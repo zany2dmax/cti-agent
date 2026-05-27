@@ -4,7 +4,7 @@ A small Go agent that reads daily CTI emails from a shared Microsoft 365 mailbox
 
 ## What it does
 
-1. Reads recent emails from `user@example.com` or another configured mailbox.
+1. Reads recent emails from email shared mailbox in M365 or another configured mailbox.
 2. Extracts CVE IDs with regex.
 3. Builds or loads a local Qualys KnowledgeBase cache mapping CVE -> QIDs.
 4. Queries Qualys Host Detection List for active detections.
@@ -53,7 +53,7 @@ task run
 | `TENANT_ID` | Entra tenant ID |
 | `CLIENT_ID` | App registration client ID |
 | `CLIENT_SECRET` | App registration client secret |
-| `GRAPH_MAILBOX` | Mailbox to read, e.g. `user@example.com` |
+| `GRAPH_MAILBOX` | Mailbox to read in mailbox@domain.com format |
 | `GRAPH_FOLDER` | Folder to read, default `inbox` |
 | `GRAPH_LOOKBACK_HOURS` | How far back to read messages |
 | `QUALYS_BASE_URL` | Qualys API base URL |
