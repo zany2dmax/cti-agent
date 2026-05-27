@@ -1,0 +1,14 @@
+# secrets / local config
+.env
+config.local.yaml
+
+# build outputs
+bin/
+dist/
+*.out
+*.log
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

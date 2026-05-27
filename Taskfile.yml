@@ -1,0 +1,29 @@
+version: '3'
+
+tasks:
+  tidy:
+    desc: Download and tidy Go dependencies
+    cmds:
+      - go mod tidy
+
+  build:
+    desc: Build the agent
+    deps: [tidy]
+    cmds:
+      - mkdir -p bin
+      - go build -o bin/cti-qualys-agent ./cmd/cti-qualys-agent
+
+  run:
+    desc: Run the agent locally using environment variables
+    cmds:
+      - go run ./cmd/cti-qualys-agent
+
+  lint:
+    desc: Run basic Go checks
+    cmds:
+      - go vet ./...
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf bin dist
