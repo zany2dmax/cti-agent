@@ -1,6 +1,25 @@
 version: '3'
 
+vars:
+  BINARY_NAME: cti-agent
+  SOURCE_NAME: cmd/cti-qualys-agent
+  INSTALL_PATH: "{{.HOME}}/bin"
+
 tasks:
+  default:
+    desc: Show available tasks
+    cmds: task --list
+
+  scan:
+    desc: Run staticcheck
+    cmds:
+      - staticcheck {{.SOURCE_NAME}}
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run {{.SOURCE_NAME}}
+
   tidy:
     desc: Download and tidy Go dependencies
     cmds:
@@ -11,12 +30,12 @@ tasks:
     deps: [tidy]
     cmds:
       - mkdir -p bin
-      - go build -o bin/cti-qualys-agent ./cmd/cti-qualys-agent
+      - go build -o {{.BINARY_NAME}} {{.SOURCE_NAME}}
 
   run:
     desc: Run the agent locally using environment variables
     cmds:
-      - go run ./cmd/cti-qualys-agent
+      - go run {{.BINARY_NAME}}
 
   lint:
     desc: Run basic Go checks
