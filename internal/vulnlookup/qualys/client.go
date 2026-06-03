@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,8 +54,10 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 		return vulnlookup.Result{CVE: cve, Source: c.Name(), Status: vulnlookup.StatusUnknown, Reason: err.Error()}, err
 	}
 
-	qids := cache[strings.ToUpper(strings.TrimSpace(cve))]
+	normalizedCVE := strings.ToUpper(strings.TrimSpace(cve))
+	qids := cache[normalizedCVE]
 	if len(qids) == 0 {
+		log.Printf("Qualys KB mapping: %s -> no QIDs found", normalizedCVE)
 		return vulnlookup.Result{
 			CVE:    cve,
 			Source: c.Name(),
@@ -62,6 +65,7 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 			Reason: "No Qualys KnowledgeBase CVE-to-QID mapping found",
 		}, nil
 	}
+	log.Printf("Qualys KB mapping: %s -> QIDs %s", normalizedCVE, strings.Join(qidStrings(qids), ","))
 
 	detections, err := c.HostDetections(ctx, qids)
 	if err != nil {
@@ -169,7 +173,7 @@ func (c *Client) HostDetections(ctx context.Context, qids []int) (map[int]Detect
 	params.Set("action", "list")
 	params.Set("show_qds", "1")
 	params.Set("status", "New,Active,Re-Opened")
-	params.Set("qid", joinInts(qids))
+	params.Set("qids", joinInts(qids))
 	endpoint := c.baseURL + "/api/4.0/fo/asset/host/vm/detection/?" + params.Encode()
 
 	body, err := c.doQualysGET(ctx, endpoint)
