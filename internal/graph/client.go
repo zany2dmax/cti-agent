@@ -78,8 +78,13 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read graph token response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", fmt.Errorf("graph token request failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -122,8 +127,14 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 		if err != nil {
 			return nil, err
 		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read graph messages response: %w", readErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to close graph messages response body: %w", closeErr)
+		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			return nil, fmt.Errorf("graph messages request failed: HTTP %d: %s", resp.StatusCode, string(body))
 		}

@@ -190,8 +190,13 @@ func (c *Client) doQualysGET(ctx context.Context, endpoint string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Qualys response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, fmt.Errorf("qualys request failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}

@@ -12,11 +12,11 @@ import (
 func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int, provider string, results []vulnlookup.Result) error {
 	var b strings.Builder
 	b.WriteString("# CTI / CVE Daily Report\n\n")
-	b.WriteString(fmt.Sprintf("- Mailbox: `%s`\n", mailbox))
-	b.WriteString(fmt.Sprintf("- Lookback since: `%s`\n", since.Format(time.RFC3339)))
-	b.WriteString(fmt.Sprintf("- Emails inspected: `%d`\n", emailCount))
-	b.WriteString(fmt.Sprintf("- Lookup provider: `%s`\n", provider))
-	b.WriteString(fmt.Sprintf("- Generated: `%s`\n\n", time.Now().Format(time.RFC3339)))
+	fmt.Fprintf(&b, "- Mailbox: `%s`\n", mailbox)
+	fmt.Fprintf(&b, "- Lookback since: `%s`\n", since.Format(time.RFC3339))
+	fmt.Fprintf(&b, "- Emails inspected: `%d`\n", emailCount)
+	fmt.Fprintf(&b, "- Lookup provider: `%s`\n", provider)
+	fmt.Fprintf(&b, "- Generated: `%s`\n\n", time.Now().Format(time.RFC3339))
 
 	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts / Reason |\n")
 	b.WriteString("|---|---|---|---|---:|---:|---|---|\n")
@@ -25,7 +25,7 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 		if len(r.SampleHosts) > 0 {
 			sample = strings.Join(r.SampleHosts, ", ")
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %d | %d | %s | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s |\n",
 			r.CVE,
 			r.Status,
 			r.Source,
@@ -34,7 +34,7 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 			r.MaxScore,
 			r.LastSeen,
 			escape(sample),
-		))
+		)
 	}
 
 	return os.WriteFile(path, []byte(b.String()), 0644)
