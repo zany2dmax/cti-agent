@@ -4,14 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/yourorg/cti-qualys-agent/internal/config"
 	"github.com/yourorg/cti-qualys-agent/internal/cti"
 	"github.com/yourorg/cti-qualys-agent/internal/graph"
-	"github.com/yourorg/cti-qualys-agent/internal/qualys"
 	"github.com/yourorg/cti-qualys-agent/internal/report"
+	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/crowdstrike"
+	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/qualys"
 )
 
 func main() {
@@ -37,47 +39,39 @@ func main() {
 		}
 	}
 
-	if len(cves) == 0 {
-		if err := report.WriteMarkdown(cfg.ReportPath, cfg.GraphMailbox, since, len(messages), nil); err != nil {
-			log.Fatalf("write report failed: %v", err)
+	provider, err := buildLookupProvider(cfg)
+	if err != nil {
+		log.Fatalf("lookup provider config error: %v", err)
+	}
+
+	results := make([]vulnlookup.Result, 0, len(cves))
+	for cve := range cves {
+		res, err := provider.LookupCVE(ctx, cve)
+		if err != nil && res.Status == "" {
+			res = vulnlookup.Result{CVE: cve, Source: provider.Name(), Status: vulnlookup.StatusUnknown, Reason: err.Error()}
 		}
+		results = append(results, res)
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].CVE < results[j].CVE })
+
+	if err := report.WriteMarkdown(cfg.ReportPath, cfg.GraphMailbox, since, len(messages), provider.Name(), results); err != nil {
+		log.Fatalf("write report failed: %v", err)
+	}
+
+	if len(cves) == 0 {
 		fmt.Printf("No CVEs found. Wrote %s\n", cfg.ReportPath)
 		return
 	}
-
-	qualysClient := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
-	kb, err := qualysClient.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath)
-	if err != nil {
-		log.Fatalf("qualys KB cache failed: %v", err)
-	}
-
-	var results []report.CVEResult
-	for cve := range cves {
-		qids := kb[strings.ToUpper(cve)]
-		if len(qids) == 0 {
-			results = append(results, report.CVEResult{
-				CVE:    cve,
-				Status: "UNKNOWN",
-				Reason: "No Qualys KnowledgeBase CVE-to-QID mapping found",
-			})
-			continue
-		}
-
-		detections, err := qualysClient.HostDetections(ctx, qids)
-		if err != nil {
-			results = append(results, report.CVEResult{
-				CVE:    cve,
-				QIDs:   qids,
-				Status: "UNKNOWN",
-				Reason: fmt.Sprintf("Qualys detection lookup failed: %v", err),
-			})
-			continue
-		}
-		results = append(results, report.FromDetections(cve, qids, detections))
-	}
-
-	if err := report.WriteMarkdown(cfg.ReportPath, cfg.GraphMailbox, since, len(messages), results); err != nil {
-		log.Fatalf("write report failed: %v", err)
-	}
 	fmt.Printf("Wrote %s\n", cfg.ReportPath)
+}
+
+func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
+	switch cfg.LookupProvider {
+	case "qualys":
+		return qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, cfg.QualysKBCachePath), nil
+	case "crowdstrike":
+		return crowdstrike.New(), nil
+	default:
+		return nil, fmt.Errorf("unsupported LOOKUP_PROVIDER %q", cfg.LookupProvider)
+	}
 }

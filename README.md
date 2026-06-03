@@ -1,16 +1,57 @@
-# CTI Qualys Agent
+# CTI CVE Agent
 
-A small Go agent that reads daily CTI emails from a shared Microsoft 365 mailbox, extracts CVEs, maps CVEs to Qualys QIDs, checks whether those QIDs are currently detected in Qualys VMDR, and writes a markdown report.
+A modular Go agent that reads daily CTI emails from a shared Microsoft 365 mailbox, extracts CVEs, sends those CVEs to a swappable vulnerability lookup provider, and writes a markdown report.
+
+The first implemented lookup provider is Qualys VMDR. The lookup layer is intentionally isolated so it can later be replaced or supplemented with CrowdStrike Exposure Management / Spotlight, Defender, Tenable, Rapid7, or another VM platform.
 
 ## What it does
 
-1. Reads recent emails from email shared mailbox in M365 or another configured mailbox.
+1. Reads recent emails from `user@example.com` or another configured mailbox.
 2. Extracts CVE IDs with regex.
-3. Builds or loads a local Qualys KnowledgeBase cache mapping CVE -> QIDs.
-4. Queries Qualys Host Detection List for active detections.
+3. Sends each CVE to the configured lookup provider.
+4. Normalizes provider-specific evidence into a common result model.
 5. Generates a markdown summary showing `PRESENT`, `NOT_PRESENT`, or `UNKNOWN`.
 
-Presence is determined only by Qualys detections. CTI email text provides context, not proof that a vulnerability exists in the environment.
+Presence should be determined only by the lookup provider. CTI email text provides urgency/context, not proof that a vulnerability exists in the environment.
+
+## Project layout
+
+```text
+cmd/cti-qualys-agent/          CLI entrypoint
+internal/config/               environment/config loading
+internal/cti/                  CTI parsing and CVE extraction
+internal/graph/                Microsoft Graph mailbox reader
+internal/vulnlookup/           provider-neutral lookup interface and result types
+internal/vulnlookup/qualys/    Qualys implementation
+internal/vulnlookup/crowdstrike/ placeholder for future CrowdStrike implementation
+internal/report/               markdown report writer
+```
+
+## Lookup provider boundary
+
+The important abstraction is `internal/vulnlookup.LookupProvider`:
+
+```go
+type LookupProvider interface {
+    Name() string
+    LookupCVE(ctx context.Context, cve string) (Result, error)
+}
+```
+
+The rest of the app does not know whether a CVE was checked in Qualys, CrowdStrike, or another backend. Provider-specific IDs like Qualys QIDs are returned as normalized `ExternalIDs`.
+
+## Current providers
+
+### Qualys
+
+The Qualys provider does a two-step lookup:
+
+1. Build/load a local Qualys KnowledgeBase cache mapping `CVE -> QID[]`.
+2. Query Host Detection List for active detections of those QIDs.
+
+### CrowdStrike
+
+A placeholder provider exists at `internal/vulnlookup/crowdstrike`. It currently returns `UNKNOWN` until a real CrowdStrike API lookup is added.
 
 ## Required permissions
 
@@ -35,7 +76,10 @@ The Qualys account needs API access to:
 cp .env.example .env
 # edit .env with real values
 
-go mod tidy
+set -a
+source .env
+set +a
+
 go run ./cmd/cti-qualys-agent
 ```
 
@@ -53,17 +97,26 @@ task run
 | `TENANT_ID` | Entra tenant ID |
 | `CLIENT_ID` | App registration client ID |
 | `CLIENT_SECRET` | App registration client secret |
-| `GRAPH_MAILBOX` | Mailbox to read in mailbox@domain.com format |
+| `GRAPH_MAILBOX` | Mailbox to read, e.g. `user@example.com` |
 | `GRAPH_FOLDER` | Folder to read, default `inbox` |
 | `GRAPH_LOOKBACK_HOURS` | How far back to read messages |
-| `QUALYS_BASE_URL` | Qualys API base URL |
-| `QUALYS_USERNAME` | Qualys username |
-| `QUALYS_PASSWORD` | Qualys password |
+| `LOOKUP_PROVIDER` | Provider to use: `qualys` or `crowdstrike` |
+| `QUALYS_BASE_URL` | Qualys API base URL, required when `LOOKUP_PROVIDER=qualys` |
+| `QUALYS_USERNAME` | Qualys username, required when `LOOKUP_PROVIDER=qualys` |
+| `QUALYS_PASSWORD` | Qualys password, required when `LOOKUP_PROVIDER=qualys` |
 | `QUALYS_KB_CACHE` | Local JSON cache path for CVE -> QID map |
 | `REPORT_PATH` | Markdown output file |
 
+## Adding another lookup provider
+
+1. Create a package under `internal/vulnlookup/<provider>`.
+2. Implement `Name()` and `LookupCVE(ctx, cve)`.
+3. Return normalized `vulnlookup.Result` values.
+4. Add the provider to `buildLookupProvider()` in `cmd/cti-qualys-agent/main.go`.
+5. Add provider-specific config to `internal/config` only if needed.
+
 ## Notes
 
-- The initial KnowledgeBase download can be large. The agent caches the CVE/QID mapping locally.
-- For very large Qualys environments, you may need pagination/truncation handling and batching by QID.
+- The initial Qualys KnowledgeBase download can be large. The agent caches the CVE/QID mapping locally.
+- For very large Qualys environments, add pagination/truncation handling and batching by QID.
 - This is an MVP scaffold meant to be checked into GitHub and iterated.
