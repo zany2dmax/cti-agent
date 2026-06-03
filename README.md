@@ -24,6 +24,7 @@ internal/graph/                Microsoft Graph mailbox reader
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for future CrowdStrike implementation
+internal/vulnlookup/noop	For testing the CVE extraction and not calling a VM provider API
 internal/report/               markdown report writer
 ```
 
@@ -52,6 +53,10 @@ The Qualys provider does a two-step lookup:
 ### CrowdStrike
 
 A placeholder provider exists at `internal/vulnlookup/crowdstrike`. It currently returns `UNKNOWN` until a real CrowdStrike API lookup is added.
+
+### noop/none
+
+Allows testing the full CVE parsing of the emails in outlook without calling a VM provider
 
 ## Required permissions
 

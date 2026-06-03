@@ -115,7 +115,7 @@ func (c *Client) HostDetections(ctx context.Context, qids []int) (map[int]Detect
 	params.Set("show_qds", "1")
 	params.Set("status", "New,Active,Re-Opened")
 	params.Set("qid", joinInts(qids))
-	endpoint := c.baseURL + "/api/2.0/fo/asset/host/vm/detection/?" + params.Encode()
+	endpoint := c.baseURL + "/api/4.0/fo/asset/host/vm/detection/?" + params.Encode()
 
 	body, err := c.doQualysGET(ctx, endpoint)
 	if err != nil {
