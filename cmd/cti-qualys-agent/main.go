@@ -13,6 +13,7 @@ import (
 	"github.com/yourorg/cti-qualys-agent/internal/report"
 	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
 	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/crowdstrike"
+	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/noop"
 	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/qualys"
 )
 
@@ -71,6 +72,8 @@ func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
 		return qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, cfg.QualysKBCachePath), nil
 	case "crowdstrike":
 		return crowdstrike.New(), nil
+	case "none", "noop", "":
+		return noop.New(), nil
 	default:
 		return nil, fmt.Errorf("unsupported LOOKUP_PROVIDER %q", cfg.LookupProvider)
 	}
