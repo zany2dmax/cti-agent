@@ -164,3 +164,9 @@ MAILBOX=cybersecurity@crhomeusa.com
 - The initial Qualys KnowledgeBase download can be large. The agent caches the CVE/QID mapping locally.
 - For very large Qualys environments, add pagination/truncation handling and batching by QID.
 - This is an MVP scaffold meant to be checked into GitHub and iterated.
+
+## Feature Requests
+
+- Add other VM providers as needed
+- Email the final report back to a distruction list
+- Package this up as a docker container for easy deployment and maintainability
