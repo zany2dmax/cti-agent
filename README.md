@@ -112,6 +112,45 @@ task run
 | `QUALYS_KB_CACHE` | Local JSON cache path for CVE -> QID map |
 | `REPORT_PATH` | Markdown output file |
 
+### Microsoft Graph permissions needed
+## Microsoft Graph API Permissions
+
+The CTI Agent uses Microsoft Graph application authentication (Client Credentials Flow) to read emails from the Cyber Security shared mailbox.
+
+### Required Application Permissions
+
+| Permission | Type |
+|------------|------|
+| Mail.Read | Application |
+
+### Grant Admin Consent
+
+After adding the permission in Microsoft Entra:
+
+1. Navigate to Entra ID → App Registrations
+2. Select the CTI Agent application
+3. API Permissions
+4. Add Permission → Microsoft Graph → Application Permissions
+5. Add `Mail.Read`
+6. Click **Grant Admin Consent**
+
+### Required Configuration
+
+```env
+TENANT_ID=<tenant-id>
+CLIENT_ID=<app-registration-client-id>
+CLIENT_SECRET=<client-secret>
+MAILBOX=cybersecurity@crhomeusa.com
+```
+
+### Authentication Flow
+
+1. Obtain access token from Microsoft Entra ID
+2. Call Microsoft Graph API
+3. Read messages from the Cyber Security shared mailbox
+4. Parse CTI emails and extract CVEs
+
+
 ## Adding another lookup provider
 
 1. Create a package under `internal/vulnlookup/<provider>`.
