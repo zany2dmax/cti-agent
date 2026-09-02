@@ -67,20 +67,32 @@ for p in "${PATHS[@]}"; do
   echo "  $p  (in $n commit(s))"
 done
 
-# ── 3. inline hostname replacements ──────────────────────────────────────────
-# For files we KEEP but which mention real hosts in prose. Add your own lines
-# here if an internal name shows up somewhere else. Format is filter-repo's
-# --replace-text: literal==>replacement, or regex:PATTERN==>replacement
+# ── 3. inline replacements for files we KEEP ─────────────────────────────────
+# Patterns live in scripts/scrub-patterns.txt, which is GITIGNORED on purpose.
+#
+# Two reasons they are not inline here:
+#   1. A committed script listing your internal domains discloses those
+#      domains. Less severe than a host inventory, but still a disclosure,
+#      and it would survive the very scrub it performs.
+#   2. --replace-text rewrites every blob including this script, so inline
+#      patterns mangle themselves on the first run and the verification pass
+#      then checks the wrong strings.
+PATTERNS="$REPO/scripts/scrub-patterns.txt"
 bold "Inline text replacements"
-cat > /tmp/scrub-replacements.txt <<'REPL'
-regex:[A-Za-z0-9][A-Za-z0-9._-]*\.REDACTED-DOMAIN\.net==>REDACTED-HOST
-regex:[A-Za-z0-9][A-Za-z0-9._-]*\.bell\.local==>REDACTED-HOST
-regex:REDACTED-DOMAIN\.net==>REDACTED-DOMAIN
-regex:bell\.local==>REDACTED-DOMAIN
-regex:REDACTED-HOST[A-Za-z0-9-]*==>REDACTED-HOST
-regex:10\.7\.30\.[0-9]{1,3}==>REDACTED-IP
-REPL
-sed 's/^/  /' /tmp/scrub-replacements.txt
+if [ ! -f "$PATTERNS" ]; then
+  echo "  No $PATTERNS - copy the example and fill in your own values:"
+  echo "    cp scripts/scrub-patterns.txt.example scripts/scrub-patterns.txt"
+  echo "  Continuing with path deletion only (no text replacement)."
+  REPLACE_ARGS=()
+else
+  grep -vE '^\s*(#|$)' "$PATTERNS" > /tmp/scrub-replacements.txt
+  n=$(wc -l < /tmp/scrub-replacements.txt | tr -d ' ')
+  echo "  $n rule(s) from scripts/scrub-patterns.txt"
+  # Show only the replacement side, so running this in a shared terminal or
+  # pasting the output somewhere does not re-disclose what you are scrubbing.
+  awk -F'==>' '{print "    <pattern> ==> " $2}' /tmp/scrub-replacements.txt | sort -u
+  REPLACE_ARGS=(--replace-text /tmp/scrub-replacements.txt)
+fi
 
 read -r -p "
 Proceed? This rewrites every commit in $REPO. Backup is at
@@ -92,8 +104,7 @@ Type 'scrub' to continue: " CONFIRM
 bold "Rewriting history"
 ARGS=()
 for p in "${PATHS[@]}"; do ARGS+=(--path "$p"); done
-git filter-repo --invert-paths "${ARGS[@]}" \
-                --replace-text /tmp/scrub-replacements.txt --force
+git filter-repo --invert-paths "${ARGS[@]}" "${REPLACE_ARGS[@]}" --force
 
 # ── 5. verify ────────────────────────────────────────────────────────────────
 bold "Verification"
@@ -105,11 +116,24 @@ for p in "${PATHS[@]}"; do
     echo "  gone: $p"
   fi
 done
-for pat in REDACTED-DOMAIN 'bell\.local' REDACTED-HOST '10\.7\.30'; do
-  hits=$(git grep -l -E "$pat" $(git rev-list --all) -- 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$hits" != "0" ]; then warn "pattern '$pat' still in $hits blob(s)"; FAIL=1
-  else echo "  clean: $pat"; fi
-done
+# Verify against the same rules we just applied, derived from the pattern file
+# rather than hardcoded - so this list can never drift from the rules, and no
+# internal name is baked into a tracked file.
+if [ -s /tmp/scrub-replacements.txt ]; then
+  ALL_COMMITS=$(git rev-list --all)
+  while IFS= read -r rule; do
+    pat="${rule%%==>*}"
+    pat="${pat#regex:}"
+    hits=$(git grep -l -E "$pat" $ALL_COMMITS -- 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$hits" != "0" ]; then
+      # This script itself will match its own rules if the pattern file was
+      # ever committed. It is gitignored, so a hit here is a real finding.
+      warn "a pattern still matches $hits blob(s) - inspect before pushing"
+      FAIL=1
+    fi
+  done < /tmp/scrub-replacements.txt
+  [ "$FAIL" = "0" ] && echo "  clean: all $(wc -l < /tmp/scrub-replacements.txt | tr -d ' ') replacement rule(s)"
+fi
 echo "  commits after rewrite: $(git rev-list --all --count)"
 [ "$FAIL" = "0" ] || { echo; warn "Verification FAILED - do not push. Restore from $BACKUP."; exit 1; }
 
