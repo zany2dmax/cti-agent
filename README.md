@@ -111,6 +111,28 @@ task run
 | `QUALYS_PASSWORD` | Qualys password, required when `LOOKUP_PROVIDER=qualys` |
 | `QUALYS_KB_CACHE` | Local JSON cache path for CVE -> QID map |
 | `REPORT_PATH` | Markdown output file |
+| `REPORT_HOSTNAMES` | Hostname disclosure: `redact` (default), `count`, or `full` |
+| `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
+
+## Report sensitivity
+
+A CTI report pairs "this CVE is exploitable" with "these are the machines that
+have it." That is a targeting list, and this repository is public, so the report
+writer redacts by default.
+
+| `REPORT_HOSTNAMES` | Output |
+|---|---|
+| `redact` *(default)* | Stable pseudonyms — `host-3797a22b`. The same machine keeps the same label across reports, so you can track remediation without naming it. |
+| `count` | Host count only, names withheld entirely. |
+| `full` | Real hostnames. The report carries a "do not commit" banner. |
+
+Set `REPORT_REDACTION_SALT` to a private, stable value. Pseudonyms are
+deterministic, so without a salt anyone holding a list of candidate hostnames
+can confirm matches by hashing them. With a salt they cannot.
+
+Generated reports are written mode `0600` and are excluded by `.gitignore`.
+Do not commit them, attach them to tickets, or paste them into chat tools.
+`scripts/scrub-history.sh` exists because this rule was learned the hard way.
 
 ### Microsoft Graph permissions needed
 ## Microsoft Graph API Permissions
