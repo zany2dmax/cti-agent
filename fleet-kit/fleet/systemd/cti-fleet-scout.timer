@@ -1,0 +1,12 @@
+[Unit]
+Description=Scout sweep every 4 hours
+
+[Timer]
+OnCalendar=*-*-* 00,04,08,12,16,20:15
+AccuracySec=5min
+Persistent=true
+RandomizedDelaySec=300
+Unit=cti-fleet-scout.service
+
+[Install]
+WantedBy=timers.target

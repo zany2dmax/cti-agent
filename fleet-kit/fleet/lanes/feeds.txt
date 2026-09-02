@@ -1,0 +1,21 @@
+# CTI feeds polled by the @scout lane. One URL per line; # comments ignored.
+# The mailbox is reactive - these are how you hear about something before a
+# vendor newsletter gets around to it. Add the vendors that match your estate.
+
+# --- Authoritative / government ---
+https://www.cisa.gov/cybersecurity-advisories/all.xml
+https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml
+
+# --- Vendors in the CR Home estate (trim to what you actually run) ---
+https://msrc.microsoft.com/blog/feed
+https://blogs.oracle.com/security/rss
+https://www.vmware.com/security/advisories.xml
+https://feeds.fortinet.com/fortiguard/rss/ir.xml
+https://sec.cloudapps.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml
+
+# --- Industry reporting that consistently carries CVE IDs ---
+https://feeds.feedburner.com/TheHackersNews
+https://www.bleepingcomputer.com/feed/
+https://krebsonsecurity.com/feed/
+https://www.tenable.com/blog/feed
+https://unit42.paloaltonetworks.com/feed/

@@ -1,0 +1,18 @@
+[Unit]
+Description=CTI scout sweep - poll advisory feeds for new CVEs
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ctifleet
+Group=ctifleet
+WorkingDirectory=/home/ctifleet/fleet
+EnvironmentFile=/home/ctifleet/fleet/fleet.env
+ExecStart=/usr/bin/python3 /home/ctifleet/fleet/lanes/scout.py --out /home/ctifleet/fleet/state/scout-latest.json --days 3
+TimeoutStartSec=900
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ctifleet/fleet
+StandardOutput=append:/home/ctifleet/fleet/logs/scout.log
+StandardError=append:/home/ctifleet/fleet/logs/scout.log
