@@ -43,7 +43,7 @@ LINUX SERVER · your Claude subscription · user: ctifleet
 ├── ORCHESTRATOR ─ the analyst on duty
 │   /checkin every 30 min (systemd timer)
 │   · reads the board, memory, lane logs
-│   · relays questions to the on-call phone (Telegram)
+│   · emails the operator when it needs a decision
 │   · fires lanes, decides what's worth sending
 │   · THE ONLY AGENT THAT SENDS MAIL
 │
@@ -293,7 +293,7 @@ production host.
 
 The P1 case is the one you'll be tempted to loosen, so it's explicit: a new P1
 does *not* buy the fleet an off-cycle blast. It posts to the board tagged
-`[P1 APPROVE-TO-SEND]`, pings the on-call phone, and waits. It also guarantees
+`[P1 APPROVE-TO-SEND]`, emails the operator, and waits. It also guarantees
 the item leads the next scheduled digest regardless of length. If you later
 decide P1s should auto-send, wire a separate `FLEET_P1_AUTO` path rather than
 widening the allowlist — those are different risks and deserve different
@@ -302,6 +302,39 @@ switches.
 Tightening it further is a one-line change: set `FLEET_ALLOW_TO` to an address
 nobody reads and every send needs `--approve`, which turns the fleet into a
 draft-only assistant.
+
+---
+
+### How the orchestrator reaches you
+
+Email, and only email. There is no chat integration — one outbound transport
+means one allowlist and one place to audit.
+
+```
+lane hits a question it cannot answer
+  → posts a line to ~/fleet/board.md addressed to @operator
+  → orchestrator emails you on its next beat, with a [FLEET <id>] subject tag
+  → you reply to that email, keeping the tag
+  → orchestrator reads CTI_REPLY_MAILBOX next beat, posts your answer to the board
+  → the waiting lane picks it up
+```
+
+Set `FLEET_OPERATOR_EMAIL` for where escalations go, and `CTI_REPLY_MAILBOX`
+for where you reply. The default for the second is `GRAPH_MAILBOX`, which is
+usually right — the app registration already has `Mail.Read` on it, so no new
+permission is needed for the return path.
+
+Escalations to `FLEET_OPERATOR_EMAIL` are **pre-approved**: the orchestrator
+has to be able to ask a question without needing permission to ask it. That
+address is added to the allowlist automatically. Every other non-scheduled
+recipient still requires `--approve`.
+
+```bash
+# what the orchestrator runs
+python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
+  --subject "Approve off-cycle notice?" \
+  --message "CVE-2026-1234 is on KEV and present on 305 hosts."
+```
 
 ---
 
@@ -446,10 +479,11 @@ digest that cries wolf in week one gets filtered forever.
 scout off; you want to know the mailbox path is solid before adding a second
 source of CVEs.
 
-**Week 3 — heartbeat.** Enable `cti-fleet-checkin.timer` and wire the phone
-channel. Now an orchestrator is doing proactive work between digests: chasing
-UNKNOWNs, nudging stale P1s. Watch `checkin.log` for a few days and judge
-whether its proactive picks are useful or busywork.
+**Week 3 — heartbeat.** Set `FLEET_OPERATOR_EMAIL` and enable
+`cti-fleet-checkin.timer`. Now an orchestrator is doing proactive work between
+digests: chasing UNKNOWNs, nudging stale P1s, and emailing you when it needs a
+decision. Watch `checkin.log` for a few days and judge whether its proactive
+picks are useful or busywork.
 
 **Week 4 — scout.** Enable `cti-fleet-scout.timer` after trimming `feeds.txt` to
 vendors you actually run. Expect a noisy first sweep as it backfills; the dedupe
@@ -477,8 +511,17 @@ sends. Swap Graph for SMTP by replacing `token()` and `graph_post()` — keep th
 `FLEET_ALLOW_TO` allowlist and the `--approve` gate, since those are the control,
 not the transport.
 
-**A different chat channel.** The orchestrator holds the phone channel. Telegram
-is the shipped example; Slack, Teams, or iMessage change only the final hop.
+**A chat channel instead of email.** The orchestrator reaches you by email and
+nothing else — one transport, one allowlist, one thing to audit. Adding Teams,
+Slack, or SMS means a second sender in `mailer.py`'s place; keep the
+`FLEET_ALLOW_TO` gate and the `--approve` flag wherever it lands, since those
+are the control and the transport is not.
+
+Note if you reach for Teams: Microsoft retired Office 365 connectors in Teams
+between 18–22 May 2026, so `outlook.office.com/webhook/...` URLs no longer
+work. The current mechanism is a Power Automate **Workflows** webhook with an
+Adaptive Card payload, and it is one-way — replies would still have to come
+back by another route.
 
 ---
 
