@@ -3,8 +3,11 @@
 config.local.yaml
 
 # build outputs
-bin/
-dist/
+# Anchored to the repo root - an unanchored "bin/" also matches nested
+# directories like fleet-kit/fleet/bin/, which silently excluded the fleet's
+# executables (run-digest, fleet-db, fleet-board) from being tracked.
+/bin/
+/dist/
 *.out
 *.log
 
