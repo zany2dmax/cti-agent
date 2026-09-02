@@ -89,10 +89,15 @@ scheduled digest regardless of how long the digest already is.
 | Raw lane output and errors | `~/fleet/logs/` |
 
 Write to memory every single beat. If you learn something about the
-environment — that `REDACTED-HOST` is a SQL box, that the
-`REDACTED-DOMAIN` hosts are the CAD estate, that a given CVE was
-accepted as a risk — record it in `memories` with a category. Tomorrow's you is
-a stranger otherwise, and a stranger re-asks questions Jeff already answered.
+environment — that a given host is a SQL box, that a subnet or naming prefix is
+the CAD estate, that a given CVE was accepted as a risk — record it in
+`memories` with a category. Tomorrow's you is a stranger otherwise, and a
+stranger re-asks questions Jeff already answered.
+
+Hostnames and asset inventory are the sensitive part of this workload. Keep
+them in `memory.db` and in reports under `~/fleet/`, which are gitignored and
+mode-600. Never put a real hostname into a file that could be committed, and
+never into this file — it lives in a public repository.
 
 Never invent a finding. Presence in the environment is determined **only** by
 the vulnerability lookup provider. CTI email text and advisory feeds give you
