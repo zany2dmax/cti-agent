@@ -132,8 +132,8 @@ tune them to your estate and your patch cadence.
 - Linux server that stays on. RHEL 8+ / Ubuntu 22.04+, 2 vCPU / 4 GB is plenty.
 - Python 3.9+ (stdlib only — no pip installs anywhere in this kit).
 - Go 1.21+ *or* a prebuilt `cti-qualys-agent` binary.
-- Claude Code installed at `/usr/local/bin/claude`, authenticated as your
-  subscription user.
+- Claude Code, installed and authenticated **as the service account** (see
+  below). The heartbeat needs it; the digest timers do not.
 - A shared mailbox receiving CTI email, and an Entra app registration that can
   read it.
 - Outbound HTTPS to: `login.microsoftonline.com`, `graph.microsoft.com`, your
@@ -177,6 +177,64 @@ systemctl list-timers 'cti-fleet-*'
 ```bash
 sudo FLEET_USER=secops FLEET_HOME=/srv/fleet ./install.sh
 ```
+
+### Installing Claude Code on the server
+
+The digest pipeline is plain Python and Go — it never calls Claude. Only the
+`/checkin` heartbeat does. So you can run the whole reporting side without this
+step and add the orchestrator later.
+
+Install **as the service account**, not as root or as yourself. Claude Code
+lives in a user home and authenticates per user; installing it as root leaves
+the timer with no credentials.
+
+```bash
+# Native installer (auto-updates in the background)
+sudo -u ctifleet bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
+
+# Or via the signed apt repo (updates come through your normal patch cycle)
+sudo apt install curl gnupg
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSL https://downloads.claude.ai/keys/claude-code.asc \
+  -o /etc/apt/keyrings/claude-code.asc
+gpg --show-keys /etc/apt/keyrings/claude-code.asc   # expect 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+echo "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/stable stable main" \
+  | sudo tee /etc/apt/sources.list.d/claude-code.list
+sudo apt update && sudo apt install claude-code
+```
+
+For a server, prefer the **package-manager install**. The native installer
+auto-updates in the background, which means an unattended version change under
+a running timer; with apt/dnf/apk, updates arrive when you patch the box. If
+you do use the native installer, you can pin behavior in the service account's
+`~/.claude/settings.json`:
+
+```json
+{
+  "autoUpdatesChannel": "stable",
+  "env": { "DISABLE_AUTOUPDATER": "1" }
+}
+```
+
+**Authenticate once, interactively.** This is the step that catches people on a
+headless box: login opens a browser.
+
+```bash
+sudo -u ctifleet -i          # a login shell, so $HOME is right
+claude                       # follow the URL it prints, paste the code back
+claude --version && claude doctor
+exit
+```
+
+If the server has no browser, open the printed URL on your laptop and paste the
+code back into the server session. Claude Code requires a Pro, Max, Team, or
+Enterprise account — the free tier does not include it.
+
+**Path.** There is no single install path: native puts it in
+`~/.local/bin/claude`, apt/dnf in `/usr/bin/claude`, Homebrew in
+`/opt/homebrew/bin/claude`. `bin/run-checkin` searches all of them at runtime,
+so the systemd unit does not hardcode one. If you have several installs, pin the
+right one with `CLAUDE_BIN` in `fleet.env`.
 
 ### Entra permissions
 
@@ -311,7 +369,8 @@ fleet-kit/
     ├── bin/
     │   ├── fleet-board            lock-safe append-only board (post/read/prune/tail)
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
-    │   └── run-digest             deterministic ingest→enrich→brief→send
+    │   ├── run-digest             deterministic ingest→enrich→brief→send
+    │   └── run-checkin            resolves the claude binary, fires one beat
     ├── lanes/
     │   ├── enrich.py              NVD + EPSS + KEV → P1–P4, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
@@ -367,6 +426,8 @@ sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --stale-days 7
 | Everything `UNKNOWN` | Scanner KB cache empty or stale | Delete the KB cache JSON and rerun; the first build is large |
 | Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-fleet-digest`; `fleet-db was-sent $(date +%F) daily` |
 | Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
+| Heartbeat never runs | `claude` not found, or not authenticated as the service account | `journalctl -u cti-fleet-checkin`; run `sudo -u ctifleet -i claude doctor`; pin `CLAUDE_BIN` |
+| Every other beat skipped | Stale `.checkin.lock` from a killed beat | `rmdir ~/fleet/.checkin.lock` (auto-breaks after 30m) |
 | Board not growing | Stale lock | `rmdir ~/fleet/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | `logs/scout.log` names failed feeds; a dead feed is a blind spot that looks like good news |
 

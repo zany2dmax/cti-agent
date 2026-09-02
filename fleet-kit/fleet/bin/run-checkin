@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# run-checkin - fire one orchestrator heartbeat.
+#
+# Exists because systemd's ExecStart needs an absolute path, and there is no
+# single path where Claude Code lives:
+#
+#   native installer   ~/.local/bin/claude
+#   Homebrew           /opt/homebrew/bin/claude  (Intel: /usr/local/bin/claude)
+#   apt / dnf / apk    /usr/bin/claude
+#   npm -g             varies with the npm prefix
+#
+# Set CLAUDE_BIN in fleet.env to pin one explicitly. Otherwise this searches
+# the usual locations and fails loudly rather than letting the timer silently
+# do nothing every 30 minutes.
+set -euo pipefail
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+set -a; [ -f "$FLEET_HOME/fleet.env" ] && . "$FLEET_HOME/fleet.env"; set +a
+
+find_claude() {
+  if [ -n "${CLAUDE_BIN:-}" ]; then
+    [ -x "$CLAUDE_BIN" ] && { echo "$CLAUDE_BIN"; return 0; }
+    echo "run-checkin: CLAUDE_BIN=$CLAUDE_BIN is not executable" >&2
+    return 1
+  fi
+  local c
+  for c in "$HOME/.local/bin/claude" /usr/bin/claude /usr/local/bin/claude \
+           /opt/homebrew/bin/claude /snap/bin/claude; do
+    [ -x "$c" ] && { echo "$c"; return 0; }
+  done
+  c="$(command -v claude 2>/dev/null || true)"
+  [ -n "$c" ] && { echo "$c"; return 0; }
+  return 1
+}
+
+CLAUDE="$(find_claude)" || {
+  echo "run-checkin: cannot find the claude binary." >&2
+  echo "  Install it (curl -fsSL https://claude.ai/install.sh | bash) or set" >&2
+  echo "  CLAUDE_BIN=/full/path/to/claude in $FLEET_HOME/fleet.env" >&2
+  "$FLEET_HOME/bin/fleet-board" post @you @operator ERROR \
+    "heartbeat cannot start: claude binary not found; set CLAUDE_BIN in fleet.env" 2>/dev/null || true
+  exit 1
+}
+
+# A heartbeat that overlaps itself corrupts nothing (the board is lock-safe) but
+# wastes a slot and doubles token spend. Skip if the previous beat is still up.
+LOCK="$FLEET_HOME/.checkin.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || echo 0) ))
+  if [ "$age" -lt 1800 ]; then
+    echo "[run-checkin $(date '+%F %H:%M:%S')] previous beat still running (${age}s) - skipping"
+    exit 0
+  fi
+  rmdir "$LOCK" 2>/dev/null || true
+  mkdir "$LOCK" 2>/dev/null || true
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+echo "[run-checkin $(date '+%F %H:%M:%S')] using $CLAUDE"
+cd "$FLEET_HOME"
+
+# Deliberately NOT exec - exec replaces this shell and discards the EXIT trap,
+# which would leave .checkin.lock behind after every beat and block the next
+# one until the staleness check expires it.
+#
+# stdin is closed explicitly: with -p, Claude Code waits on stdin for a few
+# seconds before giving up, and systemd gives a oneshot service no tty.
+"$CLAUDE" -p "/checkin" --permission-mode acceptEdits < /dev/null
+rc=$?
+echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
+exit "$rc"
