@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""fleet-db - SQLite memory for the CTI fleet.
+
+  fleet-db init                       create schema (idempotent)
+  fleet-db remember <cat> <topic> <content>
+  fleet-db recent [n]                 recent memories, open tasks, unacked mail
+  fleet-db task add <title> | done <id> | list
+  fleet-db mail send <agent> <kind> <body> | inbox <agent> | ack <id>
+  fleet-db finding upsert <json>      persist an enriched finding
+  fleet-db findings [--priority P1] [--stale-days N]
+  fleet-db sent <date> <p1> <p2> <p3> <p4> <message_id>
+  fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
+  fleet-db vacuum
+"""
+import json
+import os
+import sqlite3
+import sys
+from datetime import datetime, timezone
+
+FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
+DB = os.path.join(FLEET_HOME, "state", "memory.db")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS memories (
+  id INTEGER PRIMARY KEY, category TEXT NOT NULL, topic TEXT,
+  content TEXT NOT NULL, ts TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_mem_cat ON memories(category, ts);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY, title TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL, done_ts TEXT);
+
+CREATE TABLE IF NOT EXISTS mailbox (
+  id INTEGER PRIMARY KEY, to_agent TEXT NOT NULL, kind TEXT NOT NULL,
+  body TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_mail_agent ON mailbox(to_agent, acked);
+
+-- One row per CVE we have ever seen. first_seen never changes; everything
+-- else is refreshed on each enrich pass.
+CREATE TABLE IF NOT EXISTS findings (
+  cve TEXT PRIMARY KEY, status TEXT, provider TEXT, qids TEXT,
+  host_count INTEGER DEFAULT 0, qualys_score INTEGER DEFAULT 0,
+  last_seen TEXT, sample_hosts TEXT,
+  cvss REAL, cvss_severity TEXT, epss REAL, epss_pct REAL,
+  kev INTEGER DEFAULT 0, kev_added TEXT, kev_due TEXT, ransomware TEXT,
+  priority TEXT, rationale TEXT, description TEXT,
+  first_seen TEXT, updated TEXT, remediation_note TEXT);
+CREATE INDEX IF NOT EXISTS ix_find_pri ON findings(priority, updated);
+
+CREATE TABLE IF NOT EXISTS scout_items (
+  id INTEGER PRIMARY KEY, cve TEXT, feed TEXT, title TEXT, link TEXT,
+  published TEXT, correlated INTEGER DEFAULT 0, ts TEXT NOT NULL,
+  UNIQUE(cve, feed));
+
+CREATE TABLE IF NOT EXISTS digests (
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL,
+  p1 INTEGER, p2 INTEGER, p3 INTEGER, p4 INTEGER,
+  message_id TEXT, ts TEXT NOT NULL, UNIQUE(kind, day));
+"""
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def conn():
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    c = sqlite3.connect(DB)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")   # concurrent lanes reading while one writes
+    c.execute("PRAGMA busy_timeout=5000")
+    return c
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 2
+    cmd, args = argv[0], argv[1:]
+    c = conn()
+
+    if cmd == "init":
+        c.executescript(SCHEMA)
+        c.commit()
+        print(f"initialized {DB}")
+        return 0
+
+    c.executescript(SCHEMA)  # cheap, keeps schema current on every call
+    c.commit()
+
+    if cmd == "remember":
+        cat, topic, content = args[0], args[1], " ".join(args[2:])
+        c.execute("INSERT INTO memories(category,topic,content,ts) VALUES(?,?,?,?)",
+                  (cat, topic, content, now()))
+        c.commit()
+        print("ok")
+
+    elif cmd == "recent":
+        n = int(args[0]) if args else 20
+        print("== recent memories ==")
+        for r in c.execute("SELECT ts,category,topic,content FROM memories "
+                           "ORDER BY id DESC LIMIT ?", (n,)):
+            print(f"{r['ts']}  [{r['category']}] {r['topic']}: {r['content'][:160]}")
+        print("\n== open tasks ==")
+        for r in c.execute("SELECT id,title,ts FROM tasks WHERE done=0 ORDER BY id"):
+            print(f"#{r['id']} {r['title']}  (since {r['ts']})")
+        print("\n== unacked mailbox ==")
+        for r in c.execute("SELECT id,to_agent,kind,body FROM mailbox WHERE acked=0"):
+            print(f"#{r['id']} -> {r['to_agent']} [{r['kind']}] {r['body'][:120]}")
+        print("\n== priority counts ==")
+        for r in c.execute("SELECT priority,COUNT(*) n FROM findings "
+                           "GROUP BY priority ORDER BY priority"):
+            print(f"{r['priority'] or 'unscored'}: {r['n']}")
+
+    elif cmd == "task":
+        sub = args[0]
+        if sub == "add":
+            c.execute("INSERT INTO tasks(title,done,ts) VALUES(?,0,?)",
+                      (" ".join(args[1:]), now()))
+        elif sub == "done":
+            c.execute("UPDATE tasks SET done=1, done_ts=? WHERE id=?", (now(), int(args[1])))
+        elif sub == "list":
+            for r in c.execute("SELECT id,title,done FROM tasks ORDER BY done,id"):
+                print(f"[{'x' if r['done'] else ' '}] #{r['id']} {r['title']}")
+        c.commit()
+
+    elif cmd == "mail":
+        sub = args[0]
+        if sub == "send":
+            c.execute("INSERT INTO mailbox(to_agent,kind,body,acked,ts) VALUES(?,?,?,0,?)",
+                      (args[1], args[2], " ".join(args[3:]), now()))
+        elif sub == "inbox":
+            for r in c.execute("SELECT id,kind,body,ts FROM mailbox "
+                               "WHERE to_agent=? AND acked=0 ORDER BY id", (args[1],)):
+                print(f"#{r['id']} [{r['kind']}] {r['body']}  ({r['ts']})")
+        elif sub == "ack":
+            c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (int(args[1]),))
+        c.commit()
+
+    elif cmd == "ack":
+        c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (int(args[0]),))
+        c.commit()
+
+    elif cmd == "finding":
+        # upsert from a JSON object or a JSON array on argv or stdin
+        raw = " ".join(args[1:]) if len(args) > 1 else sys.stdin.read()
+        payload = json.loads(raw)
+        rows = payload if isinstance(payload, list) else [payload]
+        for f in rows:
+            cols = ("cve status provider qids host_count qualys_score last_seen "
+                    "sample_hosts cvss cvss_severity epss epss_pct kev kev_added "
+                    "kev_due ransomware priority rationale description").split()
+            vals = [f.get(k) for k in cols]
+            ph = ",".join("?" * len(cols))
+            sets = ",".join(f"{k}=excluded.{k}" for k in cols if k != "cve")
+            c.execute(
+                f"INSERT INTO findings({','.join(cols)},first_seen,updated) "
+                f"VALUES({ph},?,?) ON CONFLICT(cve) DO UPDATE SET {sets}, updated=excluded.updated",
+                vals + [now(), now()])
+        c.commit()
+        print(f"upserted {len(rows)} findings")
+
+    elif cmd == "findings":
+        q = "SELECT * FROM findings WHERE 1=1"
+        p = []
+        if "--priority" in args:
+            q += " AND priority=?"
+            p.append(args[args.index("--priority") + 1])
+        if "--stale-days" in args:
+            q += " AND remediation_note IS NULL AND updated < datetime('now', ?)"
+            p.append(f"-{args[args.index('--stale-days') + 1]} days")
+        q += " ORDER BY priority, host_count DESC"
+        print(json.dumps([dict(r) for r in c.execute(q, p)], indent=2))
+
+    elif cmd == "sent":
+        day, p1, p2, p3, p4, mid = args[0], *map(int, args[1:5]), args[5]
+        kind = args[6] if len(args) > 6 else "daily"
+        c.execute("INSERT OR REPLACE INTO digests(kind,day,p1,p2,p3,p4,message_id,ts) "
+                  "VALUES(?,?,?,?,?,?,?,?)", (kind, day, p1, p2, p3, p4, mid, now()))
+        c.commit()
+        print("logged")
+
+    elif cmd == "was-sent":
+        day, kind = args[0], (args[1] if len(args) > 1 else "daily")
+        hit = c.execute("SELECT 1 FROM digests WHERE day=? AND kind=?", (day, kind)).fetchone()
+        print("yes" if hit else "no")
+        return 0 if hit else 1
+
+    elif cmd == "vacuum":
+        c.execute("VACUUM")
+        print("vacuumed")
+
+    else:
+        print(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

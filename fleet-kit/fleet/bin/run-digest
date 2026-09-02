@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# run-digest [daily|weekly] [--dry-run]
+#
+# The deterministic pipeline: ingest -> enrich -> brief -> send.
+# systemd calls this so delivery never depends on the orchestrator noticing the
+# clock. The orchestrator's /checkin does the judgment work; this does the
+# guaranteed work. Idempotent - it refuses to send twice for the same window.
+set -euo pipefail
+
+KIND="${1:-daily}"
+DRY=""
+[ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+set -a; [ -f "$FLEET_HOME/fleet.env" ] && . "$FLEET_HOME/fleet.env"; set +a
+
+DAY=$(date +%F)
+RAW="$FLEET_HOME/reports/raw-$DAY.md"
+ENRICHED="$FLEET_HOME/state/enriched-$DAY.json"
+HTML="$FLEET_HOME/reports/digest-$KIND-$DAY.html"
+TXT="$FLEET_HOME/reports/digest-$KIND-$DAY.txt"
+BOARD="$FLEET_HOME/bin/fleet-board"
+DB="$FLEET_HOME/bin/fleet-db"
+
+mkdir -p "$FLEET_HOME"/{reports,state,logs}
+say() { echo "[run-digest $(date '+%H:%M:%S')] $*"; }
+fail() { say "FAILED: $*"; "$BOARD" post @brief @you ERROR "run-digest $KIND failed: $*" || true; exit 1; }
+
+# Do not double-send. A duplicate 6am digest trains people to ignore it.
+if [ -z "$DRY" ] && [ "$("$DB" was-sent "$DAY" "$KIND" 2>/dev/null || echo no)" = "yes" ]; then
+  say "$KIND digest already sent for $DAY - nothing to do"; exit 0
+fi
+
+# ── 1. ingest ────────────────────────────────────────────────────────────────
+say "ingest: reading $GRAPH_MAILBOX"
+if [ -x "${CTI_AGENT_DIR:-}/cti-qualys-agent" ]; then
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-qualys-agent ) \
+    || fail "cti-qualys-agent exited non-zero (check Graph auth and Qualys creds)"
+elif [ -d "${CTI_AGENT_DIR:-}" ]; then
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-qualys-agent ) \
+    || fail "go run failed"
+else
+  fail "CTI_AGENT_DIR not set or not found"
+fi
+[ -s "$RAW" ] || fail "no report written to $RAW"
+say "ingest: $(grep -c '^| CVE-' "$RAW" || true) CVE rows"
+
+# ── 2. enrich ────────────────────────────────────────────────────────────────
+say "enrich: NVD + EPSS + KEV"
+python3 "$FLEET_HOME/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
+  || fail "enrich lane failed"
+
+# ── 3. brief ─────────────────────────────────────────────────────────────────
+say "brief: rendering $KIND"
+python3 "$FLEET_HOME/lanes/brief.py" "--$KIND" \
+  --enriched "$ENRICHED" --out "$HTML" --text-out "$TXT" || fail "brief lane failed"
+SUBJECT=$(python3 "$FLEET_HOME/lanes/brief.py" "--$KIND" --subject-only --enriched "$ENRICHED")
+
+# ── 4. send ──────────────────────────────────────────────────────────────────
+say "send: $SUBJECT"
+RESULT=$(python3 "$FLEET_HOME/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+           --subject "$SUBJECT" --attach "$RAW" $DRY) || fail "send failed"
+echo "$RESULT"
+
+# ── 5. log ───────────────────────────────────────────────────────────────────
+if [ -z "$DRY" ]; then
+  read -r P1 P2 P3 P4 < <(python3 -c "
+import json,sys
+c=json.load(open('$ENRICHED'))['counts']
+print(c['P1'],c['P2'],c['P3'],c['P4'])")
+  MID=$(printf '%s' "$RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" 2>/dev/null || echo unknown)
+  "$DB" sent "$DAY" "$P1" "$P2" "$P3" "$P4" "$MID" "$KIND"
+  "$BOARD" post @brief @you INFO "$KIND digest sent: P1=$P1 P2=$P2 P3=$P3 P4=$P4 ($SUBJECT)"
+  say "done - P1=$P1 P2=$P2 P3=$P3 P4=$P4"
+else
+  "$BOARD" post @brief @you INFO "DRY RUN $KIND digest ready at $HTML"
+  say "dry run complete - $HTML"
+fi

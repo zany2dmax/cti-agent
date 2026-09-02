@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# fleet-board — lock-safe append-only message board for the CTI fleet.
+#
+#   fleet-board post <from> <to> <kind> <body...>   append one line
+#   fleet-board read [handle]                       lines for @you/@all (default @you)
+#   fleet-board prune <pattern>                     move matching lines to archive (orchestrator only)
+#   fleet-board tail [n]                            last n lines
+#
+# Appends are serialized with an mkdir lock, which is atomic on POSIX
+# filesystems. Two lanes writing at the same instant will never interleave.
+set -euo pipefail
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+BOARD="$FLEET_HOME/board.md"
+ARCHIVE="$FLEET_HOME/archive/board-archive.md"
+LOCK="$FLEET_HOME/.board.lock"
+LOCK_TIMEOUT="${LOCK_TIMEOUT:-10}"
+
+mkdir -p "$FLEET_HOME/archive"
+touch "$BOARD" "$ARCHIVE"
+
+acquire() {
+  local waited=0
+  until mkdir "$LOCK" 2>/dev/null; do
+    # Break a lock whose owner died. 60s is far longer than any legitimate append.
+    if [ -d "$LOCK" ]; then
+      local age
+      age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || echo 0) ))
+      if [ "$age" -gt 60 ]; then rmdir "$LOCK" 2>/dev/null || true; continue; fi
+    fi
+    sleep 0.2
+    waited=$((waited + 1))
+    if [ "$waited" -gt $((LOCK_TIMEOUT * 5)) ]; then
+      echo "fleet-board: could not acquire lock after ${LOCK_TIMEOUT}s" >&2
+      exit 1
+    fi
+  done
+  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+}
+
+cmd="${1:-read}"; shift || true
+
+case "$cmd" in
+  post)
+    from="${1:?from handle required}"; to="${2:?to handle required}"
+    kind="${3:?kind required (Q|A|INFO|P1|APPROVE|ERROR)}"; shift 3
+    body="$*"
+    [ -n "$body" ] || { echo "fleet-board: empty body" >&2; exit 1; }
+    # Collapse newlines — the board is one line per message, always.
+    body=$(printf '%s' "$body" | tr '\n' ' ' | sed 's/  */ /g')
+    acquire
+    printf '[%s] %-8s -> %-8s %-8s %s\n' \
+      "$(date '+%Y-%m-%d %H:%M')" "$from" "$to" "$kind" "$body" >> "$BOARD"
+    ;;
+  read)
+    handle="${1:-@you}"
+    grep -E -- "-> +(${handle}|@all) " "$BOARD" 2>/dev/null || echo "(nothing for ${handle})"
+    ;;
+  prune)
+    pattern="${1:?pattern required}"
+    acquire
+    tmp=$(mktemp)
+    grep -E -- "$pattern" "$BOARD" >> "$ARCHIVE" 2>/dev/null || true
+    grep -v -E -- "$pattern" "$BOARD" > "$tmp" 2>/dev/null || true
+    mv "$tmp" "$BOARD"
+    echo "pruned lines matching: $pattern"
+    ;;
+  tail) tail -n "${1:-20}" "$BOARD" ;;
+  *) echo "usage: fleet-board {post|read|prune|tail}" >&2; exit 2 ;;
+esac
