@@ -29,3 +29,7 @@ cti-qualys-report.md
 reports/
 digest-*.html
 enriched-*.json
+
+# Real scrub patterns name internal hosts/domains - keep them local.
+# Commit scripts/scrub-patterns.txt.example instead.
+scripts/scrub-patterns.txt

@@ -1,0 +1,30 @@
+# scrub-patterns.txt - inline replacement rules for scrub-history.sh
+#
+# Copy to scripts/scrub-patterns.txt (GITIGNORED) and replace the placeholders
+# with your own internal names. Keep the real file out of version control: a
+# committed list of your internal domains is itself a disclosure, and
+# --replace-text would rewrite this file's own contents on the first run.
+#
+# Format is git-filter-repo --replace-text:
+#   literal==>replacement
+#   regex:PATTERN==>replacement
+#
+# Order matters. Put the most specific patterns first, or a broad domain rule
+# will consume the hostnames before the FQDN rule can see them.
+
+# Fully-qualified internal hostnames (most specific first)
+regex:[A-Za-z0-9][A-Za-z0-9._-]*\.corp\.example\.com==>REDACTED-HOST
+regex:[A-Za-z0-9][A-Za-z0-9._-]*\.ad\.example\.local==>REDACTED-HOST
+
+# Bare internal domains, once the FQDNs above are handled
+regex:corp\.example\.com==>REDACTED-DOMAIN
+regex:ad\.example\.local==>REDACTED-DOMAIN
+
+# Standalone hostnames with no domain suffix - list your naming prefixes
+regex:appsrv[A-Za-z0-9-]*==>REDACTED-HOST
+
+# Internal address ranges that appeared in output
+regex:10\.0\.0\.[0-9]{1,3}==>REDACTED-IP
+
+# Individual names, where machine names identify people
+regex:(?i)jdoe|asmith==>REDACTED-USER
