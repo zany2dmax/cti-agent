@@ -1,6 +1,6 @@
 ---
 name: scout-sweep
-description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not carry, then correlate through Qualys.
+description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not carry, then correlate through the vulnerability scanner.
 ---
 
 # /scout-sweep
@@ -13,7 +13,7 @@ before a vendor newsletter gets around to telling you.
    `scout_items` in memory so you only surface genuinely new IDs.
 
 2. Take the new CVE IDs and run them through the same lookup path the mailbox
-   CVEs take, so presence is still decided by Qualys and nothing else:
+   CVEs take, so presence is still decided by the scanner and nothing else:
    ```
    python3 ~/fleet/lanes/enrich.py --cves CVE-2026-1234,CVE-2026-5678 \
      --out ~/fleet/state/scout-enriched-$(date +%F).json
