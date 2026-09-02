@@ -10,9 +10,13 @@ import (
 	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
 )
 
-// realHost is a stand-in for the kind of internal FQDN that must never reach a
+// sensitiveHost stands in for the kind of internal FQDN that must never reach a
 // committed file. If it appears in redacted output, the redaction is broken.
-const realHost = "REDACTED-HOST"
+//
+// It uses the RFC 2606 reserved .invalid TLD deliberately: the string is
+// obviously synthetic, so a future history-scrub or secret scanner will not
+// mistake it for a real asset and rewrite it out from under this test.
+const sensitiveHost = "db01.internal.example.invalid"
 
 func sampleResults() []vulnlookup.Result {
 	return []vulnlookup.Result{
@@ -24,7 +28,7 @@ func sampleResults() []vulnlookup.Result {
 			HostCount:   4,
 			MaxScore:    100,
 			LastSeen:    "2026-06-03T19:10:28Z",
-			SampleHosts: []string{realHost, "dc01.example.internal", realHost},
+			SampleHosts: []string{sensitiveHost, "dc01.example.internal", sensitiveHost},
 		},
 		{
 			CVE:         "CVE-2026-0826",
@@ -58,7 +62,7 @@ func TestRedactIsDefault(t *testing.T) {
 	// An unset REPORT_HOSTNAMES, or any unrecognized value, must redact.
 	for _, mode := range []string{"", "nonsense", "REDACT", " redact "} {
 		out := writeToTemp(t, mode, "salt")
-		if strings.Contains(out, realHost) {
+		if strings.Contains(out, sensitiveHost) {
 			t.Errorf("mode %q leaked the real hostname", mode)
 		}
 		if !strings.Contains(out, "host-") {
@@ -70,7 +74,7 @@ func TestRedactIsDefault(t *testing.T) {
 func TestRedactHidesHostnamesButKeepsCounts(t *testing.T) {
 	out := writeToTemp(t, "redact", "salt")
 
-	if strings.Contains(out, realHost) || strings.Contains(out, "REDACTED-DOMAIN") {
+	if strings.Contains(out, sensitiveHost) || strings.Contains(out, "internal.example.invalid") {
 		t.Error("redacted report still contains the real hostname")
 	}
 	// Host count is the actionable part and must survive redaction.
@@ -87,8 +91,8 @@ func TestRedactHidesHostnamesButKeepsCounts(t *testing.T) {
 }
 
 func TestPseudonymsAreStableAndUnique(t *testing.T) {
-	a := pseudonym(realHost, "salt")
-	b := pseudonym(realHost, "salt")
+	a := pseudonym(sensitiveHost, "salt")
+	b := pseudonym(sensitiveHost, "salt")
 	if a != b {
 		t.Errorf("pseudonym is not stable: %s != %s", a, b)
 	}
@@ -96,7 +100,7 @@ func TestPseudonymsAreStableAndUnique(t *testing.T) {
 		t.Error("distinct hosts collided")
 	}
 	// Case and surrounding whitespace must not produce a different label.
-	if pseudonym("  BCC-SQL01.Bell.Local  ", "salt") != a {
+	if pseudonym("  DB01.Internal.Example.INVALID  ", "salt") != a {
 		t.Error("pseudonym is not normalized for case/whitespace")
 	}
 	if !strings.HasPrefix(a, "host-") || len(a) != len("host-")+8 {
@@ -107,10 +111,10 @@ func TestPseudonymsAreStableAndUnique(t *testing.T) {
 func TestSaltChangesPseudonyms(t *testing.T) {
 	// This is the whole point of the salt: without it, an attacker holding a
 	// candidate hostname can hash it and confirm a match against the report.
-	if pseudonym(realHost, "salt-a") == pseudonym(realHost, "salt-b") {
+	if pseudonym(sensitiveHost, "salt-a") == pseudonym(sensitiveHost, "salt-b") {
 		t.Error("salt has no effect on the pseudonym")
 	}
-	if pseudonym(realHost, "") == pseudonym(realHost, "salt") {
+	if pseudonym(sensitiveHost, "") == pseudonym(sensitiveHost, "salt") {
 		t.Error("unsalted and salted pseudonyms match")
 	}
 }
@@ -124,7 +128,7 @@ func TestUnsaltedRedactionWarns(t *testing.T) {
 
 func TestRepeatedHostsAreDeduped(t *testing.T) {
 	out := writeToTemp(t, "redact", "salt")
-	label := pseudonym(realHost, "salt")
+	label := pseudonym(sensitiveHost, "salt")
 	if n := strings.Count(out, label); n != 1 {
 		t.Errorf("pseudonym appears %d times, want 1 (dedupe failed)", n)
 	}
@@ -132,7 +136,7 @@ func TestRepeatedHostsAreDeduped(t *testing.T) {
 
 func TestCountModeWithholdsNames(t *testing.T) {
 	out := writeToTemp(t, "count", "salt")
-	if strings.Contains(out, realHost) || strings.Contains(out, "host-") {
+	if strings.Contains(out, sensitiveHost) || strings.Contains(out, "host-") {
 		t.Error("count mode disclosed host identifiers")
 	}
 	if !strings.Contains(out, "3 host(s) - names withheld") {
@@ -142,7 +146,7 @@ func TestCountModeWithholdsNames(t *testing.T) {
 
 func TestFullModeDisclosesAndWarns(t *testing.T) {
 	out := writeToTemp(t, "full", "salt")
-	if !strings.Contains(out, realHost) {
+	if !strings.Contains(out, sensitiveHost) {
 		t.Error("full mode did not include real hostnames")
 	}
 	if !strings.Contains(out, "Contains real hostnames") {
