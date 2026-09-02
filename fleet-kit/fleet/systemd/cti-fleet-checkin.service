@@ -9,9 +9,13 @@ User=ctifleet
 Group=ctifleet
 WorkingDirectory=/home/ctifleet/fleet
 EnvironmentFile=/home/ctifleet/fleet/fleet.env
+# run-checkin resolves the claude binary at runtime - there is no single path
+# where Claude Code installs, so hardcoding one here breaks silently every 30
+# minutes. It also skips a beat if the previous one is still running.
+#
 # --permission-mode acceptEdits keeps the beat unattended. The autonomy gate
 # lives in CLAUDE.md and in mailer.py's recipient allowlist, not here.
-ExecStart=/usr/local/bin/claude -p "/checkin" --permission-mode acceptEdits
+ExecStart=/home/ctifleet/fleet/bin/run-checkin
 TimeoutStartSec=1800
 Nice=10
 

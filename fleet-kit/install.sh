@@ -29,6 +29,7 @@ install -d -m 750 "$FLEET_HOME/../.claude/skills" 2>/dev/null || true
 install -m 750 "$SRC/fleet/bin/fleet-board"  "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/fleet-db"     "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/run-digest"   "$FLEET_HOME/bin/"
+install -m 750 "$SRC/fleet/bin/run-checkin"  "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/lanes/enrich.py"  "$FLEET_HOME/lanes/"
 install -m 750 "$SRC/fleet/lanes/scout.py"   "$FLEET_HOME/lanes/"
 install -m 750 "$SRC/fleet/lanes/brief.py"   "$FLEET_HOME/lanes/"
@@ -57,6 +58,24 @@ else
   echo "$FLEET_HOME/fleet.env exists, leaving it alone"
 fi
 chmod 600 "$FLEET_HOME/fleet.env"
+
+# ── 4b. claude binary ────────────────────────────────────────────────────────
+say "Claude Code"
+CLAUDE_FOUND=""
+for c in "/home/$FLEET_USER/.local/bin/claude" /usr/bin/claude \
+         /usr/local/bin/claude /opt/homebrew/bin/claude; do
+  [ -x "$c" ] && { CLAUDE_FOUND="$c"; break; }
+done
+[ -z "$CLAUDE_FOUND" ] && CLAUDE_FOUND="$(command -v claude 2>/dev/null || true)"
+if [ -n "$CLAUDE_FOUND" ]; then
+  echo "found: $CLAUDE_FOUND ($("$CLAUDE_FOUND" --version 2>/dev/null || echo 'version unknown'))"
+  echo "the heartbeat resolves this at runtime; pin it with CLAUDE_BIN if you have several"
+else
+  echo "NOT FOUND. The digest timers will still work - they do not need Claude."
+  echo "The /checkin heartbeat does. Install it as $FLEET_USER, then authenticate:"
+  echo "    sudo -u $FLEET_USER bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'"
+  echo "    sudo -u $FLEET_USER bash -lc 'claude'   # interactive browser login, once"
+fi
 
 # ── 5. database ──────────────────────────────────────────────────────────────
 say "Memory"
