@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly CTI rollup Monday 07:00 local
+
+[Timer]
+OnCalendar=Mon 07:00
+AccuracySec=1min
+Persistent=true
+Unit=cti-fleet-weekly.service
+
+[Install]
+WantedBy=timers.target
