@@ -36,7 +36,7 @@ DEFAULT_FEEDS = os.path.join(FLEET_HOME, "lanes", "feeds.txt")
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 TAG_RE = re.compile(r"<[^>]+>")
-UA = "cti-fleet-scout/1.0 (+cybersecurity@crhomeusa.com)"
+UA = os.environ.get("FLEET_USER_AGENT", "cti-fleet-scout/1.0")
 
 
 def log(m):

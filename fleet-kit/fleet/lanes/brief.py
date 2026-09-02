@@ -177,7 +177,7 @@ def render(data, kind):
         </div></td></tr>{''.join(finding_block(f) for f in shown)}{more}""")
 
     provenance = " &middot; ".join(filter(None, [
-        f"Mailbox {esc(meta.get('mailbox', 'cybersecurity@crhomeusa.com'))}",
+        f"Mailbox {esc(meta['mailbox'])}" if meta.get("mailbox") else "",
         f"{esc(meta['emails'])} emails inspected" if meta.get("emails") else "",
         f"Lookup: {esc(meta.get('provider', 'qualys'))}" if meta.get("provider") else "",
         f"Since {esc(meta['since'])[:16]}" if meta.get("since") else "",

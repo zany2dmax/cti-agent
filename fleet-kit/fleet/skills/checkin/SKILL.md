@@ -21,7 +21,7 @@ If this is the first beat ever, do the bootstrap from CLAUDE.md first.
 
 ## 2. Postmaster pass
 
-- Relay any board line addressed to Jeff to the phone channel, prefixed with a
+- Relay any board line addressed to the operator to the phone channel, prefixed with a
   short `[TOPIC]` tag so his reply is unambiguous.
 - Post his replies back to the board with `fleet-board post`.
 - Prune resolved and stale lines into `~/fleet/archive/board-archive.md`.
@@ -34,18 +34,19 @@ already ran this window, skip it.
 
 | When | Do |
 |---|---|
-| 06:00 daily | `ingest` → `enrich` → `brief --daily` → **send** to cybersecurity@crhomeusa.com |
+| 06:00 daily | `ingest` → `enrich` → `brief --daily` → **send** to `$DIGEST_TO` |
 | every 4h | `scout` sweep; correlate any new CVEs through `enrich` |
 | Mon 07:00 | `brief --weekly` → **send** |
-| Sun 02:00 | Refresh Qualys KB cache; vacuum the SQLite db; rotate logs |
+| Sun 02:00 | Refresh the scanner KB cache; vacuum the SQLite db; rotate logs |
 
 The daily and weekly sends are pre-approved. Send them without asking. Log the
 Graph message id to memory.
 
 ## 4. Decide — ask BOTH questions
 
-**Something to TELL Jeff?** Only ping outside a scheduled digest if it is a new
-P1: `PRESENT` in Qualys, on CISA KEV, host count above zero. Even then you are
+**Something to TELL the operator?** Only ping outside a scheduled digest if it is a new
+P1: `PRESENT` per the scanner, on CISA KEV, host count above zero. Even then
+you are
 asking for approval to send, not sending. Everything else waits for the digest.
 
 **Something to DO?** If there is no ping, you owe the fleet a proactive task.
@@ -58,5 +59,5 @@ No ping is fine. No work is the bug.
 
 Write one `checkin` row to memory: what you found, what you fired, what you
 sent, what you deferred and why. If you hit an error you could not fix, post it
-to the board for Jeff rather than silently retrying forever — three failed
+to the board for the operator rather than silently retrying forever — three failed
 attempts on the same thing means escalate.

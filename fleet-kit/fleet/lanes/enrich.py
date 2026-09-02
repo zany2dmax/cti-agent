@@ -43,7 +43,7 @@ KEV_FEED = ("https://www.cisa.gov/sites/default/files/feeds/"
             "known_exploited_vulnerabilities.json")
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
-UA = "cti-fleet-enrich/1.0 (+cybersecurity@crhomeusa.com)"
+UA = os.environ.get("FLEET_USER_AGENT", "cti-fleet-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.
 NVD_DELAY = 0.7 if os.environ.get("NVD_API_KEY") else 6.5

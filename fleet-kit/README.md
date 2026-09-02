@@ -1,25 +1,37 @@
 # CTI Agent Fleet — Build Runbook
 
-An always-on threat-intel fleet running on a Linux server, wrapping your existing
-[`cti-qualys-agent`](https://github.com/zany2dmax/cti-qualys-agent) and mailing a
-prioritized digest to **cybersecurity@crhomeusa.com**.
+An always-on threat-intel fleet for a Linux server. It wraps `cti-qualys-agent`
+in an orchestrator plus three executor lanes, adds exploitability context to
+every CVE, and mails a prioritized digest to a security distribution list on a
+schedule.
 
-This applies the fleet pattern from [Build Your Own Claude Code Agent
-Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet) —
-orchestrator, executors, heartbeat, board, persistent memory — to a CTI workload
-instead of a personal-assistant one.
+The fleet pattern — orchestrator, executors, heartbeat, message board,
+persistent memory — comes from [Build Your Own Claude Code Agent
+Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet).
+This applies it to a CTI workload instead of a personal-assistant one.
+
+**Conventions in this document.** Replace these with your own values:
+
+| Placeholder | Meaning | Example |
+|---|---|---|
+| `SECURITY_DL` | Where digests are sent | `soc@example.com` |
+| `CTI_MAILBOX` | Shared mailbox the agent reads | `threatintel@example.com` |
+| `<TENANT>` / `<CLIENT_ID>` | Entra tenant and app registration | |
+| `ctifleet` | Local service account | keep as-is unless it collides |
+| `/opt/cti-fleet` | Where the kit is installed | |
 
 ---
 
 ## The idea in one paragraph
 
-Your Go agent already does the hard part: read the CTI mailbox, pull CVEs, ask
-Qualys whether you're actually exposed, write markdown. What it doesn't do is
-decide what matters, or tell anyone. The fleet wraps it. An orchestrator wakes
-every 30 minutes, three executor lanes add exploitability context and find CVEs
-the mailbox missed, and a digest lands in the security inbox at 06:00 with P1
-items at the top. Nobody has to remember to run anything, and nobody has to read
-a 50-row table to find the four rows that matter.
+The Go agent already does the hard part: read the CTI mailbox, pull CVEs, ask
+the vulnerability scanner whether the environment is actually exposed, write
+markdown. What it doesn't do is decide what matters, or tell anyone. The fleet
+wraps it. An orchestrator wakes every 30 minutes, three executor lanes add
+exploitability context and find CVEs the mailbox missed, and a digest lands in
+the security inbox each morning with P1 items at the top. Nobody has to remember
+to run anything, and nobody has to read a fifty-row table to find the four rows
+that matter.
 
 ---
 
@@ -31,11 +43,11 @@ LINUX SERVER · your Claude subscription · user: ctifleet
 ├── ORCHESTRATOR ─ the analyst on duty
 │   /checkin every 30 min (systemd timer)
 │   · reads the board, memory, lane logs
-│   · relays questions to Jeff's phone (Telegram)
+│   · relays questions to the on-call phone (Telegram)
 │   · fires lanes, decides what's worth sending
 │   · THE ONLY AGENT THAT SENDS MAIL
 │
-├── @ingest   cti-qualys-agent (Go)   mailbox → CVEs → Qualys → markdown
+├── @ingest   cti-qualys-agent (Go)   mailbox → CVEs → scanner → markdown
 ├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → P1–P4
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 └── @brief    lanes/brief.py          enriched JSON → HTML digest
@@ -49,17 +61,17 @@ LINUX SERVER · your Claude subscription · user: ctifleet
                                             │
                           lanes/mailer.py → Graph sendMail
                                             ↓
-                            cybersecurity@crhomeusa.com
+                                        SECURITY_DL
 ```
 
 Two things are worth calling out because they're where most fleets go wrong.
 
-**Lanes never mail and never talk to Jeff.** They post to the board; the
-orchestrator relays. One outbound channel means one place to audit and one place
-where the recipient allowlist lives.
+**Lanes never mail and never contact a human directly.** They post to the board;
+the orchestrator relays. One outbound channel means one place to audit and one
+place where the recipient allowlist lives.
 
-**Delivery doesn't depend on the LLM noticing the clock.** The 06:00 digest runs
-from a plain systemd timer calling `bin/run-digest` — a deterministic shell
+**Delivery doesn't depend on the LLM noticing the clock.** The morning digest
+runs from a plain systemd timer calling `bin/run-digest` — a deterministic shell
 pipeline. The orchestrator's heartbeat does judgment work: chasing UNKNOWNs,
 nudging stale P1s, correlating scout backlog. If the model has a bad day, the
 digest still goes out. If the timer is disabled, the orchestrator notices on its
@@ -70,44 +82,46 @@ next beat and says so.
 ## Why P1–P4 instead of CVSS
 
 CVSS answers "how bad is this vulnerability in the abstract," which is close to
-useless for deciding what to do on a Tuesday. Your own sample report makes the
-point: `CVE-2026-33829` is PRESENT on **305 hosts**, and `CVE-2022-0492` — a
-container escape you almost certainly don't run — is NOT_PRESENT with 118 QIDs
-of noise attached. Sorting by severity buries the first behind the second.
+useless for deciding what to do on a Tuesday. A representative report makes the
+point: one CVE is PRESENT on 305 hosts with a CVSS of 6.5, while a container
+escape most estates don't run scores 8.8 and is NOT_PRESENT. Sorting by severity
+buries the first behind the second.
 
-The enrich lane crosses **exploitability in the wild** with **presence in your
+The enrich lane crosses **exploitability in the wild** with **presence in the
 environment**:
 
-| | Definition | What it means for you |
+| | Definition | What it means |
 |---|---|---|
 | **P1** | `PRESENT` with hosts > 0 **and** (on CISA KEV **or** EPSS ≥ 10%) | Being exploited right now, and you have it. Today. |
 | **P2** | `PRESENT` with hosts > 0, any severity — or `UNKNOWN` on something with KEV / EPSS ≥ 50% | You have it, or you can't prove you don't. This patch cycle. |
-| **P3** | Exploited or EPSS ≥ 10% but not detected here — or `UNKNOWN` with CVSS ≥ 9.0 | Verify your scan coverage actually reaches it. |
+| **P3** | Exploited or EPSS ≥ 10% but not detected — or `UNKNOWN` with CVSS ≥ 9.0 | Verify scan coverage actually reaches it. |
 | **P4** | Everything else | Awareness. Suppressed from the daily; appears in the weekly. |
 
-Three deliberate choices, all of which came out of testing this against your
-committed sample report:
+Three deliberate choices, each of which came out of testing the scoring against
+real report data:
 
-**Presence alone earns P2, regardless of CVSS.** The first cut gated P2 on
-CVSS ≥ 7.0, which put `CVE-2026-45659` — present on **186 hosts**, CVSS 5.5 — in
-P3, *below* a NOT_PRESENT CVE. That inverts the exact thing this scoring exists
-to fix. If it's on your machines, it's a patching obligation.
+**Presence alone earns P2, regardless of CVSS.** An earlier cut gated P2 on
+CVSS ≥ 7.0, which put a CVE present on 186 hosts with CVSS 5.5 into P3 — *below*
+a NOT_PRESENT CVE. That inverts the exact thing this scoring exists to fix. If
+it's on your machines, it's a patching obligation.
 
 **`UNKNOWN` + actively exploited lands in P2, and `UNKNOWN` + CVSS ≥ 9.0 lands
-in P3.** In your sample, eight CVEs came back UNKNOWN because the Qualys
-KnowledgeBase had no QID mapping. That is not "we're clean" — it's "we didn't
-look." Letting missing data sink to P4 is the failure mode that shows up in a
-post-incident review.
+in P3.** A CVE comes back UNKNOWN when the scanner's KnowledgeBase has no QID
+mapping for it. That is not "we're clean" — it's "we didn't look." Letting
+missing data sink to P4 is the failure mode that shows up in a post-incident
+review.
 
 **Host count breaks ties before CVSS does.** A 6.5 on 305 hosts outranks a 9.8
 on one.
 
 **EPSS** (FIRST's Exploit Prediction Scoring System) is the probability a CVE
-will be exploited in the next 30 days. Verified live against
-`api.first.org/data/v1/epss`. **KEV** membership comes from NVD's
-`cisaExploitAdd` field, with CISA's catalog feed layered on for the remediation
-due date and ransomware association — so if the catalog fetch fails, KEV
-detection degrades but doesn't disappear.
+will be exploited in the next 30 days, from `api.first.org/data/v1/epss`. **KEV**
+membership comes from NVD's `cisaExploitAdd` field, with CISA's catalog feed
+layered on for the remediation due date and ransomware association — so if the
+catalog fetch fails, KEV detection degrades but doesn't disappear.
+
+Thresholds live in `enrich.py::prioritize()`. They are opinions, not physics —
+tune them to your estate and your patch cadence.
 
 ---
 
@@ -115,35 +129,37 @@ detection degrades but doesn't disappear.
 
 ### Prerequisites
 
-- Linux server that stays on. RHEL 8+/Ubuntu 22.04+, 2 vCPU / 4 GB is plenty.
+- Linux server that stays on. RHEL 8+ / Ubuntu 22.04+, 2 vCPU / 4 GB is plenty.
 - Python 3.9+ (stdlib only — no pip installs anywhere in this kit).
 - Go 1.21+ *or* a prebuilt `cti-qualys-agent` binary.
 - Claude Code installed at `/usr/local/bin/claude`, authenticated as your
   subscription user.
+- A shared mailbox receiving CTI email, and an Entra app registration that can
+  read it.
 - Outbound HTTPS to: `login.microsoftonline.com`, `graph.microsoft.com`, your
-  Qualys pod, `services.nvd.nist.gov`, `api.first.org`, `www.cisa.gov`, and
-  whichever advisory feeds you keep in `feeds.txt`.
+  scanner's API endpoint, `services.nvd.nist.gov`, `api.first.org`,
+  `www.cisa.gov`, and whichever advisory feeds you keep in `feeds.txt`.
 
 ### Steps
 
 ```bash
-# 1. Get the code onto the box
-sudo mkdir -p /opt/cti-fleet && sudo chown $USER /opt/cti-fleet
-# copy this cti-fleet/ directory to /opt/cti-fleet
+# 1. Get the kit onto the box
+sudo mkdir -p /opt/cti-fleet && sudo chown "$USER" /opt/cti-fleet
+# copy this fleet-kit/ directory to /opt/cti-fleet
 
 # 2. Build the Go agent as the service user
 sudo useradd -m -s /bin/bash ctifleet
-sudo -u ctifleet git clone https://github.com/zany2dmax/cti-qualys-agent \
-     /home/ctifleet/cti-qualys-agent
-cd /home/ctifleet/cti-qualys-agent && sudo -u ctifleet go build -o cti-qualys-agent ./cmd/cti-qualys-agent
+sudo -u ctifleet git clone <YOUR_FORK_OR_UPSTREAM_URL> /home/ctifleet/cti-qualys-agent
+cd /home/ctifleet/cti-qualys-agent
+sudo -u ctifleet go build -o cti-qualys-agent ./cmd/cti-qualys-agent
 
 # 3. Install the fleet
 cd /opt/cti-fleet && sudo ./install.sh
 
-# 4. Fill in secrets
-sudo -u ctifleet vi /home/ctifleet/fleet/fleet.env    # mode 600
+# 4. Fill in config and secrets (mode 600)
+sudo -u ctifleet vi /home/ctifleet/fleet/fleet.env
 
-# 5. Verify Graph permissions BEFORE trusting the 06:00 timer
+# 5. Verify Graph permissions BEFORE trusting the morning timer
 sudo -u ctifleet python3 /home/ctifleet/fleet/lanes/mailer.py --check
 
 # 6. Dry run the whole pipeline — renders and validates, sends nothing
@@ -155,65 +171,79 @@ sudo systemctl enable --now cti-fleet-checkin.timer cti-fleet-digest.timer \
 systemctl list-timers 'cti-fleet-*'
 ```
 
+`install.sh` is idempotent and rewrites the systemd units to match whatever
+`FLEET_USER` and `FLEET_HOME` you set, so non-default paths work:
+
+```bash
+sudo FLEET_USER=secops FLEET_HOME=/srv/fleet ./install.sh
+```
+
 ### Entra permissions
 
-Your app registration currently has `Mail.Read` (Application). Add one:
+The Go agent needs `Mail.Read` to read the mailbox. The fleet needs one more to
+send the digest:
 
 | Permission | Type | Why |
 |---|---|---|
-| `Mail.Read` | Application | already there — read the CTI mailbox |
-| `Mail.Send` | Application | **add this** — send the digest as the mailbox |
+| `Mail.Read` | Application | read the CTI mailbox |
+| `Mail.Send` | Application | send the digest as that mailbox |
 
 Entra ID → App registrations → your CTI app → API permissions → Add permission
 → Microsoft Graph → Application permissions → `Mail.Send` → **Grant admin
 consent**. Consent is the step people skip; `mailer.py --check` decodes the
-token and tells you exactly which roles are actually present.
+token and reports which roles are actually present, so you find out now rather
+than at 6am.
 
 Then scope it. `Mail.Send` as an application permission is tenant-wide by
-default — that app could send as *any* mailbox in the tenant. Restrict it:
+default — the app could send as *any* mailbox in the tenant. Restrict it with an
+Application Access Policy:
 
 ```powershell
 New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
-  -PolicyScopeGroupId ctifleet-mailboxes@crhomeusa.com `
+  -PolicyScopeGroupId cti-fleet-mailboxes@example.com `
   -AccessRight RestrictAccess `
-  -Description "CTI fleet: cybersecurity mailbox only"
+  -Description "CTI fleet: security mailbox only"
 
-Test-ApplicationAccessPolicy -Identity cybersecurity@crhomeusa.com -AppId <CLIENT_ID>
+Test-ApplicationAccessPolicy -Identity CTI_MAILBOX -AppId <CLIENT_ID>
 ```
 
 Do this even though it's optional. A leaked client secret that can send as
-anyone in the company is a phishing platform; one scoped to a single mailbox is
-a contained incident.
+anyone in the organization is a phishing platform; one scoped to a single
+mailbox is a contained incident.
 
 ---
 
 ## Autonomy — where the gates are
 
-You chose: **auto-send scheduled reports, gate everything else.** That's
-enforced in three independent places, deliberately, because a prompt alone isn't
-a control.
+The shipped default is **auto-send scheduled digests, gate everything else**,
+enforced in three independent places, because a prompt alone isn't a control.
 
 | Layer | Enforces |
 |---|---|
 | `CLAUDE.md` | The orchestrator's standing instructions — what it may and may not do |
 | `mailer.py` recipient allowlist | `FLEET_ALLOW_TO` in `fleet.env`. Any recipient not on it **exits non-zero** unless `--approve` is passed. Not advisory. |
-| systemd hardening | `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadWritePaths` limited to `~/fleet` |
+| systemd hardening | `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadWritePaths` limited to the fleet home |
 
-**No approval needed:** running lanes; reading mailbox/Qualys/NVD/EPSS/KEV/feeds;
-writing to memory, reports, logs, board; **sending the daily and Monday weekly
-digests to the DL.**
+**No approval needed:** running lanes; reading mailbox, scanner, NVD, EPSS, KEV,
+feeds; writing to memory, reports, logs, board; sending the scheduled daily and
+weekly digests to `SECURITY_DL`.
 
 **Approval required:** any off-cycle email, including an "urgent" one; any
-recipient outside the allowlist; tickets, Qualys config, scan exceptions;
-deleting anything outside logs and archive; touching a production host.
+recipient outside the allowlist; creating tickets, changing scanner config or
+scan exceptions; deleting anything outside logs and archive; touching a
+production host.
 
-The P1 case is worth being explicit about, because it's the one you'll be
-tempted to loosen. A new P1 does *not* buy the fleet an off-cycle blast. It
-posts to the board tagged `[P1 APPROVE-TO-SEND]`, pings your phone, and waits
-for you. It also guarantees the item leads the next scheduled digest regardless
-of length. If you later decide P1s should auto-send, add
-`cybersecurity@crhomeusa.com` to a separate `FLEET_P1_AUTO` path — don't just
-widen the allowlist.
+The P1 case is the one you'll be tempted to loosen, so it's explicit: a new P1
+does *not* buy the fleet an off-cycle blast. It posts to the board tagged
+`[P1 APPROVE-TO-SEND]`, pings the on-call phone, and waits. It also guarantees
+the item leads the next scheduled digest regardless of length. If you later
+decide P1s should auto-send, wire a separate `FLEET_P1_AUTO` path rather than
+widening the allowlist — those are different risks and deserve different
+switches.
+
+Tightening it further is a one-line change: set `FLEET_ALLOW_TO` to an address
+nobody reads and every send needs `--approve`, which turns the fleet into a
+draft-only assistant.
 
 ---
 
@@ -225,11 +255,14 @@ widen the allowlist.
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-fleet-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-fleet-scout.timer` |
 | Mon 07:00 | weekly rollup, includes P4 | `cti-fleet-weekly.timer` |
-| Sun 02:00 | Qualys KB refresh, vacuum, log rotate | orchestrator, on its beat |
+| Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
+
+Change the times by editing `OnCalendar=` in the relevant timer, then
+`systemctl daemon-reload`.
 
 All timers are `Persistent=true`, so a digest missed because the box was down
 fires on boot. A silently skipped digest reads as "no news," which is the worst
-possible failure for this system.
+possible failure for a system like this.
 
 ---
 
@@ -243,11 +276,11 @@ CTI Aug 18: 12 confirmed present, no P1
 CTI Aug 18: no new CVEs in the last 24h
 ```
 
-Body: a one-line lead telling you whether to care, P1/P2/P3/P4 count tiles, then
-findings grouped by priority. Each one carries KEV/ransomware/CVSS/EPSS/status
+Body: a one-line lead saying whether to care, P1–P4 count tiles, then findings
+grouped by priority. Each carries KEV / ransomware / CVSS / EPSS / status
 badges, a plain-English "why it ranks here," the NVD description, and
 deduplicated sample hostnames. Table-based layout with inline CSS, because
-Outlook. The raw markdown report is attached for anyone who wants all 50 rows.
+Outlook. The raw markdown report is attached for anyone who wants every row.
 
 P4 is suppressed from the daily and appears in the weekly. P2 and P3 are capped
 at 12 and 10 items on the daily, sorted by host count, with a "+N more in the
@@ -256,19 +289,25 @@ or EPSS, the digest carries an explicit **DEGRADED** banner naming what was
 missing; a digest that hides its own gaps is worse than no digest.
 
 A quiet day still sends. "No new CVEs in the last 24h" is signal; silence is
-ambiguous with "the cron job died three weeks ago."
+ambiguous with "the timer died three weeks ago."
+
+**A note on hostnames.** The digest names affected hosts, which makes it a
+targeting list if it leaks. Keep `SECURITY_DL` internal, and note that the
+upstream report writer redacts hostnames to stable pseudonyms unless
+`REPORT_HOSTNAMES=full` — see the repository README. Reports and digests are
+written mode `0600` under the fleet home and are gitignored.
 
 ---
 
 ## Files
 
 ```
-cti-fleet/
+fleet-kit/
 ├── README.md                      this runbook
 ├── install.sh                     idempotent installer
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate
-    ├── fleet.env.example           all config, superset of the Go agent's .env
+    ├── fleet.env.example          all config, superset of the Go agent's .env
     ├── bin/
     │   ├── fleet-board            lock-safe append-only board (post/read/prune/tail)
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
@@ -286,9 +325,16 @@ cti-fleet/
     └── systemd/                   4 service+timer pairs, hardened
 ```
 
+Before first run, edit two files for your environment: `fleet.env` (addresses,
+credentials, paths) and `fleet/CLAUDE.md` (the orchestrator's mandate, tone, and
+who it escalates to). `CLAUDE.md` is a prompt, not code — rewrite it in your own
+words if the shipped voice doesn't fit your team.
+
 ---
 
 ## Operating it
+
+Substitute your `FLEET_HOME` if you changed it.
 
 ```bash
 # Health
@@ -303,7 +349,7 @@ sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-board read @you
 # Ask the fleet something directly
 sudo -u ctifleet bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
 
-# Force a digest now
+# Force a digest now (dry run first, always)
 sudo -u ctifleet /home/ctifleet/fleet/bin/run-digest daily --dry-run
 
 # Query findings
@@ -318,8 +364,9 @@ sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --stale-days 7
 | `403` on sendMail | `Mail.Send` missing or unconsented | `mailer.py --check` shows actual token roles |
 | `403` with `MailboxNotEnabled` | Application Access Policy excludes the mailbox | `Test-ApplicationAccessPolicy` |
 | Enrich takes ~5 min | No NVD API key → 5 req/30s | Free key at nvd.nist.gov/developers/request-an-api-key → 50 req/30s |
-| Everything `UNKNOWN` | Qualys KB cache empty or stale | Delete `state/qualys_kb_cache.json`, rerun; the first build is large |
+| Everything `UNKNOWN` | Scanner KB cache empty or stale | Delete the KB cache JSON and rerun; the first build is large |
 | Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-fleet-digest`; `fleet-db was-sent $(date +%F) daily` |
+| Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
 | Board not growing | Stale lock | `rmdir ~/fleet/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | `logs/scout.log` names failed feeds; a dead feed is a blind spot that looks like good news |
 
@@ -335,13 +382,13 @@ thresholds in `enrich.py::prioritize()` before anyone else sees the output. A
 digest that cries wolf in week one gets filtered forever.
 
 **Week 2 — auto-send.** Enable `cti-fleet-digest.timer`. Only the daily. Leave
-scout off; you want to know that the mailbox path is solid before adding a
-second source of CVEs.
+scout off; you want to know the mailbox path is solid before adding a second
+source of CVEs.
 
-**Week 3 — heartbeat.** Enable `cti-fleet-checkin.timer` and wire Telegram. Now
-you have an orchestrator doing proactive work between digests: chasing UNKNOWNs,
-nudging stale P1s. Watch `checkin.log` for a few days and see whether its
-proactive picks are useful or busywork.
+**Week 3 — heartbeat.** Enable `cti-fleet-checkin.timer` and wire the phone
+channel. Now an orchestrator is doing proactive work between digests: chasing
+UNKNOWNs, nudging stale P1s. Watch `checkin.log` for a few days and judge
+whether its proactive picks are useful or busywork.
 
 **Week 4 — scout.** Enable `cti-fleet-scout.timer` after trimming `feeds.txt` to
 vendors you actually run. Expect a noisy first sweep as it backfills; the dedupe
@@ -349,37 +396,52 @@ against `findings` and `scout_items` settles it within a day.
 
 **Later — a fifth lane, when a bottleneck forces it.** The obvious next one is
 asset/exposure correlation: map hostnames to owners and criticality so a P1 on a
-database server routes differently than one on a CAD workstation. A real report
-puts servers, workstations and Macs across several domains in one flat list, and
-sorting that by hand gets old fast. Add the lane when you catch yourself doing
-it, not before.
+database server routes differently than one on a workstation. A real report puts
+servers, laptops and Macs across several domains in one flat list, and sorting
+that by hand gets old fast. Add the lane when you catch yourself doing it, not
+before.
 
 ---
 
-## Two upstream changes worth making
+## Adapting it
 
-Both are small, and both remove parsing fragility from the fleet.
+**A different scanner.** Presence is decided by the Go agent's
+`vulnlookup.LookupProvider` interface, so swapping Qualys for CrowdStrike,
+Defender, Tenable or Rapid7 is a change upstream in the Go code, not in the
+fleet. The lanes only ever see `PRESENT` / `NOT_PRESENT` / `UNKNOWN` plus
+normalized evidence, so nothing here needs to know which scanner answered.
 
-**1. Emit JSON alongside markdown.** `enrich.py` currently parses your markdown
-table, which works and is tested against your committed sample — but it's a
-regex contract that breaks the day you add a column. A `REPORT_JSON_PATH` env
-var writing `[]vulnlookup.Result` straight out of `main.go` would be maybe 15
-lines in `internal/report/`, and `enrich.py` would read it directly. This is
-already on your feature-request list in spirit.
+**A different mail transport.** `lanes/mailer.py` is the only component that
+sends. Swap Graph for SMTP by replacing `token()` and `graph_post()` — keep the
+`FLEET_ALLOW_TO` allowlist and the `--approve` gate, since those are the control,
+not the transport.
 
-**2. Your README lists "email the final report back to a distribution list" as a
-feature request.** `lanes/mailer.py` is that, done, with an allowlist gate — but
-in Python rather than Go. If you'd rather keep it single-binary, the same 60
-lines port to Go easily using the token you already fetch in `internal/graph`;
-the endpoint is `POST /users/{mailbox}/sendMail`. Worth doing if you also want
-the Docker packaging from your feature list, since one binary containerizes more
-cleanly than a binary plus four Python lanes.
+**A different chat channel.** The orchestrator holds the phone channel. Telegram
+is the shipped example; Slack, Teams, or iMessage change only the final hop.
+
+---
+
+## Upstream changes worth making
+
+Both remove parsing fragility from the fleet.
+
+**1. Emit JSON alongside markdown.** `enrich.py` parses the markdown report
+table, which works, but it's a regex contract that breaks the day a column is
+added. A `REPORT_JSON_PATH` env var writing `[]vulnlookup.Result` straight out
+of `main.go` would be roughly 15 lines in `internal/report/`, and `enrich.py`
+would read it directly instead.
+
+**2. Port the mailer to Go.** `lanes/mailer.py` implements the "email the report
+to a distribution list" feature request, but in Python. The same logic ports to
+Go using the token already fetched in `internal/graph`; the endpoint is
+`POST /users/{mailbox}/sendMail`. Worth doing alongside the Docker packaging
+request, since one binary containerizes more cleanly than a binary plus four
+Python lanes.
 
 ---
 
 ## Sources
 
-- [zany2dmax/cti-qualys-agent](https://github.com/zany2dmax/cti-qualys-agent) — the ingest lane
 - [Build Your Own Claude Code Agent Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet) — orchestrator/executor/heartbeat/board pattern
 - [How agent memory works](https://www.limitededitionjonathan.com/docs/how-agent-memory-works) — the companion memory deep-dive
 - [NVD API 2.0](https://services.nvd.nist.gov/rest/json/cves/2.0) · [FIRST EPSS](https://api.first.org/data/v1/epss) · [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)

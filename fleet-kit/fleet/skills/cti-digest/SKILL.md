@@ -9,8 +9,8 @@ Full pipeline: ingest → enrich → brief → send. Default is `--daily`.
 
 ## Steps
 
-1. **Ingest.** Run the Go agent. It reads cybersecurity@crhomeusa.com, extracts
-   CVEs, looks them up in Qualys, writes markdown.
+1. **Ingest.** Run the Go agent. It reads the CTI mailbox, extracts
+   CVEs, looks them up in the configured scanner, writes markdown.
    ```
    cd "$CTI_AGENT_DIR" && set -a && . ~/fleet/fleet.env && set +a && \
      REPORT_PATH=~/fleet/reports/raw-$(date +%F).md ./cti-qualys-agent
@@ -34,7 +34,7 @@ Full pipeline: ingest → enrich → brief → send. Default is `--daily`.
 
 4. **Read it before you send it.** Open the HTML. Sanity-check: does the P1
    count match what enrich found? Are host counts plausible? Is any CVE listed
-   as exploitable that Qualys actually returned UNKNOWN for? If the digest
+   as exploitable that the scanner actually returned UNKNOWN for? If the digest
    claims something the data does not support, fix the lane, do not fix the
    wording.
 

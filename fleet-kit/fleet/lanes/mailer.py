@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """mailer.py - Microsoft Graph sendMail for the CTI fleet.
 
-Reuses the same Entra app registration the Go agent already uses to *read*
-cybersecurity@crhomeusa.com. Add the Mail.Send application permission and this
-sends as that mailbox - no SMTP credentials anywhere on the box.
+Reuses the same Entra app registration the Go agent already uses to *read* the
+CTI mailbox. Add the Mail.Send application permission and this sends as that
+mailbox - no SMTP credentials anywhere on the box.
 
 Only the orchestrator invokes this. Lanes never send mail.
 
 Usage:
-  mailer.py --html digest.html                            # -> the standing DL
+  mailer.py --html digest.html                            # -> DIGEST_TO
   mailer.py --html d.html --text d.txt --subject "..."    # explicit subject
   mailer.py --html d.html --to someone@example.com --require-approval
   mailer.py --html d.html --dry-run                       # render + validate only
@@ -16,9 +16,14 @@ Usage:
 
 Environment (from ~/fleet/fleet.env):
   TENANT_ID CLIENT_ID CLIENT_SECRET
-  GRAPH_MAILBOX     mailbox that sends (default cybersecurity@crhomeusa.com)
-  DIGEST_TO         default recipients, comma-separated
+  GRAPH_MAILBOX     mailbox that sends as (required)
+  DIGEST_TO         default recipients, comma-separated (required)
   FLEET_ALLOW_TO    comma-separated allowlist; anything else needs --approve
+                    (defaults to DIGEST_TO)
+
+There is deliberately no built-in default recipient. A hardcoded address is a
+mis-send waiting to happen when this is deployed somewhere else, so the fleet
+refuses to guess who should receive security findings.
 """
 import argparse
 import json
@@ -33,7 +38,6 @@ import urllib.request
 from datetime import datetime, timezone
 
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
-DEFAULT_DL = "cybersecurity@crhomeusa.com"
 GRAPH = "https://graph.microsoft.com/v1.0"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -137,18 +141,21 @@ def main():
     ap.add_argument("--html")
     ap.add_argument("--text", help="plain-text alternative (logged, Graph sends one body)")
     ap.add_argument("--subject")
-    ap.add_argument("--to", help="comma-separated; defaults to DIGEST_TO / the DL")
-    ap.add_argument("--from-mailbox", default=os.environ.get("GRAPH_MAILBOX", DEFAULT_DL))
+    ap.add_argument("--to", help="comma-separated; defaults to DIGEST_TO")
+    ap.add_argument("--from-mailbox", default=os.environ.get("GRAPH_MAILBOX"))
     ap.add_argument("--attach", action="append", default=[],
                     help="file to attach (repeatable, keep under ~3MB total)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--require-approval", action="store_true",
                     help="refuse unless --approve is also passed (off-cycle sends)")
     ap.add_argument("--approve", action="store_true",
-                    help="Jeff approved this specific off-cycle send")
+                    help="the operator approved this specific off-cycle send")
     ap.add_argument("--save-to-sent", default="true")
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
+
+    if not args.from_mailbox:
+        die("GRAPH_MAILBOX is not set - set it in fleet.env or pass --from-mailbox")
 
     if args.check:
         return check(token(), args.from_mailbox)
@@ -157,24 +164,29 @@ def main():
     if not os.path.exists(args.html):
         die(f"{args.html} does not exist")
 
-    recipients = [r.strip() for r in
-                  (args.to or os.environ.get("DIGEST_TO") or DEFAULT_DL).split(",")
-                  if r.strip()]
+    to_raw = args.to or os.environ.get("DIGEST_TO") or ""
+    recipients = [r.strip() for r in to_raw.split(",") if r.strip()]
     if not recipients:
-        die("no recipients")
+        die("no recipients - set DIGEST_TO in fleet.env or pass --to. "
+            "There is no default; the fleet will not guess who receives "
+            "security findings.")
     for r in recipients:
         if not EMAIL_RE.match(r):
             die(f"{r!r} is not a valid address")
 
     # Autonomy gate. Scheduled digests to the allowlisted DL are pre-approved;
     # anything else needs an explicit human OK on this specific send.
-    allow = {a.strip().lower() for a in
-             os.environ.get("FLEET_ALLOW_TO", DEFAULT_DL).split(",") if a.strip()}
+    #
+    # FLEET_ALLOW_TO defaults to DIGEST_TO rather than to everything, so an
+    # unconfigured deployment fails closed: the scheduled digest still works,
+    # any other recipient needs --approve.
+    allow_raw = os.environ.get("FLEET_ALLOW_TO") or os.environ.get("DIGEST_TO") or ""
+    allow = {a.strip().lower() for a in allow_raw.split(",") if a.strip()}
     outside = [r for r in recipients if r.lower() not in allow]
     if outside and not args.approve:
         die(f"recipients outside FLEET_ALLOW_TO: {', '.join(outside)}. "
             f"Post the draft to the board tagged [APPROVE] and re-run with "
-            f"--approve once Jeff says yes.")
+            f"--approve once the operator says yes.")
     if args.require_approval and not args.approve:
         die("this send is marked as requiring approval and --approve was not passed")
 
