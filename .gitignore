@@ -18,3 +18,14 @@ config.local.yaml
 
 # run outputs
 *.json
+
+# Generated CTI reports - these map exploitable CVEs to real hostnames and
+# must never be committed. internal/report redacts by default, but the safe
+# state is for these files to be untrackable regardless of that setting.
+cti-vuln-report.md
+cti-qualys-report.md
+*-vuln-report.md
+*-cti-report.md
+reports/
+digest-*.html
+enriched-*.json

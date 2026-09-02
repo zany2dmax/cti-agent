@@ -348,11 +348,11 @@ vendors you actually run. Expect a noisy first sweep as it backfills; the dedupe
 against `findings` and `scout_items` settles it within a day.
 
 **Later — a fifth lane, when a bottleneck forces it.** The obvious next one is
-asset/exposure correlation: map hostnames to owners and criticality so a P1 on
-`REDACTED-HOST` routes differently than one on a CAD workstation. Your
-sample report already shows the shape of the problem — `REDACTED-DOMAIN`
-hosts, `REDACTED-DOMAIN` hosts, and Macs, all in one flat list. Add the lane when you
-find yourself hand-sorting that, not before.
+asset/exposure correlation: map hostnames to owners and criticality so a P1 on a
+database server routes differently than one on a CAD workstation. A real report
+puts servers, workstations and Macs across several domains in one flat list, and
+sorting that by hand gets old fast. Add the lane when you catch yourself doing
+it, not before.
 
 ---
 
