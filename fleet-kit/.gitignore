@@ -1,0 +1,12 @@
+# Runtime state - never commit
+fleet.env
+*.log
+state/
+reports/
+archive/
+board.md
+__pycache__/
+*.pyc
+qualys_kb_cache.json
+nvd-cache.json
+kev-cache.json

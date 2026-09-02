@@ -1,0 +1,29 @@
+[Unit]
+Description=CTI fleet orchestrator heartbeat (one /checkin beat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ctifleet
+Group=ctifleet
+WorkingDirectory=/home/ctifleet/fleet
+EnvironmentFile=/home/ctifleet/fleet/fleet.env
+# --permission-mode acceptEdits keeps the beat unattended. The autonomy gate
+# lives in CLAUDE.md and in mailer.py's recipient allowlist, not here.
+ExecStart=/usr/local/bin/claude -p "/checkin" --permission-mode acceptEdits
+TimeoutStartSec=1800
+Nice=10
+
+# Least privilege - the fleet only ever needs to write under its own home.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ctifleet/fleet
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=append:/home/ctifleet/fleet/logs/checkin.log
+StandardError=append:/home/ctifleet/fleet/logs/checkin.log

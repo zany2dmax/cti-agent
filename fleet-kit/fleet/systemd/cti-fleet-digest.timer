@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily CTI digest at 06:00 local
+
+[Timer]
+OnCalendar=Mon..Sun 06:00
+AccuracySec=1min
+# Fire on boot if the box was asleep through the window - a missed digest is a
+# silent gap, which is worse than a late one.
+Persistent=true
+Unit=cti-fleet-digest.service
+
+[Install]
+WantedBy=timers.target
