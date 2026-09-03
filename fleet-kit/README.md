@@ -125,6 +125,105 @@ tune them to your estate and your patch cadence.
 
 ---
 
+## Command reference
+
+Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
+
+### Local pipeline
+
+| Task | Direct | What it does | Sends mail? |
+|---|---|---|---|
+| `task dev:doctor` | `dev-run doctor` | Tools, `.env` completeness, Graph token, granted app roles | no |
+| `task dev:ingest:none` | `dev-run ingest --provider none` | Mailbox → CVEs, **no scanner** | no |
+| `task dev:ingest` | `dev-run ingest` | Mailbox → CVEs → scanner lookup | no |
+| `task dev:enrich` | `dev-run enrich` | + NVD CVSS, EPSS, KEV → P1–P4 | no |
+| `task dev:brief` | `dev-run brief` | Render HTML + text digest | no |
+| `task dev:send TO=…` | `dev-run send --to …` | Validate the send path and gate | **dry run** |
+| `task dev:send:real TO=…` | `dev-run send --to … --for-real` | Deliver it | **YES** |
+| `task dev:all` | `dev-run all` | doctor → ingest → enrich → brief, opens the digest | no |
+| `task dev:report` | — | Show the latest report and priority counts | no |
+| `task dev:clean` | — | Wipe `.fleet-local/` | no |
+
+### Tests
+
+| Task | Covers |
+|---|---|
+| `task test` | Everything: Go + Python |
+| `task test:go` | All Go packages |
+| `task test:graph` | Graph URL building and error diagnosis (guards the `$orderby` bug) |
+| `task test:report` | Hostname redaction, salt behavior, `0600` file mode |
+| `task test:cve` | CVE extraction and numeric CVE ordering |
+| `task test:lanes` | Priority truth table, report parsing, digest, mailer gate (33 cases) |
+| `task test:syntax` | Byte-compiles the lanes, `bash -n` the scripts, parses the systemd units |
+| `task check` | What CI should run: `fmt:check`, `vet`, all tests, syntax |
+
+### Build and quality
+
+| Task | Does |
+|---|---|
+| `task build` | Build to `bin/cti-agent` |
+| `task run` | Run the Go agent directly from env vars |
+| `task install` | Copy the binary to `~/bin` |
+| `task fmt` / `task fmt:check` | Format / fail if unformatted |
+| `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck |
+| `task clean` / `task clean:all` | Build artifacts / also local state |
+
+### Production (on the server)
+
+| Command | Does |
+|---|---|
+| `bin/run-digest daily` | Deterministic ingest → enrich → brief → **send** |
+| `bin/run-digest daily --dry-run` | Same, sends nothing |
+| `bin/run-digest weekly` | Weekly rollup, includes P4 |
+| `bin/run-checkin` | One orchestrator heartbeat |
+| `bin/fleet-board tail 30` | Recent board lines |
+| `bin/fleet-board read @you` | Lines addressed to the orchestrator |
+| `bin/fleet-db recent` | Memory, open tasks, unacked mailbox, priority counts |
+| `bin/fleet-db findings --priority P1` | Query findings |
+| `bin/fleet-db findings --stale-days 7` | Findings with no remediation note |
+| `lanes/mailer.py --check` | Decode the token, list granted app roles |
+| `lanes/scout.py --out …` | Poll advisory feeds for new CVEs |
+
+### Run modes that change behavior
+
+| Setting | Values | Effect |
+|---|---|---|
+| `LOOKUP_PROVIDER` | `qualys` \| `crowdstrike` \| `none` | `none` skips the scanner entirely — everything returns UNKNOWN, which is how you isolate mailbox and parsing problems |
+| `REPORT_HOSTNAMES` | `redact` *(default)* \| `count` \| `full` | Pseudonyms / counts only / real hostnames |
+| `GRAPH_LOOKBACK_HOURS` | integer, default `24` | How far back to read mail. `168` = one week |
+| `GRAPH_FOLDER` | folder name, default `inbox` | Read a subfolder instead |
+| `QUALYS_KB_MAX_AGE_HOURS` | integer, default `168` | When the CVE→QID cache refreshes |
+| `--provider` | on `dev-run ingest` | Overrides `LOOKUP_PROVIDER` for one run |
+| `--for-real` | on `dev-run send` | Required to actually send; absent = dry run |
+| `--approve` | on `mailer.py` | Required for any recipient outside the allowlist |
+
+---
+
+## The NVD API key
+
+Get one before this runs on a schedule. It is free and takes about a minute:
+**https://nvd.nist.gov/developers/request-an-api-key**
+
+Put it in `.env` (local) or `fleet.env` (server) as `NVD_API_KEY`.
+
+| | Rate limit | 20 CVEs | 50 CVEs |
+|---|---|---|---|
+| Without a key | 5 requests / 30s | ~2 min | ~5 min |
+| With a key | 50 requests / 30s | ~15 s | ~35 s |
+
+The enrich lane caches NVD responses for 7 days, so day-to-day runs only fetch
+CVEs it has not seen. The cost is worst on the first run and after a quiet
+period. It works without a key — it is just slow enough to be annoying, and
+slow enough that a 06:00 timer might still be running when you check your
+phone.
+
+`enrich.py` prints which mode it is in: `set NVD_API_KEY to go 10x faster`
+appears when the key is missing.
+
+EPSS and the CISA KEV catalog need no key and no registration.
+
+---
+
 ## Test it locally first
 
 Before any of the server setup below, prove the pipeline works on your laptop.
@@ -444,7 +543,7 @@ written mode `0600` under the fleet home and are gitignored.
 fleet-kit/
 ├── README.md                      this runbook
 ├── install.sh                     idempotent installer (Linux server)
-├── bin/dev-run                    local test runner: macOS/Linux, never sends
+├── bin/dev-run                    local runner: doctor/ingest/enrich/brief/send
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate
     ├── fleet.env.example          all config, superset of the Go agent's .env
@@ -464,7 +563,13 @@ fleet-kit/
     │   ├── cti-digest/SKILL.md    full pipeline on demand
     │   └── scout-sweep/SKILL.md   feed sweep + correlate
     └── systemd/                   4 service+timer pairs, hardened
+tests/
+└── test_lanes.py                  33 lane tests: stdlib unittest, no network
 ```
+
+Run the tests with `task test:lanes`, or `python3 fleet-kit/tests/test_lanes.py -v`.
+They stub the NVD, EPSS and KEV fetchers, so they are deterministic offline and
+need no API key.
 
 Before first run, edit two files for your environment: `fleet.env` (addresses,
 credentials, paths) and `fleet/CLAUDE.md` (the orchestrator's mandate, tone, and
