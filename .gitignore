@@ -21,6 +21,11 @@ config.local.yaml
 
 # run outputs
 *.json
+# The scanner KB cache is ~17MB of generated data that changes on every
+# refresh. It was tracked, so `git add -A` after a rebuild committed a new
+# copy each time and bloated history for no benefit - it is rebuildable from
+# the Qualys API in a few minutes.
+qualys_kb_cache.json
 
 # Generated CTI reports - these map exploitable CVEs to real hostnames and
 # must never be committed. internal/report redacts by default, but the safe
