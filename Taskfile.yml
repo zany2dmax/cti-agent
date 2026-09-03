@@ -183,6 +183,22 @@ tasks:
     cmds:
       - "{{.DEV_RUN}} all"
 
+  dev:send:
+    desc: DRY RUN the digest send - validates the gate and payload, sends nothing
+    cmds:
+      - '{{.DEV_RUN}} send{{if .TO}} --to {{.TO}}{{end}}'
+
+  dev:send:real:
+    desc: "ACTUALLY send the digest. Usage: task dev:send:real TO=you@example.com"
+    cmds:
+      - |
+        if [ -z "{{.TO}}" ]; then
+          echo "TO= is required, so a real send is never a typo away."
+          echo "  task dev:send:real TO=you@example.com"
+          exit 1
+        fi
+      - '{{.DEV_RUN}} send --to {{.TO}} --for-real'
+
   dev:report:
     desc: Show the latest local report and enriched priority counts
     cmds:

@@ -3,14 +3,19 @@
 # dev-run - run the CTI pipeline locally for testing and debugging.
 #
 # Works on macOS or Linux, from a repo checkout, with no root, no service
-# account, no systemd, and NO OUTBOUND EMAIL. It is for answering one question:
-# "does this read the mailbox and produce believable threat intel?"
+# account and no systemd. It is for answering one question: "does this read the
+# mailbox and produce believable threat intel?"
+#
+# Nothing here sends email except the `send` stage, and that one dry-runs unless
+# you pass --for-real. Every other stage is read-only as far as the outside
+# world is concerned.
 #
 # Stages, each runnable on its own so you can see where it breaks:
 #   doctor   check tools, config, Graph token and permissions
 #   ingest   Go agent: mailbox -> CVEs -> scanner -> markdown
 #   enrich   NVD CVSS + EPSS + KEV -> P1-P4
 #   brief    render the HTML digest
+#   send     mail the digest - DRY RUN unless you pass --for-real
 #   all      doctor -> ingest -> enrich -> brief, then open the digest
 #
 # Usage:
@@ -19,6 +24,8 @@
 #   ./bin/dev-run ingest                     # uses LOOKUP_PROVIDER from .env
 #   ./bin/dev-run all
 #   ./bin/dev-run all --provider none
+#   ./bin/dev-run send --to you@example.com              # dry run, sends nothing
+#   ./bin/dev-run send --to you@example.com --for-real   # actually sends
 #
 # State lands in .fleet-local/ inside the repo (gitignored), so nothing touches
 # ~/fleet and nothing you generate here can be committed.
@@ -42,10 +49,14 @@ HTML="$FLEET_HOME/reports/digest-$DAY.html"
 TXT="$FLEET_HOME/reports/digest-$DAY.txt"
 
 PROVIDER=""
+SEND_TO=""
+FOR_REAL="no"
 STAGE="${1:-all}"; shift || true
 while [ $# -gt 0 ]; do
   case "$1" in
     --provider) PROVIDER="$2"; shift 2 ;;
+    --to)       SEND_TO="$2"; shift 2 ;;
+    --for-real) FOR_REAL="yes"; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -109,8 +120,8 @@ stage_doctor() {
     ok "token acquired"
   else
     bad "Graph check failed - see above"
-    info "Mail.Read is required for ingest. Mail.Send is only needed to send,"
-    info "which dev-run never does, so a missing Mail.Send is fine for testing."
+    info "Mail.Read is required for ingest. Mail.Send is only needed by the"
+    info "send stage, so a missing Mail.Send is fine until you run that."
   fi
 
   [ "$fail" = "0" ] || { bad "fix the above before continuing"; return 1; }
@@ -204,8 +215,72 @@ stage_brief() {
   head -28 "$TXT" | sed 's/^/    /'
 }
 
+# ────────────────────────────────────────────────────────────────── send ─────
+stage_send() {
+  bold "Send"
+  [ -s "$HTML" ] || { bad "no digest at $HTML - run brief first"; return 1; }
+
+  local to="${SEND_TO:-${DIGEST_TO:-}}"
+  if [ -z "$to" ]; then
+    bad "no recipient"
+    info "Pass --to you@example.com, or set DIGEST_TO in .env."
+    info "There is no default: the fleet will not guess who receives findings."
+    return 1
+  fi
+
+  # Mail.Send is the one permission the read-only stages do not need, so check
+  # it before attempting a send and name the fix if it is missing.
+  info "checking Mail.Send..."
+  local roles
+  roles=$(python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 || true)
+  echo "$roles" | sed 's/^\[mailer\] /    /'
+  if echo "$roles" | grep -q "MISSING Mail.Send"; then
+    bad "Mail.Send is not granted to this app registration"
+    info "Entra ID > App registrations > your CTI app > API permissions >"
+    info "  Add permission > Microsoft Graph > Application permissions >"
+    info "  Mail.Send > then GRANT ADMIN CONSENT (people skip that step)."
+    info "Consent can take a minute to propagate."
+    return 1
+  fi
+
+  # Exercise the real allowlist rather than bypassing it with --approve: an
+  # explicit --to on this command is the operator's decision, so scope the
+  # allowlist to exactly that recipient and let the normal gate run.
+  export FLEET_ALLOW_TO="$to"
+
+  local subject
+  subject=$(python3 "$KIT/fleet/lanes/brief.py" --daily --subject-only --enriched "$ENRICHED")
+  info "from   : ${GRAPH_MAILBOX:-unset}"
+  info "to     : $to"
+  info "subject: $subject"
+
+  local dry="--dry-run"
+  if [ "$FOR_REAL" = "yes" ]; then
+    dry=""
+  else
+    bold "DRY RUN - nothing will be sent"
+    info "add --for-real to actually send"
+  fi
+
+  if python3 "$KIT/fleet/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+       --subject "$subject" --to "$to" --attach "$RAW" $dry \
+       2>&1 | sed 's/^\[mailer\] /    /'; then
+    if [ "$FOR_REAL" = "yes" ]; then
+      ok "sent to $to - check the inbox, and the Sent Items of ${GRAPH_MAILBOX:-the sending mailbox}"
+      info "if it does not arrive: check quarantine, and that the sending"
+      info "mailbox is allowed to send to that address"
+    else
+      ok "dry run passed - the gate and the payload are both valid"
+    fi
+  else
+    bad "send failed - see above"
+    return 1
+  fi
+}
+
 case "$STAGE" in
   doctor) stage_doctor ;;
+  send)   stage_send ;;
   ingest) stage_ingest ;;
   enrich) stage_enrich ;;
   brief)  stage_brief ;;
@@ -222,6 +297,7 @@ case "$STAGE" in
       info "open it yourself: $HTML"
     fi
     ;;
-  *) echo "usage: dev-run {doctor|ingest|enrich|brief|all} [--provider none|qualys]" >&2
+  *) echo "usage: dev-run {doctor|ingest|enrich|brief|send|all}" >&2
+     echo "         [--provider none|qualys] [--to addr] [--for-real]" >&2
      exit 2 ;;
 esac
