@@ -168,7 +168,22 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck |
 | `task clean` / `task clean:all` | Build artifacts / also local state |
 
-### Production (on the server)
+### Production — Fedora/RHEL layout
+
+Via the `cti-fleet` wrapper the installer writes:
+
+| Command | Does |
+|---|---|
+| `sudo cti-fleet run-digest daily --dry-run` | Full pipeline, sends nothing |
+| `sudo cti-fleet run-digest daily` | Full pipeline, **sends** |
+| `sudo cti-fleet run-checkin` | One orchestrator heartbeat |
+| `sudo cti-fleet mailer.py --check` | Decode the token, list granted app roles |
+| `sudo cti-fleet fleet-db recent` | Memory, tasks, mailbox, priority counts |
+| `sudo cti-fleet fleet-board tail 30` | Recent board lines |
+| `systemctl list-timers 'cti-fleet-*'` | What is scheduled and when |
+| `journalctl -u cti-fleet-digest -f` | Follow the digest run |
+
+### Production — simple layout (`install.sh`)
 
 | Command | Does |
 |---|---|
@@ -382,6 +397,65 @@ Enterprise account — the free tier does not include it.
 `/opt/homebrew/bin/claude`. `bin/run-checkin` searches all of them at runtime,
 so the systemd unit does not hardcode one. If you have several installs, pin the
 right one with `CLAUDE_BIN` in `fleet.env`.
+
+### Fedora / RHEL: use install-fedora.sh
+
+On Fedora, RHEL, Rocky or Alma, run `install-fedora.sh` instead of
+`install.sh`. It is not cosmetic — the two use different filesystem layouts.
+
+```bash
+sudo ./install-fedora.sh --dry-run     # see exactly what it would do
+sudo ./install-fedora.sh
+```
+
+`install.sh` puts everything under `/home/ctifleet` and hardens the units with
+`ProtectHome=read-only` plus a `ReadWritePaths` punch-through back into
+`/home`. That combination is order-dependent in systemd, and it is the exact
+shape SELinux is most likely to deny on a box running enforcing. Rather than
+fight the policy, the Fedora installer uses the layout systemd and SELinux
+already expect:
+
+| Path | Holds | Ownership |
+|---|---|---|
+| `/opt/cti-fleet` | code | `root:root` `0755` — read-only to the service |
+| `/etc/cti-fleet` | config; `fleet.env`, `feeds.txt` | `root:ctifleet` `0750`, secrets `0640` |
+| `/var/lib/cti-fleet` | state: findings db, reports, caches, `.claude` | created and chowned by systemd `StateDirectory` |
+
+Because nothing lives under `/home`, the units set `ProtectHome=yes` and hide
+it entirely — stricter than the original, and less likely to break. They also
+add `SystemCallFilter=@system-service`, an empty `CapabilityBoundingSet`, and
+`RestrictAddressFamilies` to inet/unix only.
+
+The service account is a **system** account with no login shell and `HOME` set
+to the state directory, so Claude Code's credentials land in
+`/var/lib/cti-fleet/.claude` rather than creating a `/home` path the hardening
+would have to special-case.
+
+**Running commands by hand.** The split layout means four environment
+variables, so the installer writes a wrapper:
+
+```bash
+sudo cti-fleet mailer.py --check
+sudo cti-fleet run-digest daily --dry-run
+sudo cti-fleet run-digest daily
+sudo cti-fleet run-checkin
+sudo cti-fleet fleet-db recent
+sudo cti-fleet fleet-board tail 30
+```
+
+**SELinux.** The layout is chosen so the default policy permits it, and the
+installer reports the current mode. If a run fails with a permission error that
+makes no sense given the file modes, look for a denial before editing the unit:
+
+```bash
+sudo ausearch -m avc -ts recent
+systemd-analyze security cti-fleet-digest.service
+journalctl -u cti-fleet-digest -n 50 --no-pager
+```
+
+**Uninstall.** `--uninstall` removes the units and code but keeps config and
+state; `--purge` removes everything and prompts before deleting the client
+secret and findings database.
 
 ### Entra permissions
 

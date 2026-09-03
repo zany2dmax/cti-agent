@@ -12,15 +12,24 @@ DRY=""
 [ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
-set -a; [ -f "$FLEET_HOME/fleet.env" ] && . "$FLEET_HOME/fleet.env"; set +a
+
+# Code, config and state are not necessarily the same directory. The simple
+# layout puts all three under ~/fleet; the FHS layout used on Fedora splits
+# them: code in /opt/cti-fleet, config in /etc/cti-fleet, state in
+# /var/lib/cti-fleet. Each has its own override and defaults to FLEET_HOME.
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+# fleet.env may itself set FLEET_CODE, so re-resolve after sourcing.
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 
 DAY=$(date +%F)
 RAW="$FLEET_HOME/reports/raw-$DAY.md"
 ENRICHED="$FLEET_HOME/state/enriched-$DAY.json"
 HTML="$FLEET_HOME/reports/digest-$KIND-$DAY.html"
 TXT="$FLEET_HOME/reports/digest-$KIND-$DAY.txt"
-BOARD="$FLEET_HOME/bin/fleet-board"
-DB="$FLEET_HOME/bin/fleet-db"
+BOARD="$FLEET_CODE/bin/fleet-board"
+DB="$FLEET_CODE/bin/fleet-db"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say() { echo "[run-digest $(date '+%H:%M:%S')] $*"; }
@@ -47,18 +56,18 @@ say "ingest: $(grep -c '^| CVE-' "$RAW" || true) CVE rows"
 
 # ── 2. enrich ────────────────────────────────────────────────────────────────
 say "enrich: NVD + EPSS + KEV"
-python3 "$FLEET_HOME/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
+python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
   || fail "enrich lane failed"
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
 say "brief: rendering $KIND"
-python3 "$FLEET_HOME/lanes/brief.py" "--$KIND" \
+python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" \
   --enriched "$ENRICHED" --out "$HTML" --text-out "$TXT" || fail "brief lane failed"
-SUBJECT=$(python3 "$FLEET_HOME/lanes/brief.py" "--$KIND" --subject-only --enriched "$ENRICHED")
+SUBJECT=$(python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" --subject-only --enriched "$ENRICHED")
 
 # ── 4. send ──────────────────────────────────────────────────────────────────
 say "send: $SUBJECT"
-RESULT=$(python3 "$FLEET_HOME/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" --attach "$RAW" $DRY) || fail "send failed"
 echo "$RESULT"
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=CTI orchestrator heartbeat every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+Unit=cti-fleet-checkin.service
+
+[Install]
+WantedBy=timers.target
