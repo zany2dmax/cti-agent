@@ -125,6 +125,50 @@ tune them to your estate and your patch cadence.
 
 ---
 
+## Test it locally first
+
+Before any of the server setup below, prove the pipeline works on your laptop.
+`bin/dev-run` runs the whole thing from a repo checkout: macOS or Linux, no
+root, no service account, no systemd, and **it never sends email**. State goes
+to `.fleet-local/` inside the repo, which is gitignored.
+
+```bash
+cd <repo>
+cp .env.example .env && vi .env      # tenant, client secret, mailbox
+
+./fleet-kit/bin/dev-run doctor       # tools, config, Graph token + roles
+./fleet-kit/bin/dev-run all          # ingest -> enrich -> brief, opens the digest
+```
+
+Work up in stages, so a failure tells you *where* it failed:
+
+| Command | Proves |
+|---|---|
+| `dev-run doctor` | Go and Python present, `.env` complete, Graph token acquired, which app roles are actually granted |
+| `dev-run ingest --provider none` | Graph can read the mailbox and CVEs extract — **no scanner involved**, so a failure here is auth or parsing, never Qualys |
+| `dev-run ingest` | the scanner lookup works and returns PRESENT / NOT_PRESENT / UNKNOWN |
+| `dev-run enrich` | NVD, EPSS and KEV are reachable and P1–P4 comes out sane |
+| `dev-run brief` | the digest renders; prints a plain-text preview |
+
+Start with `--provider none`. It needs only the Entra credentials, so it
+separates "can we read the mailbox and find CVEs" from "does Qualys answer" —
+two failures that look identical in a combined run.
+
+`doctor` failing on `Mail.Send` is expected and harmless here: `dev-run` never
+sends. Only `Mail.Read` matters for testing.
+
+**If ingest finds zero CVEs**, check `Emails inspected` in its output first.
+Zero emails is an auth, mailbox or folder problem. Non-zero emails with zero
+CVEs is a parsing or content problem — try `GRAPH_LOOKBACK_HOURS=168`, or
+`GRAPH_FOLDER=<subfolder>` if the CTI mail is filtered somewhere other than the
+inbox. `dev-run` prints this checklist when it happens.
+
+Dev runs set `REPORT_HOSTNAMES=redact`, so local reports carry pseudonyms
+rather than real machine names. Override with `REPORT_HOSTNAMES=full` when you
+specifically need to see hosts, and remember what that file then contains.
+
+---
+
 ## Install
 
 ### Prerequisites
@@ -395,7 +439,8 @@ written mode `0600` under the fleet home and are gitignored.
 ```
 fleet-kit/
 ├── README.md                      this runbook
-├── install.sh                     idempotent installer
+├── install.sh                     idempotent installer (Linux server)
+├── bin/dev-run                    local test runner: macOS/Linux, never sends
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate
     ├── fleet.env.example          all config, superset of the Go agent's .env
