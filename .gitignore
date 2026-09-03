@@ -3,6 +3,9 @@
 config.local.yaml
 
 # build outputs
+# The compiled binary shares its name with the repo, so it is easy to commit
+# by accident with `git add -A`. Anchored so it cannot match the directory.
+/cti-qualys-agent
 # Anchored to the repo root - an unanchored "bin/" also matches nested
 # directories like fleet-kit/fleet/bin/, which silently excluded the fleet's
 # executables (run-digest, fleet-db, fleet-board) from being tracked.
