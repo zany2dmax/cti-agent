@@ -50,9 +50,56 @@ echo "  branch: $(git rev-parse --abbrev-ref HEAD)"
 echo "  commits: $(git rev-list --all --count)"
 
 # ── 1. backup ────────────────────────────────────────────────────────────────
+# The backup is a full mirror of pre-scrub history, which means it CONTAINS the
+# very data you are scrubbing. Treat it as sensitive: keep it out of synced
+# folders, and delete it once the rewrite is pushed and verified.
 bold "Backup (mirror clone, keeps every ref)"
-git clone --mirror "$REPO" "$BACKUP/.git" >/dev/null 2>&1
-echo "  wrote $BACKUP"
+
+# || true because ls exits non-zero with no matches, and set -e would abort.
+# Timestamps are YYYYMMDD-HHMMSS, so alphabetical order is chronological and
+# head -1 is genuinely the oldest - the only true pre-scrub restore point.
+EXISTING=$(ls -d "${REPO}".backup-* 2>/dev/null | head -20 || true)
+if [ -n "$EXISTING" ]; then
+  echo "  Existing backups found:"
+  echo "$EXISTING" | while read -r b; do
+    echo "    $(basename "$b")  ($(du -sh "$b" 2>/dev/null | cut -f1))"
+  done
+  echo
+  warn "Each of these holds a full copy of the UNSCRUBBED history."
+  warn "The oldest is your real restore point; later ones are snapshots of"
+  warn "already-partly-scrubbed history and are mostly clutter."
+  read -r -p "  Take another backup anyway? [y/N] " ANOTHER
+  case "$ANOTHER" in
+    [yY]*) : ;;
+    *) REUSE_BACKUP="$(echo "$EXISTING" | head -1)"
+       echo "  Reusing $(basename "$REUSE_BACKUP") as the restore point."
+       SKIP_BACKUP=1 ;;
+  esac
+fi
+
+case "$(dirname "$REPO")" in
+  *CloudStorage*|*OneDrive*|*Dropbox*|*"Google Drive"*|*iCloud*)
+    warn "This repo lives in a cloud-synced folder. Backups written here will"
+    warn "sync to that provider, replicating the data you are trying to"
+    warn "contain - and most providers keep their own version history."
+    warn "Consider: BACKUP_DIR=~/local-backups $0"
+    ;;
+esac
+
+if [ "${SKIP_BACKUP:-0}" = "1" ]; then
+  BACKUP="$REUSE_BACKUP"
+else
+  # BACKUP_DIR lets you put the mirror outside a synced folder.
+  if [ -n "${BACKUP_DIR:-}" ]; then
+    mkdir -p "$BACKUP_DIR"
+    BACKUP="$BACKUP_DIR/$(basename "$REPO").backup-$STAMP"
+  else
+    BACKUP="${REPO}.backup-${STAMP}"
+  fi
+  git clone --mirror "$REPO" "$BACKUP/.git" >/dev/null 2>&1
+  chmod -R go-rwx "$BACKUP" 2>/dev/null || true
+  echo "  wrote $BACKUP (mode 700)"
+fi
 echo "  to restore: git -C \"$BACKUP\" push --mirror <remote>"
 
 # ── 2. what we are removing ──────────────────────────────────────────────────
@@ -162,6 +209,12 @@ Then finish the job - the rewrite alone is not remediation:
   5. Rotate anything that leaked alongside it. Check for a committed .env or
      client secret:  git log --all --diff-filter=A --name-only | sort -u | grep -i env
   6. Consider making the repo private until the fleet code stabilizes.
+  7. Delete the backup mirrors once the force-push is verified. They hold the
+     unscrubbed history, so leaving them around defeats the scrub locally:
+       ls -d "${REPO}".backup-*
+       rm -rf "${REPO}".backup-*
+     If this repo is in a cloud-synced folder, also purge the provider's
+     version history for those paths, or they persist server-side.
 
 Reports will not come back: internal/report/markdown.go now redacts hostnames
 unless REPORT_HOSTNAMES=full, and .gitignore excludes generated reports.
