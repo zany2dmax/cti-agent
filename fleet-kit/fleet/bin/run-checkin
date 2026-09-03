@@ -17,6 +17,25 @@ set -euo pipefail
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 set -a; [ -f "$FLEET_HOME/fleet.env" ] && . "$FLEET_HOME/fleet.env"; set +a
 
+# ── platform ────────────────────────────────────────────────────────────────
+# The fleet runs on Linux in production and on macOS for development, and the
+# two disagree on stat(1) flags. Detect once, branch explicitly.
+case "$(uname -s)" in
+  Darwin) FLEET_OS="macos" ;;
+  Linux)  FLEET_OS="linux" ;;
+  *)      FLEET_OS="other" ;;
+esac
+
+# mtime in epoch seconds. Getting this wrong fails SILENTLY: stat errors, the
+# caller sees 0, every lock looks infinitely old, and the lock stops locking.
+mtime() {
+  if [ "$FLEET_OS" = "macos" ]; then
+    stat -f %m "$1" 2>/dev/null || echo 0
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
+
 find_claude() {
   if [ -n "${CLAUDE_BIN:-}" ]; then
     [ -x "$CLAUDE_BIN" ] && { echo "$CLAUDE_BIN"; return 0; }
@@ -46,7 +65,7 @@ CLAUDE="$(find_claude)" || {
 # wastes a slot and doubles token spend. Skip if the previous beat is still up.
 LOCK="$FLEET_HOME/.checkin.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
-  age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || echo 0) ))
+  age=$(( $(date +%s) - $(mtime "$LOCK") ))
   if [ "$age" -lt 1800 ]; then
     echo "[run-checkin $(date '+%F %H:%M:%S')] previous beat still running (${age}s) - skipping"
     exit 0
