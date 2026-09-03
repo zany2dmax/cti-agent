@@ -134,8 +134,8 @@ def main():
     if not os.path.exists(args.feeds):
         log(f"no feed list at {args.feeds}")
         return 1
-    feeds = [l.strip() for l in open(args.feeds)
-             if l.strip() and not l.startswith("#")]
+    with open(args.feeds) as f:
+        feeds = [l.strip() for l in f if l.strip() and not l.startswith("#")]
     log(f"polling {len(feeds)} feeds, window {args.days}d")
 
     conn = None
