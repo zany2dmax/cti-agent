@@ -4,12 +4,32 @@ vars:
   BINARY_NAME: cti-agent
   SOURCE_NAME: ./cmd/cti-qualys-agent
   INSTALL_PATH: "{{.HOME}}/bin"
+  DEV_RUN: ./fleet-kit/bin/dev-run
+  LANE_TESTS: ./fleet-kit/tests/test_lanes.py
+  FLEET_LOCAL: .fleet-local
 
 tasks:
   default:
     desc: Show available tasks
     cmds:
       - task --list
+
+# ── quality ──────────────────────────────────────────────────────────────────
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail if any Go file is unformatted
+    cmds:
+      - |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "unformatted files:"; echo "$unformatted"; exit 1
+        fi
+        echo "all Go files formatted"
 
   scan:
     desc: Run staticcheck
@@ -31,10 +51,86 @@ tasks:
     cmds:
       - go mod tidy
 
+# ── tests ────────────────────────────────────────────────────────────────────
+
   test:
-    desc: Run tests
+    desc: Run every test (Go + Python lanes)
+    deps: [test:go, test:lanes]
+
+  test:go:
+    desc: Run all Go tests
     cmds:
       - go test ./...
+
+  test:graph:
+    desc: Graph URL construction and error diagnosis (guards the $orderby bug)
+    cmds:
+      - go test ./internal/graph/ -v
+
+  test:report:
+    desc: Report writer hostname redaction and file permissions
+    cmds:
+      - go test ./internal/report/ -v
+
+  test:cve:
+    desc: CVE extraction from email text
+    cmds:
+      - go test ./internal/cti/ -v
+
+  test:lanes:
+    desc: Python lanes - priority truth table, parsing, digest, mailer gate
+    cmds:
+      - python3 {{.LANE_TESTS}}
+
+  test:lanes:v:
+    desc: Python lane tests, verbose
+    cmds:
+      - python3 {{.LANE_TESTS}} -v
+
+  test:syntax:
+    desc: Byte-compile the lanes and shell-check the fleet scripts
+    cmds:
+      - |
+        set -e
+        for f in fleet-kit/fleet/lanes/*.py fleet-kit/fleet/bin/fleet-db; do
+          python3 -c "import ast,sys; ast.parse(open('$f').read())"
+          echo "  ok  $f"
+        done
+        for f in fleet-kit/fleet/bin/fleet-board \
+                 fleet-kit/fleet/bin/run-digest \
+                 fleet-kit/fleet/bin/run-checkin \
+                 fleet-kit/bin/dev-run \
+                 fleet-kit/install.sh \
+                 scripts/scrub-history.sh; do
+          bash -n "$f" && echo "  ok  $f"
+        done
+      - |
+        python3 - <<'PY'
+        import configparser, glob, sys
+        bad = 0
+        for u in sorted(glob.glob("fleet-kit/fleet/systemd/*")):
+            c = configparser.ConfigParser(strict=False, allow_no_value=True)
+            try:
+                c.read(u)
+                if not c.sections():
+                    print(f"  EMPTY {u}"); bad += 1
+                else:
+                    print(f"  ok  {u}")
+            except Exception as e:
+                print(f"  BAD  {u}: {e}"); bad += 1
+        sys.exit(1 if bad else 0)
+        PY
+
+  check:
+    desc: Everything CI should run - format, vet, all tests, syntax
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: test:go
+      - task: test:lanes
+      - task: test:syntax
+
+# ── build ────────────────────────────────────────────────────────────────────
 
   build:
     desc: Build the agent
@@ -55,7 +151,71 @@ tasks:
       - mkdir -p {{.INSTALL_PATH}}
       - cp bin/{{.BINARY_NAME}} {{.INSTALL_PATH}}/{{.BINARY_NAME}}
 
+# ── local pipeline (never sends email) ───────────────────────────────────────
+
+  dev:doctor:
+    desc: Check tools, .env completeness, Graph token and granted app roles
+    cmds:
+      - "{{.DEV_RUN}} doctor"
+
+  dev:ingest:none:
+    desc: Read the mailbox with NO scanner - isolates Graph and CVE extraction
+    cmds:
+      - "{{.DEV_RUN}} ingest --provider none"
+
+  dev:ingest:
+    desc: Read the mailbox and look CVEs up in the configured scanner
+    cmds:
+      - "{{.DEV_RUN}} ingest"
+
+  dev:enrich:
+    desc: Add NVD CVSS, EPSS and CISA KEV, then assign P1-P4
+    cmds:
+      - "{{.DEV_RUN}} enrich"
+
+  dev:brief:
+    desc: Render the digest and print a plain-text preview
+    cmds:
+      - "{{.DEV_RUN}} brief"
+
+  dev:all:
+    desc: Full local pipeline, then open the digest. Sends nothing.
+    cmds:
+      - "{{.DEV_RUN}} all"
+
+  dev:report:
+    desc: Show the latest local report and enriched priority counts
+    cmds:
+      - |
+        latest=$(ls -t {{.FLEET_LOCAL}}/reports/raw-*.md 2>/dev/null | head -1)
+        if [ -z "$latest" ]; then echo "no local report yet - run: task dev:ingest:none"; exit 1; fi
+        echo "== $latest"
+        head -12 "$latest"
+        echo
+        enriched=$(ls -t {{.FLEET_LOCAL}}/state/enriched-*.json 2>/dev/null | head -1)
+        if [ -n "$enriched" ]; then
+          python3 -c "
+        import json,sys
+        d=json.load(open('$enriched'))
+        print('== priorities:', d['counts'], 'total', d['total'])
+        if d.get('degraded'): print('== DEGRADED:', ', '.join(d['degraded']))
+        for f in d['findings'][:10]:
+            print(f\"   {f['priority']}  {f['cve']:<17} {f.get('status','?'):<12} {f.get('host_count',0):>4} host(s)\")"
+        fi
+
+  dev:clean:
+    desc: Wipe local pipeline state (reports, digests, caches, sqlite)
+    cmds:
+      - rm -rf {{.FLEET_LOCAL}}
+      - echo "removed {{.FLEET_LOCAL}}"
+
+# ── housekeeping ─────────────────────────────────────────────────────────────
+
   clean:
     desc: Remove build artifacts
     cmds:
-      - rm -rf bin dist
+      - rm -rf bin dist cti-qualys-agent
+
+  clean:all:
+    desc: Remove build artifacts and local pipeline state
+    deps: [clean, dev:clean]

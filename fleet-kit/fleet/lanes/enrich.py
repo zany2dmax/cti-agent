@@ -153,7 +153,8 @@ def parse_meta(path):
         "generated": r"Generated:\s*`([^`]+)`",
     }
     try:
-        head = open(path, encoding="utf-8").read(4000)
+        with open(path, encoding="utf-8") as f:
+            head = f.read(4000)
     except OSError:
         return meta
     for k, p in pats.items():

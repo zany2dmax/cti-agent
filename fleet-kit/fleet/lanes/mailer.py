@@ -68,12 +68,13 @@ def load_env():
     """Read fleet.env if present so cron/systemd runs do not need it exported."""
     path = os.path.join(FLEET_HOME, "fleet.env")
     if os.path.exists(path):
-        for line in open(path):
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def token():
@@ -261,7 +262,8 @@ def main():
         die("this send is marked as requiring approval and --approve was not passed")
 
     if args.html:
-        body = open(args.html, encoding="utf-8").read()
+        with open(args.html, encoding="utf-8") as f:
+            body = f.read()
     else:
         body = escalation_html(args.message, args.board_id)
     subject = args.subject or f"CTI Brief {datetime.now().strftime('%Y-%m-%d')}"
