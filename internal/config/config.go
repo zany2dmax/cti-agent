@@ -19,6 +19,7 @@ type Config struct {
 	QualysUsername    string
 	QualysPassword    string
 	QualysKBCachePath string
+	QualysKBMaxAge    time.Duration
 	ReportPath        string
 }
 
@@ -26,6 +27,14 @@ func Load() (Config, error) {
 	lookbackHours, err := strconv.Atoi(getenvDefault("GRAPH_LOOKBACK_HOURS", "24"))
 	if err != nil || lookbackHours <= 0 {
 		return Config{}, fmt.Errorf("GRAPH_LOOKBACK_HOURS must be a positive integer")
+	}
+
+	// How long a CVE->QID cache stays trustworthy. Past this the agent
+	// refreshes it, because an expired mapping silently turns every newer CVE
+	// into UNKNOWN, which reads like "not affected".
+	kbMaxAgeHours, err := strconv.Atoi(getenvDefault("QUALYS_KB_MAX_AGE_HOURS", "168"))
+	if err != nil || kbMaxAgeHours <= 0 {
+		return Config{}, fmt.Errorf("QUALYS_KB_MAX_AGE_HOURS must be a positive integer")
 	}
 
 	cfg := Config{
@@ -40,6 +49,7 @@ func Load() (Config, error) {
 		QualysUsername:    os.Getenv("QUALYS_USERNAME"),
 		QualysPassword:    os.Getenv("QUALYS_PASSWORD"),
 		QualysKBCachePath: getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
+		QualysKBMaxAge:    time.Duration(kbMaxAgeHours) * time.Hour,
 		ReportPath:        getenvDefault("REPORT_PATH", "./cti-qualys-report.md"),
 	}
 
