@@ -120,21 +120,27 @@ stage_doctor() {
 # ─────────────────────────────────────────────────────────────── ingest ──────
 stage_ingest() {
   bold "Ingest  (provider=${LOOKUP_PROVIDER:-qualys}, lookback=${GRAPH_LOOKBACK_HOURS:-24}h)"
-  # Prefer whatever `task build` produced, so the two do not build twice or
-  # disagree about which binary is current.
-  local bin=""
-  local candidate
-  for candidate in "$REPO/bin/cti-agent" "$REPO/cti-qualys-agent"; do
-    [ -x "$candidate" ] && { bin="$candidate"; break; }
-  done
-  if [ -z "$bin" ]; then
-    info "no binary found, building..."
-    ( cd "$REPO" && go build -o cti-qualys-agent ./cmd/cti-qualys-agent )
-    bin="$REPO/cti-qualys-agent"
-    ok "built $bin"
-  else
-    info "using $bin"
+  # ALWAYS rebuild. An earlier version reused any existing binary, which meant
+  # a source fix could be applied, committed and tested against - while the run
+  # silently exercised the old build. Debugging a bug you have already fixed is
+  # the worst possible way to lose an hour.
+  #
+  # Go's build cache makes this near-instant when nothing changed, so there is
+  # no reason to be clever here.
+  local bin="$FLEET_HOME/cti-agent-dev"
+  info "building $(basename "$bin")..."
+  if ! ( cd "$REPO" && go build -o "$bin" ./cmd/cti-qualys-agent ); then
+    bad "go build failed - fix the compile error above"
+    return 1
   fi
+  # Report what actually got built, so "did my fix land?" is answerable.
+  local src_newest
+  src_newest=$(find "$REPO" -name '*.go' -newer "$bin" -print -quit 2>/dev/null || true)
+  if [ -n "$src_newest" ]; then
+    bad "a .go file is newer than the binary that just built - unexpected"
+  fi
+  ok "built from $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'no git')$(
+      [ -n "$(git -C "$REPO" status --porcelain -- '*.go' 2>/dev/null)" ] && echo ' + uncommitted .go changes')"
   ( cd "$REPO" && "$bin" ) 2>&1 | tee "$FLEET_HOME/logs/ingest.log" | sed 's/^/    /'
   [ -s "$RAW" ] || { bad "no report at $RAW"; return 1; }
 
