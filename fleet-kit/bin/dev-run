@@ -120,11 +120,20 @@ stage_doctor() {
 # ─────────────────────────────────────────────────────────────── ingest ──────
 stage_ingest() {
   bold "Ingest  (provider=${LOOKUP_PROVIDER:-qualys}, lookback=${GRAPH_LOOKBACK_HOURS:-24}h)"
-  local bin="$REPO/cti-qualys-agent"
-  if [ ! -x "$bin" ]; then
-    info "building..."
+  # Prefer whatever `task build` produced, so the two do not build twice or
+  # disagree about which binary is current.
+  local bin=""
+  local candidate
+  for candidate in "$REPO/bin/cti-agent" "$REPO/cti-qualys-agent"; do
+    [ -x "$candidate" ] && { bin="$candidate"; break; }
+  done
+  if [ -z "$bin" ]; then
+    info "no binary found, building..."
     ( cd "$REPO" && go build -o cti-qualys-agent ./cmd/cti-qualys-agent )
+    bin="$REPO/cti-qualys-agent"
     ok "built $bin"
+  else
+    info "using $bin"
   fi
   ( cd "$REPO" && "$bin" ) 2>&1 | tee "$FLEET_HOME/logs/ingest.log" | sed 's/^/    /'
   [ -s "$RAW" ] || { bad "no report at $RAW"; return 1; }
