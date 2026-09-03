@@ -151,7 +151,7 @@ tasks:
       - mkdir -p {{.INSTALL_PATH}}
       - cp bin/{{.BINARY_NAME}} {{.INSTALL_PATH}}/{{.BINARY_NAME}}
 
-# ── local pipeline (never sends email) ───────────────────────────────────────
+# ── local pipeline (only dev:send:real sends email) ──────────────────────────
 
   dev:doctor:
     desc: Check tools, .env completeness, Graph token and granted app roles
