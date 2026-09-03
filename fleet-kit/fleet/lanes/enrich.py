@@ -110,7 +110,12 @@ def parse_report(path):
     """Parse the Go agent's markdown table.
 
     Columns: CVE | Status | Provider | External IDs | Host Count | Max Score |
-             Last Seen | Sample Hosts / Reason
+             Last Seen | Sample Hosts | Reason
+
+    Older reports combined the last two into "Sample Hosts / Reason", so a
+    diagnostic sentence could end up in the hosts field. Both layouts are
+    accepted; the 8-column form routes that cell by whether the lookup
+    actually found hosts.
     """
     findings = {}
     with open(path, encoding="utf-8") as f:
@@ -129,15 +134,25 @@ def parse_report(path):
                 except ValueError:
                     return 0
 
+            host_count = as_int(cells[4])
+            if len(cells) >= 9:
+                hosts, reason = cells[7], cells[8]
+            else:
+                # Legacy single column: it holds hosts only when the provider
+                # actually returned some, otherwise it is the reason text.
+                hosts = cells[7] if host_count > 0 else ""
+                reason = "" if host_count > 0 else cells[7]
+
             findings[cve] = {
                 "cve": cve,
                 "status": cells[1] or "UNKNOWN",
                 "provider": cells[2] or "unknown",
                 "qids": cells[3],
-                "host_count": as_int(cells[4]),
+                "host_count": host_count,
                 "qualys_score": as_int(cells[5]),
                 "last_seen": cells[6],
-                "sample_hosts": cells[7],
+                "sample_hosts": hosts,
+                "provider_reason": reason,
             }
     return findings
 
@@ -345,7 +360,7 @@ def main():
         findings = {c.strip().upper(): {"cve": c.strip().upper(), "status": "UNKNOWN",
                                         "provider": "scout", "qids": "", "host_count": 0,
                                         "qualys_score": 0, "last_seen": "",
-                                        "sample_hosts": ""}
+                                        "sample_hosts": "", "provider_reason": ""}
                     for c in args.cves.split(",") if CVE_RE.fullmatch(c.strip())}
         log(f"scoring {len(findings)} CVEs from --cves")
 
