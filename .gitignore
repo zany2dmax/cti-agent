@@ -33,3 +33,7 @@ enriched-*.json
 # Real scrub patterns name internal hosts/domains - keep them local.
 # Commit scripts/scrub-patterns.txt.example instead.
 scripts/scrub-patterns.txt
+
+# Local dev-run state: reports, digests, caches, sqlite. Generated, and
+# contains real findings - never commit it.
+.fleet-local/
