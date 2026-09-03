@@ -167,20 +167,28 @@ task run
 | `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `FLEET_HOME` | Fleet state directory |
-| `REPORT_HOSTNAMES` | Hostname disclosure: `redact` (default), `count`, or `full` |
+| `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, or `count` |
 | `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
 
 ## Report sensitivity
 
 A CTI report pairs "this CVE is exploitable" with "these are the machines that
-have it." That is a targeting list, and this repository is public, so the report
-writer redacts by default.
+have it." That is a targeting list if it leaks.
+
+The default is nonetheless `full`, because the alternative is worse in practice:
+a pseudonym cannot be looked up in the scanner, so a redacted report tells you a
+P1 exists without telling you where, and you have to rerun the pipeline to act
+on it. An unactionable security report is not a safe security report.
+
+What keeps that defensible is everything around it — reports are written `0600`,
+excluded by `.gitignore`, and mailed only to an allowlisted internal DL. Switch
+to `redact` or `count` for any copy leaving that path.
 
 | `REPORT_HOSTNAMES` | Output |
 |---|---|
-| `redact` *(default)* | Stable pseudonyms — `host-3797a22b`. The same machine keeps the same label across reports, so you can track remediation without naming it. |
+| `redact` | Stable pseudonyms — `host-3797a22b`. The same machine keeps the same label across reports, so you can track remediation without naming it. **Not reversible** — there is no lookup table, so you cannot resolve one back to a host. |
 | `count` | Host count only, names withheld entirely. |
-| `full` | Real hostnames. The report carries a "do not commit" banner. |
+| `full` *(default)* | Real hostnames. The report carries a "do not commit" banner. |
 
 Set `REPORT_REDACTION_SALT` to a private, stable value. Pseudonyms are
 deterministic, so without a salt anyone holding a list of candidate hostnames

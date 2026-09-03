@@ -58,9 +58,24 @@ func writeToTemp(t *testing.T, mode, salt string) string {
 	return string(b)
 }
 
-func TestRedactIsDefault(t *testing.T) {
-	// An unset REPORT_HOSTNAMES, or any unrecognized value, must redact.
-	for _, mode := range []string{"", "nonsense", "REDACT", " redact "} {
+func TestFullIsDefault(t *testing.T) {
+	// An unset REPORT_HOSTNAMES, or an unrecognized value, means full: a
+	// redacted report is unactionable, since a pseudonym cannot be looked up
+	// in the scanner. Redaction is opt-in for copies that leave the DL.
+	for _, mode := range []string{"", "nonsense", "FULL", " full "} {
+		out := writeToTemp(t, mode, "salt")
+		if !strings.Contains(out, sensitiveHost) {
+			t.Errorf("mode %q did not include real hostnames", mode)
+		}
+		if !strings.Contains(out, "Contains real hostnames") {
+			t.Errorf("mode %q is missing the do-not-commit banner", mode)
+		}
+	}
+}
+
+func TestRedactIsOptIn(t *testing.T) {
+	// Case and surrounding whitespace must still select redaction.
+	for _, mode := range []string{"redact", "REDACT", " redact "} {
 		out := writeToTemp(t, mode, "salt")
 		if strings.Contains(out, sensitiveHost) {
 			t.Errorf("mode %q leaked the real hostname", mode)

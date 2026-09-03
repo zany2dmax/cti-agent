@@ -14,6 +14,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -46,6 +47,9 @@ def hosts_cell(f):
     hosts = [h.strip() for h in (f.get("sample_hosts") or "").split(",") if h.strip()]
     if not hosts:
         return "&mdash;"
+    # A pseudonym is not a hostname and cannot be looked up anywhere. Label it,
+    # or the reader wastes time searching the scanner for "host-69a692a2".
+    pseudo = all(re.fullmatch(r"host-[0-9a-f]{8}", h) for h in hosts)
     # Dedupe but keep order - the raw report repeats hosts across QIDs.
     uniq, out = set(), []
     for h in hosts:
@@ -55,7 +59,48 @@ def hosts_cell(f):
     shown = ", ".join(esc(h) for h in out[:6])
     if len(out) > 6:
         shown += f" <span style='color:#718096'>+{len(out) - 6} more</span>"
+    if pseudo:
+        shown += ("  <span style='color:#b25000'>(pseudonymized &mdash; set "
+                  "REPORT_HOSTNAMES=full for real names)</span>")
     return shown
+
+
+def provider_reason_cell(f):
+    """The scanner's own explanation, when it gave one.
+
+    Shown separately from Hosts. These previously shared a column in the
+    markdown report, so a sentence like "No Qualys KnowledgeBase CVE-to-QID
+    mapping found" rendered as if it were a machine name.
+    """
+    reason = (f.get("provider_reason") or "").strip()
+    if not reason:
+        return ""
+    return (f"<div style=\"font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,"
+            f"Arial,sans-serif;color:#744210;background:#fffbe6;padding:6px 8px;"
+            f"border-radius:3px;margin-top:6px\"><b>Scanner:</b> "
+            f"{esc(reason)}</div>")
+
+
+def qids_cell(f):
+    """Render the scanner's own IDs.
+
+    Without these the digest is not actionable: you cannot look a finding up in
+    Qualys by CVE, only by QID. A long list gets truncated, but the count is
+    always shown so it is obvious more exist.
+    """
+    raw = (f.get("qids") or "").strip()
+    if not raw:
+        return ""
+    qids = [q.strip() for q in raw.split(",") if q.strip()]
+    if not qids:
+        return ""
+    shown = ", ".join(esc(q) for q in qids[:8])
+    extra = f" <span style='color:#718096'>+{len(qids) - 8} more</span>" if len(qids) > 8 else ""
+    label = "QID" if len(qids) == 1 else f"QIDs ({len(qids)})"
+    return (f"<div style=\"font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,"
+            f"Arial,sans-serif;color:#4a5568;margin-top:4px\">"
+            f"<b>{label}:</b> <span style='font-family:ui-monospace,SFMono-Regular,"
+            f"Menlo,monospace'>{shown}</span>{extra}</div>")
 
 
 def finding_block(f):
@@ -101,10 +146,12 @@ def finding_block(f):
                         color:#2d3748;margin:6px 0">
               {esc((f.get('description') or 'No NVD description available.')[:320])}
             </div>
+            {qids_cell(f)}
             <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                        color:#4a5568;margin-top:6px">
+                        color:#4a5568;margin-top:4px">
               <b>Hosts:</b> {hosts_cell(f)}
             </div>
+            {provider_reason_cell(f)}
           </td></tr>
         </table>
       </td></tr>"""

@@ -189,7 +189,7 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | Setting | Values | Effect |
 |---|---|---|
 | `LOOKUP_PROVIDER` | `qualys` \| `crowdstrike` \| `none` | `none` skips the scanner entirely — everything returns UNKNOWN, which is how you isolate mailbox and parsing problems |
-| `REPORT_HOSTNAMES` | `redact` *(default)* \| `count` \| `full` | Pseudonyms / counts only / real hostnames |
+| `REPORT_HOSTNAMES` | `full` *(default)* \| `redact` \| `count` | Real hostnames / non-reversible pseudonyms / counts only |
 | `GRAPH_LOOKBACK_HOURS` | integer, default `24` | How far back to read mail. `168` = one week |
 | `GRAPH_FOLDER` | folder name, default `inbox` | Read a subfolder instead |
 | `QUALYS_KB_MAX_AGE_HOURS` | integer, default `168` | When the CVE→QID cache refreshes |
@@ -530,10 +530,14 @@ A quiet day still sends. "No new CVEs in the last 24h" is signal; silence is
 ambiguous with "the timer died three weeks ago."
 
 **A note on hostnames.** The digest names affected hosts, which makes it a
-targeting list if it leaks. Keep `SECURITY_DL` internal, and note that the
-upstream report writer redacts hostnames to stable pseudonyms unless
-`REPORT_HOSTNAMES=full` — see the repository README. Reports and digests are
-written mode `0600` under the fleet home and are gitignored.
+targeting list if it leaks. Keep `SECURITY_DL` internal.
+
+Real hostnames are the default, deliberately: `REPORT_HOSTNAMES=redact`
+produces pseudonyms like `host-69a692a2` that cannot be looked up in the
+scanner or resolved back to a machine, so a redacted P1 tells the reader
+something is wrong without telling them where. Reports and digests are written
+mode `0600` under the fleet home and are gitignored. Use `redact` or `count`
+for a copy that leaves the distribution list.
 
 ---
 

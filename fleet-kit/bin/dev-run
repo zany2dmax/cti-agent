@@ -76,11 +76,15 @@ else
 fi
 [ -n "$PROVIDER" ] && export LOOKUP_PROVIDER="$PROVIDER"
 
-# Keep generated artifacts inside .fleet-local, and never write real hostnames
-# to disk during a dev run unless explicitly asked.
+# Keep generated artifacts inside .fleet-local, which is gitignored.
+#
+# Hostnames are NOT redacted by default. dev-run used to force redact, which
+# made findings unactionable: a pseudonym cannot be looked up in the scanner,
+# so a P1 told you something was wrong without telling you where. Set
+# REPORT_HOSTNAMES=redact explicitly when you want a shareable copy.
 export REPORT_PATH="$RAW"
 export QUALYS_KB_CACHE="${QUALYS_KB_CACHE:-$FLEET_HOME/state/qualys_kb_cache.json}"
-export REPORT_HOSTNAMES="${REPORT_HOSTNAMES:-redact}"
+export REPORT_HOSTNAMES="${REPORT_HOSTNAMES:-full}"
 
 # ─────────────────────────────────────────────────────────────── doctor ──────
 stage_doctor() {

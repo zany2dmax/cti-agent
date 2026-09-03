@@ -14,23 +14,31 @@ import (
 // Hostname disclosure mode, from REPORT_HOSTNAMES.
 //
 // A CTI report pairs "this CVE is exploitable" with "these are the machines
-// that have it", which makes it a targeting list. Reports have been committed
-// to this repository before, so the default is to redact and callers must opt
-// in to real hostnames.
+// that have it", which makes it a targeting list if it leaks.
+//
+// The default is nonetheless "full", because the alternative is worse in
+// practice: a pseudonym cannot be looked up in the scanner, so a redacted
+// report tells you a P1 exists without telling you where, and the reader has
+// to rerun the pipeline to act on it. An unactionable security report is not a
+// safe security report.
+//
+// What keeps that defensible is everything around it: reports are written
+// 0600, excluded by .gitignore, and mailed only to an allowlisted internal
+// distribution list. Use "redact" or "count" for anything leaving that path.
 const (
-	hostsRedact = "redact" // default: stable pseudonyms
+	hostsRedact = "redact" // stable pseudonyms, non-reversible
 	hostsCount  = "count"  // host count only, no per-host rows
-	hostsFull   = "full"   // real hostnames - opt in deliberately
+	hostsFull   = "full"   // default: real hostnames
 )
 
 func hostMode() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("REPORT_HOSTNAMES"))) {
-	case hostsFull:
-		return hostsFull
+	case hostsRedact:
+		return hostsRedact
 	case hostsCount:
 		return hostsCount
 	default:
-		return hostsRedact
+		return hostsFull
 	}
 }
 
@@ -84,8 +92,9 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 	switch mode {
 	case hostsFull:
 		b.WriteString("> **Contains real hostnames.** This file maps exploitable CVEs to\n")
-		b.WriteString("> specific machines. Do not commit it, attach it to anything public,\n")
-		b.WriteString("> or store it outside controlled locations.\n\n")
+		b.WriteString("> specific machines - it is a targeting list. Do not commit it, attach\n")
+		b.WriteString("> it to anything public, or store it outside controlled locations.\n")
+		b.WriteString("> Set `REPORT_HOSTNAMES=redact` for a shareable copy.\n\n")
 	case hostsRedact:
 		if salt == "" {
 			b.WriteString("> Hostnames are pseudonymized without a salt, so the mapping is\n")
@@ -94,14 +103,14 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 		}
 	}
 
-	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts / Reason |\n")
-	b.WriteString("|---|---|---|---|---:|---:|---|---|\n")
+	// Hosts and Reason are SEPARATE columns. They used to share one, which
+	// meant a diagnostic sentence ("No Qualys KnowledgeBase CVE-to-QID mapping
+	// found") landed in the hosts field and got rendered downstream as though
+	// it were a machine name.
+	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason |\n")
+	b.WriteString("|---|---|---|---|---:|---:|---|---|---|\n")
 	for _, r := range results {
-		sample := r.Reason
-		if len(r.SampleHosts) > 0 {
-			sample = redactHosts(r.SampleHosts, mode, salt)
-		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s |\n",
 			r.CVE,
 			r.Status,
 			r.Source,
@@ -109,7 +118,8 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 			r.HostCount,
 			r.MaxScore,
 			r.LastSeen,
-			escape(sample),
+			escape(redactHosts(r.SampleHosts, mode, salt)),
+			escape(r.Reason),
 		)
 	}
 
