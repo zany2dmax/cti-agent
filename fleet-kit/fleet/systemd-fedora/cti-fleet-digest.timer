@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily CTI digest at 06:00 local
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+AccuracySec=1min
+# Fire on boot if the window was missed. A silently skipped digest reads as
+# "no news", which is the worst failure this system can have.
+Persistent=true
+Unit=cti-fleet-digest.service
+
+[Install]
+WantedBy=timers.target

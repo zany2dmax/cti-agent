@@ -1,0 +1,60 @@
+[Unit]
+Description=CTI orchestrator heartbeat (one /checkin beat)
+Documentation=file:///opt/cti-fleet/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ctifleet
+Group=ctifleet
+
+# FHS layout. Nothing lives under /home, which is what lets ProtectHome=yes
+# hide it entirely - the original units used ProtectHome=read-only plus a
+# ReadWritePaths punch-through into /home, which is order-dependent in systemd
+# and the exact pattern SELinux is most likely to deny on Fedora.
+#
+#   /opt/cti-fleet     code      root-owned, read-only to this service
+#   /etc/cti-fleet     config    root:ctifleet 0750, secrets 0640
+#   /var/lib/cti-fleet state     systemd creates and chowns this
+StateDirectory=cti-fleet
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/cti-fleet
+Environment=HOME=/var/lib/cti-fleet
+Environment=FLEET_HOME=/var/lib/cti-fleet
+Environment=FLEET_CODE=/opt/cti-fleet
+Environment=FLEET_ENV=/etc/cti-fleet/fleet.env
+Environment=FLEET_FEEDS=/etc/cti-fleet/feeds.txt
+EnvironmentFile=/etc/cti-fleet/fleet.env
+
+ExecStart=/opt/cti-fleet/bin/run-checkin
+TimeoutStartSec=1800
+Nice=15
+
+# Least privilege. ProtectHome=yes is stronger than the read-only variant and
+# safe here only because no fleet path is under /home.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+
+# journald, not hand-rolled log files: Fedora ships journald and it handles
+# rotation, size caps and retention already.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cti-fleet-checkin

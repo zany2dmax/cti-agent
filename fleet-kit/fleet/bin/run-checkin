@@ -15,7 +15,11 @@
 set -euo pipefail
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
-set -a; [ -f "$FLEET_HOME/fleet.env" ] && . "$FLEET_HOME/fleet.env"; set +a
+# See run-digest: config may live outside FLEET_HOME on FHS layouts.
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 
 # ── platform ────────────────────────────────────────────────────────────────
 # The fleet runs on Linux in production and on macOS for development, and the
@@ -56,7 +60,7 @@ CLAUDE="$(find_claude)" || {
   echo "run-checkin: cannot find the claude binary." >&2
   echo "  Install it (curl -fsSL https://claude.ai/install.sh | bash) or set" >&2
   echo "  CLAUDE_BIN=/full/path/to/claude in $FLEET_HOME/fleet.env" >&2
-  "$FLEET_HOME/bin/fleet-board" post @you @operator ERROR \
+  "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
     "heartbeat cannot start: claude binary not found; set CLAUDE_BIN in fleet.env" 2>/dev/null || true
   exit 1
 }
