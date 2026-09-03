@@ -129,8 +129,9 @@ tune them to your estate and your patch cadence.
 
 Before any of the server setup below, prove the pipeline works on your laptop.
 `bin/dev-run` runs the whole thing from a repo checkout: macOS or Linux, no
-root, no service account, no systemd, and **it never sends email**. State goes
-to `.fleet-local/` inside the repo, which is gitignored.
+root, no service account, no systemd. Nothing sends email except the `send`
+stage, and that dry-runs unless you pass `--for-real`. State goes to
+`.fleet-local/` inside the repo, which is gitignored.
 
 ```bash
 cd <repo>
@@ -149,13 +150,16 @@ Work up in stages, so a failure tells you *where* it failed:
 | `dev-run ingest` | the scanner lookup works and returns PRESENT / NOT_PRESENT / UNKNOWN |
 | `dev-run enrich` | NVD, EPSS and KEV are reachable and P1–P4 comes out sane |
 | `dev-run brief` | the digest renders; prints a plain-text preview |
+| `dev-run send --to you@example.com` | the send path and the recipient gate work — **dry run**, sends nothing |
+| `dev-run send --to you@example.com --for-real` | actually delivers, so you can see what lands in an inbox |
 
 Start with `--provider none`. It needs only the Entra credentials, so it
 separates "can we read the mailbox and find CVEs" from "does Qualys answer" —
 two failures that look identical in a combined run.
 
-`doctor` failing on `Mail.Send` is expected and harmless here: `dev-run` never
-sends. Only `Mail.Read` matters for testing.
+`doctor` failing on `Mail.Send` is expected until you test sending: only
+`Mail.Read` is needed for ingest. The `send` stage checks for `Mail.Send`
+itself and names the Entra fix if it is missing.
 
 **If ingest finds zero CVEs**, check `Emails inspected` in its output first.
 Zero emails is an auth, mailbox or folder problem. Non-zero emails with zero
