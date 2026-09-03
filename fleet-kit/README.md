@@ -501,7 +501,7 @@ sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --stale-days 7
 | `403` on sendMail | `Mail.Send` missing or unconsented | `mailer.py --check` shows actual token roles |
 | `403` with `MailboxNotEnabled` | Application Access Policy excludes the mailbox | `Test-ApplicationAccessPolicy` |
 | Enrich takes ~5 min | No NVD API key → 5 req/30s | Free key at nvd.nist.gov/developers/request-an-api-key → 50 req/30s |
-| Everything `UNKNOWN` | Scanner KB cache empty or stale | Delete the KB cache JSON and rerun; the first build is large |
+| Everything `UNKNOWN` | KB cache predates the CVEs, so the mapping is missing | The agent now auto-refreshes past `QUALYS_KB_MAX_AGE_HOURS`. To force it: delete the cache JSON and rerun (the full build is large). A stale-cache UNKNOWN says "coverage UNVERIFIED" in its reason; a real one says "No Qualys KnowledgeBase mapping" |
 | Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-fleet-digest`; `fleet-db was-sent $(date +%F) daily` |
 | Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
 | Heartbeat never runs | `claude` not found, or not authenticated as the service account | `journalctl -u cti-fleet-checkin`; run `sudo -u ctifleet -i claude doctor`; pin `CLAUDE_BIN` |
