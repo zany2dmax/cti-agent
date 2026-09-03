@@ -99,20 +99,89 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	return tr.AccessToken, nil
 }
 
+// messagesURL builds the first-page request URL for a mailbox folder.
+//
+// Extracted so it can be tested without a network call. It exists because an
+// unescaped space in $orderby shipped once: every OData *value* must be
+// escaped, or the space lands in the HTTP request line and the edge rejects
+// the request with an HTML "Bad Request" page before Graph's API layer sees
+// it. That failure does not look like a Graph error, so it costs real time.
+//
+// The "$" prefixes stay literal rather than going through
+// url.Values.Encode(), which would percent-encode them to %24. Graph accepts
+// %24, but literal "$" matches its documentation and error messages, which
+// keeps these URLs greppable against the docs.
+func messagesURL(mailbox, folder string, since time.Time) string {
+	filter := fmt.Sprintf("receivedDateTime ge %s", since.UTC().Format(time.RFC3339))
+	selectFields := "id,subject,receivedDateTime,from,body"
+
+	params := []string{
+		"$top=50",
+		"$select=" + url.QueryEscape(selectFields),
+		"$orderby=" + url.QueryEscape("receivedDateTime desc"),
+		"$filter=" + url.QueryEscape(filter),
+	}
+	return fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/mailFolders/%s/messages?%s",
+		url.PathEscape(mailbox),
+		url.PathEscape(folder),
+		strings.Join(params, "&"),
+	)
+}
+
+// graphError turns a failed response into something actionable.
+//
+// Graph reports its own errors as JSON. An HTML body means the request never
+// reached Graph - it was rejected by the edge for being malformed - so saying
+// so directly saves a long detour through permissions and mailbox settings
+// that are not the problem.
+func graphError(status int, body []byte, endpoint string) error {
+	trimmed := strings.TrimSpace(string(body))
+
+	if strings.HasPrefix(trimmed, "<") {
+		return fmt.Errorf("graph request was rejected before reaching the API "+
+			"(HTTP %d, HTML response). This means a malformed URL, almost always "+
+			"an unescaped character in an OData query parameter such as a space "+
+			"in $orderby or $filter.\nrequest: %s",
+			status, endpoint)
+	}
+
+	var ge struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &ge); err == nil && ge.Error.Code != "" {
+		hint := ""
+		switch ge.Error.Code {
+		case "ErrorAccessDenied", "Authorization_RequestDenied", "ErrorItemNotFound":
+			hint = "\nhint: check that Mail.Read is granted as an APPLICATION " +
+				"permission with admin consent, and that any Application Access " +
+				"Policy includes this mailbox."
+		case "ResourceNotFound", "ErrorInvalidUser", "MailboxNotEnabledForRESTAPI":
+			hint = "\nhint: check GRAPH_MAILBOX is a real, licensed mailbox, and " +
+				"that GRAPH_FOLDER names an existing folder."
+		case "ErrorInvalidProperty", "BadRequest":
+			hint = "\nhint: the OData query was understood but rejected - check " +
+				"$select field names and the $filter datetime format."
+		}
+		return fmt.Errorf("graph messages request failed: HTTP %d %s: %s%s",
+			status, ge.Error.Code, ge.Error.Message, hint)
+	}
+
+	if len(trimmed) > 800 {
+		trimmed = trimmed[:800] + "..."
+	}
+	return fmt.Errorf("graph messages request failed: HTTP %d: %s", status, trimmed)
+}
+
 func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, since time.Time) ([]Message, error) {
 	tok, err := c.token(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	filter := fmt.Sprintf("receivedDateTime ge %s", since.UTC().Format(time.RFC3339))
-	selectFields := "id,subject,receivedDateTime,from,body"
-	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/mailFolders/%s/messages?$top=50&$select=%s&$orderby=receivedDateTime desc&$filter=%s",
-		url.PathEscape(mailbox),
-		url.PathEscape(folder),
-		url.QueryEscape(selectFields),
-		url.QueryEscape(filter),
-	)
+	endpoint := messagesURL(mailbox, folder, since)
 
 	var all []Message
 	for endpoint != "" {
@@ -136,7 +205,7 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 			return nil, fmt.Errorf("failed to close graph messages response body: %w", closeErr)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return nil, fmt.Errorf("graph messages request failed: HTTP %d: %s", resp.StatusCode, string(body))
+			return nil, graphError(resp.StatusCode, body, endpoint)
 		}
 
 		var mr messagesResponse
