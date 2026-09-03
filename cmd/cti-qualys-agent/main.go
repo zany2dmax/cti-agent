@@ -53,7 +53,7 @@ func main() {
 		}
 		results = append(results, res)
 	}
-	sort.Slice(results, func(i, j int) bool { return results[i].CVE < results[j].CVE })
+	sort.Slice(results, func(i, j int) bool { return cti.CVELess(results[i].CVE, results[j].CVE) })
 
 	if err := report.WriteMarkdown(cfg.ReportPath, cfg.GraphMailbox, since, len(messages), provider.Name(), results); err != nil {
 		log.Fatalf("write report failed: %v", err)
@@ -69,7 +69,7 @@ func main() {
 func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
 	switch cfg.LookupProvider {
 	case "qualys":
-		return qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, cfg.QualysKBCachePath), nil
+		return qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, cfg.QualysKBCachePath, cfg.QualysKBMaxAge), nil
 	case "crowdstrike":
 		return crowdstrike.New(), nil
 	case "none", "noop", "":
