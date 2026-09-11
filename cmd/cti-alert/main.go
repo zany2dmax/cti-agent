@@ -41,6 +41,14 @@ const journalLines = "40"
 func main() {
 	unit := flag.String("unit", "", "the systemd unit that failed (required)")
 	dryRun := flag.Bool("dry-run", false, "print what would be sent, send nothing")
+	// A lane can be stopped on purpose - a budget hold, say - which is worth an
+	// email but is not a failure. Without these two flags such a notice would
+	// arrive titled FAILED and quoting a journal that shows the unit succeeded,
+	// which trains the reader to distrust the alerts that do matter.
+	kind := flag.String("kind", "FAILED",
+		"headline word: FAILED for a crash, HOLD for a deliberate stop")
+	reason := flag.String("reason", "",
+		"one-line explanation shown above the systemd detail")
 	flag.Parse()
 
 	// systemd passes the unit as a bare argument via `ExecStart=... %i`, so
@@ -57,8 +65,10 @@ func main() {
 	loadEnvFile()
 
 	f := gather(name)
+	f.Kind = strings.ToUpper(*kind)
+	f.Reason = *reason
 	body := renderHTML(f)
-	subject := fmt.Sprintf("[CTI FLEET FAILED] %s on %s", f.Unit, f.Host)
+	subject := fmt.Sprintf("[CTI FLEET %s] %s on %s", f.Kind, f.Unit, f.Host)
 
 	// Board first: it needs nothing external, so it is the channel most
 	// likely to survive whatever caused the failure.
@@ -96,7 +106,9 @@ type failure struct {
 	ExitCode  string
 	NRestarts string
 	Journal   string
-	IsDigest  bool // the digest failing has a consequence the others do not
+	IsDigest  bool   // the digest failing has a consequence the others do not
+	Kind      string // FAILED or HOLD - a crash and a deliberate stop read differently
+	Reason    string // set for a HOLD; empty for a crash, where the journal is the story
 }
 
 func gather(unit string) failure {
@@ -157,9 +169,15 @@ func postToBoard(f failure) bool {
 	if _, err := os.Stat(board); err != nil {
 		return false
 	}
-	msg := fmt.Sprintf("%s failed (result=%s exit=%s) on %s at %s",
+	// A hold is not an ERROR on the board either. The orchestrator reads these
+	// lines on its next beat and should not open an incident over its own brake.
+	level, msg := "ERROR", fmt.Sprintf("%s failed (result=%s exit=%s) on %s at %s",
 		f.Unit, f.Result, f.ExitCode, f.Host, f.When)
-	if _, err := run(10*time.Second, board, "post", "@systemd", "@operator", "ERROR", msg); err != nil {
+	if f.isHold() {
+		level, msg = "INFO", fmt.Sprintf("%s is holding on %s at %s: %s",
+			f.Unit, f.Host, f.When, f.Reason)
+	}
+	if _, err := run(10*time.Second, board, "post", "@systemd", "@operator", level, msg); err != nil {
 		return false
 	}
 	return true
@@ -198,7 +216,10 @@ func sendEmail(subject, htmlBody string, f failure) (string, error) {
 		HTML:    htmlBody,
 		// A failed digest means intel is not reaching anyone. That earns high
 		// importance; a scout sweep failing does not.
-		HighImportance: f.IsDigest,
+		// High importance is reserved for a broken digest. A hold is never
+		// urgent - flagging one would spend the signal that makes a real
+		// digest failure stand out.
+		HighImportance: f.IsDigest && !f.isHold(),
 	})
 }
 
@@ -259,13 +280,28 @@ func splitList(s string) []string {
 
 func renderText(f failure) string {
 	consequence := "Check what this unit is responsible for before assuming it is harmless."
-	if f.IsDigest {
+	verb := "failed"
+	reason := ""
+
+	if f.isHold() {
+		// A hold is the brake working. Saying so plainly is the difference
+		// between an operator who ignores it and one who goes looking for a
+		// crash that never happened.
+		verb = "is holding"
+		consequence = "Nothing is broken. The lane stopped itself and will resume " +
+			"on its own once the condition clears. No action is needed unless " +
+			"this repeats for longer than you expect."
+	} else if f.IsDigest {
 		consequence = "NO THREAT-INTEL EMAIL WILL ARRIVE. An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained."
 	}
-	return fmt.Sprintf(`%s failed on %s at %s
+	if f.Reason != "" {
+		reason = "Reason: " + f.Reason + "\n\n"
+	}
 
-systemd result: %s
+	return fmt.Sprintf(`%s %s on %s at %s
+
+%ssystemd result: %s
 exit status:    %s
 restarts:       %s
 
@@ -278,40 +314,60 @@ Last %s journal lines:
 Next steps on the box:
   systemctl status %s
   journalctl -u %s -n 100 --no-pager
-  sudo ausearch -m avc -ts recent          # SELinux denials
-  sudo cti-agent run-digest daily --dry-run`,
-		f.Unit, f.Host, f.When, f.Result, f.ExitCode, f.NRestarts,
+  sudo cti-agent cti-budget status         # ceilings, cooldown, beats used
+  sudo ausearch -m avc -ts recent          # SELinux denials`,
+		f.Unit, verb, f.Host, f.When, reason, f.Result, f.ExitCode, f.NRestarts,
 		consequence, journalLines, f.Journal, f.Unit, f.Unit)
 }
 
+// isHold separates a deliberate stop from a crash. Everything that is not an
+// explicit HOLD is treated as a failure, so a malformed --kind errs toward
+// alarming rather than reassuring.
+func (f failure) isHold() bool { return f.Kind == "HOLD" }
+
 func renderHTML(f failure) string {
 	consequence := "Check what this unit is responsible for before assuming it is harmless."
-	if f.IsDigest {
+	// Red for a crash, amber for a deliberate stop. If every fleet email is
+	// the same alarming red, the colour stops carrying information.
+	banner, accent, tint := "CTI fleet failure", "#b3001b", "#fdecee"
+	verb, reasonRow := "failed", ""
+
+	if f.isHold() {
+		banner, accent, tint = "CTI fleet on hold", "#8a5a00", "#fff7e6"
+		verb = "is holding"
+		consequence = "<b>Nothing is broken.</b> The lane stopped itself and will " +
+			"resume once the condition clears. No action is needed unless this " +
+			"repeats for longer than you expect."
+	} else if f.IsDigest {
 		consequence = "<b>No threat-intel email will arrive.</b> An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained until you " +
 			"have checked."
 	}
 	e := html.EscapeString
+	if f.Reason != "" {
+		reasonRow = `<tr><td><b>reason</b></td><td>` + e(f.Reason) + `</td></tr>`
+	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html><body style="margin:0;padding:16px;background:#eef1f5">
 <table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
 <tr><td align="center">
 <table width="680" cellpadding="0" cellspacing="0" role="presentation"
        style="max-width:680px;background:#fff;border-radius:6px;overflow:hidden">
-  <tr><td style="background:#b3001b;padding:14px 18px;font:700 15px
+  <tr><td style="background:%s;padding:14px 18px;font:700 15px
                  -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#fff">
-    CTI fleet failure</td></tr>
+    %s</td></tr>
   <tr><td style="padding:16px 18px;font:400 14px/1.55 -apple-system,Segoe UI,
                  Helvetica,Arial,sans-serif;color:#1a202c">
-    <p style="margin:0 0 12px 0"><code>%s</code> failed on <b>%s</b> at %s.</p>
+    <p style="margin:0 0 12px 0"><code>%s</code> %s on <b>%s</b> at %s.</p>
     <table cellpadding="4" cellspacing="0"
            style="font:400 13px -apple-system,Segoe UI,Arial,sans-serif;color:#2d3748">
+      %s
       <tr><td><b>systemd result</b></td><td><code>%s</code></td></tr>
       <tr><td><b>exit status</b></td><td><code>%s</code></td></tr>
       <tr><td><b>restarts</b></td><td><code>%s</code></td></tr>
     </table>
-    <p style="margin:12px 0 0 0;padding:10px 12px;background:#fdecee;
-              border-left:4px solid #b3001b">%s</p>
+    <p style="margin:12px 0 0 0;padding:10px 12px;background:%s;
+              border-left:4px solid %s">%s</p>
   </td></tr>
   <tr><td style="padding:0 18px 14px 18px">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
@@ -326,10 +382,13 @@ func renderHTML(f failure) string {
     <pre style="margin:0;font:400 12px/1.6 ui-monospace,SFMono-Regular,Menlo,
                 monospace;color:#2d3748">systemctl status %s
 journalctl -u %s -n 100 --no-pager
-sudo ausearch -m avc -ts recent
-sudo cti-agent run-digest daily --dry-run</pre>
+sudo cti-agent cti-budget status
+sudo ausearch -m avc -ts recent</pre>
   </td></tr>
 </table></td></tr></table></body></html>`,
-		e(f.Unit), e(f.Host), e(f.When), e(f.Result), e(f.ExitCode), e(f.NRestarts),
-		consequence, journalLines, e(f.Journal), e(f.Unit), e(f.Unit))
+		accent, banner,
+		e(f.Unit), verb, e(f.Host), e(f.When),
+		reasonRow, e(f.Result), e(f.ExitCode), e(f.NRestarts),
+		tint, accent, consequence,
+		journalLines, e(f.Journal), e(f.Unit), e(f.Unit))
 }
