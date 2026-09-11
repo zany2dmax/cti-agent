@@ -65,16 +65,36 @@ CLAUDE="$(find_claude)" || {
   exit 1
 }
 
+# A stored login does not live in the same place on both platforms, and
+# checking the wrong one is worse than not checking at all. On Linux the token
+# is a file under the config dir; on macOS it is a Keychain item and that file
+# NEVER exists, so a file-only test would reject every dev run on a machine
+# that is perfectly well authenticated.
+has_stored_credentials() {
+  if [ "$FLEET_OS" = "macos" ]; then
+    # Existence only - no -w, which would read the secret and can prompt.
+    security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1
+  else
+    [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]
+  fi
+}
+
 # Finding the binary is not the same as being able to use it. The service
 # account has no browser and no TTY, so an unauthenticated claude blocks or
 # errors in a way that reads like a hang rather than a config problem. Check
 # for credentials up front and name the fix.
-if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ ! -s "$HOME/.claude.json" ]; then
+if [ -z "${ANTHROPIC_API_KEY:-}" ] \
+   && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] \
+   && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+   && ! has_stored_credentials; then
   echo "run-checkin: claude is installed at $CLAUDE but not authenticated." >&2
-  echo "  Either set ANTHROPIC_API_KEY in $FLEET_ENV, or log in once as this" >&2
-  echo "  account:  sudo -u $(id -un) HOME=$HOME claude" >&2
+  echo "  Set one of these in $FLEET_ENV:" >&2
+  echo "    ANTHROPIC_API_KEY        Console key, billed per token" >&2
+  echo "    CLAUDE_CODE_OAUTH_TOKEN  subscription token from 'claude setup-token'" >&2
+  echo "  or, if this account has a login shell, authenticate it once:" >&2
+  echo "    sudo -u $(id -un) HOME=$HOME claude" >&2
   "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
-    "heartbeat cannot start: claude not authenticated; set ANTHROPIC_API_KEY in fleet.env" 2>/dev/null || true
+    "heartbeat cannot start: claude not authenticated; set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in fleet.env" 2>/dev/null || true
   exit 1
 fi
 
