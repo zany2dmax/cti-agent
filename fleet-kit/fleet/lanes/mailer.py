@@ -68,7 +68,7 @@ def load_env():
     """Read fleet.env if present so cron/systemd runs do not need it exported.
 
     FLEET_ENV overrides the location. The Fedora layout keeps state in
-    /var/lib/cti-fleet and config in /etc/cti-fleet, so the two are not
+    /var/lib/cti-agent and config in /etc/cti-agent, so the two are not
     always the same directory.
     """
     path = os.environ.get("FLEET_ENV") or os.path.join(FLEET_HOME, "fleet.env")

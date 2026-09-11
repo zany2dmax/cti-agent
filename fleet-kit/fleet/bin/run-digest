@@ -15,8 +15,8 @@ FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 
 # Code, config and state are not necessarily the same directory. The simple
 # layout puts all three under ~/fleet; the FHS layout used on Fedora splits
-# them: code in /opt/cti-fleet, config in /etc/cti-fleet, state in
-# /var/lib/cti-fleet. Each has its own override and defaults to FLEET_HOME.
+# them: code in /opt/cti-agent, config in /etc/cti-agent, state in
+# /var/lib/cti-agent. Each has its own override and defaults to FLEET_HOME.
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
 FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
@@ -42,11 +42,11 @@ fi
 
 # ── 1. ingest ────────────────────────────────────────────────────────────────
 say "ingest: reading $GRAPH_MAILBOX"
-if [ -x "${CTI_AGENT_DIR:-}/cti-qualys-agent" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-qualys-agent ) \
-    || fail "cti-qualys-agent exited non-zero (check Graph auth and Qualys creds)"
+if [ -x "${CTI_AGENT_DIR:-}/cti-agent" ]; then
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ) \
+    || fail "cti-agent exited non-zero (check Graph auth and Qualys creds)"
 elif [ -d "${CTI_AGENT_DIR:-}" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-qualys-agent ) \
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-agent ) \
     || fail "go run failed"
 else
   fail "CTI_AGENT_DIR not set or not found"

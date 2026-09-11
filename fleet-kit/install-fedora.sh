@@ -3,15 +3,15 @@
 # install-fedora.sh - deploy the CTI fleet on Fedora / RHEL / Rocky / Alma.
 #
 # WHY A SEPARATE INSTALLER
-#   install.sh puts everything under /home/ctifleet and hardens the units with
+#   install.sh puts everything under /home/ctiagent and hardens the units with
 #   ProtectHome=read-only plus a ReadWritePaths punch-through into /home. That
 #   combination is order-dependent in systemd and is the exact shape SELinux is
 #   most likely to deny on a Fedora box running enforcing. Rather than fight it,
 #   this installer uses the FHS layout systemd and SELinux already expect:
 #
-#     /opt/cti-fleet      code, root-owned, read-only to the service
-#     /etc/cti-fleet      config; fleet.env is 0640 root:ctifleet
-#     /var/lib/cti-fleet  state, created and chowned by systemd StateDirectory
+#     /opt/cti-agent      code, root-owned, read-only to the service
+#     /etc/cti-agent      config; fleet.env is 0640 root:ctiagent
+#     /var/lib/cti-agent  state, created and chowned by systemd StateDirectory
 #
 #   Nothing lives under /home, so the units can set ProtectHome=yes and hide it
 #   entirely - stricter than the original and less likely to break.
@@ -26,13 +26,13 @@
 # staged rollout it prints at the end.
 set -euo pipefail
 
-CODE_DIR=/opt/cti-fleet
-CONF_DIR=/etc/cti-fleet
-STATE_DIR=/var/lib/cti-fleet
+CODE_DIR=/opt/cti-agent
+CONF_DIR=/etc/cti-agent
+STATE_DIR=/var/lib/cti-agent
 UNIT_DIR=/etc/systemd/system
-FLEET_USER=ctifleet
-FLEET_GROUP=ctifleet
-AGENT_REPO=https://github.com/zany2dmax/cti-qualys-agent
+FLEET_USER=ctiagent
+FLEET_GROUP=ctiagent
+AGENT_REPO=https://github.com/zany2dmax/cti-agent
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE=install
@@ -58,11 +58,11 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   [ "$(id -u)" = 0 ] || { bad "run with sudo"; exit 1; }
   bold "Stopping and disabling timers"
   for t in digest weekly checkin scout; do
-    systemctl disable --now "cti-fleet-$t.timer" 2>/dev/null || true
-    ok "cti-fleet-$t.timer"
+    systemctl disable --now "cti-agent-$t.timer" 2>/dev/null || true
+    ok "cti-agent-$t.timer"
   done
   bold "Removing units"
-  rm -f "$UNIT_DIR"/cti-fleet-*.service "$UNIT_DIR"/cti-fleet-*.timer
+  rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
   bold "Removing code"
@@ -221,7 +221,7 @@ if [ -f "$CONF_DIR/fleet.env" ]; then
 else
   run install -m 0640 -o root -g "$FLEET_GROUP" \
       "$SRC/fleet/fleet.env.example" "$CONF_DIR/fleet.env"
-  # Rewrite the example's /home/ctifleet defaults to the FHS layout.
+  # Rewrite the example's /home/ctiagent defaults to the FHS layout.
   if [ "$MODE" != dryrun ]; then
     sed -i \
       -e "s#^FLEET_HOME=.*#FLEET_HOME=$STATE_DIR#" \
@@ -232,7 +232,7 @@ else
   fi
   warn "created $CONF_DIR/fleet.env with PLACEHOLDER secrets - edit it now"
 fi
-info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctifleet')"
+info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
 
 # ────────────────────────────────────────────────────────── the Go agent ─────
 bold "Go agent"
@@ -244,11 +244,11 @@ else
   run git clone --depth 1 "$AGENT_REPO" "$AGENT_SRC"
 fi
 if [ "$MODE" != dryrun ]; then
-  ( cd "$AGENT_SRC" && go build -o "$AGENT_SRC/cti-qualys-agent" ./cmd/cti-qualys-agent )
-  chmod 0755 "$AGENT_SRC/cti-qualys-agent"
-  ok "built $AGENT_SRC/cti-qualys-agent"
+  ( cd "$AGENT_SRC" && go build -o "$AGENT_SRC/cti-agent" ./cmd/cti-agent )
+  chmod 0755 "$AGENT_SRC/cti-agent"
+  ok "built $AGENT_SRC/cti-agent"
 else
-  info "would build $AGENT_SRC/cti-qualys-agent"
+  info "would build $AGENT_SRC/cti-agent"
 fi
 
 # ──────────────────────────────────────────────────────────── systemd ───────
@@ -310,7 +310,7 @@ if [ "$MODE" != dryrun ]; then
   else
     bad "fleet.env is too permissive"; FAIL=1
   fi
-  for u in cti-fleet-digest cti-fleet-checkin cti-fleet-scout cti-fleet-weekly; do
+  for u in cti-agent-digest cti-agent-checkin cti-agent-scout cti-agent-weekly; do
     if systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | grep -q .; then
       warn "$u.service: systemd-analyze reported warnings (see below)"
       systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | sed 's/^/      /'
@@ -324,18 +324,18 @@ fi
 # ───────────────────────────────────────────────────── convenience wrapper ───
 # Four environment variables is three too many to retype. This wrapper is the
 # single supported way to run a fleet command by hand on this layout.
-bold "Wrapper: /usr/local/bin/cti-fleet"
+bold "Wrapper: /usr/local/bin/cti-agent"
 if [ "$MODE" != dryrun ]; then
-  cat > /usr/local/bin/cti-fleet <<WRAP
+  cat > /usr/local/bin/cti-agent <<WRAP
 #!/usr/bin/env bash
-# cti-fleet - run a fleet command by hand with the FHS paths already set.
+# cti-agent - run a fleet command by hand with the FHS paths already set.
 #
-#   cti-fleet run-digest daily --dry-run
-#   cti-fleet run-digest daily
-#   cti-fleet run-checkin
-#   cti-fleet mailer.py --check
-#   cti-fleet fleet-db recent
-#   cti-fleet fleet-board tail 30
+#   cti-agent run-digest daily --dry-run
+#   cti-agent run-digest daily
+#   cti-agent run-checkin
+#   cti-agent mailer.py --check
+#   cti-agent fleet-db recent
+#   cti-agent fleet-board tail 30
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -344,7 +344,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-fleet <run-digest|run-checkin|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
@@ -353,10 +353,10 @@ case "\$cmd" in
               "$CODE_DIR/bin/\$cmd" "\$@" ;;
 esac
 WRAP
-  chmod 0755 /usr/local/bin/cti-fleet
-  ok "installed - try: sudo cti-fleet fleet-db recent"
+  chmod 0755 /usr/local/bin/cti-agent
+  ok "installed - try: sudo cti-agent fleet-db recent"
 else
-  info "would write /usr/local/bin/cti-fleet"
+  info "would write /usr/local/bin/cti-agent"
 fi
 
 # ──────────────────────────────────────────────────────────── next steps ─────
@@ -367,36 +367,36 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
 1. Fill in the config, then confirm Graph can see the mailbox:
 
      sudo vi $CONF_DIR/fleet.env
-     sudo cti-fleet mailer.py --check
+     sudo cti-agent mailer.py --check
 
    Mail.Read is required. Mail.Send is required to send the digest.
    Missing "grant admin consent" is the usual cause of a 403.
 
 2. Dry run the whole pipeline by hand. Sends nothing:
 
-     sudo cti-fleet run-digest daily --dry-run
+     sudo cti-agent run-digest daily --dry-run
 
    First run downloads the Qualys KnowledgeBase - several minutes.
 
 3. Enable ONLY the daily digest. Live with it for a few days:
 
-     sudo systemctl enable --now cti-fleet-digest.timer
-     systemctl list-timers 'cti-fleet-*'
-     journalctl -u cti-fleet-digest -f
+     sudo systemctl enable --now cti-agent-digest.timer
+     systemctl list-timers 'cti-agent-*'
+     journalctl -u cti-agent-digest -f
 
 4. Once the digest is trustworthy, add the orchestrator heartbeat. This is the
    part that needs Claude Code authenticated as $FLEET_USER:
 
-     sudo systemctl enable --now cti-fleet-checkin.timer
+     sudo systemctl enable --now cti-agent-checkin.timer
 
 5. Trim $CONF_DIR/feeds.txt to vendors you run, then:
 
-     sudo systemctl enable --now cti-fleet-scout.timer cti-fleet-weekly.timer
+     sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
 
 $(printf '\033[1mIf something is denied for no visible reason\033[0m')
 
    sudo ausearch -m avc -ts recent          # SELinux denials
-   systemd-analyze security cti-fleet-digest.service
-   journalctl -u cti-fleet-digest -n 50 --no-pager
+   systemd-analyze security cti-agent-digest.service
+   journalctl -u cti-agent-digest -n 50 --no-pager
 
 NEXT

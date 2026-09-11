@@ -7,7 +7,7 @@ AccuracySec=1min
 # Fire on boot if the window was missed. A silently skipped digest reads as
 # "no news", which is the worst failure this system can have.
 Persistent=true
-Unit=cti-fleet-digest.service
+Unit=cti-agent-digest.service
 
 [Install]
 WantedBy=timers.target

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
 // sensitiveHost stands in for the kind of internal FQDN that must never reach a

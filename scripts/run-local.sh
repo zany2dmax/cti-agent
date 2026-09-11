@@ -7,4 +7,4 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-go run ./cmd/cti-qualys-agent
+go run ./cmd/cti-agent

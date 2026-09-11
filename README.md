@@ -17,7 +17,7 @@ Presence should be determined only by the lookup provider. CTI email text provid
 ## Project layout
 
 ```text
-cmd/cti-qualys-agent/          CLI entrypoint
+cmd/cti-agent/          CLI entrypoint
 internal/config/               environment/config loading
 internal/cti/                  CTI parsing and CVE extraction
 internal/graph/                Microsoft Graph mailbox reader
@@ -81,7 +81,7 @@ any mailbox in the tenant.
 
 ```powershell
 New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
-  -PolicyScopeGroupId cti-fleet-mailboxes@example.com `
+  -PolicyScopeGroupId cti-agent-mailboxes@example.com `
   -AccessRight RestrictAccess -Description "CTI: security mailbox only"
 Test-ApplicationAccessPolicy -Identity <MAILBOX> -AppId <CLIENT_ID>
 ```
@@ -133,7 +133,7 @@ set -a
 source .env
 set +a
 
-go run ./cmd/cti-qualys-agent
+go run ./cmd/cti-agent
 ```
 
 Or with Task:
@@ -272,7 +272,7 @@ MAILBOX=cybersecurity@crhomeusa.com
 1. Create a package under `internal/vulnlookup/<provider>`.
 2. Implement `Name()` and `LookupCVE(ctx, cve)`.
 3. Return normalized `vulnlookup.Result` values.
-4. Add the provider to `buildLookupProvider()` in `cmd/cti-qualys-agent/main.go`.
+4. Add the provider to `buildLookupProvider()` in `cmd/cti-agent/main.go`.
 5. Add provider-specific config to `internal/config` only if needed.
 
 ## Notes

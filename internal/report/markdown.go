@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
 // Hostname disclosure mode, from REPORT_HOSTNAMES.

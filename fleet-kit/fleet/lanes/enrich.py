@@ -43,7 +43,7 @@ KEV_FEED = ("https://www.cisa.gov/sites/default/files/feeds/"
             "known_exploited_vulnerabilities.json")
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
-UA = os.environ.get("FLEET_USER_AGENT", "cti-fleet-enrich/1.0")
+UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.
 NVD_DELAY = 0.7 if os.environ.get("NVD_API_KEY") else 6.5
@@ -344,7 +344,7 @@ def prioritize(f):
 def main():
     ap = argparse.ArgumentParser(description="Enrich CTI CVEs with NVD, EPSS and KEV.")
     src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--report", help="markdown report from cti-qualys-agent")
+    src.add_argument("--report", help="markdown report from cti-agent")
     src.add_argument("--cves", help="comma-separated CVE list (scout lane)")
     ap.add_argument("--out", required=True, help="output JSON path")
     ap.add_argument("--no-db", action="store_true", help="skip the SQLite upsert")

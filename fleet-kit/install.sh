@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # install.sh - stand up the CTI agent fleet on a Linux server.
-# Idempotent. Run as root (it creates the service account) or as ctifleet
+# Idempotent. Run as root (it creates the service account) or as ctiagent
 # itself with SKIP_USER=1.
 set -euo pipefail
 
-FLEET_USER="${FLEET_USER:-ctifleet}"
+FLEET_USER="${FLEET_USER:-ctiagent}"
 FLEET_HOME="${FLEET_HOME:-/home/$FLEET_USER/fleet}"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -91,13 +91,13 @@ fi
 if [ "$(id -u)" = "0" ]; then
   say "systemd timers"
   for u in "$SRC"/fleet/systemd/*; do
-    sed "s#/home/ctifleet#$(dirname "$FLEET_HOME")#g; s#\bctifleet\b#$FLEET_USER#g" \
+    sed "s#/home/ctiagent#$(dirname "$FLEET_HOME")#g; s#\bctiagent\b#$FLEET_USER#g" \
       "$u" > "/etc/systemd/system/$(basename "$u")"
   done
   systemctl daemon-reload
   echo "installed. enable them when fleet.env is filled in:"
-  echo "  systemctl enable --now cti-fleet-checkin.timer cti-fleet-digest.timer \\"
-  echo "                          cti-fleet-weekly.timer cti-fleet-scout.timer"
+  echo "  systemctl enable --now cti-agent-checkin.timer cti-agent-digest.timer \\"
+  echo "                          cti-agent-weekly.timer cti-agent-scout.timer"
 else
   say "systemd (skipped - not root)"
   echo "copy $SRC/fleet/systemd/* to /etc/systemd/system/ as root"
@@ -111,6 +111,6 @@ $(printf '\033[1mNext steps\033[0m')
   2. Grant Mail.Send (Application) to the app registration in Entra + admin consent
   3. Verify:  python3 $FLEET_HOME/lanes/mailer.py --check
   4. Dry run: $FLEET_HOME/bin/run-digest daily --dry-run
-  5. Enable the timers, then watch: journalctl -fu cti-fleet-digest.service
+  5. Enable the timers, then watch: journalctl -fu cti-agent-digest.service
 
 DONE

@@ -6,7 +6,7 @@ OnBootSec=3min
 OnUnitActiveSec=30min
 AccuracySec=1min
 Persistent=true
-Unit=cti-fleet-checkin.service
+Unit=cti-agent-checkin.service
 
 [Install]
 WantedBy=timers.target

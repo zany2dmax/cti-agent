@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
 // Client is a placeholder implementation showing where a CrowdStrike Exposure

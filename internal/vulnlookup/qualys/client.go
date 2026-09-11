@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
 type Client struct {
@@ -336,7 +336,7 @@ func (c *Client) doQualysGET(ctx context.Context, endpoint string) ([]byte, erro
 		return nil, err
 	}
 	req.SetBasicAuth(c.username, c.password)
-	req.Header.Set("X-Requested-With", "cti-qualys-agent")
+	req.Header.Set("X-Requested-With", "cti-agent")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

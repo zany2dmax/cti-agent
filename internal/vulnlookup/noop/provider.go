@@ -3,7 +3,7 @@ package noop
 import (
 	"context"
 
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
 type Provider struct{}
