@@ -5,7 +5,7 @@ Description=Weekly CTI rollup, Monday 07:00 local
 OnCalendar=Mon *-*-* 07:00:00
 AccuracySec=1min
 Persistent=true
-Unit=cti-fleet-weekly.service
+Unit=cti-agent-weekly.service
 
 [Install]
 WantedBy=timers.target

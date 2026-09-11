@@ -33,13 +33,13 @@ from html import unescape
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 DB = os.path.join(FLEET_HOME, "state", "memory.db")
 # The feed list is configuration, not code. On the FHS layout it lives in
-# /etc/cti-fleet/feeds.txt; on the simple layout, next to the lanes.
+# /etc/cti-agent/feeds.txt; on the simple layout, next to the lanes.
 DEFAULT_FEEDS = (os.environ.get("FLEET_FEEDS")
                  or os.path.join(FLEET_HOME, "lanes", "feeds.txt"))
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 TAG_RE = re.compile(r"<[^>]+>")
-UA = os.environ.get("FLEET_USER_AGENT", "cti-fleet-scout/1.0")
+UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-scout/1.0")
 
 
 def log(m):
