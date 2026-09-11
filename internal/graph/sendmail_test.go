@@ -101,9 +101,13 @@ func TestSendMailImportanceIsOptIn(t *testing.T) {
 }
 
 func TestSendMailEscapesTheMailboxInThePath(t *testing.T) {
-	var gotPath string
+	// r.URL.Path is the DECODED path, so a correctly transmitted %20 appears
+	// there as a literal space and an assertion on it fails against working
+	// code. What actually matters is the raw request line, which is what the
+	// $orderby bug corrupted: assert on RequestURI.
+	var gotRequestURI, gotEscapedPath string
 	c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotRequestURI, gotEscapedPath = r.RequestURI, r.URL.EscapedPath()
 		w.WriteHeader(http.StatusAccepted)
 	})
 	defer srv.Close()
@@ -112,8 +116,11 @@ func TestSendMailEscapesTheMailboxInThePath(t *testing.T) {
 	if _, err := c.SendMail(context.Background(), req); err != nil {
 		t.Fatalf("SendMail: %v", err)
 	}
-	if strings.Contains(gotPath, " ") {
-		t.Errorf("unescaped space reached the request path: %q", gotPath)
+	if strings.ContainsAny(gotRequestURI, " \t\r\n") {
+		t.Errorf("unescaped whitespace reached the request line: %q", gotRequestURI)
+	}
+	if !strings.Contains(gotEscapedPath, "%20") {
+		t.Errorf("space should have been percent-encoded, got %q", gotEscapedPath)
 	}
 }
 
