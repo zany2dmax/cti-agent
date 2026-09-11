@@ -1,5 +1,8 @@
 [Unit]
 Description=CTI daily digest (deterministic backstop for the 06:00 send)
+# If this fails, tell the operator. Without this a failed digest is
+# silent, and no email looks exactly like a quiet day.
+OnFailure=cti-agent-alert@%n.service
 After=network-online.target
 Wants=network-online.target
 

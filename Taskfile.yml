@@ -63,7 +63,7 @@ tasks:
       - go test ./...
 
   test:graph:
-    desc: Graph URL construction and error diagnosis (guards the $orderby bug)
+    desc: Graph URL construction, sendMail, and error diagnosis
     cmds:
       - go test ./internal/graph/ -v
 
@@ -137,11 +137,12 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build the agent
+    desc: Build both binaries (agent + failure alerter)
     deps: [tidy]
     cmds:
       - mkdir -p bin
       - go build -o bin/{{.BINARY_NAME}} {{.SOURCE_NAME}}
+      - go build -o bin/cti-alert ./cmd/cti-alert
 
   run:
     desc: Run the agent locally using environment variables

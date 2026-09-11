@@ -247,6 +247,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$AGENT_SRC/cti-agent" ./cmd/cti-agent )
   chmod 0755 "$AGENT_SRC/cti-agent"
   ok "built $AGENT_SRC/cti-agent"
+  # The failure alerter. It lives in bin/ next to the shell helpers because
+  # the alert units invoke it by absolute path, and it must exist before any
+  # timer is enabled - an OnFailure pointing at a missing binary means the
+  # failure is silent, which is the thing this is here to prevent.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-alert" ./cmd/cti-alert )
+  chmod 0755 "$CODE_DIR/bin/cti-alert"
+  ok "built $CODE_DIR/bin/cti-alert"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -289,7 +296,8 @@ fi
 # ────────────────────────────────────────────────────────── verification ─────
 bold "Verification"
 FAIL=0
-for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
+for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
+         "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 if [ "$MODE" != dryrun ]; then

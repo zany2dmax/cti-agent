@@ -1,0 +1,22 @@
+[Unit]
+Description=Alert the operator that %i failed
+# NO OnFailure here, deliberately. If the alert fails it must not trigger
+# another alert - that loops every 30 minutes.
+
+[Service]
+Type=oneshot
+User=ctiagent
+Group=ctiagent
+Environment=HOME=/home/ctiagent/fleet
+Environment=FLEET_HOME=/home/ctiagent/fleet
+Environment=FLEET_CODE=/home/ctiagent/fleet
+Environment=FLEET_ENV=/home/ctiagent/fleet/fleet.env
+EnvironmentFile=/home/ctiagent/fleet/fleet.env
+ExecStart=/home/ctiagent/fleet/bin/cti-alert --unit %i
+TimeoutStartSec=120
+
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cti-agent-alert

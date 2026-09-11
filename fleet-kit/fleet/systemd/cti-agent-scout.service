@@ -1,5 +1,8 @@
 [Unit]
 Description=CTI scout sweep - poll advisory feeds for new CVEs
+# If this fails, tell the operator. Without this a failed digest is
+# silent, and no email looks exactly like a quiet day.
+OnFailure=cti-agent-alert@%n.service
 After=network-online.target
 
 [Service]
