@@ -1,6 +1,6 @@
 # CTI Agent Fleet — Build Runbook
 
-An always-on threat-intel fleet for a Linux server. It wraps `cti-qualys-agent`
+An always-on threat-intel fleet for a Linux server. It wraps `cti-agent`
 in an orchestrator plus three executor lanes, adds exploitability context to
 every CVE, and mails a prioritized digest to a security distribution list on a
 schedule.
@@ -17,8 +17,8 @@ This applies it to a CTI workload instead of a personal-assistant one.
 | `SECURITY_DL` | Where digests are sent | `soc@example.com` |
 | `CTI_MAILBOX` | Shared mailbox the agent reads | `threatintel@example.com` |
 | `<TENANT>` / `<CLIENT_ID>` | Entra tenant and app registration | |
-| `ctifleet` | Local service account | keep as-is unless it collides |
-| `/opt/cti-fleet` | Where the kit is installed | |
+| `ctiagent` | Local service account | keep as-is unless it collides |
+| `/opt/cti-agent` | Where the kit is installed | |
 
 ---
 
@@ -38,7 +38,7 @@ that matter.
 ## Architecture
 
 ```
-LINUX SERVER · your Claude subscription · user: ctifleet
+LINUX SERVER · your Claude subscription · user: ctiagent
 │
 ├── ORCHESTRATOR ─ the analyst on duty
 │   /checkin every 30 min (systemd timer)
@@ -47,7 +47,7 @@ LINUX SERVER · your Claude subscription · user: ctifleet
 │   · fires lanes, decides what's worth sending
 │   · THE ONLY AGENT THAT SENDS MAIL
 │
-├── @ingest   cti-qualys-agent (Go)   mailbox → CVEs → scanner → markdown
+├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
 ├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → P1–P4
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 └── @brief    lanes/brief.py          enriched JSON → HTML digest
@@ -170,18 +170,18 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 
 ### Production — Fedora/RHEL layout
 
-Via the `cti-fleet` wrapper the installer writes:
+Via the `cti-agent` wrapper the installer writes:
 
 | Command | Does |
 |---|---|
-| `sudo cti-fleet run-digest daily --dry-run` | Full pipeline, sends nothing |
-| `sudo cti-fleet run-digest daily` | Full pipeline, **sends** |
-| `sudo cti-fleet run-checkin` | One orchestrator heartbeat |
-| `sudo cti-fleet mailer.py --check` | Decode the token, list granted app roles |
-| `sudo cti-fleet fleet-db recent` | Memory, tasks, mailbox, priority counts |
-| `sudo cti-fleet fleet-board tail 30` | Recent board lines |
-| `systemctl list-timers 'cti-fleet-*'` | What is scheduled and when |
-| `journalctl -u cti-fleet-digest -f` | Follow the digest run |
+| `sudo cti-agent run-digest daily --dry-run` | Full pipeline, sends nothing |
+| `sudo cti-agent run-digest daily` | Full pipeline, **sends** |
+| `sudo cti-agent run-checkin` | One orchestrator heartbeat |
+| `sudo cti-agent mailer.py --check` | Decode the token, list granted app roles |
+| `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |
+| `sudo cti-agent fleet-board tail 30` | Recent board lines |
+| `systemctl list-timers 'cti-agent-*'` | What is scheduled and when |
+| `journalctl -u cti-agent-digest -f` | Follow the digest run |
 
 ### Production — simple layout (`install.sh`)
 
@@ -293,7 +293,7 @@ specifically need to see hosts, and remember what that file then contains.
 
 - Linux server that stays on. RHEL 8+ / Ubuntu 22.04+, 2 vCPU / 4 GB is plenty.
 - Python 3.9+ (stdlib only — no pip installs anywhere in this kit).
-- Go 1.21+ *or* a prebuilt `cti-qualys-agent` binary.
+- Go 1.21+ *or* a prebuilt `cti-agent` binary.
 - Claude Code, installed and authenticated **as the service account** (see
   below). The heartbeat needs it; the digest timers do not.
 - A shared mailbox receiving CTI email, and an Entra app registration that can
@@ -306,31 +306,31 @@ specifically need to see hosts, and remember what that file then contains.
 
 ```bash
 # 1. Get the kit onto the box
-sudo mkdir -p /opt/cti-fleet && sudo chown "$USER" /opt/cti-fleet
-# copy this fleet-kit/ directory to /opt/cti-fleet
+sudo mkdir -p /opt/cti-agent && sudo chown "$USER" /opt/cti-agent
+# copy this fleet-kit/ directory to /opt/cti-agent
 
 # 2. Build the Go agent as the service user
-sudo useradd -m -s /bin/bash ctifleet
-sudo -u ctifleet git clone <YOUR_FORK_OR_UPSTREAM_URL> /home/ctifleet/cti-qualys-agent
-cd /home/ctifleet/cti-qualys-agent
-sudo -u ctifleet go build -o cti-qualys-agent ./cmd/cti-qualys-agent
+sudo useradd -m -s /bin/bash ctiagent
+sudo -u ctiagent git clone <YOUR_FORK_OR_UPSTREAM_URL> /home/ctiagent/cti-agent
+cd /home/ctiagent/cti-agent
+sudo -u ctiagent go build -o cti-agent ./cmd/cti-agent
 
 # 3. Install the fleet
-cd /opt/cti-fleet && sudo ./install.sh
+cd /opt/cti-agent && sudo ./install.sh
 
 # 4. Fill in config and secrets (mode 600)
-sudo -u ctifleet vi /home/ctifleet/fleet/fleet.env
+sudo -u ctiagent vi /home/ctiagent/fleet/fleet.env
 
 # 5. Verify Graph permissions BEFORE trusting the morning timer
-sudo -u ctifleet python3 /home/ctifleet/fleet/lanes/mailer.py --check
+sudo -u ctiagent python3 /home/ctiagent/fleet/lanes/mailer.py --check
 
 # 6. Dry run the whole pipeline — renders and validates, sends nothing
-sudo -u ctifleet /home/ctifleet/fleet/bin/run-digest daily --dry-run
+sudo -u ctiagent /home/ctiagent/fleet/bin/run-digest daily --dry-run
 
 # 7. Enable the timers
-sudo systemctl enable --now cti-fleet-checkin.timer cti-fleet-digest.timer \
-                            cti-fleet-weekly.timer cti-fleet-scout.timer
-systemctl list-timers 'cti-fleet-*'
+sudo systemctl enable --now cti-agent-checkin.timer cti-agent-digest.timer \
+                            cti-agent-weekly.timer cti-agent-scout.timer
+systemctl list-timers 'cti-agent-*'
 ```
 
 `install.sh` is idempotent and rewrites the systemd units to match whatever
@@ -352,7 +352,7 @@ the timer with no credentials.
 
 ```bash
 # Native installer (auto-updates in the background)
-sudo -u ctifleet bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
+sudo -u ctiagent bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
 
 # Or via the signed apt repo (updates come through your normal patch cycle)
 sudo apt install curl gnupg
@@ -382,7 +382,7 @@ you do use the native installer, you can pin behavior in the service account's
 headless box: login opens a browser.
 
 ```bash
-sudo -u ctifleet -i          # a login shell, so $HOME is right
+sudo -u ctiagent -i          # a login shell, so $HOME is right
 claude                       # follow the URL it prints, paste the code back
 claude --version && claude doctor
 exit
@@ -408,7 +408,7 @@ sudo ./install-fedora.sh --dry-run     # see exactly what it would do
 sudo ./install-fedora.sh
 ```
 
-`install.sh` puts everything under `/home/ctifleet` and hardens the units with
+`install.sh` puts everything under `/home/ctiagent` and hardens the units with
 `ProtectHome=read-only` plus a `ReadWritePaths` punch-through back into
 `/home`. That combination is order-dependent in systemd, and it is the exact
 shape SELinux is most likely to deny on a box running enforcing. Rather than
@@ -417,9 +417,9 @@ already expect:
 
 | Path | Holds | Ownership |
 |---|---|---|
-| `/opt/cti-fleet` | code | `root:root` `0755` — read-only to the service |
-| `/etc/cti-fleet` | config; `fleet.env`, `feeds.txt` | `root:ctifleet` `0750`, secrets `0640` |
-| `/var/lib/cti-fleet` | state: findings db, reports, caches, `.claude` | created and chowned by systemd `StateDirectory` |
+| `/opt/cti-agent` | code | `root:root` `0755` — read-only to the service |
+| `/etc/cti-agent` | config; `fleet.env`, `feeds.txt` | `root:ctiagent` `0750`, secrets `0640` |
+| `/var/lib/cti-agent` | state: findings db, reports, caches, `.claude` | created and chowned by systemd `StateDirectory` |
 
 Because nothing lives under `/home`, the units set `ProtectHome=yes` and hide
 it entirely — stricter than the original, and less likely to break. They also
@@ -428,19 +428,19 @@ add `SystemCallFilter=@system-service`, an empty `CapabilityBoundingSet`, and
 
 The service account is a **system** account with no login shell and `HOME` set
 to the state directory, so Claude Code's credentials land in
-`/var/lib/cti-fleet/.claude` rather than creating a `/home` path the hardening
+`/var/lib/cti-agent/.claude` rather than creating a `/home` path the hardening
 would have to special-case.
 
 **Running commands by hand.** The split layout means four environment
 variables, so the installer writes a wrapper:
 
 ```bash
-sudo cti-fleet mailer.py --check
-sudo cti-fleet run-digest daily --dry-run
-sudo cti-fleet run-digest daily
-sudo cti-fleet run-checkin
-sudo cti-fleet fleet-db recent
-sudo cti-fleet fleet-board tail 30
+sudo cti-agent mailer.py --check
+sudo cti-agent run-digest daily --dry-run
+sudo cti-agent run-digest daily
+sudo cti-agent run-checkin
+sudo cti-agent fleet-db recent
+sudo cti-agent fleet-board tail 30
 ```
 
 **SELinux.** The layout is chosen so the default policy permits it, and the
@@ -449,8 +449,8 @@ makes no sense given the file modes, look for a denial before editing the unit:
 
 ```bash
 sudo ausearch -m avc -ts recent
-systemd-analyze security cti-fleet-digest.service
-journalctl -u cti-fleet-digest -n 50 --no-pager
+systemd-analyze security cti-agent-digest.service
+journalctl -u cti-agent-digest -n 50 --no-pager
 ```
 
 **Uninstall.** `--uninstall` removes the units and code but keeps config and
@@ -479,7 +479,7 @@ Application Access Policy:
 
 ```powershell
 New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
-  -PolicyScopeGroupId cti-fleet-mailboxes@example.com `
+  -PolicyScopeGroupId cti-agent-mailboxes@example.com `
   -AccessRight RestrictAccess `
   -Description "CTI fleet: security mailbox only"
 
@@ -563,10 +563,10 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 
 | When | What | Fired by |
 |---|---|---|
-| every 30 min | `/checkin` heartbeat — relay, decide, one proactive task | `cti-fleet-checkin.timer` |
-| 06:00 daily | ingest → enrich → brief → **send** | `cti-fleet-digest.timer` |
-| 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-fleet-scout.timer` |
-| Mon 07:00 | weekly rollup, includes P4 | `cti-fleet-weekly.timer` |
+| every 30 min | `/checkin` heartbeat — relay, decide, one proactive task | `cti-agent-checkin.timer` |
+| 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
+| 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
+| Mon 07:00 | weekly rollup, includes P4 | `cti-agent-weekly.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then
@@ -662,23 +662,23 @@ Substitute your `FLEET_HOME` if you changed it.
 
 ```bash
 # Health
-systemctl list-timers 'cti-fleet-*'
-tail -f /home/ctifleet/fleet/logs/{checkin,digest,scout}.log
-sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db recent
+systemctl list-timers 'cti-agent-*'
+tail -f /home/ctiagent/fleet/logs/{checkin,digest,scout}.log
+sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db recent
 
 # The board
-sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-board tail 30
-sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-board read @you
+sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-board tail 30
+sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-board read @you
 
 # Ask the fleet something directly
-sudo -u ctifleet bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
+sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
 
 # Force a digest now (dry run first, always)
-sudo -u ctifleet /home/ctifleet/fleet/bin/run-digest daily --dry-run
+sudo -u ctiagent /home/ctiagent/fleet/bin/run-digest daily --dry-run
 
 # Query findings
-sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --priority P1
-sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --stale-days 7
+sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --priority P1
+sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --stale-days 7
 ```
 
 ### Troubleshooting
@@ -689,9 +689,9 @@ sudo -u ctifleet /home/ctifleet/fleet/bin/fleet-db findings --stale-days 7
 | `403` with `MailboxNotEnabled` | Application Access Policy excludes the mailbox | `Test-ApplicationAccessPolicy` |
 | Enrich takes ~5 min | No NVD API key → 5 req/30s | Free key at nvd.nist.gov/developers/request-an-api-key → 50 req/30s |
 | Everything `UNKNOWN` | KB cache predates the CVEs, so the mapping is missing | The agent now auto-refreshes past `QUALYS_KB_MAX_AGE_HOURS`. To force it: delete the cache JSON and rerun (the full build is large). A stale-cache UNKNOWN says "coverage UNVERIFIED" in its reason; a real one says "No Qualys KnowledgeBase mapping" |
-| Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-fleet-digest`; `fleet-db was-sent $(date +%F) daily` |
+| Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-agent-digest`; `fleet-db was-sent $(date +%F) daily` |
 | Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
-| Heartbeat never runs | `claude` not found, or not authenticated as the service account | `journalctl -u cti-fleet-checkin`; run `sudo -u ctifleet -i claude doctor`; pin `CLAUDE_BIN` |
+| Heartbeat never runs | `claude` not found, or not authenticated as the service account | `journalctl -u cti-agent-checkin`; run `sudo -u ctiagent -i claude doctor`; pin `CLAUDE_BIN` |
 | Every other beat skipped | Stale `.checkin.lock` from a killed beat | `rmdir ~/fleet/.checkin.lock` (auto-breaks after 30m) |
 | Board not growing | Stale lock | `rmdir ~/fleet/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | `logs/scout.log` names failed feeds; a dead feed is a blind spot that looks like good news |
@@ -707,17 +707,17 @@ read the HTML yourself. Confirm the P1/P2 calls match your judgment. Tune the
 thresholds in `enrich.py::prioritize()` before anyone else sees the output. A
 digest that cries wolf in week one gets filtered forever.
 
-**Week 2 — auto-send.** Enable `cti-fleet-digest.timer`. Only the daily. Leave
+**Week 2 — auto-send.** Enable `cti-agent-digest.timer`. Only the daily. Leave
 scout off; you want to know the mailbox path is solid before adding a second
 source of CVEs.
 
 **Week 3 — heartbeat.** Set `FLEET_OPERATOR_EMAIL` and enable
-`cti-fleet-checkin.timer`. Now an orchestrator is doing proactive work between
+`cti-agent-checkin.timer`. Now an orchestrator is doing proactive work between
 digests: chasing UNKNOWNs, nudging stale P1s, and emailing you when it needs a
 decision. Watch `checkin.log` for a few days and judge whether its proactive
 picks are useful or busywork.
 
-**Week 4 — scout.** Enable `cti-fleet-scout.timer` after trimming `feeds.txt` to
+**Week 4 — scout.** Enable `cti-agent-scout.timer` after trimming `feeds.txt` to
 vendors you actually run. Expect a noisy first sweep as it backfills; the dedupe
 against `findings` and `scout_items` settles it within a day.
 

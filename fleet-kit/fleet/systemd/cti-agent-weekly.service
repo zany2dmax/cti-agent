@@ -1,0 +1,18 @@
+[Unit]
+Description=CTI weekly rollup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ctiagent
+Group=ctiagent
+WorkingDirectory=/home/ctiagent/fleet
+EnvironmentFile=/home/ctiagent/fleet/fleet.env
+ExecStart=/home/ctiagent/fleet/bin/run-digest weekly
+TimeoutStartSec=3600
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ctiagent/fleet
+StandardOutput=append:/home/ctiagent/fleet/logs/digest.log
+StandardError=append:/home/ctiagent/fleet/logs/digest.log
