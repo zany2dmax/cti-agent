@@ -344,6 +344,7 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent mailer.py --check
 #   cti-agent fleet-db recent
 #   cti-agent fleet-board tail 30
+#   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -352,7 +353,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\

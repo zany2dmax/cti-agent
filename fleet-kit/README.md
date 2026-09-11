@@ -345,10 +345,18 @@ specifically need to see hosts, and remember what that file then contains.
 
 ### Steps
 
+> **On Fedora, RHEL, Rocky or Alma, skip this section.** Use
+> [`install-fedora.sh`](#fedora--rhel-use-install-fedorash) instead — it lays
+> the kit out under `/opt`, `/etc` and `/var/lib`, which is what keeps SELinux
+> quiet. The steps below are the generic single-directory layout, and the two
+> produce different paths for everything afterwards.
+
 ```bash
-# 1. Get the kit onto the box
-sudo mkdir -p /opt/cti-agent && sudo chown "$USER" /opt/cti-agent
-# copy this fleet-kit/ directory to /opt/cti-agent
+# 1. Get the kit onto the box. Staging directory only — install.sh copies out
+#    of it. Deliberately not /opt/cti-agent, which is where the Fedora layout
+#    installs to; staging there makes the two layouts impossible to tell apart.
+mkdir -p ~/cti-agent-kit
+# copy this fleet-kit/ directory into ~/cti-agent-kit
 
 # 2. Build the Go agent as the service user
 sudo useradd -m -s /bin/bash ctiagent
@@ -357,7 +365,7 @@ cd /home/ctiagent/cti-agent
 sudo -u ctiagent go build -o cti-agent ./cmd/cti-agent
 
 # 3. Install the fleet
-cd /opt/cti-agent && sudo ./install.sh
+cd ~/cti-agent-kit && sudo ./install.sh
 
 # 4. Fill in config and secrets (mode 600)
 sudo -u ctiagent vi /home/ctiagent/fleet/fleet.env
@@ -368,11 +376,14 @@ sudo -u ctiagent python3 /home/ctiagent/fleet/lanes/mailer.py --check
 # 6. Dry run the whole pipeline — renders and validates, sends nothing
 sudo -u ctiagent /home/ctiagent/fleet/bin/run-digest daily --dry-run
 
-# 7. Enable the timers
-sudo systemctl enable --now cti-agent-checkin.timer cti-agent-digest.timer \
-                            cti-agent-weekly.timer cti-agent-scout.timer
+# 7. Enable ONE timer. Not all four.
+sudo systemctl enable --now cti-agent-digest.timer
 systemctl list-timers 'cti-agent-*'
 ```
+
+Step 7 is deliberately one timer. Enabling all four on day one means four
+untested lanes failing at once at 06:00, and no way to tell which caused what.
+See [Rollout](#rollout--one-primitive-at-a-time) for the order to add the rest.
 
 `install.sh` is idempotent and rewrites the systemd units to match whatever
 `FLEET_USER` and `FLEET_HOME` you set, so non-default paths work:
@@ -720,27 +731,80 @@ words if the shipped voice doesn't fit your team.
 
 ## Operating it
 
-Substitute your `FLEET_HOME` if you changed it.
+**The two installers produce different paths.** Every command below works on
+either, but you have to pick the right prefix first — running the generic form
+on a Fedora box gets you "no such file or directory" for every one of them.
+
+| | `install.sh` | `install-fedora.sh` |
+|---|---|---|
+| Code | `$FLEET_HOME` (one directory) | `/opt/cti-agent` |
+| Config | `$FLEET_HOME/fleet.env` | `/etc/cti-agent/fleet.env` |
+| State, logs, DB | `$FLEET_HOME` | `/var/lib/cti-agent` |
+| Default `FLEET_HOME` | `/home/ctiagent/fleet` | `/var/lib/cti-agent` |
+
+`install-fedora.sh` installs `/usr/local/bin/cti-agent`, a wrapper that exports
+`FLEET_HOME`, `FLEET_CODE`, `FLEET_ENV`, `FLEET_FEEDS` and `HOME` and then drops
+to the service account. That is why the Fedora commands are shorter: the paths
+are already set. Define `fleet` for your layout and the rest of this section is
+copy-pasteable as written.
+
+```bash
+# Fedora / RHEL / Rocky / Alma — install-fedora.sh
+fleet() { sudo cti-agent "$@"; }
+
+# Everything else — install.sh. Substitute your FLEET_HOME if you changed it.
+FLEET_HOME=/home/ctiagent/fleet
+fleet() { local c=$1; shift
+  case "$c" in
+    *.py) sudo -u ctiagent python3 "$FLEET_HOME/lanes/$c" "$@" ;;
+    *)    sudo -u ctiagent "$FLEET_HOME/bin/$c" "$@" ;;
+  esac
+}
+```
 
 ```bash
 # Health
 systemctl list-timers 'cti-agent-*'
-tail -f /home/ctiagent/fleet/logs/{checkin,digest,scout}.log
-sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db recent
+fleet fleet-db recent
 
 # The board
-sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-board tail 30
-sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-board read @you
-
-# Ask the fleet something directly
-sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
+fleet fleet-board tail 30
+fleet fleet-board read @you
 
 # Force a digest now (dry run first, always)
-sudo -u ctiagent /home/ctiagent/fleet/bin/run-digest daily --dry-run
+fleet run-digest daily --dry-run
 
 # Query findings
-sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --priority P1
-sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --stale-days 7
+fleet fleet-db findings --priority P1
+fleet fleet-db findings --stale-days 7
+
+# Confirm Graph still sees the mailbox, and which roles the token actually has
+fleet mailer.py --check
+```
+
+Logs go to journald on Fedora and to files on the generic layout — the Fedora
+units set `StandardOutput=journal` deliberately, so journald handles rotation
+and retention rather than the kit hand-rolling it:
+
+```bash
+# Fedora
+journalctl -u cti-agent-digest -f
+journalctl -u 'cti-agent-*' --since today
+
+# Generic
+tail -f /home/ctiagent/fleet/logs/{checkin,digest,scout}.log
+```
+
+Asking the fleet something directly needs the orchestrator's own directory,
+since `CLAUDE.md` and the skills are resolved relative to it:
+
+```bash
+# Fedora
+sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env \
+  bash -c 'cd /opt/cti-agent && claude "what P1s are open and unremediated?"'
+
+# Generic
+sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
 ```
 
 ### Troubleshooting
@@ -754,9 +818,14 @@ sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --stale-days 7
 | Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-agent-digest`; `fleet-db was-sent $(date +%F) daily` |
 | Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
 | Heartbeat never runs | `claude` not found, or no usable credentials | `journalctl -u cti-agent-checkin` — run-checkin names which one it is; set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`, or pin `CLAUDE_BIN` |
-| Every other beat skipped | Stale `.checkin.lock` from a killed beat | `rmdir ~/fleet/.checkin.lock` (auto-breaks after 30m) |
-| Board not growing | Stale lock | `rmdir ~/fleet/.board.lock` (auto-breaks after 60s) |
-| Scout finds nothing | Feeds 404'd | `logs/scout.log` names failed feeds; a dead feed is a blind spot that looks like good news |
+| Every other beat skipped | Stale `.checkin.lock` from a killed beat | `sudo rmdir $FLEET_HOME/.checkin.lock` (auto-breaks after 30m) |
+| Board not growing | Stale lock | `sudo rmdir $FLEET_HOME/.board.lock` (auto-breaks after 60s) |
+| Scout finds nothing | Feeds 404'd | Fedora: `journalctl -u cti-agent-scout`. Generic: `logs/scout.log`. Either way it names the failed feeds — a dead feed is a blind spot that looks like good news |
+| Command not found on Fedora | Used the generic paths | The FHS layout has no `/home/ctiagent`. Use `sudo cti-agent <cmd>` |
+
+`$FLEET_HOME` above is `/var/lib/cti-agent` on Fedora and `/home/ctiagent/fleet`
+on the generic layout. The lock files live in state, not code, so they follow
+`FLEET_HOME` rather than `FLEET_CODE`.
 
 ---
 
