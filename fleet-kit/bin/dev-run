@@ -64,6 +64,7 @@ done
 bold() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 
 mkdir -p "$FLEET_HOME"/{state,reports,logs}
@@ -120,12 +121,53 @@ stage_doctor() {
   bold "Microsoft Graph"
   # mailer.py --check decodes the token and reports the granted app roles, so a
   # permissions problem is named here rather than surfacing as a 403 later.
-  if python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 | sed 's/^\[mailer\] /    /'; then
-    ok "token acquired"
+  #
+  # Three outcomes, and they are NOT equivalent. An earlier version treated
+  # them all as one "Graph check failed" and then still printed "ready", which
+  # is worse than no check at all:
+  #
+  #   token request failed  -> ingest cannot work. Hard fail.
+  #   Mail.Read missing     -> ingest cannot work. Hard fail.
+  #   Mail.Send missing     -> only the send stage cares. Warn and continue.
+  local graph_out
+  graph_out=$(python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 || true)
+  echo "$graph_out" | sed 's/^\[mailer\] /    /'
+
+  if echo "$graph_out" | grep -q "token request failed"; then
+    bad "could not get a token from Entra - ingest will not work"
+    fail=1
+    case "$graph_out" in
+      *"Connection reset by peer"*|*"Connection refused"*|*"Temporary failure"*|*timed\ out*)
+        info "This is a NETWORK failure, not a credentials failure - the request"
+        info "never got an answer. Usual causes, in order:"
+        info "  1. TLS-inspecting proxy or VPN (Zscaler, Netskope, corporate MITM)"
+        info "     python does not read the macOS keychain, so a proxy's root CA"
+        info "     that Safari trusts can still break it."
+        info "  2. A proxy set for the shell but not for python, or vice versa:"
+        info "       env | grep -i proxy"
+        info "  3. Confirm reachability independent of this tool:"
+        info "       curl -sS -o /dev/null -w '%{http_code}\\n' \\\\"
+        info "         https://login.microsoftonline.com/common/discovery/keys"
+        info "     A 200 there with a failure here points at python's TLS trust."
+        ;;
+      *HTTP\ 400*|*invalid_client*|*AADSTS*)
+        info "Entra answered and rejected the request - this IS a credentials"
+        info "problem. Check TENANT_ID, CLIENT_ID and CLIENT_SECRET, and whether"
+        info "the client secret has expired (they are time-limited)."
+        ;;
+    esac
+  elif echo "$graph_out" | grep -q "MISSING Mail.Read"; then
+    bad "Mail.Read is not granted - ingest cannot read the mailbox"
+    fail=1
+    info "Entra ID > App registrations > your app > API permissions >"
+    info "  Microsoft Graph > Application permissions > Mail.Read,"
+    info "  then GRANT ADMIN CONSENT."
+  elif echo "$graph_out" | grep -q "MISSING Mail.Send"; then
+    ok "token acquired, Mail.Read granted"
+    warn "Mail.Send is not granted - only the send stage needs it"
+    info "Everything except 'dev-run send' works without it."
   else
-    bad "Graph check failed - see above"
-    info "Mail.Read is required for ingest. Mail.Send is only needed by the"
-    info "send stage, so a missing Mail.Send is fine until you run that."
+    ok "token acquired, Mail.Read and Mail.Send both granted"
   fi
 
   [ "$fail" = "0" ] || { bad "fix the above before continuing"; return 1; }
