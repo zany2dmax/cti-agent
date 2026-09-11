@@ -1,11 +1,18 @@
 [Unit]
-Description=CTI orchestrator heartbeat every 30 minutes
+Description=CTI orchestrator heartbeat every 2 hours
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=30min
+OnUnitActiveSec=2h
 AccuracySec=1min
-Persistent=true
+# Spread the beat off the hour so it does not collide with the digest or
+# scout timers, which both fire on exact clock boundaries.
+RandomizedDelaySec=300
+# Deliberately NOT Persistent: after downtime systemd would fire every missed
+# beat at once. cti-budget's window ceiling would refuse most of them, which
+# works but emails a hold for each. One beat 5min after boot is enough to
+# catch up, and OnBootSec= above already provides it.
+Persistent=false
 Unit=cti-agent-checkin.service
 
 [Install]
