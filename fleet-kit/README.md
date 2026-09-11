@@ -334,8 +334,9 @@ specifically need to see hosts, and remember what that file then contains.
 - Linux server that stays on. RHEL 8+ / Ubuntu 22.04+, 2 vCPU / 4 GB is plenty.
 - Python 3.9+ (stdlib only — no pip installs anywhere in this kit).
 - Go 1.21+ *or* a prebuilt `cti-agent` binary.
-- Claude Code, installed and authenticated **as the service account** (see
-  below). The heartbeat needs it; the digest timers do not.
+- Claude Code, installed **as the service account**, plus credentials it can
+  use unattended — an API key, a `claude setup-token` token, or its own login
+  (see below). The heartbeat needs it; the digest timers do not.
 - A shared mailbox receiving CTI email, and an Entra app registration that can
   read it.
 - Outbound HTTPS to: `login.microsoftonline.com`, `graph.microsoft.com`, your
@@ -418,8 +419,25 @@ you do use the native installer, you can pin behavior in the service account's
 }
 ```
 
-**Authenticate once, interactively.** This is the step that catches people on a
-headless box: login opens a browser.
+**Authentication.** This is the step that catches people on a headless box:
+the normal login opens a browser, and the service account has neither a browser
+nor — on the Fedora layout — a login shell. Pick one of three, set it in
+`fleet.env`, and `bin/run-checkin` will verify it before every beat rather than
+hanging on a prompt nobody can answer.
+
+| | How | Bills against |
+|---|---|---|
+| **A. Console API key** | `ANTHROPIC_API_KEY=` in `fleet.env` | metered tokens |
+| **B. Subscription token** | `claude setup-token` on a machine you are already logged into, paste into `CLAUDE_CODE_OAUTH_TOKEN=` | a subscription seat |
+| **C. Interactive login** | authenticate as the service account itself (below) | a subscription seat |
+
+A is the default recommendation: it is revocable on its own and does not put a
+person's login on a server. B is the answer when you want subscription billing,
+and it is the *only* one of B/C that works on Fedora, where `ctiagent` is a
+system account with no login shell. The token expires — when it does the
+heartbeat stops dead, so calendar the renewal.
+
+C, where the account does have a shell:
 
 ```bash
 sudo -u ctiagent -i          # a login shell, so $HOME is right
@@ -429,8 +447,12 @@ exit
 ```
 
 If the server has no browser, open the printed URL on your laptop and paste the
-code back into the server session. Claude Code requires a Pro, Max, Team, or
-Enterprise account — the free tier does not include it.
+code back into the server session. Credentials land in
+`$HOME/.claude/.credentials.json` — under `StateDirectory` on the Fedora
+layout, so they survive restarts and upgrades.
+
+B and C both require a Pro, Max, Team, or Enterprise account; the free tier does
+not include Claude Code.
 
 **Path.** There is no single install path: native puts it in
 `~/.local/bin/claude`, apt/dnf in `/usr/bin/claude`, Homebrew in
@@ -731,7 +753,7 @@ sudo -u ctiagent /home/ctiagent/fleet/bin/fleet-db findings --stale-days 7
 | Everything `UNKNOWN` | KB cache predates the CVEs, so the mapping is missing | The agent now auto-refreshes past `QUALYS_KB_MAX_AGE_HOURS`. To force it: delete the cache JSON and rerun (the full build is large). A stale-cache UNKNOWN says "coverage UNVERIFIED" in its reason; a real one says "No Qualys KnowledgeBase mapping" |
 | Digest didn't arrive | Timer disabled, or already-sent guard tripped | `systemctl status cti-agent-digest`; `fleet-db was-sent $(date +%F) daily` |
 | Duplicate digest | Clock change or manual run after the timer | The guard is per `(kind, day)` — check the `digests` table |
-| Heartbeat never runs | `claude` not found, or not authenticated as the service account | `journalctl -u cti-agent-checkin`; run `sudo -u ctiagent -i claude doctor`; pin `CLAUDE_BIN` |
+| Heartbeat never runs | `claude` not found, or no usable credentials | `journalctl -u cti-agent-checkin` — run-checkin names which one it is; set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`, or pin `CLAUDE_BIN` |
 | Every other beat skipped | Stale `.checkin.lock` from a killed beat | `rmdir ~/fleet/.checkin.lock` (auto-breaks after 30m) |
 | Board not growing | Stale lock | `rmdir ~/fleet/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | `logs/scout.log` names failed feeds; a dead feed is a blind spot that looks like good news |
