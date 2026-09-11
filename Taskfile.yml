@@ -101,14 +101,18 @@ tasks:
                  fleet-kit/fleet/bin/run-checkin \
                  fleet-kit/bin/dev-run \
                  fleet-kit/install.sh \
-                 scripts/scrub-history.sh; do
+                 fleet-kit/install-fedora.sh \
+                 scripts/scrub-history.sh \
+                 scripts/run-local.sh; do
           bash -n "$f" && echo "  ok  $f"
         done
       - |
         python3 - <<'PY'
         import configparser, glob, sys
         bad = 0
-        for u in sorted(glob.glob("fleet-kit/fleet/systemd/*")):
+        # Both layouts. The glob used to be systemd/* only, so a broken
+        # Fedora unit would have sailed through CI.
+        for u in sorted(glob.glob("fleet-kit/fleet/systemd*/*")):
             c = configparser.ConfigParser(strict=False, allow_no_value=True)
             try:
                 c.read(u)
