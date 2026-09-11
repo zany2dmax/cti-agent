@@ -144,6 +144,46 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:report` | — | Show the latest report and priority counts | no |
 | `task dev:clean` | — | Wipe `.fleet-local/` | no |
 
+### Failure alerting
+
+The fleet's premise is that a quiet inbox means a quiet day. That only holds if
+a broken pipeline is loud — otherwise a failed digest timer produces the same
+observable result as "no new CVEs", and the outage sits unnoticed.
+
+Every service unit carries `OnFailure=cti-agent-alert@%n.service`, which runs
+`cmd/cti-alert`. It gathers systemd's verdict (`Result`, `ExecMainStatus`,
+`NRestarts`) plus the last 40 journal lines, then writes to two channels:
+
+| Channel | Survives what | Reaches |
+|---|---|---|
+| the message board | anything — no network needed | the orchestrator's next heartbeat |
+| email via Graph | not a Graph or network fault | your phone |
+
+Both are attempted; email failing does not suppress the board post. If both
+fail, everything is dumped to the journal under `cti-agent-alert`.
+
+Three deliberate properties:
+
+- **It always exits 0.** A non-zero exit would mark the alert unit failed too,
+  making `systemctl --failed` misleading about what actually broke.
+- **The alert unit has no `OnFailure` of its own.** An alerter that alerts on
+  its own failure loops every 30 minutes.
+- **High importance only for the digest and weekly.** A failed scout sweep is
+  not urgent; a digest that did not send means intel reached nobody. A system
+  that marks everything urgent has marked nothing urgent.
+
+It reuses `internal/graph`, so it shares the agent's Entra app registration and
+token path — no dependency on the Python mailer in the failure path, which
+matters because the failure path has to work when other things are broken.
+
+Test it without breaking anything:
+
+```bash
+sudo cti-agent-alert-test      # or, directly:
+sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
+  /opt/cti-agent/bin/cti-alert --unit cti-agent-digest.service --dry-run
+```
+
 ### Tests
 
 | Task | Covers |
