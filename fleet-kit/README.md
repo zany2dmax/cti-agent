@@ -27,7 +27,7 @@ This applies it to a CTI workload instead of a personal-assistant one.
 The Go agent already does the hard part: read the CTI mailbox, pull CVEs, ask
 the vulnerability scanner whether the environment is actually exposed, write
 markdown. What it doesn't do is decide what matters, or tell anyone. The fleet
-wraps it. An orchestrator wakes every 30 minutes, three executor lanes add
+wraps it. An orchestrator wakes every two hours, three executor lanes add
 exploitability context and find CVEs the mailbox missed, and a digest lands in
 the security inbox each morning with P1 items at the top. Nobody has to remember
 to run anything, and nobody has to read a fifty-row table to find the four rows
@@ -41,7 +41,7 @@ that matter.
 LINUX SERVER · your Claude subscription · user: ctiagent
 │
 ├── ORCHESTRATOR ─ the analyst on duty
-│   /checkin every 30 min (systemd timer)
+│   /checkin every 2h (systemd timer, quota-governed)
 │   · reads the board, memory, lane logs
 │   · emails the operator when it needs a decision
 │   · fires lanes, decides what's worth sending
@@ -465,6 +465,49 @@ layout, so they survive restarts and upgrades.
 B and C both require a Pro, Max, Team, or Enterprise account; the free tier does
 not include Claude Code.
 
+### Rationing the quota
+
+With B or C the fleet spends **your** subscription. An overrun there does not
+cost money — it costs you your own access, in the middle of an afternoon, with
+no warning. So the heartbeat rations itself.
+
+It has to ration rather than negotiate. The fleet runs on a different machine
+from your own Claude sessions, nothing reports how much of the window is left,
+and the only signal either side gets is a rate-limit error *after* the fact.
+There is no way to observe contention and yield. So `cti-budget` takes a fixed
+slice and leaves the rest alone.
+
+Only `run-checkin` spends anything. The digest, weekly and scout lanes are
+stdlib Python and cost nothing, so **your morning email is never at risk from
+a quota hold.**
+
+| Guard | Default | What it is for |
+|---|---|---|
+| Rolling window | 4 beats / 5h | Bursts. `Persistent=true` after an outage fires every missed beat at once |
+| Daily ceiling | 14 beats | Total spend. 12 scheduled at the 2h cadence, plus two manual runs |
+| Backoff | 30m, doubling to 6h | A throttled fleet that keeps asking digs the hole deeper |
+
+At the shipped two-hour cadence you get 12 beats a day and 2–3 in any five-hour
+window, so the window ceiling never binds in normal operation — it exists for
+the abnormal case. Raising `FLEET_BUDGET_WINDOW_BEATS` is how you give the fleet
+a larger share of your quota; lowering it reserves more for yourself.
+
+```bash
+fleet cti-budget status          # ceilings, beats used, cooldown, and why
+fleet cti-budget status --json   # same, for scripting
+```
+
+A hold is **not** a failure. The unit exits 0, the board line is `INFO`, and the
+email is amber and titled *on hold* rather than red and titled *FAILED* — a
+brake that reports itself as a crash teaches you to ignore the alerts that
+matter. The heartbeat resumes on its own when the window rolls off.
+
+Rate limits are detected from the CLI's output text, not its exit code, because
+`claude` exits non-zero for a bad flag and an exhausted quota alike and those
+want opposite responses. The match list is deliberately broad: a false positive
+costs one skipped beat, a false negative means hammering a quota you are trying
+to use.
+
 **Path.** There is no single install path: native puts it in
 `~/.local/bin/claude`, apt/dnf in `/usr/bin/claude`, Homebrew in
 `/opt/homebrew/bin/claude`. `bin/run-checkin` searches all of them at runtime,
@@ -636,7 +679,7 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 
 | When | What | Fired by |
 |---|---|---|
-| every 30 min | `/checkin` heartbeat — relay, decide, one proactive task | `cti-agent-checkin.timer` |
+| every 2h | `/checkin` heartbeat — relay, decide, one proactive task. Subject to the quota ceiling below | `cti-agent-checkin.timer` |
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
 | Mon 07:00 | weekly rollup, includes P4 | `cti-agent-weekly.timer` |
@@ -822,6 +865,9 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediat
 | Board not growing | Stale lock | `sudo rmdir $FLEET_HOME/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | Fedora: `journalctl -u cti-agent-scout`. Generic: `logs/scout.log`. Either way it names the failed feeds — a dead feed is a blind spot that looks like good news |
 | Command not found on Fedora | Used the generic paths | The FHS layout has no `/home/ctiagent`. Use `sudo cti-agent <cmd>` |
+| Heartbeat skipping, unit shows success | Quota ceiling or cooldown — working as designed | `fleet cti-budget status` gives the reason and when it resumes. Raise `FLEET_BUDGET_WINDOW_BEATS` to give the fleet more of your quota |
+| *You* got rate-limited, not the fleet | The fleet's slice is too large for how you work | Lower `FLEET_BUDGET_DAILY_BEATS`, or widen the timer past 2h. The fleet cannot see your usage, so this is tuned by hand |
+| Holds emailed repeatedly for one outage | `AlertedFor` state lost with the ledger | Expected after deleting `budget.json`. One email per distinct cooldown otherwise |
 
 `$FLEET_HOME` above is `/var/lib/cti-agent` on Fedora and `/home/ctiagent/fleet`
 on the generic layout. The lock files live in state, not code, so they follow

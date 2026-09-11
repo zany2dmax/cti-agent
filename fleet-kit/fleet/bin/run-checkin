@@ -112,6 +112,39 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
+# The fleet and its operator draw on the same subscription quota, from
+# different machines, with no API that reports what is left. So the fleet
+# rations itself: cti-budget holds a rolling-window and daily ceiling and a
+# cooldown after any rate limit. Locking prevents the fleet colliding with
+# itself; this is what keeps it from crowding out the person who owns the
+# account.
+#
+# The gate is skipped rather than failed when cti-budget is absent, so an
+# older install keeps beating instead of going silent on upgrade.
+BUDGET="$FLEET_CODE/bin/cti-budget"
+if [ -x "$BUDGET" ]; then
+  budget_out="$("$BUDGET" check --print-alert-flag 2>&1)" && budget_rc=0 || budget_rc=$?
+  if [ "$budget_rc" -eq 3 ]; then
+    reason="$(echo "$budget_out" | grep -v '^\(alert\|silent\)$' | tr '\n' ' ')"
+    echo "[run-checkin $(date '+%F %H:%M:%S')] skipping: $reason"
+    "$FLEET_CODE/bin/fleet-board" post @you @operator INFO \
+      "heartbeat skipped - $reason" 2>/dev/null || true
+    # Escalate on the first beat of each distinct denial. cti-budget decides,
+    # so a six-hour backoff does not send the same email three times.
+    if echo "$budget_out" | tail -1 | grep -qx alert && [ -x "$FLEET_CODE/bin/cti-alert" ]; then
+      "$FLEET_CODE/bin/cti-alert" --unit cti-agent-checkin.service \
+        --kind HOLD --reason "$reason" || true
+    fi
+    # Exit 0: a working brake is not a failed unit. Non-zero would trip
+    # OnFailure= and email a second time about the fleet behaving correctly.
+    exit 0
+  elif [ "$budget_rc" -ne 0 ]; then
+    echo "[run-checkin] cti-budget check failed (rc=$budget_rc), proceeding: $budget_out" >&2
+  else
+    echo "[run-checkin $(date '+%F %H:%M:%S')] $budget_out"
+  fi
+fi
+
 echo "[run-checkin $(date '+%F %H:%M:%S')] using $CLAUDE"
 cd "$FLEET_HOME"
 
@@ -121,7 +154,24 @@ cd "$FLEET_HOME"
 #
 # stdin is closed explicitly: with -p, Claude Code waits on stdin for a few
 # seconds before giving up, and systemd gives a oneshot service no tty.
-"$CLAUDE" -p "/checkin" --permission-mode acceptEdits < /dev/null
-rc=$?
+#
+# Output is teed rather than swallowed: the journal still gets everything, and
+# a copy goes to cti-budget so it can tell "the quota refused us" from "the
+# script broke". Those want opposite responses - wait vs fix - and the exit
+# code alone does not distinguish them.
+beat_log="$(mktemp "${TMPDIR:-/tmp}/cti-checkin.XXXXXX")"
+trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
+
+"$CLAUDE" -p "/checkin" --permission-mode acceptEdits < /dev/null 2>&1 | tee "$beat_log"
+rc="${PIPESTATUS[0]}"
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
+
+if [ -x "$BUDGET" ]; then
+  # Only beats that actually reached the model count against the ceilings.
+  # head -c bounds what a runaway transcript can push through argv.
+  "$BUDGET" record --exit "$rc" \
+    --output "$(tail -c 4000 "$beat_log" 2>/dev/null || true)" \
+    --note "checkin" >/dev/null 2>&1 || true
+fi
+
 exit "$rc"

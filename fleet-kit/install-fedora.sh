@@ -254,6 +254,14 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-alert" ./cmd/cti-alert )
   chmod 0755 "$CODE_DIR/bin/cti-alert"
   ok "built $CODE_DIR/bin/cti-alert"
+
+  # The quota governor. The heartbeat and its operator share one subscription,
+  # so the fleet rations itself rather than competing. run-checkin skips the
+  # gate if this is missing, which keeps an older install beating - but then
+  # nothing is stopping it, so build it here.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-budget" ./cmd/cti-budget )
+  chmod 0755 "$CODE_DIR/bin/cti-budget"
+  ok "built $CODE_DIR/bin/cti-budget"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -297,6 +305,7 @@ fi
 bold "Verification"
 FAIL=0
 for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
+         "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
@@ -345,6 +354,7 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent fleet-db recent
 #   cti-agent fleet-board tail 30
 #   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
+#   cti-agent cti-budget status
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -353,7 +363,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\

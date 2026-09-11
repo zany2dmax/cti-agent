@@ -30,6 +30,22 @@ install -m 750 "$SRC/fleet/bin/fleet-board"  "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/fleet-db"     "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/run-digest"   "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/run-checkin"  "$FLEET_HOME/bin/"
+# The Go helpers are optional on this path - this installer assumes a prebuilt
+# agent and does not compile anything. Copy them if they are lying next to the
+# kit, and say so plainly if they are not: run-checkin skips the budget gate
+# when cti-budget is absent, so an ungated heartbeat looks identical to a
+# governed one right up until it exhausts the operator's quota.
+for helper in cti-alert cti-budget; do
+  if [ -x "$SRC/$helper" ]; then
+    install -m 750 "$SRC/$helper" "$FLEET_HOME/bin/"
+    echo "  installed bin/$helper"
+  else
+    echo "  NOTE: $helper not found next to install.sh - build it with"
+    echo "        go build -o $helper ./cmd/$helper  and rerun, or the"
+    echo "        heartbeat runs with no quota ceiling and no failure alerts."
+  fi
+done
+
 install -m 750 "$SRC/fleet/lanes/enrich.py"  "$FLEET_HOME/lanes/"
 install -m 750 "$SRC/fleet/lanes/scout.py"   "$FLEET_HOME/lanes/"
 install -m 750 "$SRC/fleet/lanes/brief.py"   "$FLEET_HOME/lanes/"
