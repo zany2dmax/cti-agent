@@ -77,6 +77,16 @@ tasks:
     cmds:
       - go test ./internal/cti/ -v
 
+  test:budget:
+    desc: Quota ceilings, backoff growth, and rate-limit classification
+    cmds:
+      - go test ./internal/budget/ -v
+
+  budget:status:
+    desc: What the heartbeat's quota ledger would decide right now
+    cmds:
+      - go run ./cmd/cti-budget status
+
   test:lanes:
     desc: Python lanes - priority truth table, parsing, digest, mailer gate
     cmds:
