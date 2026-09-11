@@ -158,7 +158,7 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 
 | Handle | Script | Owns |
 |---|---|---|
-| `@ingest` | the Go agent, `cti-qualys-agent` | Read the CTI mailbox, extract CVEs, look them up in the configured scanner, write the markdown report |
+| `@ingest` | the Go agent, `cti-agent` | Read the CTI mailbox, extract CVEs, look them up in the configured scanner, write the markdown report |
 | `@enrich` | `~/fleet/lanes/enrich.py` | Add NVD CVSS, EPSS, CISA KEV; compute P1–P4 priority |
 | `@scout` | `~/fleet/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `~/fleet/lanes/brief.py` | Render the HTML digest from enriched findings |

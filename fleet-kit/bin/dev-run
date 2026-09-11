@@ -186,7 +186,7 @@ stage_ingest() {
   # no reason to be clever here.
   local bin="$FLEET_HOME/cti-agent-dev"
   info "building $(basename "$bin")..."
-  if ! ( cd "$REPO" && go build -o "$bin" ./cmd/cti-qualys-agent ); then
+  if ! ( cd "$REPO" && go build -o "$bin" ./cmd/cti-agent ); then
     bad "go build failed - fix the compile error above"
     return 1
   fi

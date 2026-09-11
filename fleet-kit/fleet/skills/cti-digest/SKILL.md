@@ -13,7 +13,7 @@ Full pipeline: ingest → enrich → brief → send. Default is `--daily`.
    CVEs, looks them up in the configured scanner, writes markdown.
    ```
    cd "$CTI_AGENT_DIR" && set -a && . ~/fleet/fleet.env && set +a && \
-     REPORT_PATH=~/fleet/reports/raw-$(date +%F).md ./cti-qualys-agent
+     REPORT_PATH=~/fleet/reports/raw-$(date +%F).md ./cti-agent
    ```
    If Graph auth fails, stop and post to the board — do not send a digest built
    on stale data without labeling it stale.

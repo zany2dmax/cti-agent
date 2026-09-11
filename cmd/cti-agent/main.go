@@ -7,14 +7,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yourorg/cti-qualys-agent/internal/config"
-	"github.com/yourorg/cti-qualys-agent/internal/cti"
-	"github.com/yourorg/cti-qualys-agent/internal/graph"
-	"github.com/yourorg/cti-qualys-agent/internal/report"
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup"
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/crowdstrike"
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/noop"
-	"github.com/yourorg/cti-qualys-agent/internal/vulnlookup/qualys"
+	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/cti"
+	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/report"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/crowdstrike"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/noop"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
 
 func main() {
