@@ -134,6 +134,52 @@ def graph_post(path, payload, tok, retries=3):
     return None
 
 
+def env_path():
+    """Where load_env() actually read from, for error messages.
+
+    Naming the resolved path matters on the Fedora layout, where config lives
+    in /etc/cti-agent and state in /var/lib/cti-agent - 'set it in fleet.env'
+    is ambiguous advice on a box with a plausible wrong answer.
+    """
+    return os.environ.get("FLEET_ENV") or os.path.join(FLEET_HOME, "fleet.env")
+
+
+# Settings the fleet cannot run without, and what each one is for. Kept here
+# rather than inline so preflight and the docs cannot drift apart.
+REQUIRED = [
+    ("TENANT_ID", "Entra tenant the app registration lives in"),
+    ("CLIENT_ID", "the app registration"),
+    ("CLIENT_SECRET", "its secret - check the expiry date too"),
+    ("GRAPH_MAILBOX", "mailbox the fleet reads and sends as"),
+    ("FLEET_OPERATOR_EMAIL", "where escalations and failure alerts go"),
+]
+OPTIONAL = [
+    ("DIGEST_TO", "digest recipients; without it every send needs --to"),
+    ("FLEET_ALLOW_TO", "recipient allowlist; falls back to DIGEST_TO"),
+    ("NVD_API_KEY", "without it NVD throttles to 5 requests/30s"),
+    ("CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"),
+]
+
+
+def preflight(mailbox):
+    """Report everything wrong at once, then test the token if we can."""
+    log(f"config: {env_path()}")
+    missing = [(k, why) for k, why in REQUIRED if not (os.environ.get(k) or "").strip()]
+    for k, why in REQUIRED:
+        log(f"  {'OK  ' if (os.environ.get(k) or '').strip() else 'UNSET'} {k:<22} {why}")
+    for k, why in OPTIONAL:
+        log(f"  {'OK  ' if (os.environ.get(k) or '').strip() else 'none '} {k:<22} {why}")
+
+    if missing:
+        log("")
+        log(f"{len(missing)} required setting(s) unset. Edit {env_path()}, then rerun.")
+        # Stop here deliberately: requesting a token without a tenant produces
+        # an Entra error that describes the wrong problem.
+        return 1
+
+    return check(token(), mailbox)
+
+
 def check(tok, mailbox):
     """Confirm the token carries Mail.Send before the 6am run depends on it."""
     import base64
@@ -216,11 +262,15 @@ def main():
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
 
-    if not args.from_mailbox:
-        die("GRAPH_MAILBOX is not set - set it in fleet.env or pass --from-mailbox")
-
     if args.check:
-        return check(token(), args.from_mailbox)
+        # Report every missing setting at once. Dying on the first one turns
+        # first-time configuration into a series of one-line errors, each
+        # needing another run to reveal the next.
+        return preflight(args.from_mailbox)
+
+    if not args.from_mailbox:
+        die("GRAPH_MAILBOX is not set in %s - set it there, or pass "
+            "--from-mailbox" % env_path())
     if bool(args.html) == bool(args.message):
         die("pass exactly one of --html (a rendered digest) or --message "
             "(a short escalation)")
