@@ -608,6 +608,202 @@ mailbox is a contained incident.
 
 ---
 
+## Configuration reference
+
+Every setting the fleet reads lives in one file. `fleet/fleet.env.example` is
+the authoritative copy, with the same notes as below inline — this section is
+for reading before you start, that file is for editing.
+
+| Where it lives | Mode |
+|---|---|
+| `install-fedora.sh` → `/etc/cti-agent/fleet.env` | `0640 root:ctiagent` |
+| `install.sh` → `$FLEET_HOME/fleet.env` | `0600 ctiagent` |
+
+**Check your work rather than discovering a gap one lane at a time:**
+
+```bash
+fleet mailer.py --check      # every required setting, its state, then the Graph token
+fleet cti-budget status      # the quota ceilings, as actually parsed
+```
+
+`mailer.py --check` reports *all* missing settings at once and names the
+resolved config path. Run it before anything else.
+
+**Syntax.** `KEY=value`, one per line, no `export`, no spaces around `=`.
+Values are read literally — don't quote unless the value contains a space. A
+later duplicate of a key wins, which is the failure mode when you paste a
+block onto the end of an existing file.
+
+### 1. Microsoft Graph — required
+
+An Entra app registration with **application** permissions `Mail.Read` and
+`Mail.Send`, both admin-consented. Delegated permissions cannot work: there's
+no signed-in user on a timer at 06:00.
+
+| Variable | Where to get it |
+|---|---|
+| `TENANT_ID` | Entra ID → App registrations → your app → Overview → Directory (tenant) ID |
+| `CLIENT_ID` | same page → Application (client) ID |
+| `CLIENT_SECRET` | Certificates & secrets → New client secret. Shown once. **Note the expiry** — when it lapses the error says authentication failed, not "your secret expired" |
+| `GRAPH_MAILBOX` | the shared mailbox to read and send as. No default |
+| `GRAPH_FOLDER` | folder display name as it appears in Outlook. Default `inbox` |
+| `GRAPH_LOOKBACK_HOURS` | how far back each ingest reads. Default `24` |
+| `CTI_REPLY_MAILBOX` | optional; where replies to fleet questions go. Defaults to `GRAPH_MAILBOX` |
+
+`GRAPH_MAILBOX` has no default on purpose. It used to fall back to a hardcoded
+address, which meant an unconfigured install read someone else's mailbox
+instead of refusing to start.
+
+If ingest reports 0 CVEs but the mailbox plainly has mail, check
+`GRAPH_FOLDER` first — a rule filing CTI email into a subfolder is the usual
+cause.
+
+### 2. Vulnerability scanner — required unless `LOOKUP_PROVIDER=none`
+
+| Variable | Notes |
+|---|---|
+| `LOOKUP_PROVIDER` | `qualys` or `none`. `none` makes every CVE `UNKNOWN` — useful for testing the mail path without scanner credentials |
+| `QUALYS_BASE_URL` | your **pod**, not the login page. See below |
+| `QUALYS_USERNAME` / `QUALYS_PASSWORD` | a read-only account with KnowledgeBase and Host Detection API access. It does not need scan-launch or admin rights |
+
+```
+US POD1  https://qualysapi.qualys.com
+US POD2  https://qualysapi.qg2.apps.qualys.com
+US POD3  https://qualysapi.qg3.apps.qualys.com
+US POD4  https://qualysapi.qg4.apps.qualys.com
+EU POD1  https://qualysapi.qualys.eu
+EU POD2  https://qualysapi.qg2.apps.qualys.eu
+```
+
+Get the pod wrong and it authenticates, returns nothing, and every CVE reads
+`NOT_PRESENT`. That is the most dangerous wrong answer this system can
+produce, so confirm it against the URL you use for the Qualys UI.
+
+### 3. Paths — the group that differs per machine
+
+**This is the one section you cannot copy between boxes.** Everything else is
+portable; these are not. A laptop's paths on a server fail several minutes
+into a run rather than at startup.
+
+| Variable | `install-fedora.sh` | `install.sh` |
+|---|---|---|
+| `FLEET_HOME` | `/var/lib/cti-agent` | `/home/ctiagent/fleet` |
+| `CTI_AGENT_DIR` | `/opt/cti-agent/agent` | `/home/ctiagent/cti-agent` |
+| `QUALYS_KB_CACHE` | `/var/lib/cti-agent/state/qualys_kb_cache.json` | `$FLEET_HOME/state/qualys_kb_cache.json` |
+| `REPORT_PATH` | `/var/lib/cti-agent/reports/raw-latest.md` | `$FLEET_HOME/reports/raw-latest.md` |
+| `FLEET_FEEDS` | `/etc/cti-agent/feeds.txt` | `$FLEET_HOME/lanes/feeds.txt` |
+| `QUALYS_KB_MAX_AGE_HOURS` | `168` — both | |
+
+`CTI_AGENT_DIR` is the one that bites. `run-digest` looks for
+`$CTI_AGENT_DIR/cti-agent` and falls back to `go run ./cmd/cti-agent`, which
+recompiles on every digest; wrong means slow at best and `CTI_AGENT_DIR not
+set or not found` at worst.
+
+Past `QUALYS_KB_MAX_AGE_HOURS` the agent tries an incremental refresh, then a
+full rebuild, and if both fail it uses the stale cache while marking every
+`UNKNOWN` as *coverage UNVERIFIED* rather than implying absence.
+
+`FLEET_CODE` and `FLEET_ENV` are set by systemd and by the `cti-agent`
+wrapper. Set them by hand only when invoking a lane directly with neither in
+play.
+
+### 4. Recipients and the send gate — required
+
+| Variable | Notes |
+|---|---|
+| `DIGEST_TO` | scheduled digest recipients, comma-separated |
+| `FLEET_ALLOW_TO` | **hard allowlist, enforced in code.** A send to any address not listed is refused even with `--approve`. Defaults to `DIGEST_TO` |
+| `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
+| `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
+
+`FLEET_ALLOW_TO` is the control that stops a confused or compromised agent
+mailing your findings somewhere else. Keep it as tight as the job allows.
+Mail to `FLEET_OPERATOR_EMAIL` is pre-approved and needs no gate — telling you
+something is broken is not an outward-facing send.
+
+### 5. Report content
+
+| Variable | Notes |
+|---|---|
+| `REPORT_HOSTNAMES` | `full`, `redact` or `count` |
+| `REPORT_REDACTION_SALT` | required for `redact` to mean anything |
+
+`full` is the default and the right choice for most teams: a finding nobody
+can locate is not a finding. Understand what it means, though — the digest
+becomes an inventory of vulnerable machines sitting in an inbox.
+
+`redact` produces stable, non-reversible `host-xxxxxxxx` pseudonyms. **With an
+empty salt they are trivially reversible** by anyone who can guess a hostname,
+so the report header says so when it's unset. Changing the salt changes every
+pseudonym and breaks continuity with older digests.
+
+### 6. Enrichment
+
+| Variable | Notes |
+|---|---|
+| `NVD_API_KEY` | free, from [nvd.nist.gov](https://nvd.nist.gov/developers/request-an-api-key). Without it NVD throttles to 5 req/30s, so a 50-CVE day spends ~5 minutes of the digest window. With it, 50 req/30s |
+| `FLEET_USER_AGENT` | what the enrich and scout lanes send to NVD, EPSS, CISA and your feeds. Some feeds block unrecognised agents, and naming yourself is courteous when polling someone's server six times a day |
+
+### 7. Claude Code — the heartbeat lane only
+
+The digest, weekly and scout lanes are stdlib Python and need none of this.
+**Only `run-checkin` calls `claude`, so an unset token costs you the heartbeat,
+never the morning email.**
+
+Set exactly one of these. `run-checkin` verifies before every beat rather than
+hanging on a prompt nobody can answer.
+
+| Variable | Bills against | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | metered tokens | From platform.claude.com. Revocable on its own without touching anyone's login. Pick this if you have Console access |
+| `CLAUDE_CODE_OAUTH_TOKEN` | a subscription seat | `claude setup-token` on any machine you're already logged into. **The only workable option on Fedora**, where `ctiagent` has no login shell. Expires in ~a year and the heartbeat stops dead when it does |
+| `ANTHROPIC_AUTH_TOKEN` | your gateway | For an LLM gateway or proxy fronting Claude |
+| *(none — log in as the account)* | a subscription seat | Needs a login shell, which the Fedora layout doesn't give it: `sudo -u ctiagent HOME=/var/lib/cti-agent claude` |
+
+`CLAUDE_BIN` pins the binary; blank auto-detects (`/usr/bin/claude` for
+dnf/apt/apk, `~/.local/bin/claude` for the native installer). `CLAUDE_CONFIG_DIR`
+moves credentials elsewhere — leave it blank, the default is already under
+`FLEET_HOME`.
+
+All the subscription options share a person's seat with an unattended process.
+The API key costs money instead. There is no option that avoids both.
+
+### 8. Quota ceilings
+
+Covered in full under [Rationing the quota](#rationing-the-quota).
+`FLEET_BUDGET_WINDOW_HOURS`, `FLEET_BUDGET_WINDOW_BEATS`,
+`FLEET_BUDGET_DAILY_BEATS`, `FLEET_BUDGET_BACKOFF_BASE_HOURS`,
+`FLEET_BUDGET_BACKOFF_MAX_HOURS`, `FLEET_BUDGET_FILE`.
+
+### Starting from an existing file
+
+If you populated `fleet.env` from the Go agent's own `.env`, it carries only
+the agent's variables — the fleet-specific ones won't be there at all. Check
+before debugging lane by lane:
+
+```bash
+diff <(sudo grep -oE '^[A-Z_]+=' /etc/cti-agent/fleet.env | sort -u) \
+     <(grep -oE '^[A-Z_]+=' fleet-kit/fleet/fleet.env.example | sort -u)
+```
+
+Lines marked `>` are settings the example defines and your file lacks. If
+there are more than a couple, start from the example and merge your secrets in
+rather than adding variables one failure at a time:
+
+```bash
+sudo cp /etc/cti-agent/fleet.env /etc/cti-agent/fleet.env.bak
+sudo cp fleet-kit/fleet/fleet.env.example /etc/cti-agent/fleet.env
+sudo chown root:ctiagent /etc/cti-agent/fleet.env
+sudo chmod 640 /etc/cti-agent/fleet.env
+sudo vi /etc/cti-agent/fleet.env     # paste secrets from the .bak, then delete it
+```
+
+`install-fedora.sh` validates the four path settings against the box on every
+run and prints the expected value for each. It does not rewrite them — mode
+and ownership are the installer's business, the contents are yours.
+
+---
+
 ## Autonomy — where the gates are
 
 The shipped default is **auto-send scheduled digests, gate everything else**,
