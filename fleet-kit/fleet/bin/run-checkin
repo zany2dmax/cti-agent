@@ -18,7 +18,16 @@ FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 # See run-digest: config may live outside FLEET_HOME on FHS layouts.
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
 FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+# See run-digest: `set -a` sourcing lets fleet.env overwrite the layout the
+# unit or wrapper injected. Preserve what was given to us.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+_inj_feeds="${FLEET_FEEDS:-}"
 set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ]  && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ]  && FLEET_CODE="$_inj_code"
+[ -n "$_inj_feeds" ] && FLEET_FEEDS="$_inj_feeds"
+export FLEET_HOME FLEET_CODE
 FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 
 # ── platform ────────────────────────────────────────────────────────────────
