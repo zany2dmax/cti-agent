@@ -217,7 +217,17 @@ done
 # ───────────────────────────────────────────────────────────── config ────────
 bold "Config"
 if [ -f "$CONF_DIR/fleet.env" ]; then
-  ok "$CONF_DIR/fleet.env exists, leaving it alone"
+  ok "$CONF_DIR/fleet.env exists, keeping its contents"
+  # Contents are the operator's; ownership and mode are this installer's job.
+  # A file staged by hand arrives owned by whoever ran the editor, often 0400,
+  # which root can still read - so nothing appears wrong until the service
+  # account tries and the verification step fails with no obvious cause.
+  # Correcting it here is safe: it changes no secret, only who may read one.
+  before="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env")"
+  run chown root:"$FLEET_GROUP" "$CONF_DIR/fleet.env"
+  run chmod 0640 "$CONF_DIR/fleet.env"
+  after="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo "$before")"
+  [ "$before" = "$after" ] || warn "corrected $before -> $after"
 else
   run install -m 0640 -o root -g "$FLEET_GROUP" \
       "$SRC/fleet/fleet.env.example" "$CONF_DIR/fleet.env"
@@ -320,12 +330,23 @@ if [ "$MODE" != dryrun ]; then
   if sudo -u "$FLEET_USER" test -r "$CONF_DIR/fleet.env"; then
     ok "$FLEET_USER can read fleet.env"
   else
-    bad "$FLEET_USER cannot read $CONF_DIR/fleet.env"; FAIL=1
+    envmode="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env")"
+    bad "$FLEET_USER cannot read $CONF_DIR/fleet.env (it is $envmode)"
+    info "root can read it regardless of the mode, which is why this is the"
+    info "first thing to notice. Fix:"
+    info "    sudo chown root:$FLEET_GROUP $CONF_DIR/fleet.env"
+    info "    sudo chmod 0640 $CONF_DIR/fleet.env"
+    FAIL=1
   fi
-  if [ "$(stat -c %a "$CONF_DIR/fleet.env")" -le 640 ]; then
-    ok "fleet.env is not world-readable"
+  # Test the world bits, not the number. The previous check compared an octal
+  # mode as a decimal integer, so 0604 - which grants world read - sorted below
+  # 640 and passed. Anything other than 0 in the last digit is a finding.
+  envmode="$(stat -c %a "$CONF_DIR/fleet.env")"
+  if [ "${envmode: -1}" = 0 ]; then
+    ok "fleet.env is not world-readable (mode $envmode)"
   else
-    bad "fleet.env is too permissive"; FAIL=1
+    bad "fleet.env is world-accessible (mode $envmode) - it holds the client secret"
+    FAIL=1
   fi
   for u in cti-agent-digest cti-agent-checkin cti-agent-scout cti-agent-weekly; do
     if systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | grep -q .; then
