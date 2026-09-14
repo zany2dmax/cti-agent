@@ -46,7 +46,7 @@ func main() {
 	// arrive titled FAILED and quoting a journal that shows the unit succeeded,
 	// which trains the reader to distrust the alerts that do matter.
 	kind := flag.String("kind", "FAILED",
-		"headline word: FAILED for a crash, HOLD for a deliberate stop")
+		"headline word: FAILED for a crash, HOLD for a deliberate stop. TEST is inferred when the named unit is healthy")
 	reason := flag.String("reason", "",
 		"one-line explanation shown above the systemd detail")
 	flag.Parse()
@@ -67,6 +67,21 @@ func main() {
 	f := gather(name)
 	f.Kind = strings.ToUpper(*kind)
 	f.Reason = *reason
+
+	// An alert whose subject unit is demonstrably healthy was started by hand,
+	// not by OnFailure=. Saying "failed (result=success exit=0)" in that case
+	// contradicts itself in the same sentence - and because the orchestrator
+	// reads the board every beat, it would open an incident for a failure that
+	// never happened. Testing the alert path must not manufacture the thing it
+	// is testing for.
+	if f.Kind == "FAILED" && f.ExitCode == "0" &&
+		(f.Result == "success" || f.Result == "" || f.Result == "unknown") {
+		f.Kind = "TEST"
+		if f.Reason == "" {
+			f.Reason = "manual test of the alert path - " + f.Unit +
+				" is healthy (result=success, exit=0). No action needed."
+		}
+	}
 	body := renderHTML(f)
 	subject := fmt.Sprintf("[CTI FLEET %s] %s on %s", f.Kind, f.Unit, f.Host)
 
@@ -107,8 +122,8 @@ type failure struct {
 	NRestarts string
 	Journal   string
 	IsDigest  bool   // the digest failing has a consequence the others do not
-	Kind      string // FAILED or HOLD - a crash and a deliberate stop read differently
-	Reason    string // set for a HOLD; empty for a crash, where the journal is the story
+	Kind      string // FAILED, HOLD or TEST - they must not look alike
+	Reason    string // set for HOLD and TEST; empty for a crash, where the journal is the story
 }
 
 func gather(unit string) failure {
@@ -176,6 +191,9 @@ func postToBoard(f failure) bool {
 	if f.isHold() {
 		level, msg = "INFO", fmt.Sprintf("%s is holding on %s at %s: %s",
 			f.Unit, f.Host, f.When, f.Reason)
+	} else if f.isTest() {
+		level, msg = "INFO", fmt.Sprintf("alert path tested against %s on %s at %s - %s is healthy, no incident",
+			f.Unit, f.Host, f.When, f.Unit)
 	}
 	if _, err := run(10*time.Second, board, "post", "@systemd", "@operator", level, msg); err != nil {
 		return false
@@ -219,7 +237,7 @@ func sendEmail(subject, htmlBody string, f failure) (string, error) {
 		// High importance is reserved for a broken digest. A hold is never
 		// urgent - flagging one would spend the signal that makes a real
 		// digest failure stand out.
-		HighImportance: f.IsDigest && !f.isHold(),
+		HighImportance: f.IsDigest && !f.notFailure(),
 	})
 }
 
@@ -283,7 +301,12 @@ func renderText(f failure) string {
 	verb := "failed"
 	reason := ""
 
-	if f.isHold() {
+	if f.isTest() {
+		verb = "alert path tested against"
+		consequence = "This is a test. The unit is healthy and nothing failed. " +
+			"Receiving this confirms the alert path works end to end: systemd " +
+			"started the alerter, it read the journal, and Graph delivered the mail."
+	} else if f.isHold() {
 		// A hold is the brake working. Saying so plainly is the difference
 		// between an operator who ignores it and one who goes looking for a
 		// crash that never happened.
@@ -325,6 +348,16 @@ Next steps on the box:
 // alarming rather than reassuring.
 func (f failure) isHold() bool { return f.Kind == "HOLD" }
 
+// isTest marks an alert triggered by hand against a healthy unit. Like a hold,
+// it is not a failure - so it must not be red, not be high importance, and not
+// land on the board as an ERROR the orchestrator will act on.
+func (f failure) isTest() bool { return f.Kind == "TEST" }
+
+// notFailure covers every kind that should be reported calmly. Anything not
+// explicitly listed is treated as a real failure, so an unrecognised --kind
+// errs toward alarming rather than reassuring.
+func (f failure) notFailure() bool { return f.isHold() || f.isTest() }
+
 func renderHTML(f failure) string {
 	consequence := "Check what this unit is responsible for before assuming it is harmless."
 	// Red for a crash, amber for a deliberate stop. If every fleet email is
@@ -332,7 +365,12 @@ func renderHTML(f failure) string {
 	banner, accent, tint := "CTI fleet failure", "#b3001b", "#fdecee"
 	verb, reasonRow := "failed", ""
 
-	if f.isHold() {
+	if f.isTest() {
+		banner, accent, tint = "CTI fleet alert test", "#1f6f43", "#e9f7ef"
+		verb = "alert path tested against"
+		consequence = "<b>This is a test.</b> The unit is healthy and nothing " +
+			"failed. Receiving this confirms the alert path works end to end."
+	} else if f.isHold() {
 		banner, accent, tint = "CTI fleet on hold", "#8a5a00", "#fff7e6"
 		verb = "is holding"
 		consequence = "<b>Nothing is broken.</b> The lane stopped itself and will " +
