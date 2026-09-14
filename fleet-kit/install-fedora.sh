@@ -311,6 +311,52 @@ else
   info "Paste the printed URL into a browser on your laptop and return the code."
 fi
 
+# Installed BEFORE verification, deliberately. Verification can fail - a
+# hand-staged fleet.env with the wrong ownership is the common case - and
+# the wrapper is the tool an operator needs to diagnose and re-check. When
+# it was written after the gate, a failed verification left the box with no
+# way to run a fleet command except by retyping four environment variables.
+
+# ───────────────────────────────────────────────────── convenience wrapper ───
+# Four environment variables is three too many to retype. This wrapper is the
+# single supported way to run a fleet command by hand on this layout.
+bold "Wrapper: /usr/local/bin/cti-agent"
+if [ "$MODE" != dryrun ]; then
+  cat > /usr/local/bin/cti-agent <<WRAP
+#!/usr/bin/env bash
+# cti-agent - run a fleet command by hand with the FHS paths already set.
+#
+#   cti-agent run-digest daily --dry-run
+#   cti-agent run-digest daily
+#   cti-agent run-checkin
+#   cti-agent mailer.py --check
+#   cti-agent fleet-db recent
+#   cti-agent fleet-board tail 30
+#   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
+#   cti-agent cti-budget status
+#
+# Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
+set -euo pipefail
+export FLEET_HOME=$STATE_DIR
+export FLEET_CODE=$CODE_DIR
+export FLEET_ENV=$CONF_DIR/fleet.env
+export FLEET_FEEDS=$CONF_DIR/feeds.txt
+export HOME=$STATE_DIR
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+shift
+case "\$cmd" in
+  *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
+              /usr/bin/python3 "$CODE_DIR/lanes/\$cmd" "\$@" ;;
+  *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
+              "$CODE_DIR/bin/\$cmd" "\$@" ;;
+esac
+WRAP
+  chmod 0755 /usr/local/bin/cti-agent
+  ok "installed - try: sudo cti-agent fleet-db recent"
+else
+  info "would write /usr/local/bin/cti-agent"
+fi
+
 # ────────────────────────────────────────────────────────── verification ─────
 bold "Verification"
 FAIL=0
@@ -357,48 +403,15 @@ if [ "$MODE" != dryrun ]; then
     fi
   done
 fi
-[ "$FAIL" = 0 ] || { bad "fix the above before enabling anything"; exit 1; }
-
-# ───────────────────────────────────────────────────── convenience wrapper ───
-# Four environment variables is three too many to retype. This wrapper is the
-# single supported way to run a fleet command by hand on this layout.
-bold "Wrapper: /usr/local/bin/cti-agent"
-if [ "$MODE" != dryrun ]; then
-  cat > /usr/local/bin/cti-agent <<WRAP
-#!/usr/bin/env bash
-# cti-agent - run a fleet command by hand with the FHS paths already set.
-#
-#   cti-agent run-digest daily --dry-run
-#   cti-agent run-digest daily
-#   cti-agent run-checkin
-#   cti-agent mailer.py --check
-#   cti-agent fleet-db recent
-#   cti-agent fleet-board tail 30
-#   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
-#   cti-agent cti-budget status
-#
-# Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
-set -euo pipefail
-export FLEET_HOME=$STATE_DIR
-export FLEET_CODE=$CODE_DIR
-export FLEET_ENV=$CONF_DIR/fleet.env
-export FLEET_FEEDS=$CONF_DIR/feeds.txt
-export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
-shift
-case "\$cmd" in
-  *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              /usr/bin/python3 "$CODE_DIR/lanes/\$cmd" "\$@" ;;
-  *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              "$CODE_DIR/bin/\$cmd" "\$@" ;;
-esac
-WRAP
-  chmod 0755 /usr/local/bin/cti-agent
-  ok "installed - try: sudo cti-agent fleet-db recent"
-else
-  info "would write /usr/local/bin/cti-agent"
+if [ "$FAIL" != 0 ]; then
+  bad "fix the above before enabling anything"
+  # The wrapper is already installed by this point, so say so: the natural
+  # next move after a failed verification is to inspect something, and
+  # discovering the tool is missing sends people hunting for a second bug.
+  info "sudo cti-agent <cmd> works already - the wrapper is installed."
+  info "Re-run this script after fixing; it is idempotent."
+  exit 1
 fi
-
 # ──────────────────────────────────────────────────────────── next steps ─────
 cat <<NEXT
 
