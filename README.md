@@ -6,7 +6,7 @@ The first implemented lookup provider is Qualys VMDR. The lookup layer is intent
 
 ## What it does
 
-1. Reads recent emails from `cybersecurity@crhomeusa.com` or another configured mailbox.
+1. Reads recent emails from a configured shared mailbox (`GRAPH_MAILBOX`).
 2. Extracts CVE IDs with regex.
 3. Sends each CVE to the configured lookup provider.
 4. Normalizes provider-specific evidence into a common result model.
@@ -150,7 +150,7 @@ task run
 | `TENANT_ID` | Entra tenant ID |
 | `CLIENT_ID` | App registration client ID |
 | `CLIENT_SECRET` | App registration client secret |
-| `GRAPH_MAILBOX` | Mailbox to read, e.g. `cybersecurity@crhomeusa.com` |
+| `GRAPH_MAILBOX` | Mailbox to read, e.g. `threatintel@example.com`. Required — there is no default |
 | `GRAPH_FOLDER` | Folder to read, default `inbox` |
 | `GRAPH_LOOKBACK_HOURS` | How far back to read messages |
 | `LOOKUP_PROVIDER` | `qualys`, `crowdstrike`, or `none`/`noop` (skip the scanner) |
@@ -256,7 +256,7 @@ After adding the permission in Microsoft Entra:
 TENANT_ID=<tenant-id>
 CLIENT_ID=<app-registration-client-id>
 CLIENT_SECRET=<client-secret>
-MAILBOX=cybersecurity@crhomeusa.com
+GRAPH_MAILBOX=<shared-mailbox-address>
 ```
 
 ### Authentication Flow
