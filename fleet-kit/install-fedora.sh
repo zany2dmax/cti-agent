@@ -228,6 +228,32 @@ if [ -f "$CONF_DIR/fleet.env" ]; then
   run chmod 0640 "$CONF_DIR/fleet.env"
   after="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo "$before")"
   [ "$before" = "$after" ] || warn "corrected $before -> $after"
+
+  # Path settings are layout, not secrets - and an existing fleet.env skips the
+  # rewrite below, so a file copied from a developer's laptop keeps that
+  # laptop's paths. run-digest then fails with "CTI_AGENT_DIR not found", which
+  # names the variable but not the reason. Validate and print the right value;
+  # do not rewrite, because the operator's file is theirs.
+  if [ "$MODE" != dryrun ]; then
+    pathfail=0
+    check_path() { # name expected
+      local cur; cur="$(grep -E "^$1=" "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2-)"
+      cur="${cur%\"}"; cur="${cur#\"}"
+      if [ -z "$cur" ]; then
+        warn "$1 is unset - should be $2"; pathfail=1
+      elif [ ! -e "$cur" ] && [ ! -d "$(dirname "$cur")" ]; then
+        bad "$1=$cur does not exist on this box"
+        info "expected: $2"; pathfail=1
+      else
+        ok "$1=$cur"
+      fi
+    }
+    check_path FLEET_HOME      "$STATE_DIR"
+    check_path CTI_AGENT_DIR   "$CODE_DIR/agent"
+    check_path QUALYS_KB_CACHE "$STATE_DIR/state/qualys_kb_cache.json"
+    check_path REPORT_PATH     "$STATE_DIR/reports/raw-latest.md"
+    [ "$pathfail" = 0 ] || warn "fix the paths above in $CONF_DIR/fleet.env"
+  fi
 else
   run install -m 0640 -o root -g "$FLEET_GROUP" \
       "$SRC/fleet/fleet.env.example" "$CONF_DIR/fleet.env"
