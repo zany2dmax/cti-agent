@@ -23,12 +23,16 @@ Group=ctiagent
 StateDirectory=cti-agent
 StateDirectoryMode=0750
 WorkingDirectory=/var/lib/cti-agent
+# EnvironmentFile FIRST, then Environment=. systemd applies these in
+# written order and the last assignment wins, so with the file last a
+# stale FLEET_HOME in fleet.env silently replaced the layout this unit
+# specifies. The unit owns the layout; fleet.env owns the settings.
+EnvironmentFile=/etc/cti-agent/fleet.env
 Environment=HOME=/var/lib/cti-agent
 Environment=FLEET_HOME=/var/lib/cti-agent
 Environment=FLEET_CODE=/opt/cti-agent
 Environment=FLEET_ENV=/etc/cti-agent/fleet.env
 Environment=FLEET_FEEDS=/etc/cti-agent/feeds.txt
-EnvironmentFile=/etc/cti-agent/fleet.env
 
 ExecStart=/opt/cti-agent/bin/run-digest daily
 TimeoutStartSec=3600

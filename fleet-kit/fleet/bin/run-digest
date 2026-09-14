@@ -19,8 +19,20 @@ FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 # /var/lib/cti-agent. Each has its own override and defaults to FLEET_HOME.
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
 FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+# Layout variables belong to whoever launched us - the systemd unit or the
+# cti-agent wrapper - not to fleet.env. Sourcing with `set -a` assigns
+# unconditionally, so a stale FLEET_HOME in the config file silently replaced
+# the correct one and the pipeline then tried to write under a path it does
+# not own. Remember what was injected, source, then put it back.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+_inj_feeds="${FLEET_FEEDS:-}"
 set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
-# fleet.env may itself set FLEET_CODE, so re-resolve after sourcing.
+[ -n "$_inj_home" ]  && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ]  && FLEET_CODE="$_inj_code"
+[ -n "$_inj_feeds" ] && FLEET_FEEDS="$_inj_feeds"
+export FLEET_HOME FLEET_CODE
+# Only reachable when nothing injected one and fleet.env did not set one.
 FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 
 DAY=$(date +%F)
