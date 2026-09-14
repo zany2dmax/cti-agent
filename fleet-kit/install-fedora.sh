@@ -324,6 +324,29 @@ done
 run systemctl daemon-reload
 ok "daemon-reload"
 
+# ───────────────────────────────────────────────────────── SELinux labels ────
+# The FHS layout was chosen so the default policy already permits everything,
+# and it does - but only for files that carry the label their location implies.
+# A fleet.env staged in a home directory and moved into /etc keeps its
+# original context, because mv preserves labels. systemd then refuses to read
+# it with "Failed to load environment files: Permission denied", as PID 1,
+# as root - which reads like an impossible error and sends you looking at
+# file modes that are already correct.
+#
+# The manual path hides this completely: the cti-agent wrapper uses
+# sudo -u ctiagent, which is plain DAC and never involves init_t. So the
+# pipeline works by hand and every timer fails.
+if [ "$SEMODE" = Enforcing ] || [ "$SEMODE" = Permissive ]; then
+  bold "SELinux labels"
+  if command -v restorecon >/dev/null; then
+    run restorecon -RF "$CONF_DIR" "$CODE_DIR" "$STATE_DIR"
+    run restorecon -F "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
+    ok "relabelled config, code, state and units to policy defaults"
+  else
+    warn "restorecon not found - install policycoreutils to relabel"
+  fi
+fi
+
 # ─────────────────────────────────────────────────────────── Claude Code ─────
 bold "Claude Code"
 CLAUDE_BIN=""
@@ -416,6 +439,21 @@ if [ "$MODE" != dryrun ]; then
     bad "$FLEET_USER cannot write $STATE_DIR"; FAIL=1
   fi
   # And that it can read the secret but not the world.
+  # Prove SYSTEMD can read the env file, not just the service account. Those
+  # are different subjects under SELinux: ctiagent reading it is DAC only,
+  # while systemd reads it as init_t and a mislabelled file denies only the
+  # latter. Testing the easy one and shipping is how a box passes install and
+  # then fails every timer.
+  if [ "$MODE" != dryrun ] && command -v matchpathcon >/dev/null 2>&1; then
+    if matchpathcon -V "$CONF_DIR/fleet.env" >/dev/null 2>&1; then
+      ok "fleet.env SELinux label matches policy"
+    else
+      bad "fleet.env has the wrong SELinux label - systemd will be denied"
+      info "$(matchpathcon -V "$CONF_DIR/fleet.env" 2>&1 | head -1)"
+      info "fix: sudo restorecon -RFv $CONF_DIR"
+      FAIL=1
+    fi
+  fi
   if sudo -u "$FLEET_USER" test -r "$CONF_DIR/fleet.env"; then
     ok "$FLEET_USER can read fleet.env"
   else
