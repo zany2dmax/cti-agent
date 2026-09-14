@@ -1061,9 +1061,43 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediat
 | Board not growing | Stale lock | `sudo rmdir $FLEET_HOME/.board.lock` (auto-breaks after 60s) |
 | Scout finds nothing | Feeds 404'd | Fedora: `journalctl -u cti-agent-scout`. Generic: `logs/scout.log`. Either way it names the failed feeds — a dead feed is a blind spot that looks like good news |
 | Command not found on Fedora | Used the generic paths | The FHS layout has no `/home/ctiagent`. Use `sudo cti-agent <cmd>` |
+| Works by hand, every timer fails | SELinux label, not permissions | `sudo restorecon -RFv /etc/cti-agent /opt/cti-agent /var/lib/cti-agent`. See below |
+| `Failed to load environment files: Permission denied` | Same — systemd reads `fleet.env` as `init_t` | `ls -Z /etc/cti-agent/fleet.env` should be `etc_t`. `restorecon` fixes it |
 | Heartbeat skipping, unit shows success | Quota ceiling or cooldown — working as designed | `fleet cti-budget status` gives the reason and when it resumes. Raise `FLEET_BUDGET_WINDOW_BEATS` to give the fleet more of your quota |
 | *You* got rate-limited, not the fleet | The fleet's slice is too large for how you work | Lower `FLEET_BUDGET_DAILY_BEATS`, or widen the timer past 2h. The fleet cannot see your usage, so this is tuned by hand |
 | Holds emailed repeatedly for one outage | `AlertedFor` state lost with the ledger | Expected after deleting `budget.json`. One email per distinct cooldown otherwise |
+
+
+### When it works by hand but every timer fails
+
+This one is worth understanding because the error is actively misleading:
+
+```
+cti-agent-digest.service: Failed to load environment files: Permission denied
+```
+
+That is systemd, as PID 1, as root, being refused a file whose mode and
+ownership are correct. Root is not subject to file modes, so the cause is
+SELinux: a `fleet.env` staged in a home directory and moved into `/etc` keeps
+its original label, because `mv` preserves context. `init_t` cannot read a
+home-directory label, and the unit fails before `ExecStart` with
+`Result: resources` — so the service's own journal is empty.
+
+The manual path hides it completely. `sudo cti-agent …` runs `sudo -u
+ctiagent`, which is plain DAC and never involves `init_t`. So the pipeline
+works perfectly by hand and every scheduled run fails, including the alert
+unit that exists to tell you about failures.
+
+```bash
+ls -Z /etc/cti-agent/fleet.env                  # want etc_t
+sudo ausearch -m avc -ts recent
+sudo restorecon -RFv /etc/cti-agent /opt/cti-agent /var/lib/cti-agent
+```
+
+`install-fedora.sh` now relabels on every run and fails verification if
+`fleet.env` does not match policy, so a fresh install cannot land in this
+state. Copying a file into `/etc` by hand afterwards still can — use
+`install` or `cp` rather than `mv`, or run `restorecon` after.
 
 `$FLEET_HOME` above is `/var/lib/cti-agent` on Fedora and `/home/ctiagent/fleet`
 on the generic layout. The lock files live in state, not code, so they follow
