@@ -15,6 +15,12 @@ EnvironmentFile=/etc/cti-agent/fleet.env
 ExecStart=/opt/cti-agent/bin/cti-alert --unit %i
 TimeoutStartSec=120
 
+# cti-alert quotes the last 40 journal lines, which is the most useful part
+# of the email. Reading them needs membership of systemd-journal: without
+# it journalctl exits 1 and every alert arrives saying 'journal
+# unavailable', which looks like a second failure on top of the first.
+SupplementaryGroups=systemd-journal
+
 NoNewPrivileges=true
 PrivateTmp=true
 StandardOutput=journal
