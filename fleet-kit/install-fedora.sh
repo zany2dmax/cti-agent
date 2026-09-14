@@ -445,6 +445,32 @@ if [ "$MODE" != dryrun ]; then
       ok "$u.service verifies"
     fi
   done
+
+  # The alert template was never verified, because a template needs an
+  # instance name before systemd will resolve it. That omission is why a unit
+  # which could not start at all passed every install: the one unit whose job
+  # is to report failure was the one unit nobody checked.
+  if systemd-analyze verify 'cti-agent-alert@verify.service' 2>&1 | grep -q .; then
+    bad "cti-agent-alert@.service does not verify:"
+    systemd-analyze verify 'cti-agent-alert@verify.service' 2>&1 | sed 's/^/      /'
+    FAIL=1
+  else
+    ok "cti-agent-alert@.service verifies"
+  fi
+
+  # SupplementaryGroups names a group that must exist, and systemd fails the
+  # whole unit with "Result: resources" when it does not - before ExecStart,
+  # so nothing appears in the service's own log.
+  for g in $(grep -h '^SupplementaryGroups=' "$UNIT_DIR"/cti-agent-*.service 2>/dev/null \
+             | cut -d= -f2 | tr ' ' '\n' | sort -u); do
+    if getent group "$g" >/dev/null; then
+      ok "group $g exists"
+    else
+      bad "group $g does not exist - units referencing it cannot start"
+      info "remove the SupplementaryGroups line, or create the group"
+      FAIL=1
+    fi
+  done
 fi
 if [ "$FAIL" != 0 ]; then
   bad "fix the above before enabling anything"
