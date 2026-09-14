@@ -7,11 +7,15 @@ Description=Alert the operator that %i failed
 Type=oneshot
 User=ctiagent
 Group=ctiagent
+# EnvironmentFile FIRST, then Environment=. systemd applies these in
+# written order and the last assignment wins, so with the file last a
+# stale FLEET_HOME in fleet.env silently replaced the layout this unit
+# specifies. The unit owns the layout; fleet.env owns the settings.
+EnvironmentFile=/etc/cti-agent/fleet.env
 Environment=HOME=/var/lib/cti-agent
 Environment=FLEET_HOME=/var/lib/cti-agent
 Environment=FLEET_CODE=/opt/cti-agent
 Environment=FLEET_ENV=/etc/cti-agent/fleet.env
-EnvironmentFile=/etc/cti-agent/fleet.env
 ExecStart=/opt/cti-agent/bin/cti-alert --unit %i
 TimeoutStartSec=120
 
