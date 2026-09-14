@@ -41,7 +41,12 @@ func Load() (Config, error) {
 		TenantID:          os.Getenv("TENANT_ID"),
 		ClientID:          os.Getenv("CLIENT_ID"),
 		ClientSecret:      os.Getenv("CLIENT_SECRET"),
-		GraphMailbox:      getenvDefault("GRAPH_MAILBOX", "cybersecurity@crhomeusa.com"),
+		// No default. A hardcoded address here shipped one organisation's
+		// internal distribution list as the fallback for everyone else's
+		// deployment, and an unconfigured install read that mailbox instead
+		// of refusing to start. Same rule as the mailer: never guess an
+		// address, fail and say which variable is missing.
+		GraphMailbox:      os.Getenv("GRAPH_MAILBOX"),
 		GraphFolder:       getenvDefault("GRAPH_FOLDER", "inbox"),
 		GraphLookback:     time.Duration(lookbackHours) * time.Hour,
 		LookupProvider:    getenvDefault("LOOKUP_PROVIDER", "qualys"),
@@ -50,7 +55,7 @@ func Load() (Config, error) {
 		QualysPassword:    os.Getenv("QUALYS_PASSWORD"),
 		QualysKBCachePath: getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
 		QualysKBMaxAge:    time.Duration(kbMaxAgeHours) * time.Hour,
-		ReportPath:        getenvDefault("REPORT_PATH", "./cti-qualys-report.md"),
+		ReportPath:        getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
 	}
 
 	missing := []string{}
@@ -58,6 +63,7 @@ func Load() (Config, error) {
 		"TENANT_ID":     cfg.TenantID,
 		"CLIENT_ID":     cfg.ClientID,
 		"CLIENT_SECRET": cfg.ClientSecret,
+		"GRAPH_MAILBOX": cfg.GraphMailbox,
 	} {
 		if value == "" {
 			missing = append(missing, name)
