@@ -82,6 +82,23 @@ tasks:
     cmds:
       - go test ./internal/budget/ -v
 
+  test:kev:
+    desc: KEV deadline bands, sign convention, and present-only filtering
+    cmds:
+      - go test ./internal/kev/ -v
+
+  kev:
+    desc: CISA KEV remediation deadlines for what is actually in the estate
+    cmds:
+      - |
+        # Newest by filename: the names carry an ISO date, so lexical order is
+        # chronological and a file touched by a backup does not become "newest".
+        enriched=$(ls {{.FLEET_LOCAL}}/state/enriched-*.json 2>/dev/null | sort | tail -1)
+        if [ -z "$enriched" ]; then
+          echo "no enriched file yet - run: task dev:enrich"; exit 1
+        fi
+        go run ./cmd/cti-kev --enriched "$enriched" --hosts
+
   budget:status:
     desc: What the heartbeat's quota ledger would decide right now
     cmds:
@@ -147,12 +164,14 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build both binaries (agent + failure alerter)
+    desc: Build all four binaries (agent, alerter, quota ledger, KEV report)
     deps: [tidy]
     cmds:
       - mkdir -p bin
       - go build -o bin/{{.BINARY_NAME}} {{.SOURCE_NAME}}
       - go build -o bin/cti-alert ./cmd/cti-alert
+      - go build -o bin/cti-budget ./cmd/cti-budget
+      - go build -o bin/cti-kev ./cmd/cti-kev
 
   run:
     desc: Run the agent locally using environment variables
