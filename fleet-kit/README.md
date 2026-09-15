@@ -940,6 +940,47 @@ All timers are `Persistent=true`, so a digest missed because the box was down
 fires on boot. A silently skipped digest reads as "no news," which is the worst
 possible failure for a system like this.
 
+### Timezones — the trap
+
+`OnCalendar=` uses the **system** timezone, and servers are conventionally UTC.
+A digest timed for `06:00` therefore arrives at **02:00 US Eastern**: six hours
+stale by the time anyone reads it, which defeats the point of a morning digest.
+This kit shipped that way, and it only surfaced once a real timer fired.
+
+Set `FLEET_TIMEZONE` in `fleet.env` and `install-fedora.sh` writes systemd
+drop-ins pinning the two human-facing timers to it:
+
+```bash
+FLEET_TIMEZONE=America/New_York
+FLEET_DIGEST_TIME=06:00:00
+FLEET_WEEKLY_TIME=07:00:00
+```
+
+Use an IANA name, not an offset — systemd handles DST, whereas `11:00 UTC`
+drifts an hour every winter. `timedatectl list-timezones` lists valid values,
+and the installer fails rather than installing an unknown one.
+
+Only the digest and weekly are pinned. The heartbeat every 2h and the scout
+every 4h do not care what a clock on a wall says.
+
+Drop-ins rather than edited units, deliberately: an upgrade reinstalls the
+units and would silently revert an edit. To do it by hand:
+
+```bash
+sudo mkdir -p /etc/systemd/system/cti-agent-digest.timer.d
+sudo tee /etc/systemd/system/cti-agent-digest.timer.d/timezone.conf >/dev/null <<'EOF'
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 06:00:00 America/New_York
+EOF
+sudo systemctl daemon-reload
+systemctl list-timers cti-agent-digest.timer
+```
+
+The bare `OnCalendar=` is required. It is a **list**, so a drop-in that omits
+the reset *adds* a schedule rather than replacing it, and the digest sends
+twice.
+
 ---
 
 ## What lands in the inbox
