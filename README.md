@@ -17,22 +17,52 @@ Presence should be determined only by the lookup provider. CTI email text provid
 ## Project layout
 
 ```text
-cmd/cti-agent/          CLI entrypoint
+cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
+cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
+cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
+cmd/cti-kev/                   CISA KEV remediation deadline report
 internal/config/               environment/config loading
 internal/cti/                  CTI parsing and CVE extraction
-internal/graph/                Microsoft Graph mailbox reader
+internal/graph/                Microsoft Graph mailbox reader and sendMail
+internal/budget/               rolling-window and daily ceilings, backoff
+internal/kev/                  deadline bands, present-only filtering
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for future CrowdStrike implementation
-internal/vulnlookup/noop	For testing the CVE extraction and not calling a VM provider API
+internal/vulnlookup/noop       For testing the CVE extraction and not calling a VM provider API
 internal/report/               markdown report writer
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, fleet-board, fleet-db
-fleet-kit/fleet/systemd/       service + timer pairs for the server
+fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
+fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep
+fleet-kit/fleet/systemd/       service + timer pairs, generic layout
+fleet-kit/fleet/systemd-fedora/ same, FHS layout for Fedora/RHEL
+fleet-kit/install.sh           generic installer, everything under one directory
+fleet-kit/install-fedora.sh    FHS installer: /opt, /etc, /var/lib
 fleet-kit/tests/               lane tests (stdlib unittest, no network)
 scripts/                       history scrub + exposure remediation notes
+```
+
+### The four binaries
+
+| Binary | Run by | Purpose |
+|---|---|---|
+| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown |
+| `cti-alert` | systemd `OnFailure=` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
+| `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
+| `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found in the estate |
+
+All four are stdlib-only. `go.mod` has no dependencies, and adding one would
+make a C toolchain or a large generated tree a build-time requirement on the
+deployment host.
+
+```bash
+task build        # all four into bin/
+task test         # Go tests + Python lane tests
+task test:kev     # deadline logic
+task test:budget  # quota ceilings and backoff
 ```
 
 ## Lookup provider boundary
