@@ -33,9 +33,25 @@ def esc(v):
 def subject(data, kind):
     c = data["counts"]
     day = datetime.now().strftime("%b %d")
+    kev = data.get("kev_deadlines") or {}
+    overdue = kev.get("overdue") or 0
+    # The deadline rides along; it does not displace the priority. P1 means
+    # actively exploited and present, which outranks a published date on
+    # something less severe - and a subject line that leads with OVERDUE while
+    # a P1 sits unmentioned buries the more urgent fact.
+    tail = ""
+    if overdue:
+        tail = (f" — {overdue} KEV deadline{'s' if overdue != 1 else ''} OVERDUE")
+
     if c["P1"]:
         return (f"[P1] CTI {day}: {c['P1']} exploited vuln"
-                f"{'s' if c['P1'] != 1 else ''} present in the environment")
+                f"{'s' if c['P1'] != 1 else ''} present in the environment{tail}")
+    if overdue:
+        # No P1, but something is past a federal due date - still worth the
+        # prefix, because it is the most actionable thing in the mail.
+        return (f"[OVERDUE] CTI {day}: {overdue} CISA KEV deadline"
+                f"{'s' if overdue != 1 else ''} passed, worst by "
+                f"{kev.get('worst_overdue_days', 0)}d")
     if c["P2"]:
         return f"CTI {day}: {c['P2']} confirmed present, no P1"
     if data["total"] == 0:
@@ -197,6 +213,37 @@ def render(data, kind):
           {esc(', '.join(data['degraded']))}. Priorities below may understate risk.
         </div></td></tr>"""
 
+    # KEV deadlines. One band, above the priority tiles, and only when there is
+    # something to act on - a banner that says "nothing overdue" every morning
+    # is a banner nobody reads by Thursday.
+    kevd = data.get("kev_deadlines") or {}
+    kev_banner = ""
+    if kevd.get("overdue"):
+        _cves = ", ".join(kevd.get("overdue_cves", [])[:6])
+        _more = len(kevd.get("overdue_cves", [])) - 6
+        kev_banner = f"""
+      <tr><td style="padding:0 0 14px 0">
+        <div style="background:#fff5f5;border:1px solid #c53030;border-radius:4px;
+                    padding:10px 12px;font:400 13px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
+                    color:#742a2a">
+          <b>{kevd['overdue']} CISA KEV remediation deadline{
+              's' if kevd['overdue'] != 1 else ''} passed</b>
+          &mdash; worst by {kevd.get('worst_overdue_days', 0)} days.
+          These are present in the environment and past a published federal
+          due date: {esc(_cves)}{f' +{_more} more' if _more > 0 else ''}.
+        </div></td></tr>"""
+    elif kevd.get("due_within_14d"):
+        kev_banner = f"""
+      <tr><td style="padding:0 0 14px 0">
+        <div style="background:#fffaf0;border:1px solid #dd6b20;border-radius:4px;
+                    padding:10px 12px;font:400 13px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
+                    color:#7b341e">
+          {kevd['due_within_14d']} CISA KEV deadline{
+              's' if kevd['due_within_14d'] != 1 else ''} fall due within 14 days
+          on vulnerabilities present here.
+        </div></td></tr>"""
+    degraded += kev_banner
+
     tiles = "".join(
         f"""<td width="25%" align="center" style="background:{PRI[p][1]};
               border-top:3px solid {PRI[p][0]};padding:10px 4px">
@@ -283,6 +330,13 @@ def render_text(data, kind):
                  f"   (total {data['total']})")
     if data.get("degraded"):
         lines += ["", f"DEGRADED - unavailable this run: {', '.join(data['degraded'])}"]
+    kev = data.get("kev_deadlines") or {}
+    if kev.get("overdue") or kev.get("due_within_14d"):
+        lines += ["", f"CISA KEV: {kev.get('overdue', 0)} OVERDUE"
+                      f" (worst by {kev.get('worst_overdue_days', 0)}d),"
+                      f" {kev.get('due_within_14d', 0)} due within 14d"]
+        if kev.get("overdue_cves"):
+            lines.append(f"  overdue: {', '.join(kev['overdue_cves'][:8])}")
     lines.append("")
     for p in ("P1", "P2", "P3", "P4"):
         group = [f for f in data["findings"] if f["priority"] == p]

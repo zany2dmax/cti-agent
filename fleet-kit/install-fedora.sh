@@ -311,6 +311,12 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-budget" ./cmd/cti-budget )
   chmod 0755 "$CODE_DIR/bin/cti-budget"
   ok "built $CODE_DIR/bin/cti-budget"
+
+  # KEV deadline reporting. Reads the enrich lane's output; no credentials and
+  # no network of its own, so it cannot fail in a way that affects the digest.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-kev" ./cmd/cti-kev )
+  chmod 0755 "$CODE_DIR/bin/cti-kev"
+  ok "built $CODE_DIR/bin/cti-kev"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -396,6 +402,7 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent fleet-board tail 30
 #   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
 #   cti-agent cti-budget status
+#   cti-agent cti-kev --horizon 30
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -404,7 +411,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|cti-kev|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
@@ -427,7 +434,7 @@ bold "Verification"
 FAIL="${PATHFAIL:-0}"
 [ "$FAIL" = 0 ] || bad "config paths above must be fixed"
 for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
-         "$CODE_DIR/bin/cti-budget" \
+         "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

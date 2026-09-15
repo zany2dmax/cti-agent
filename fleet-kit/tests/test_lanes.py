@@ -10,6 +10,7 @@ human sees - priority assignment, report parsing, digest rendering, and the
 mailer's autonomy gate.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
@@ -391,6 +392,156 @@ class MailerGate(unittest.TestCase):
         body = mailer.escalation_html("<script>alert(1)</script>", None)
         self.assertNotIn("<script>", body)
         self.assertIn("&lt;script&gt;", body)
+
+
+class KevDeadlines(unittest.TestCase):
+    """CISA publishes a due date with every KEV entry. It is the only date in
+    this system that somebody outside the company set, which makes it the most
+    useful one in a patching argument - and the easiest to misuse."""
+
+    TODAY = datetime.date(2026, 9, 15)
+
+    def days(self, due):
+        return enrich.kev_days_left({"kev_due": due}, self.TODAY)
+
+    def test_sign_convention(self):
+        self.assertEqual(self.days("2026-09-01"), -14, "past dates are negative")
+        self.assertEqual(self.days("2026-09-15"), 0, "today is zero")
+        self.assertEqual(self.days("2026-09-20"), 5, "future dates are positive")
+
+    def test_absent_is_not_zero(self):
+        # "No deadline" and "due today" are opposite facts. Collapsing them
+        # into 0 would report every non-KEV finding as due today.
+        for due in ("", "   ", None, "not-a-date", "2026-13-45"):
+            self.assertIsNone(self.days(due), f"{due!r} should have no deadline")
+
+    def test_rationale_states_the_deadline_only_when_present(self):
+        overdue = {"status": "PRESENT", "host_count": 3, "kev": 1,
+                   "kev_due": "2026-09-01"}
+        _, why = enrich.prioritize(overdue, self.TODAY)
+        self.assertIn("PASSED 14d ago", why)
+
+        # The same deadline on something not in the estate is not an
+        # obligation, and saying "OVERDUE" about it teaches people to
+        # discount the word.
+        elsewhere = {"status": "NOT_PRESENT", "host_count": 0, "kev": 1,
+                     "kev_due": "2026-09-01"}
+        _, why = enrich.prioritize(elsewhere, self.TODAY)
+        self.assertNotIn("PASSED", why)
+        self.assertIn("not detected here", why)
+
+    def test_due_today_is_not_reported_as_overdue(self):
+        f = {"status": "PRESENT", "host_count": 1, "kev": 1, "kev_due": "2026-09-15"}
+        _, why = enrich.prioritize(f, self.TODAY)
+        self.assertIn("TODAY", why)
+        self.assertNotIn("PASSED", why)
+
+    def test_deadline_does_not_change_the_priority(self):
+        # A deadline is an obligation about a risk, not a change to it. If it
+        # moved findings between bands, the same CVE would be P1 one week and
+        # P2 the next with nothing about the environment having changed.
+        base = {"status": "PRESENT", "host_count": 1, "kev": 1}
+        for due in (None, "2026-09-01", "2026-09-15", "2027-01-01"):
+            f = dict(base)
+            if due:
+                f["kev_due"] = due
+            p, _ = enrich.prioritize(f, self.TODAY)
+            self.assertEqual(p, "P1", f"due={due} changed the band")
+
+    def test_host_count_still_outranks_lateness(self):
+        # The regression guard. An earlier cut sorted by lateness first, which
+        # pushed a 40-host P1 below a 4-host P1 - the same inversion as the
+        # CVSS-gated P2 bug this scoring exists to prevent.
+        stub_enrichment()
+        tmp = tempfile.TemporaryDirectory()
+        raw = os.path.join(tmp.name, "raw.md")
+        out = os.path.join(tmp.name, "enriched.json")
+        with open(raw, "w") as f:
+            f.write(REPORT)
+        sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
+        with quiet():
+            enrich.main()
+        with open(out) as fh:
+            data = json.load(fh)
+        tmp.cleanup()
+
+        order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+        keys = [(order[f["priority"]], -(f.get("host_count") or 0))
+                for f in data["findings"]]
+        self.assertEqual(keys, sorted(keys),
+                         "lateness must not reorder ahead of blast radius")
+
+    def test_summary_counts_only_what_is_present(self):
+        rows = [
+            {"cve": "A", "status": "PRESENT", "host_count": 2,
+             "kev_days_left": -5, "ransomware": "Known"},
+            {"cve": "B", "status": "PRESENT", "host_count": 1, "kev_days_left": 3},
+            {"cve": "C", "status": "PRESENT", "host_count": 1, "kev_days_left": 90},
+            {"cve": "D", "status": "NOT_PRESENT", "host_count": 0,
+             "kev_days_left": -100, "ransomware": "Known"},
+            {"cve": "E", "status": "UNKNOWN", "host_count": 0, "kev_days_left": -7},
+            {"cve": "F", "status": "PRESENT", "host_count": 5, "kev_days_left": None},
+        ]
+        s = enrich.kev_summary(rows)
+        self.assertEqual(s["overdue"], 1, "only A is overdue and present")
+        self.assertEqual(s["overdue_cves"], ["A"])
+        self.assertEqual(s["due_within_14d"], 1)
+        self.assertEqual(s["worst_overdue_days"], 5)
+        self.assertEqual(s["ransomware_present"], 1, "D is not in the estate")
+
+    def test_empty_summary_is_all_zeroes_not_an_error(self):
+        s = enrich.kev_summary([])
+        self.assertEqual(s["overdue"], 0)
+        self.assertEqual(s["worst_overdue_days"], 0)
+        self.assertEqual(s["overdue_cves"], [])
+
+
+class KevInTheDigest(unittest.TestCase):
+    def data(self, kev, p1=1):
+        return {"counts": {"P1": p1, "P2": 2, "P3": 0, "P4": 0}, "total": 3,
+                "degraded": [], "source_meta": {}, "generated": "2026-09-15T06:00:00Z",
+                "kev_deadlines": kev,
+                "findings": [{"cve": "CVE-2026-1", "priority": "P1",
+                              "status": "PRESENT", "host_count": 12,
+                              "rationale": "present", "sample_hosts": "a",
+                              "qids": "1"}]}
+
+    def test_p1_still_leads_the_subject(self):
+        # An overdue deadline on a P2 is less urgent than a P1. A subject that
+        # led with OVERDUE would bury the more urgent fact.
+        s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
+                                     "overdue_cves": ["X", "Y"]}), "daily")
+        self.assertTrue(s.startswith("[P1]"), s)
+        self.assertIn("OVERDUE", s, "the deadline should still ride along")
+
+    def test_overdue_leads_when_there_is_no_p1(self):
+        s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
+                                     "overdue_cves": ["X", "Y"]}, p1=0), "daily")
+        self.assertTrue(s.startswith("[OVERDUE]"), s)
+
+    def test_no_banner_when_nothing_is_due(self):
+        # A banner that says "nothing overdue" every morning is a banner
+        # nobody reads by Thursday.
+        html = brief.render(self.data({"overdue": 0, "due_within_14d": 0}), "daily")
+        self.assertNotIn("remediation deadline", html)
+        self.assertNotIn("fall due within", html)
+
+    def test_banners_coexist_with_the_degraded_notice(self):
+        d = self.data({"overdue": 1, "worst_overdue_days": 4, "overdue_cves": ["X"]})
+        d["degraded"] = ["KEV catalog"]
+        html = brief.render(d, "daily")
+        self.assertIn("DEGRADED", html)
+        self.assertIn("remediation deadline", html)
+        self.assertEqual(html.count("<div"), html.count("</div>"))
+
+    def test_missing_summary_key_does_not_break_rendering(self):
+        # Older enriched files predate kev_deadlines. The digest must still
+        # render rather than failing the whole 6am run over a new field.
+        d = self.data({})
+        del d["kev_deadlines"]
+        self.assertTrue(brief.render(d, "daily"))
+        self.assertTrue(brief.render_text(d, "daily"))
+        self.assertTrue(brief.subject(d, "daily"))
 
 
 if __name__ == "__main__":

@@ -143,6 +143,8 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:all` | `dev-run all` | doctor → ingest → enrich → brief, opens the digest | no |
 | `task dev:report` | — | Show the latest report and priority counts | no |
 | `task dev:clean` | — | Wipe `.fleet-local/` | no |
+| `task kev` | `cti-kev` | CISA KEV deadlines for findings present in the estate | no |
+| `task test:kev` | — | Deadline bands, sign convention, present-only filtering | no |
 
 ### Failure alerting
 
@@ -801,6 +803,56 @@ sudo vi /etc/cti-agent/fleet.env     # paste secrets from the .bak, then delete 
 `install-fedora.sh` validates the four path settings against the box on every
 run and prints the expected value for each. It does not rewrite them — mode
 and ownership are the installer's business, the contents are yours.
+
+---
+
+## CISA KEV remediation deadlines
+
+Every KEV entry carries a `dueDate` set by CISA under BOD 22-01. The enrich
+lane already downloaded the whole catalogue to get the known-exploited flag, so
+the deadline was sitting in the enriched JSON unused. It is now the only date in
+this system that somebody outside the company set — which makes it far more
+durable in a patching argument than an internal opinion about severity, and the
+one line item a non-technical reader can act on without translation.
+
+```bash
+fleet cti-kev                    # newest enriched file, markdown
+fleet cti-kev --horizon 30       # widen the "due soon" window from 14 days
+fleet cti-kev --hosts            # include sample hostnames
+fleet cti-kev --json             # for scripting
+fleet cti-kev --quiet            # silent when nothing is overdue or due soon
+```
+
+**Everything is restricted to findings the scanner actually found here.** A
+deadline on a CVE you do not run is not an obligation. Counting those inflates
+the number, and the first time someone checks one and finds it irrelevant the
+whole section stops being read — which costs more than it ever gained. CVEs
+with deadlines that are `NOT_PRESENT` or `UNKNOWN` are reported as separate
+counts, never mixed into the overdue list.
+
+Three deliberate choices:
+
+**The deadline does not change the priority.** A due date is an obligation
+about a risk, not a change to the risk. If it moved findings between bands, the
+same CVE would be P1 one week and P2 the next with nothing about your
+environment having changed.
+
+**Host count still outranks lateness in the digest.** An earlier cut sorted by
+lateness first, which pushed a 40-host P1 below a 4-host P1 — the same
+inversion as the CVSS-gated P2 bug this scoring exists to prevent. Blast radius
+is the risk; lateness breaks ties after it. `cti-kev` orders by lateness
+instead, because that is where compliance questions get answered.
+
+**Due today is not overdue.** The day is not over. Comparison is by calendar
+date, not wall clock, so "due today" does not flip to overdue at noon.
+
+The digest gains a red banner and a subject-line suffix when something is past
+due, and nothing at all when nothing is. A banner that reports "nothing
+overdue" every morning is a banner nobody reads by Thursday.
+
+`UNKNOWN` findings with a deadline get their own line, because they are the
+genuinely uncomfortable case: a published federal due date on something you
+could not check coverage for is not a clean result, it means you did not look.
 
 ---
 
