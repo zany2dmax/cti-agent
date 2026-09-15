@@ -314,5 +314,5 @@ GRAPH_MAILBOX=<shared-mailbox-address>
 ## Feature Requests
 
 - Add other VM providers as needed
-- Email the final report back to a distruction list
+- Email the final report back to a distribution list
 - Package this up as a docker container for easy deployment and maintainability
