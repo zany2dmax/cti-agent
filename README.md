@@ -14,6 +14,18 @@ The first implemented lookup provider is Qualys VMDR. The lookup layer is intent
 
 Presence should be determined only by the lookup provider. CTI email text provides urgency/context, not proof that a vulnerability exists in the environment.
 
+## The design pattern
+
+If you want to understand *why* this is shaped the way it is — what an
+orchestrator, executor lanes, a heartbeat, a message board and persistent
+memory each contribute, and how they compose into something that does a job
+rather than runs a task — read
+**[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md)**.
+
+The pattern originates with [Build Your Own Claude Code Agent
+Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet)
+by Limited Edition Jonathan. This repository applies it to threat intel.
+
 ## Project layout
 
 ```text
