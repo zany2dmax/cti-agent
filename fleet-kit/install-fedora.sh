@@ -330,6 +330,73 @@ done
 run systemctl daemon-reload
 ok "daemon-reload"
 
+# ──────────────────────────────────────────────────── schedule timezone ──────
+# OnCalendar= uses the SYSTEM timezone, and servers are conventionally UTC. A
+# digest timed for 06:00 then lands at 02:00 for an operator on US Eastern -
+# six hours stale by the time anyone reads it, which defeats the point of a
+# morning digest. This was shipped that way and only surfaced once a real
+# timer fired.
+#
+# Drop-ins rather than editing the units, so an upgrade that reinstalls the
+# units does not silently revert the schedule.
+# Own flag, not FAIL: this block runs before Verification, which initialises
+# FAIL from PATHFAIL and would overwrite anything set here. Setting FAIL early
+# looked correct and silently did nothing.
+TZFAIL=0
+FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"
+if [ -r "$CONF_DIR/fleet.env" ]; then
+  FLEET_TZ="$(grep -E '^FLEET_TIMEZONE=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+  _dt="$(grep -E '^FLEET_DIGEST_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+  _wt="$(grep -E '^FLEET_WEEKLY_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+  [ -n "$_dt" ] && DIGEST_AT="$_dt"
+  [ -n "$_wt" ] && WEEKLY_AT="$_wt"
+fi
+
+if [ -n "$FLEET_TZ" ]; then
+  bold "Schedule timezone: $FLEET_TZ"
+  if [ ! -e "/usr/share/zoneinfo/$FLEET_TZ" ]; then
+    bad "$FLEET_TZ is not a known timezone"
+    info "list them:  timedatectl list-timezones"
+    TZFAIL=1
+  else
+    # The bare OnCalendar= is required: it is a LIST, so without clearing it
+    # first the drop-in ADDS a schedule and the digest sends twice.
+    for pair in "cti-agent-digest.timer:*-*-* $DIGEST_AT" \
+                "cti-agent-weekly.timer:Mon *-*-* $WEEKLY_AT"; do
+      unit="${pair%%:*}"; cal="${pair#*:}"
+      if [ "$MODE" != dryrun ]; then
+        install -d -m 0755 "$UNIT_DIR/$unit.d"
+        cat > "$UNIT_DIR/$unit.d/timezone.conf" <<DROPIN
+# Written by install-fedora.sh from FLEET_TIMEZONE in fleet.env.
+# The empty OnCalendar= clears the inherited schedule; OnCalendar is a list,
+# and appending without clearing would run the job twice.
+[Timer]
+OnCalendar=
+OnCalendar=$cal $FLEET_TZ
+DROPIN
+        ok "$unit -> $cal $FLEET_TZ"
+      else
+        info "would pin $unit to $cal $FLEET_TZ"
+      fi
+    done
+    run systemctl daemon-reload
+    if [ "$MODE" != dryrun ]; then
+      # Prove the schedule parses and show the resolved next run, so a typo in
+      # the time does not wait until tomorrow to reveal itself.
+      if systemd-analyze calendar "*-*-* $DIGEST_AT $FLEET_TZ" >/dev/null 2>&1; then
+        ok "next digest: $(systemd-analyze calendar "*-*-* $DIGEST_AT $FLEET_TZ" \
+             2>/dev/null | awk -F': +' '/Next elapse/{print $2}')"
+      else
+        bad "FLEET_DIGEST_TIME=$DIGEST_AT is not a valid time"; TZFAIL=1
+      fi
+    fi
+  fi
+else
+  info "FLEET_TIMEZONE unset - timers use the system timezone ($(date +%Z))"
+  info "On a UTC server a 06:00 digest arrives at 02:00 US Eastern. Set"
+  info "FLEET_TIMEZONE in $CONF_DIR/fleet.env to pin it to local time."
+fi
+
 # ───────────────────────────────────────────────────────── SELinux labels ────
 # The FHS layout was chosen so the default policy already permits everything,
 # and it does - but only for files that carry the label their location implies.
@@ -431,8 +498,9 @@ bold "Verification"
 # A path that cannot work is not a warning. The previous run reported three
 # wrong paths, printed "Installed", and the next command failed on the first
 # of them - so the install said success about a box that could not run.
-FAIL="${PATHFAIL:-0}"
-[ "$FAIL" = 0 ] || bad "config paths above must be fixed"
+FAIL=0
+[ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
+[ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
          "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
