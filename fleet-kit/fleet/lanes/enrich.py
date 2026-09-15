@@ -249,6 +249,52 @@ def fetch_epss(cves):
     return out
 
 
+def kev_days_left(f, today=None):
+    """Days until the CISA KEV remediation deadline; negative means overdue.
+
+    CISA publishes a dueDate with every KEV entry under BOD 22-01. Federal
+    agencies are bound by it; everyone else gets a published, defensible date
+    that someone else set - which is far more useful in a patching argument
+    than an internal opinion about severity.
+
+    Returns None when there is no date to compare, rather than guessing zero:
+    "no deadline" and "due today" are opposite facts.
+    """
+    raw = (f.get("kev_due") or "").strip()
+    if not raw:
+        return None
+    try:
+        due = datetime.strptime(raw[:10], "%Y-%m-%d").date()
+    except ValueError:
+        # CISA has been consistent about ISO dates, but a malformed one must
+        # not take down enrichment for every other finding.
+        return None
+    return (due - (today or datetime.now(timezone.utc).date())).days
+
+
+def kev_summary(rows):
+    """Deadline rollup over findings that are actually in the estate.
+
+    Every count here is restricted to PRESENT, because a deadline on a CVE we
+    do not run is not an obligation. Reporting those inflates the number and
+    the first time someone checks one and finds it irrelevant, the whole
+    section stops being read.
+    """
+    present = [f for f in rows
+               if f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0
+               and f.get("kev_days_left") is not None]
+    overdue = [f for f in present if f["kev_days_left"] < 0]
+    soon = [f for f in present if 0 <= f["kev_days_left"] <= 14]
+    return {
+        "overdue": len(overdue),
+        "due_within_14d": len(soon),
+        "worst_overdue_days": max((-f["kev_days_left"] for f in overdue), default=0),
+        "ransomware_present": sum(
+            1 for f in present if str(f.get("ransomware", "")).lower() == "known"),
+        "overdue_cves": [f["cve"] for f in overdue],
+    }
+
+
 def fetch_kev():
     """Bulk KEV catalog. NVD already flags KEV membership, but the catalog is
     the only place with the remediation due date and ransomware association."""
@@ -278,7 +324,7 @@ def fetch_kev():
 
 # -------------------------------------------------------------------- scoring
 
-def prioritize(f):
+def prioritize(f, today=None):
     """Combine exploitability with presence.
 
     The whole point: a 10.0 CVSS on software we do not run is noise, and a 6.5
@@ -304,9 +350,27 @@ def prioritize(f):
     hot = kev or epss >= 0.10
     very_hot = kev or epss >= 0.50
 
+    days = kev_days_left(f, today)
+    f["kev_days_left"] = days
+
     why = []
     if kev:
-        why.append("on CISA KEV")
+        # The deadline only means anything for something we actually have.
+        # "Overdue" on a CVE that is not in the estate is noise, and the kind
+        # of noise that makes people stop reading deadline language entirely.
+        if days is not None and present:
+            if days < 0:
+                why.append(f"CISA KEV deadline PASSED {-days}d ago ({f['kev_due']})")
+            elif days == 0:
+                why.append(f"CISA KEV deadline is TODAY ({f['kev_due']})")
+            elif days <= 14:
+                why.append(f"CISA KEV due in {days}d ({f['kev_due']})")
+            else:
+                why.append(f"on CISA KEV, due {f['kev_due']}")
+        elif days is not None:
+            why.append(f"on CISA KEV (due {f['kev_due']}, not detected here)")
+        else:
+            why.append("on CISA KEV")
     if epss >= 0.50:
         why.append(f"EPSS {epss:.0%} - exploitation likely")
     elif epss >= 0.10:
@@ -391,9 +455,29 @@ def main():
         f["priority"], f["rationale"] = prioritize(f)
 
     order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
-    rows = sorted(findings.values(),
-                  key=lambda f: (order[f["priority"]], -(f.get("host_count") or 0),
-                                 -(f.get("epss") or 0), f["cve"]))
+
+    def rank(f):
+        """Sort within a priority band.
+
+        Host count stays the primary tiebreaker. An earlier cut of this put
+        overdue-ness first, which pushed a 40-host P1 below a 4-host P1 - the
+        same inversion as the CVSS-gated P2 bug this scoring exists to fix.
+        Blast radius is the risk; a deadline is an obligation about that risk,
+        and an obligation does not make a small exposure into a big one.
+
+        Lateness breaks ties *after* host count, so two equally widespread
+        findings are separated by which one someone external can ask about.
+        The deadline still leads the digest subject and its own banner, and
+        cti-kev orders by lateness - the compliance view lives where
+        compliance questions get answered.
+        """
+        present = f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0
+        days = f.get("kev_days_left")
+        overdue = 0 if (days is None or not present or days >= 0) else -days
+        return (order[f["priority"]], -(f.get("host_count") or 0), -overdue,
+                -(f.get("epss") or 0), f["cve"])
+
+    rows = sorted(findings.values(), key=rank)
 
     counts = {p: sum(1 for f in rows if f["priority"] == p) for p in ("P1", "P2", "P3", "P4")}
     result = {
@@ -402,6 +486,9 @@ def main():
         "counts": counts,
         "total": len(rows),
         "degraded": degraded,
+        # Deadline summary, computed once here so the digest, the weekly and
+        # cti-kev all report the same numbers rather than each deriving them.
+        "kev_deadlines": kev_summary(rows),
         "findings": rows,
     }
 
