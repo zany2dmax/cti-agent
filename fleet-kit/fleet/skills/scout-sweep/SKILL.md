@@ -8,15 +8,15 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 Runs every 4 hours. The mailbox is reactive — this lane is how you find things
 before a vendor newsletter gets around to telling you.
 
-1. `python3 ~/fleet/lanes/scout.py --out ~/fleet/state/scout-$(date +%F).json`
-   Polls the feeds in `~/fleet/lanes/feeds.txt`, extracts CVEs, dedupes against
+1. `python3 $FLEET_CODE/lanes/scout.py --out $FLEET_HOME/state/scout-$(date +%F).json`
+   Polls the feeds in `$FLEET_FEEDS`, extracts CVEs, dedupes against
    `scout_items` in memory so you only surface genuinely new IDs.
 
 2. Take the new CVE IDs and run them through the same lookup path the mailbox
    CVEs take, so presence is still decided by the scanner and nothing else:
    ```
-   python3 ~/fleet/lanes/enrich.py --cves CVE-2026-1234,CVE-2026-5678 \
-     --out ~/fleet/state/scout-enriched-$(date +%F).json
+   python3 $FLEET_CODE/lanes/enrich.py --cves CVE-2026-1234,CVE-2026-5678 \
+     --out $FLEET_HOME/state/scout-enriched-$(date +%F).json
    ```
 
 3. Anything that lands P1 or P2 goes on the board immediately so it makes the
