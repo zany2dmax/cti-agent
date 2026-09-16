@@ -76,7 +76,30 @@ func redactHosts(hosts []string, mode, salt string) string {
 	}
 }
 
+// Scan describes what the mailbox pass actually did. It exists because the
+// report used to print a single "Emails inspected: 14", which readers
+// reasonably took to mean fourteen emails carried new CVE information. It
+// meant neither: it was every message in the lookback window, whether or not
+// it mentioned a CVE, and the window is purely time-based so the same messages
+// are re-read on every run.
+//
+// Three numbers instead of one, because the difference between them is the
+// interesting part - 40 emails yielding 2 CVEs and 3 emails yielding 21 are
+// very different days.
+type Scan struct {
+	Messages     int // every message Graph returned in the window
+	WithCVEs     int // how many of those actually mentioned a CVE
+	CVEsFound    int // distinct CVE IDs extracted
+	Truncated    bool // set if the provider capped results (should not happen; we paginate)
+}
+
+// Compat wrapper for callers that only have a message count.
 func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int, provider string, results []vulnlookup.Result) error {
+	return WriteMarkdownScan(path, mailbox, since,
+		Scan{Messages: emailCount, CVEsFound: len(results)}, provider, results)
+}
+
+func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, provider string, results []vulnlookup.Result) error {
 	mode := hostMode()
 	salt := os.Getenv("REPORT_REDACTION_SALT")
 
@@ -84,10 +107,23 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 	b.WriteString("# CTI / CVE Daily Report\n\n")
 	fmt.Fprintf(&b, "- Mailbox: `%s`\n", mailbox)
 	fmt.Fprintf(&b, "- Lookback since: `%s`\n", since.Format(time.RFC3339))
-	fmt.Fprintf(&b, "- Emails inspected: `%d`\n", emailCount)
+	// Label each number for what it is. "Emails inspected" alone invited the
+	// reading that all of them carried CVEs, and that every run saw fresh mail.
+	fmt.Fprintf(&b, "- Emails in window: `%d` (all mail received since the lookback time)\n",
+		scan.Messages)
+	fmt.Fprintf(&b, "- Emails mentioning a CVE: `%d`\n", scan.WithCVEs)
+	fmt.Fprintf(&b, "- Distinct CVEs extracted: `%d`\n", scan.CVEsFound)
 	fmt.Fprintf(&b, "- Lookup provider: `%s`\n", provider)
 	fmt.Fprintf(&b, "- Generated: `%s`\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&b, "- Hostname disclosure: `%s`\n\n", mode)
+
+	// Say plainly that this is a window, not a novelty feed. Whether a CVE is
+	// new is decided downstream against first_seen in the findings database;
+	// this pass has no memory and cannot know.
+	b.WriteString("> The lookback is a time window, so a CVE that is still being\n")
+	b.WriteString("> discussed appears in every run until it falls out of the window.\n")
+	b.WriteString("> \"New since last run\" is determined by the enrich lane against\n")
+	b.WriteString("> `first_seen` in the findings database, not here.\n\n")
 
 	switch mode {
 	case hostsFull:
