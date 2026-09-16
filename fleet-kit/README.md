@@ -93,7 +93,7 @@ environment**:
 | | Definition | What it means |
 |---|---|---|
 | **P1** | `PRESENT` with hosts > 0 **and** (on CISA KEV **or** EPSS ≥ 10%) | Being exploited right now, and you have it. Today. |
-| **P2** | `PRESENT` with hosts > 0, any severity — or `UNKNOWN` on something with KEV / EPSS ≥ 50% | You have it, or you can't prove you don't. This patch cycle. |
+| **P2** | `PRESENT` with hosts > 0, any severity — or `UNKNOWN` on something with KEV / EPSS ≥ 50% | You have it, or you can't prove you don't. This patch cycle. **The band is mixed, and the digest says which rows are which.** |
 | **P3** | Exploited or EPSS ≥ 10% but not detected — or `UNKNOWN` with CVSS ≥ 9.0 | Verify scan coverage actually reaches it. |
 | **P4** | Everything else | Awareness. Suppressed from the daily; appears in the weekly. |
 
@@ -714,9 +714,33 @@ play.
 | Variable | Notes |
 |---|---|
 | `DIGEST_TO` | scheduled digest recipients, comma-separated |
-| `FLEET_ALLOW_TO` | **hard allowlist, enforced in code.** A send to any address not listed is refused even with `--approve`. Defaults to `DIGEST_TO` |
+| `DIGEST_CC` | additional recipients on CC, comma-separated. For individuals who should see the digest but are not the DL |
+| `FLEET_ALLOW_TO` | **hard allowlist, enforced in code, covering To *and* Cc.** A send to any address not listed is refused. Defaults to `DIGEST_TO` only — so a `DIGEST_CC` address must be added here too |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
+
+### Adding recipients
+
+`DIGEST_TO` is comma-separated, so more addresses need no code — but put
+individuals on `DIGEST_CC` rather than `DIGEST_TO`. A distribution list plus
+four names on the To line reads as a mail to five parties and invites
+reply-all.
+
+```bash
+DIGEST_TO=soc@example.com
+DIGEST_CC=alice@example.com,bob@example.com
+FLEET_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com,you@example.com
+```
+
+**The allowlist covers Cc as well as To.** It has to: a Cc is still a delivery,
+and exempting it would make the one control that stops a mis-send trivially
+bypassable. The `FLEET_ALLOW_TO` fallback only covers `DIGEST_TO`, so a Cc
+added without updating the allowlist is **refused**, not silently delivered.
+That is the right direction to fail, but it does mean two edits.
+
+A Cc that duplicates a To recipient is dropped rather than delivered twice.
+Operator escalations are never Cc'd — a question addressed to one person
+should not become a thread.
 
 `FLEET_ALLOW_TO` is the control that stops a confused or compromised agent
 mailing your findings somewhere else. Keep it as tight as the job allows.

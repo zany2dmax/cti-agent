@@ -394,6 +394,142 @@ class MailerGate(unittest.TestCase):
         self.assertIn("&lt;script&gt;", body)
 
 
+class BandLabelsDoNotOverclaim(unittest.TestCase):
+    """P2 and P3 each hold two kinds of finding. The band heading must not
+    assert presence the scanner never confirmed - the digest previously printed
+    "Present in the environment" directly above rows whose own status read
+    UNKNOWN."""
+
+    def data(self, findings, **counts):
+        c = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
+        c.update(counts)
+        return {"counts": c, "total": len(findings), "degraded": [],
+                "source_meta": {}, "generated": "g", "kev_deadlines": {},
+                "findings": findings}
+
+    def unknown(self, cve, pri="P2"):
+        return {"cve": cve, "priority": pri, "status": "UNKNOWN", "host_count": 0,
+                "rationale": "No Qualys KnowledgeBase CVE-to-QID mapping found",
+                "sample_hosts": "", "qids": ""}
+
+    def present(self, cve, hosts=3, pri="P2"):
+        return {"cve": cve, "priority": pri, "status": "PRESENT",
+                "host_count": hosts, "rationale": f"PRESENT on {hosts} host(s)",
+                "sample_hosts": "h1", "qids": "1"}
+
+    def test_p2_heading_never_claims_bare_presence(self):
+        self.assertNotIn("Present in the environment", brief.PRI["P2"][2])
+        self.assertIn("unverified", brief.PRI["P2"][2].lower())
+
+    def test_all_unknown_p2_gets_no_presence_claim_anywhere(self):
+        # The reported bug: two P2 rows, both UNKNOWN, under a header saying
+        # they were present.
+        d = self.data([self.unknown("CVE-1"), self.unknown("CVE-2")], P2=2)
+        html = brief.render(d, "daily")
+        self.assertNotIn("Present in the environment", html)
+        self.assertIn("coverage could not be established", html)
+
+    def test_mixed_band_explains_itself(self):
+        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+        html = brief.render(d, "daily")
+        self.assertIn("not a confirmed exposure", html)
+
+    def test_all_present_band_carries_no_caveat(self):
+        # A caveat on a band that does not need one is noise, and noise is how
+        # a caveat stops being read when it matters.
+        d = self.data([self.present("CVE-1"), self.present("CVE-2")], P2=2)
+        html = brief.render(d, "daily")
+        self.assertNotIn("not a confirmed exposure", html)
+
+    def test_subject_counts_confirmed_presence_not_band_size(self):
+        # "3 confirmed present" was printed from the P2 count, which can be
+        # entirely UNKNOWN.
+        d = self.data([self.unknown("CVE-1"), self.unknown("CVE-2")], P2=2)
+        s = brief.subject(d, "daily")
+        self.assertNotIn("confirmed present, no P1", s.replace("0 confirmed present", ""))
+        self.assertIn("could not check", s)
+
+        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+        s = brief.subject(d, "daily")
+        self.assertIn("1 confirmed present", s)
+        self.assertIn("1 unverified", s)
+
+    def test_text_digest_carries_the_same_caveat(self):
+        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+        txt = brief.render_text(d, "daily")
+        self.assertIn("unverified coverage", txt)
+        self.assertIn("not that we are clean", txt)
+
+
+class MailerCc(unittest.TestCase):
+    """CC exists so individuals can receive the digest without appearing on a
+    distribution list's To line. It is still a delivery, so the allowlist
+    covers it."""
+
+    def env(self, **extra):
+        e = {"TENANT_ID": "t", "CLIENT_ID": "c", "CLIENT_SECRET": "s",
+             "GRAPH_MAILBOX": "cti@example.com",
+             "FLEET_OPERATOR_EMAIL": "op@example.com",
+             "DIGEST_TO": "dl@example.com"}
+        e.update(extra)
+        return e
+
+    def run_mailer(self, env, *argv):
+        tmp = tempfile.TemporaryDirectory()
+        html = os.path.join(tmp.name, "d.html")
+        with open(html, "w") as f:
+            f.write("<html>x</html>")
+        old = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(env, FLEET_HOME=tmp.name,
+                          FLEET_ENV=os.path.join(tmp.name, "absent.env"))
+        sys.argv = ["mailer.py", "--html", html, "--subject", "S",
+                    "--dry-run", *argv]
+        out = io.StringIO()
+        code = 0
+        try:
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                mailer.main()
+        except SystemExit as e:
+            code = e.code or 0
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+            tmp.cleanup()
+        return code, out.getvalue()
+
+    def test_cc_outside_the_allowlist_is_refused(self):
+        code, _ = self.run_mailer(self.env(), "--cc", "outsider@example.com")
+        self.assertNotEqual(code, 0,
+                            "an unapproved CC must be refused, not delivered")
+
+    def test_cc_on_the_allowlist_is_sent(self):
+        code, out = self.run_mailer(
+            self.env(FLEET_ALLOW_TO="dl@example.com,ok@example.com"),
+            "--cc", "ok@example.com")
+        self.assertEqual(code, 0)
+        self.assertIn("ok@example.com", json.loads(out)["cc"])
+
+    def test_cc_duplicating_a_to_recipient_is_dropped(self):
+        code, out = self.run_mailer(self.env(), "--cc", "dl@example.com")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["cc"], [],
+                         "a CC that is already a To recipient would deliver twice")
+
+    def test_digest_cc_env_var_is_honoured(self):
+        code, out = self.run_mailer(self.env(
+            DIGEST_CC="ok@example.com",
+            FLEET_ALLOW_TO="dl@example.com,ok@example.com"))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["cc"], ["ok@example.com"])
+
+    def test_invalid_cc_address_is_refused(self):
+        code, _ = self.run_mailer(
+            self.env(FLEET_ALLOW_TO="dl@example.com,notanemail"), "--cc", "notanemail")
+        self.assertNotEqual(code, 0)
+
+
 class KevDeadlines(unittest.TestCase):
     """CISA publishes a due date with every KEV entry. It is the only date in
     this system that somebody outside the company set, which makes it the most

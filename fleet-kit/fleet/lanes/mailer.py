@@ -18,6 +18,7 @@ Usage:
             --message "CVE-2026-1234 is on KEV and present on 305 hosts." \
             --board-id q17
   mailer.py --html d.html --to someone@example.com --require-approval
+  mailer.py --html d.html --cc a@example.com,b@example.com
   mailer.py --html d.html --dry-run                       # render + validate only
   mailer.py --check                                       # verify token + Mail.Send
 
@@ -25,6 +26,7 @@ Environment (from ~/fleet/fleet.env):
   TENANT_ID CLIENT_ID CLIENT_SECRET
   GRAPH_MAILBOX         mailbox that sends as (required)
   DIGEST_TO             digest recipients, comma-separated (required)
+  DIGEST_CC             additional recipients on CC, comma-separated (optional)
   FLEET_OPERATOR_EMAIL  where --to-operator escalations go
   CTI_REPLY_MAILBOX     mailbox the operator replies to; defaults to GRAPH_MAILBOX
   FLEET_ALLOW_TO        allowlist; anything else needs --approve.
@@ -155,7 +157,8 @@ REQUIRED = [
 ]
 OPTIONAL = [
     ("DIGEST_TO", "digest recipients; without it every send needs --to"),
-    ("FLEET_ALLOW_TO", "recipient allowlist; falls back to DIGEST_TO"),
+    ("DIGEST_CC", "extra recipients on CC; also gated by FLEET_ALLOW_TO"),
+    ("FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"),
     ("NVD_API_KEY", "without it NVD throttles to 5 requests/30s"),
     ("CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"),
 ]
@@ -245,6 +248,8 @@ def main():
     ap.add_argument("--text", help="plain-text alternative (logged, Graph sends one body)")
     ap.add_argument("--subject")
     ap.add_argument("--to", help="comma-separated; defaults to DIGEST_TO")
+    ap.add_argument("--cc", help="comma-separated; defaults to DIGEST_CC. Subject "
+                                 "to the same FLEET_ALLOW_TO gate as --to")
     ap.add_argument("--to-operator", action="store_true",
                     help="send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the "
                          "operator something is not an outward-facing send.")
@@ -292,9 +297,23 @@ def main():
         die("no recipients - set DIGEST_TO in fleet.env or pass --to. "
             "There is no default; the fleet will not guess who receives "
             "security findings.")
-    for r in recipients:
+
+    # CC. Individuals who should see the digest but are not the distribution
+    # list itself belong here rather than on the To line - a DL plus four
+    # names in To reads as a mail to five parties and invites reply-all.
+    # Escalations to the operator are never CC'd: a question addressed to one
+    # person should not be a thread.
+    cc_raw = "" if args.to_operator else (args.cc or os.environ.get("DIGEST_CC") or "")
+    cc = [r.strip() for r in cc_raw.split(",") if r.strip()]
+
+    for r in recipients + cc:
         if not EMAIL_RE.match(r):
             die(f"{r!r} is not a valid address")
+
+    # A CC that is already a To recipient is a duplicate delivery, and Graph
+    # will happily send both.
+    seen = {r.lower() for r in recipients}
+    cc = [r for r in cc if r.lower() not in seen]
 
     # Autonomy gate. Scheduled digests to the allowlisted DL are pre-approved,
     # and so are escalations to the operator's own address - the orchestrator
@@ -308,11 +327,16 @@ def main():
     allow = {a.strip().lower() for a in allow_raw.split(",") if a.strip()}
     if operator:
         allow.add(operator.lower())
-    outside = [r for r in recipients if r.lower() not in allow]
+    # The gate covers CC as well as To. Exempting CC would make the allowlist
+    # trivially bypassable - the whole control is "this fleet cannot mail an
+    # address nobody approved", and a header name does not change who receives
+    # the findings.
+    outside = [r for r in recipients + cc if r.lower() not in allow]
     if outside and not args.approve:
         die(f"recipients outside FLEET_ALLOW_TO: {', '.join(outside)}. "
-            f"Post the draft to the board tagged [APPROVE] and re-run with "
-            f"--approve once the operator says yes.")
+            f"Add them to FLEET_ALLOW_TO in fleet.env for a standing "
+            f"recipient, or post the draft to the board tagged [APPROVE] and "
+            f"re-run with --approve for a one-off.")
     if args.require_approval and not args.approve:
         die("this send is marked as requiring approval and --approve was not passed")
 
@@ -332,6 +356,8 @@ def main():
         "toRecipients": [{"emailAddress": {"address": r}} for r in recipients],
         "importance": "high" if subject.startswith("[P1]") else "normal",
     }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": r}} for r in cc]
     for path in args.attach:
         if not os.path.exists(path):
             log(f"skipping missing attachment {path}")
@@ -357,7 +383,7 @@ def main():
     if args.dry_run:
         log("DRY RUN - nothing sent")
         out = {"dry_run": True, "mode": "html" if args.html else "message",
-               "subject": subject, "to": recipients}
+               "subject": subject, "to": recipients, "cc": cc}
         if args.html:
             out["html"] = os.path.abspath(args.html)
         else:
@@ -378,7 +404,7 @@ def main():
     req_id = headers.get("request-id") or headers.get("client-request-id") or "unknown"
     log(f"sent - HTTP {status}, request-id {req_id}")
     print(json.dumps({"sent": True, "status": status, "request_id": req_id,
-                      "subject": subject, "to": recipients,
+                      "subject": subject, "to": recipients, "cc": cc,
                       "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
     return 0
 
