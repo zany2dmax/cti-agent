@@ -196,6 +196,19 @@ def finding_block(f):
     badges.append(f"<span style='background:{st_color};color:#fff;padding:2px 6px;"
                   f"border-radius:3px;font-size:11px;font-weight:700'>{esc(st)}</span>")
 
+    # The lookback is a time window, so anything still being discussed
+    # reappears every run. Without this a reader cannot tell the third day of
+    # one finding from three new ones. is_new is None when there was no
+    # findings history to compare against, in which case say nothing rather
+    # than implying novelty either way.
+    if f.get("is_new") is True:
+        badges.append("<span style='background:#12203a;color:#fff;padding:2px 6px;"
+                      "border-radius:3px;font-size:11px;font-weight:700'>NEW</span>")
+    elif f.get("is_new") is False and f.get("first_seen"):
+        badges.append(f"<span style='background:#edf2f7;color:#4a5568;padding:2px 6px;"
+                      f"border-radius:3px;font-size:11px'>since "
+                      f"{esc(str(f['first_seen'])[:10])}</span>")
+
     return f"""
       <tr><td style="padding:0 0 14px 0">
         <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
@@ -359,9 +372,25 @@ def render(data, kind):
           {p} &mdash; {PRI[p][2]} ({len(group)})
         </div></td></tr>{note}{''.join(finding_block(f) for f in shown)}{more}""")
 
+    # "N emails inspected" was read as "N emails brought new CVE information".
+    # It meant neither: it counted every message in the window, and the window
+    # is time-based so the same mail is re-read on every run. Say which number
+    # this is, and report novelty separately from volume.
+    nv = data.get("novelty") or {}
+    if nv.get("undetermined"):
+        novelty_txt = "new vs previously reported: no history yet"
+    elif nv.get("new") is not None:
+        novelty_txt = (f"{nv.get('new', 0)} new, "
+                       f"{nv.get('seen_before', 0)} previously reported")
+    else:
+        novelty_txt = ""
+
     provenance = " &middot; ".join(filter(None, [
         f"Mailbox {esc(meta['mailbox'])}" if meta.get("mailbox") else "",
-        f"{esc(meta['emails'])} emails inspected" if meta.get("emails") else "",
+        (f"{esc(meta['emails'])} emails in the lookback window"
+         if meta.get("emails") else ""),
+        f"{esc(meta['with_cves'])} mentioned a CVE" if meta.get("with_cves") else "",
+        novelty_txt,
         f"Lookup: {esc(meta.get('provider', 'qualys'))}" if meta.get("provider") else "",
         f"Since {esc(meta['since'])[:16]}" if meta.get("since") else "",
     ]))
@@ -419,6 +448,14 @@ def render_text(data, kind):
                  f"   (total {data['total']})")
     if data.get("degraded"):
         lines += ["", f"DEGRADED - unavailable this run: {', '.join(data['degraded'])}"]
+    nov = data.get("novelty") or {}
+    if nov.get("undetermined"):
+        lines += ["", "NEW vs SEEN: undetermined - no findings history yet"]
+    elif nov.get("new") is not None:
+        lines += ["", f"NEW since last run: {nov.get('new', 0)}"
+                      f"   previously reported: {nov.get('seen_before', 0)}"]
+        if nov.get("new_cves"):
+            lines.append(f"  new: {', '.join(nov['new_cves'][:10])}")
     kev = data.get("kev_deadlines") or {}
     if kev.get("overdue") or kev.get("due_within_14d"):
         lines += ["", f"CISA KEV: {kev.get('overdue', 0)} OVERDUE"

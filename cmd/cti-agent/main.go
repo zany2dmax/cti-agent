@@ -32,10 +32,18 @@ func main() {
 		log.Fatalf("graph read failed: %v", err)
 	}
 
+	// Count messages that actually carried a CVE separately from the total.
+	// Reporting one number made "Emails inspected: 14" read as "14 emails
+	// brought new CVE information", when it meant "14 emails arrived".
 	cves := map[string]bool{}
+	withCVEs := 0
 	for _, msg := range messages {
 		text := msg.Subject + "\n" + msg.BodyText
-		for _, cve := range cti.ExtractCVEs(text) {
+		found := cti.ExtractCVEs(text)
+		if len(found) > 0 {
+			withCVEs++
+		}
+		for _, cve := range found {
 			cves[cve] = true
 		}
 	}
@@ -55,9 +63,16 @@ func main() {
 	}
 	sort.Slice(results, func(i, j int) bool { return cti.CVELess(results[i].CVE, results[j].CVE) })
 
-	if err := report.WriteMarkdown(cfg.ReportPath, cfg.GraphMailbox, since, len(messages), provider.Name(), results); err != nil {
+	scan := report.Scan{
+		Messages:  len(messages),
+		WithCVEs:  withCVEs,
+		CVEsFound: len(cves),
+	}
+	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		log.Fatalf("write report failed: %v", err)
 	}
+	log.Printf("scanned %d email(s) since %s; %d mentioned a CVE; %d distinct CVE(s)",
+		scan.Messages, since.Format(time.RFC3339), scan.WithCVEs, scan.CVEsFound)
 
 	if len(cves) == 0 {
 		fmt.Printf("No CVEs found. Wrote %s\n", cfg.ReportPath)
