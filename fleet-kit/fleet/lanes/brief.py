@@ -18,12 +18,47 @@ import re
 import sys
 from datetime import datetime, timezone
 
+# Band labels must not claim more than the scanner said.
+#
+# P2 and P3 each contain two different kinds of finding. P2 is "PRESENT" plus
+# "UNKNOWN and actively exploited"; P3 is "exploited but NOT_PRESENT" plus
+# "UNKNOWN with a critical CVSS". Labelling P2 "Present in the environment"
+# printed a header asserting presence directly above rows whose own status
+# read UNKNOWN - the one claim this system exists not to make. A reader who
+# notices the contradiction stops trusting the report; one who does not
+# notice acts on a presence that was never established.
 PRI = {
-    "P1": ("#b3001b", "#fdecee", "Exploited AND present - act today"),
-    "P2": ("#b25000", "#fff4e5", "Present in the environment - this patch cycle"),
-    "P3": ("#8a6d00", "#fffbe6", "Not detected here - verify scan coverage"),
+    "P1": ("#b3001b", "#fdecee",
+           "Exploited AND confirmed present - act today"),
+    "P2": ("#b25000", "#fff4e5",
+           "Confirmed present, or exploited and coverage unverified - this patch cycle"),
+    "P3": ("#8a6d00", "#fffbe6",
+           "Not detected, or coverage unverified - check the scanner reaches it"),
     "P4": ("#4a5568", "#f4f5f7", "Awareness only"),
 }
+
+# Per-band note explaining the mixed contents, shown under the heading
+# whenever the band holds any unverified row. A band that is entirely PRESENT
+# carries no caveat, because a caveat that appears every day stops being read
+# on the day it matters.
+MIXED_NOTE = {
+    "P2": ("Rows marked <b>UNKNOWN</b> are here because the scanner has no "
+           "QID mapping for them and they are being actively exploited. That is "
+           "not a confirmed exposure &mdash; it means coverage could not be "
+           "established. Treat them as unresolved questions, not as findings."),
+    "P3": ("Rows marked <b>UNKNOWN</b> were not checked, not cleared. "
+           "<b>NOT_PRESENT</b> rows were checked and the scanner found nothing."),
+}
+
+
+def band_needs_caveat(group):
+    """True when a band contains any unverified row.
+
+    An earlier version fired only when the band was *mixed*, which got the
+    worst case exactly backwards: a P2 that is entirely UNKNOWN needs the
+    caveat more than one where a confirmed finding sits beside it, not less.
+    """
+    return any((f.get("status") or "UNKNOWN") == "UNKNOWN" for f in group)
 
 
 def esc(v):
@@ -52,8 +87,26 @@ def subject(data, kind):
         return (f"[OVERDUE] CTI {day}: {overdue} CISA KEV deadline"
                 f"{'s' if overdue != 1 else ''} passed, worst by "
                 f"{kev.get('worst_overdue_days', 0)}d")
-    if c["P2"]:
-        return f"CTI {day}: {c['P2']} confirmed present, no P1"
+    # Count what the scanner actually confirmed, not the size of the P2 band.
+    # P2 also holds UNKNOWN findings that are being exploited, so "N confirmed
+    # present" was wrong whenever the band was wholly or partly unverified -
+    # and a subject line is the one part of the digest everyone reads.
+    findings = data.get("findings") or []
+    present = sum(1 for f in findings
+                  if f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0)
+    unverified = sum(1 for f in findings
+                     if f.get("status") == "UNKNOWN" and f.get("priority") in ("P2", "P3"))
+
+    if present:
+        s = f"CTI {day}: {present} confirmed present, no P1"
+        if unverified:
+            s += f", {unverified} unverified"
+        return s
+    if unverified:
+        # Nothing confirmed, but coverage gaps on things being exploited. Say
+        # exactly that rather than implying either a clean day or an exposure.
+        return (f"CTI {day}: 0 confirmed present, {unverified} exploited CVE"
+                f"{'s' if unverified != 1 else ''} the scanner could not check")
     if data["total"] == 0:
         return f"CTI {day}: no new CVEs in the last 24h"
     return f"CTI {day}: {data['total']} CVEs reviewed, nothing exploitable found"
@@ -183,15 +236,44 @@ def render(data, kind):
               "weekly": {"P1": 99, "P2": 40, "P3": 40, "P4": 25}}[kind]
     now = datetime.now().strftime("%A %d %B %Y, %H:%M %Z").strip()
 
+    # The lead has to count what the scanner confirmed, not the size of a
+    # priority band. P2 holds both PRESENT findings and UNKNOWN ones that are
+    # being exploited, so "N confirmed present" was false whenever the band
+    # was partly or wholly unverified - and this is the first line anyone
+    # reads.
+    rows = data.get("findings") or []
+    n_present = sum(1 for f in rows
+                    if f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0)
+    n_unverified = sum(1 for f in rows if f.get("status") == "UNKNOWN"
+                       and f.get("priority") in ("P2", "P3"))
+    unverified_clause = ""
+    if n_unverified:
+        unverified_clause = (
+            f" A further {n_unverified} exploited CVE"
+            f"{'s' if n_unverified != 1 else ''} could not be checked against "
+            f"the scanner at all &mdash; unverified coverage, not a clean result.")
+
     if c["P1"]:
         lead = (f"<b>{c['P1']} vulnerabilit{'y' if c['P1'] == 1 else 'ies'} "
                 f"confirmed present in our environment and known to be exploited.</b> "
-                f"These need attention today.")
+                f"These need attention today.{unverified_clause}")
         lead_bg, lead_border = "#fdecee", "#b3001b"
-    elif c["P2"]:
-        lead = (f"No actively-exploited vulnerabilities are present. "
-                f"{c['P2']} confirmed present in the environment for this week's "
-                f"patch cycle.")
+    elif n_present:
+        lead = (f"No actively-exploited vulnerabilities are confirmed present. "
+                f"{n_present} confirmed present in the environment for this "
+                f"week's patch cycle.{unverified_clause}")
+        lead_bg, lead_border = "#fff4e5", "#b25000"
+    elif n_unverified:
+        # Nothing confirmed, but coverage gaps on things being exploited. This
+        # is neither a clean day nor a confirmed exposure, and saying either
+        # would be wrong. Amber, because it is a question, not a finding.
+        lead = (f"<b>Nothing confirmed present in the environment.</b> But "
+                f"{n_unverified} actively-exploited CVE"
+                f"{'s' if n_unverified != 1 else ''} could not be checked "
+                f"against the scanner &mdash; there is no QID mapping for "
+                f"{'them' if n_unverified != 1 else 'it'}. That means we did "
+                f"not look, not that we are clean. Resolving the coverage gap "
+                f"is the action here.")
         lead_bg, lead_border = "#fff4e5", "#b25000"
     elif data["total"] == 0:
         lead = ("No CVEs appeared in the threat-intel mailbox in this window. "
@@ -262,13 +344,20 @@ def render(data, kind):
         more = (f"<tr><td style='font:400 12px -apple-system,Segoe UI,Arial,sans-serif;"
                 f"color:#718096;padding:0 0 14px 2px'>+{hidden} more {p} "
                 f"in the full report.</td></tr>") if hidden else ""
+        note = ""
+        if p in MIXED_NOTE and band_needs_caveat(group):
+            note = f"""
+      <tr><td style="padding:0 0 6px 0">
+        <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
+                    color:#4a5568;background:#f7fafc;border-left:3px solid {PRI[p][0]};
+                    padding:7px 10px">{MIXED_NOTE[p]}</div></td></tr>"""
         sections.append(f"""
       <tr><td style="padding:6px 0 8px 0">
         <div style="font:700 13px -apple-system,Segoe UI,Arial,sans-serif;
                     color:{PRI[p][0]};letter-spacing:.6px;text-transform:uppercase;
                     border-bottom:2px solid {PRI[p][0]};padding-bottom:5px">
           {p} &mdash; {PRI[p][2]} ({len(group)})
-        </div></td></tr>{''.join(finding_block(f) for f in shown)}{more}""")
+        </div></td></tr>{note}{''.join(finding_block(f) for f in shown)}{more}""")
 
     provenance = " &middot; ".join(filter(None, [
         f"Mailbox {esc(meta['mailbox'])}" if meta.get("mailbox") else "",
@@ -343,12 +432,16 @@ def render_text(data, kind):
         if not group or (kind == "daily" and p == "P4"):
             continue
         lines += [f"{p} - {PRI[p][2]} ({len(group)})", "-" * 68]
+        if p in MIXED_NOTE and band_needs_caveat(group):
+            lines.append("  NOTE: UNKNOWN rows below are unverified coverage, "
+                         "not confirmed exposure.")
         for f in group[: 99 if p in ("P1", "P2") else 10]:
             lines.append(f"  {f['cve']}  {f.get('status')}  "
                          f"{f.get('host_count') or 0} host(s)")
             lines.append(f"    {f.get('rationale')}")
         lines.append("")
     lines.append("Presence determined solely by the vulnerability lookup provider.")
+    lines.append("UNKNOWN means the scanner had no mapping - not that we are clean.")
     return "\n".join(lines)
 
 
