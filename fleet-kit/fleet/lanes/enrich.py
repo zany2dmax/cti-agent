@@ -163,7 +163,11 @@ def parse_meta(path):
     pats = {
         "mailbox": r"Mailbox:\s*`([^`]+)`",
         "since": r"Lookback since:\s*`([^`]+)`",
-        "emails": r"Emails inspected:\s*`([^`]+)`",
+        # Both spellings: "Emails inspected" was the old single, misleading
+        # count; the agent now writes three separately-labelled numbers.
+        "emails": r"Emails (?:in window|inspected):\s*`([^`]+)`",
+        "with_cves": r"Emails mentioning a CVE:\s*`([^`]+)`",
+        "cves_found": r"Distinct CVEs extracted:\s*`([^`]+)`",
         "provider": r"Lookup provider:\s*`([^`]+)`",
         "generated": r"Generated:\s*`([^`]+)`",
     }
@@ -270,6 +274,79 @@ def kev_days_left(f, today=None):
         # not take down enrichment for every other finding.
         return None
     return (due - (today or datetime.now(timezone.utc).date())).days
+
+
+def fleet_db_candidates():
+    """Where fleet-db might be, most specific first.
+
+    FLEET_CODE is the answer on both layouts when it is set; the FLEET_HOME
+    fallback only works on the single-directory layout, which is why relying
+    on it alone silently disabled the upsert under FHS.
+    """
+    out = []
+    code = os.environ.get("FLEET_CODE")
+    if code:
+        out.append(os.path.join(code, "bin", "fleet-db"))
+    out.append(os.path.join(FLEET_HOME, "bin", "fleet-db"))
+    # Alongside this lane: lanes/ and bin/ are siblings in both layouts.
+    out.append(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "bin", "fleet-db"))
+    seen, uniq = set(), []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return uniq
+
+
+def find_fleet_db():
+    for p in fleet_db_candidates():
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def mark_novelty(findings):
+    """Flag each finding as new or previously seen, before the upsert.
+
+    Answers the question a daily digest should lead with: what changed since
+    yesterday? The lookback is a time window, so a CVE still being discussed
+    reappears every run - without this, a reader cannot tell three weeks of
+    the same finding from three weeks of fresh ones.
+
+    Read directly rather than through fleet-db: sqlite3 is stdlib, the query
+    is one statement, and it has to happen BEFORE the upsert or every CVE
+    looks old. Failure is non-fatal - an unknown novelty flag is better than
+    no digest.
+    """
+    import sqlite3
+    path = os.path.join(STATE, "memory.db")
+    for f in findings.values():
+        f["is_new"] = None          # None = could not determine
+        f["first_seen"] = None
+    if not os.path.exists(path):
+        return 0, 0, len(findings)
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            rows = dict(con.execute(
+                "SELECT cve, first_seen FROM findings").fetchall())
+        finally:
+            con.close()
+    except Exception as e:                                      # noqa: BLE001
+        log(f"novelty check skipped ({e})")
+        return 0, 0, len(findings)
+
+    new = seen = 0
+    for cve, f in findings.items():
+        if cve in rows:
+            f["is_new"] = False
+            f["first_seen"] = rows[cve]
+            seen += 1
+        else:
+            f["is_new"] = True
+            new += 1
+    return new, seen, 0
 
 
 def kev_summary(rows):
@@ -454,6 +531,14 @@ def main():
             f["kev"] = 1 if (nvd.get(cve) or {}).get("kev_nvd") else 0
         f["priority"], f["rationale"] = prioritize(f)
 
+    # Before the upsert, or everything looks previously-seen.
+    n_new, n_seen, n_unknown = mark_novelty(findings)
+    if n_unknown:
+        log(f"novelty: unknown for {n_unknown} finding(s) - no findings "
+            f"database yet, so the first run cannot distinguish new from old")
+    else:
+        log(f"novelty: {n_new} new, {n_seen} seen before")
+
     order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
 
     def rank(f):
@@ -489,6 +574,13 @@ def main():
         # Deadline summary, computed once here so the digest, the weekly and
         # cti-kev all report the same numbers rather than each deriving them.
         "kev_deadlines": kev_summary(rows),
+        # What changed since the last run. None for new/seen means there was
+        # no history to compare against - the digest must say "unknown", not
+        # imply everything is new.
+        "novelty": {
+            "new": n_new, "seen_before": n_seen, "undetermined": n_unknown,
+            "new_cves": [f["cve"] for f in rows if f.get("is_new")],
+        },
         "findings": rows,
     }
 
@@ -500,8 +592,13 @@ def main():
         + (f"  DEGRADED: {', '.join(degraded)}" if degraded else ""))
 
     if not args.no_db and rows:
-        db = os.path.join(FLEET_HOME, "bin", "fleet-db")
-        if os.path.exists(db):
+        # bin/ lives under FLEET_CODE, not FLEET_HOME. On the FHS layout those
+        # are /opt/cti-agent and /var/lib/cti-agent, so the old
+        # FLEET_HOME/bin/fleet-db never existed - and because the check was a
+        # silent os.path.exists, every run skipped the upsert without saying
+        # so. The findings database stayed empty while the digest looked fine.
+        db = find_fleet_db()
+        if db:
             try:
                 subprocess.run([sys.executable, db, "finding", "upsert"],
                                input=json.dumps(rows), text=True, check=True,
@@ -509,6 +606,12 @@ def main():
                 log(f"upserted {len(rows)} findings to memory.db")
             except subprocess.CalledProcessError as e:
                 log(f"db upsert failed ({e}) - JSON is still on disk")
+        else:
+            # Loud, not silent. Without the upsert there is no history, so
+            # nothing can tell a new CVE from one reported every day this week.
+            log("WARNING: fleet-db not found - findings were NOT written to "
+                "memory.db, so 'new since last run' cannot be computed. "
+                f"Looked in: {', '.join(fleet_db_candidates())}")
     return 0
 
 
