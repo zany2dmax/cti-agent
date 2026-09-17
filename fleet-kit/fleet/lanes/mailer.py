@@ -354,7 +354,7 @@ def main():
         "subject": subject,
         "body": {"contentType": "HTML", "content": body},
         "toRecipients": [{"emailAddress": {"address": r}} for r in recipients],
-        "importance": "high" if subject.startswith("[P1]") else "normal",
+        "importance": "high" if subject.startswith("[Sev5]") else "normal",
     }
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": r}} for r in cc]

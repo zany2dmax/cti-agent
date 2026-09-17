@@ -13,7 +13,7 @@ var now = time.Date(2026, 9, 15, 14, 30, 0, 0, time.UTC)
 
 func f(cve, status string, hosts int, due string) Finding {
 	return Finding{CVE: cve, Status: status, HostCount: hosts, KEVDue: due, KEV: 1,
-		Priority: "P1"}
+		Priority: "Sev5"}
 }
 
 func TestDaysLeftComparesCalendarDaysNotInstants(t *testing.T) {
@@ -224,7 +224,7 @@ func TestLoadRoundTripsWhatEnrichActuallyWrites(t *testing.T) {
 	// would silently produce an empty report rather than an error.
 	raw := `{"generated":"2026-09-15T06:00:00Z","total":2,"degraded":[],
 	 "findings":[{"cve":"CVE-2026-1","status":"PRESENT","host_count":3,
-	   "qids":"92345","priority":"P1","kev":1,"kev_due":"2026-09-01",
+	   "qids":"92345","priority":"Sev5","kev":1,"kev_due":"2026-09-01",
 	   "ransomware":"Known","epss":0.64,"cvss":9.8,"sample_hosts":"a, b"}]}`
 	dir := t.TempDir()
 	p := filepath.Join(dir, "enriched-2026-09-15.json")
