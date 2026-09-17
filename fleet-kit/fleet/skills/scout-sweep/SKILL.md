@@ -19,7 +19,7 @@ before a vendor newsletter gets around to telling you.
      --out $FLEET_HOME/state/scout-enriched-$(date +%F).json
    ```
 
-3. Anything that lands P1 or P2 goes on the board immediately so it makes the
+3. Anything that lands Sev5 or Sev4 goes on the board immediately so it makes the
    next digest. Everything else just accumulates in memory for the weekly.
 
 4. Log a `scout_sweep` row: feeds polled, feeds that errored, new CVEs found.

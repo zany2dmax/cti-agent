@@ -252,7 +252,7 @@ type SendMailRequest struct {
 	To      []string // recipients
 	Subject string
 	HTML    string // body, contentType HTML
-	// HighImportance flags the message. Reserved for genuine P1 alerts: a
+	// HighImportance flags the message. Reserved for genuine Sev5 alerts: a
 	// system that marks everything urgent has marked nothing urgent.
 	HighImportance bool
 }

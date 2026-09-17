@@ -8,7 +8,7 @@ context that decides whether anyone should care:
   * FIRST EPSS - probability of exploitation in the next 30 days
   * CISA KEV   - known-exploited flag, due date, ransomware association
 
-Then it assigns a P1-P4 priority that combines *exploitability in the wild*
+Then it assigns a Sev5-Sev1 severity that combines *exploitability in the wild*
 with *presence in our environment*. Presence comes only from the vulnerability
 lookup provider - this lane never decides that on its own.
 
@@ -41,6 +41,10 @@ NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 EPSS_API = "https://api.first.org/data/v1/epss"
 KEV_FEED = ("https://www.cisa.gov/sites/default/files/feeds/"
             "known_exploited_vulnerabilities.json")
+
+# Severity bands, most urgent first. Defined once here; brief.py mirrors it
+# for rendering, and fleet-db migrates stored values to match.
+SEV_ORDER = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-enrich/1.0")
@@ -155,6 +159,37 @@ def parse_report(path):
                 "provider_reason": reason,
             }
     return findings
+
+
+def parse_subjects(path):
+    """Read the 'Emails read this run' table the agent appends.
+
+    Columns: CVE? | Received | Subject. Absent in reports from before this
+    existed, in which case the digest simply omits the section.
+    """
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return out
+    if "## Emails read this run" not in text:
+        return out
+    block = text.split("## Emails read this run", 1)[1]
+    for line in block.split("\n"):
+        line = line.strip()
+        if not line.startswith("|") or line.startswith("|---"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 3 or cells[0] == "CVE?":
+            continue
+        out.append({
+            "has_cve": cells[0].lower() == "yes",
+            "received": cells[1],
+            # The writer escapes pipes; undo that for display.
+            "subject": cells[2].replace("\\|", "|"),
+        })
+    return out
 
 
 def parse_meta(path):
@@ -402,21 +437,47 @@ def fetch_kev():
 # -------------------------------------------------------------------- scoring
 
 def prioritize(f, today=None):
-    """Combine exploitability with presence.
+    """Combine exploitability with presence, on a Sev5-Sev1 scale.
 
     The whole point: a 10.0 CVSS on software we do not run is noise, and a 6.5
     that is being actively exploited on 300 of our hosts is an emergency. CVSS
     alone gets that backwards, which is why it is the tiebreaker and not the
     driver.
 
-    P1 - present AND actively exploited (KEV or EPSS >= 10%)   -> today
-    P2 - present in the environment at all                     -> this patch cycle
-         (also: UNKNOWN coverage on something being exploited)
-    P3 - exploited but not detected here, or UNKNOWN + CVSS>=9  -> verify coverage
-    P4 - everything else                                       -> awareness
+    Sev5 - PRESENT and actively exploited (KEV or EPSS >= 10%)  -> today
+    Sev4 - PRESENT, not known to be exploited                   -> this patch cycle
+    Sev3 - exploited AND coverage UNVERIFIED                    -> resolve coverage now
+    Sev2 - exploited but NOT_PRESENT, or unverified CVSS >= 9   -> verify coverage
+    Sev1 - everything else                                     -> awareness
 
-    Note that presence alone earns P2 regardless of CVSS. A 5.5 on 186 hosts is
-    a real patching obligation; ranking it below a 9.3 we do not run inverts the
+    WHY SEV AND NOT P1-P4
+    This deliberately does not use P1-P4: that is the incident-reporting scale
+    here, and a CTI digest arriving labelled "P1" reads as a live incident to
+    anyone on the rota. Different scale, different meaning, no collision. Note
+    the direction is inverted too - Sev5 is the most urgent, where P1 was.
+
+    WHY FIVE BANDS
+    Sev5/Sev4 and Sev3/Sev2 used to be two bands, and each conflated a
+    confirmed finding with an unverified one. The digest then printed "present
+    in the environment" as a heading above rows whose own status read UNKNOWN.
+    Separating them means the band itself carries an honest claim, so no
+    caveat is needed to undo the heading.
+
+    Sev4 above Sev3 is the deliberate part, and it is a judgement call.
+    "We definitely have it, nobody is exploiting it" ranks above "it is being
+    exploited and we cannot tell whether we have it", because certainty of
+    presence is bounded, assignable work while an unverified finding may turn
+    out not to affect us at all. Ranking every coverage gap above every
+    confirmed exposure would fill the top of the digest with questions instead
+    of tasks.
+
+    What Sev3 must never be is the noise floor. An exploited CVE the scanner
+    could not check is not a clean result - it means nobody looked - so it sits
+    in the middle of the scale where it gets read, not at the bottom with
+    awareness items. That was the whole reason the old P2 band was split.
+
+    Presence alone still earns Sev4 regardless of CVSS. A 5.5 on 186 hosts is a
+    real patching obligation; ranking it below a 9.3 we do not run inverts the
     thing this scoring exists to fix.
     """
     present = f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0
@@ -464,19 +525,21 @@ def prioritize(f, today=None):
         why.append("used in ransomware campaigns")
 
     if present and hot:
-        p = "P1"
+        p = "Sev5"
     elif present:
-        p = "P2"
+        p = "Sev4"
     elif unknown and very_hot:
-        # Cannot confirm we are clean and it is being exploited. Do not let this
-        # sit in the noise bucket just because Qualys had no mapping.
-        p = "P2"
+        # Being exploited, and the scanner could not tell us whether we are
+        # exposed. Mid-scale on purpose: below confirmed presence, because a
+        # gap may turn out to be nothing, but nowhere near the awareness floor,
+        # because "we did not look" is not "we are clean".
+        p = "Sev3"
     elif hot or (unknown and cvss >= 9.0):
         # UNKNOWN means we did not look, not that we are clean. A critical with
-        # no QID mapping is a coverage gap, so it does not get to be P4.
-        p = "P3"
+        # no QID mapping is a coverage gap, so it does not sink to Sev1.
+        p = "Sev2"
     else:
-        p = "P4"
+        p = "Sev1"
     return p, "; ".join(why) or "no enrichment data available"
 
 
@@ -492,10 +555,13 @@ def main():
     ap.add_argument("--skip-nvd", action="store_true", help="EPSS + KEV only (fast)")
     args = ap.parse_args()
 
-    meta = {}
+    # Initialised for both branches: the scout lane passes --cves and has no
+    # mailbox pass, so there are no subjects to list.
+    meta, subjects = {}, []
     if args.report:
         findings = parse_report(args.report)
         meta = parse_meta(args.report)
+        subjects = parse_subjects(args.report)
         log(f"parsed {len(findings)} CVEs from {os.path.basename(args.report)}")
     else:
         findings = {c.strip().upper(): {"cve": c.strip().upper(), "status": "UNKNOWN",
@@ -539,7 +605,8 @@ def main():
     else:
         log(f"novelty: {n_new} new, {n_seen} seen before")
 
-    order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+    # Urgency order for sorting, highest first.
+    order = {p: i for i, p in enumerate(SEV_ORDER)}
 
     def rank(f):
         """Sort within a priority band.
@@ -564,7 +631,7 @@ def main():
 
     rows = sorted(findings.values(), key=rank)
 
-    counts = {p: sum(1 for f in rows if f["priority"] == p) for p in ("P1", "P2", "P3", "P4")}
+    counts = {p: sum(1 for f in rows if f["priority"] == p) for p in SEV_ORDER}
     result = {
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source_meta": meta,
@@ -574,6 +641,9 @@ def main():
         # Deadline summary, computed once here so the digest, the weekly and
         # cti-kev all report the same numbers rather than each deriving them.
         "kev_deadlines": kev_summary(rows),
+        # What the ingest pass actually read. Listed in the digest so the
+        # email count can be checked rather than taken on trust.
+        "email_subjects": subjects,
         # What changed since the last run. None for new/seen means there was
         # no history to compare against - the digest must say "unknown", not
         # imply everything is new.
@@ -587,8 +657,8 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(result, f, indent=2)
-    log(f"wrote {args.out}  P1={counts['P1']} P2={counts['P2']} "
-        f"P3={counts['P3']} P4={counts['P4']}"
+    log(f"wrote {args.out}  "
+        + " ".join(f"{p}={counts[p]}" for p in SEV_ORDER)
         + (f"  DEGRADED: {', '.join(degraded)}" if degraded else ""))
 
     if not args.no_db and rows:

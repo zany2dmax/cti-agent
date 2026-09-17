@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """brief.py - the @brief lane. Renders the enriched findings as an email digest.
 
-Built for a phone screen at 6am: P1 first, host counts visible, action stated.
+Built for a phone screen at 6am: Sev5 first, host counts visible, action stated.
 Inline CSS and a table layout because Outlook ignores most of everything else.
 
 Usage:
@@ -20,43 +20,50 @@ from datetime import datetime, timezone
 
 # Band labels must not claim more than the scanner said.
 #
-# P2 and P3 each contain two different kinds of finding. P2 is "PRESENT" plus
-# "UNKNOWN and actively exploited"; P3 is "exploited but NOT_PRESENT" plus
-# "UNKNOWN with a critical CVSS". Labelling P2 "Present in the environment"
-# printed a header asserting presence directly above rows whose own status
-# read UNKNOWN - the one claim this system exists not to make. A reader who
-# notices the contradiction stops trusting the report; one who does not
-# notice acts on a presence that was never established.
+# Sev5 (highest) down to Sev1. Deliberately NOT P1-P4: that is the
+# incident-reporting scale here, and a CTI digest labelled "P1" reads as a
+# live incident to anyone on the rota. The direction is inverted too - Sev5 is
+# the urgent end, where P1 used to be.
+#
+# Five bands rather than four because the old P2 and P3 each mixed a confirmed
+# finding with an unverified one, which forced the heading to claim presence
+# the scanner had not established. Separating them lets every label be true on
+# its own.
+SEV_ORDER = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
 PRI = {
-    "P1": ("#b3001b", "#fdecee",
-           "Exploited AND confirmed present - act today"),
-    "P2": ("#b25000", "#fff4e5",
-           "Confirmed present, or exploited and coverage unverified - this patch cycle"),
-    "P3": ("#8a6d00", "#fffbe6",
-           "Not detected, or coverage unverified - check the scanner reaches it"),
-    "P4": ("#4a5568", "#f4f5f7", "Awareness only"),
+    "Sev5": ("#b3001b", "#fdecee",
+             "Exploited AND confirmed present - act today"),
+    "Sev4": ("#b25000", "#fff4e5",
+             "Confirmed present, not known to be exploited - this patch cycle"),
+    "Sev3": ("#8a6d00", "#fffbe6",
+             "Exploited, coverage UNVERIFIED - we cannot say whether we are exposed"),
+    "Sev2": ("#2c5282", "#ebf4ff",
+             "Exploited but not detected here, or unverified critical - verify coverage"),
+    "Sev1": ("#4a5568", "#f4f5f7", "Awareness only"),
 }
 
-# Per-band note explaining the mixed contents, shown under the heading
-# whenever the band holds any unverified row. A band that is entirely PRESENT
-# carries no caveat, because a caveat that appears every day stops being read
-# on the day it matters.
+# With five bands each label is already honest, so these are explanations of
+# *why a band exists*, not corrections to a misleading heading.
 MIXED_NOTE = {
-    "P2": ("Rows marked <b>UNKNOWN</b> are here because the scanner has no "
-           "QID mapping for them and they are being actively exploited. That is "
-           "not a confirmed exposure &mdash; it means coverage could not be "
-           "established. Treat them as unresolved questions, not as findings."),
-    "P3": ("Rows marked <b>UNKNOWN</b> were not checked, not cleared. "
-           "<b>NOT_PRESENT</b> rows were checked and the scanner found nothing."),
+    "Sev3": ("These are being actively exploited and the scanner has no QID "
+             "mapping for them, so it could not tell us whether we are exposed. "
+             "That is not a confirmed exposure and it is not a clean result "
+             "&mdash; it means nobody looked. Below Sev4 because a gap may "
+             "turn out to be nothing, but well above the awareness floor, "
+             "because it may equally turn out to be everything."),
+    "Sev2": ("<b>NOT_PRESENT</b> rows were checked and the scanner found "
+             "nothing. <b>UNKNOWN</b> rows were not checked. Both warrant a "
+             "look at scan coverage rather than a patch."),
 }
 
 
 def band_needs_caveat(group):
     """True when a band contains any unverified row.
 
-    An earlier version fired only when the band was *mixed*, which got the
-    worst case exactly backwards: a P2 that is entirely UNKNOWN needs the
-    caveat more than one where a confirmed finding sits beside it, not less.
+    Sev3 is entirely unverified by definition, so it always carries its note.
+    Sev2 mixes NOT_PRESENT with UNKNOWN, so the note only appears when an
+    UNKNOWN is actually in it - a caveat printed every day stops being read on
+    the day it matters.
     """
     return any((f.get("status") or "UNKNOWN") == "UNKNOWN" for f in group)
 
@@ -70,35 +77,36 @@ def subject(data, kind):
     day = datetime.now().strftime("%b %d")
     kev = data.get("kev_deadlines") or {}
     overdue = kev.get("overdue") or 0
-    # The deadline rides along; it does not displace the priority. P1 means
+    # The deadline rides along; it does not displace the severity. Sev5 means
     # actively exploited and present, which outranks a published date on
     # something less severe - and a subject line that leads with OVERDUE while
-    # a P1 sits unmentioned buries the more urgent fact.
+    # a Sev5 sits unmentioned buries the more urgent fact.
     tail = ""
     if overdue:
         tail = (f" — {overdue} KEV deadline{'s' if overdue != 1 else ''} OVERDUE")
 
-    if c["P1"]:
-        return (f"[P1] CTI {day}: {c['P1']} exploited vuln"
-                f"{'s' if c['P1'] != 1 else ''} present in the environment{tail}")
+    if c.get("Sev5"):
+        return (f"[Sev5] CTI {day}: {c['Sev5']} exploited vuln"
+                f"{'s' if c['Sev5'] != 1 else ''} present in the environment{tail}")
     if overdue:
-        # No P1, but something is past a federal due date - still worth the
+        # No Sev5, but something is past a federal due date - still worth the
         # prefix, because it is the most actionable thing in the mail.
         return (f"[OVERDUE] CTI {day}: {overdue} CISA KEV deadline"
                 f"{'s' if overdue != 1 else ''} passed, worst by "
                 f"{kev.get('worst_overdue_days', 0)}d")
-    # Count what the scanner actually confirmed, not the size of the P2 band.
-    # P2 also holds UNKNOWN findings that are being exploited, so "N confirmed
-    # present" was wrong whenever the band was wholly or partly unverified -
-    # and a subject line is the one part of the digest everyone reads.
+    # Count what the scanner actually confirmed. The bands now separate
+    # confirmed from unverified, but the subject still counts rows rather than
+    # bands - it is the one part of the digest everyone reads, and it should
+    # not need a lookup table to interpret.
     findings = data.get("findings") or []
     present = sum(1 for f in findings
                   if f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0)
     unverified = sum(1 for f in findings
-                     if f.get("status") == "UNKNOWN" and f.get("priority") in ("P2", "P3"))
+                     if f.get("status") == "UNKNOWN"
+                     and f.get("priority") in ("Sev3", "Sev2"))
 
     if present:
-        s = f"CTI {day}: {present} confirmed present, no P1"
+        s = f"CTI {day}: {present} confirmed present, no Sev5"
         if unverified:
             s += f", {unverified} unverified"
         return s
@@ -239,26 +247,76 @@ def finding_block(f):
       </td></tr>"""
 
 
+def subjects_section(data):
+    """List the email subjects the ingest pass read.
+
+    Answers "what did it actually look at?" - the question the old single
+    "emails inspected" count invited and could not answer. Subjects with a CVE
+    are marked, so the gap between mail volume and finding volume is visible
+    rather than implied.
+
+    Subjects can carry vendor and product names. That is a lower sensitivity
+    than the hostnames already in this digest, but it is another reason the
+    report is internal-only.
+    """
+    subs = data.get("email_subjects") or []
+    if not subs:
+        return ""
+    rows = []
+    for e in subs[:60]:
+        subj = (e.get("subject") or "(no subject)").strip() or "(no subject)"
+        has = e.get("has_cve")
+        mark = ("<span style='color:#b3001b;font-weight:700'>CVE</span>"
+                if has else "<span style='color:#a0aec0'>&mdash;</span>")
+        when = esc((e.get("received") or "")[:16].replace("T", " "))
+        rows.append(
+            f"<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;"
+            f"vertical-align:top\">{mark}</td>"
+            f"<td style=\"padding:3px 8px 3px 0;white-space:nowrap;color:#718096;"
+            f"vertical-align:top\">{when}</td>"
+            f"<td style=\"padding:3px 0;color:#2d3748\">{esc(subj)}</td></tr>")
+    more = ""
+    if len(subs) > 60:
+        more = (f"<div style='color:#718096;margin-top:6px'>"
+                f"+{len(subs) - 60} more in the attached raw report</div>")
+    n_cve = sum(1 for e in subs if e.get("has_cve"))
+    return f"""
+  <tr><td style="padding:4px 20px 18px 20px;border-top:1px solid #e2e8f0">
+    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
+                color:#4a5568;margin:12px 0 8px 0;letter-spacing:.5px">
+      EMAILS READ THIS RUN &mdash; {len(subs)} total, {n_cve} mentioning a CVE</div>
+    <table cellpadding="0" cellspacing="0" role="presentation"
+           style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+      {''.join(rows)}
+    </table>{more}
+  </td></tr>"""
+
+
 def render(data, kind):
     c, meta = data["counts"], data.get("source_meta", {})
     findings = data["findings"]
-    # P2 is capped on the daily because "present in the environment" is a large
+    # Sev4 is capped on the daily because "present in the environment" is a large
     # set in a real estate - the top offenders by host count carry the message,
     # and the attached raw report has the rest.
-    limits = {"daily": {"P1": 99, "P2": 12, "P3": 10, "P4": 0},
-              "weekly": {"P1": 99, "P2": 40, "P3": 40, "P4": 25}}[kind]
+    # Sev1 is suppressed from the daily and surfaces in the weekly: awareness
+    # items every morning is how a digest becomes something people filter.
+    limits = {"daily":  {"Sev5": 99, "Sev4": 12, "Sev3": 12, "Sev2": 10, "Sev1": 0},
+              "weekly": {"Sev5": 99, "Sev4": 40, "Sev3": 40, "Sev2": 40, "Sev1": 25}}[kind]
     now = datetime.now().strftime("%A %d %B %Y, %H:%M %Z").strip()
+    # Whose digest this is. Named in the header and the footer so a forwarded
+    # copy is still identifiable, and so nobody mistakes it for a vendor
+    # newsletter. Generic default keeps the kit reusable.
+    org = os.environ.get("FLEET_ORG", "Security")
 
     # The lead has to count what the scanner confirmed, not the size of a
-    # priority band. P2 holds both PRESENT findings and UNKNOWN ones that are
-    # being exploited, so "N confirmed present" was false whenever the band
-    # was partly or wholly unverified - and this is the first line anyone
-    # reads.
+    # severity band. The bands now separate confirmed from unverified, but the
+    # lead still counts rows: it is the first line anyone reads and should not
+    # require knowing what a band contains.
     rows = data.get("findings") or []
     n_present = sum(1 for f in rows
                     if f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0)
     n_unverified = sum(1 for f in rows if f.get("status") == "UNKNOWN"
-                       and f.get("priority") in ("P2", "P3"))
+                       and f.get("priority") in ("Sev3", "Sev2"))
     unverified_clause = ""
     if n_unverified:
         unverified_clause = (
@@ -266,8 +324,8 @@ def render(data, kind):
             f"{'s' if n_unverified != 1 else ''} could not be checked against "
             f"the scanner at all &mdash; unverified coverage, not a clean result.")
 
-    if c["P1"]:
-        lead = (f"<b>{c['P1']} vulnerabilit{'y' if c['P1'] == 1 else 'ies'} "
+    if c.get("Sev5"):
+        lead = (f"<b>{c['Sev5']} vulnerabilit{'y' if c['Sev5'] == 1 else 'ies'} "
                 f"confirmed present in our environment and known to be exploited.</b> "
                 f"These need attention today.{unverified_clause}")
         lead_bg, lead_border = "#fdecee", "#b3001b"
@@ -340,16 +398,16 @@ def render(data, kind):
     degraded += kev_banner
 
     tiles = "".join(
-        f"""<td width="25%" align="center" style="background:{PRI[p][1]};
+        f"""<td width="20%" align="center" style="background:{PRI[p][1]};
               border-top:3px solid {PRI[p][0]};padding:10px 4px">
-              <div style="font:700 26px -apple-system,Segoe UI,Arial,sans-serif;
-                          color:{PRI[p][0]}">{c[p]}</div>
+              <div style="font:700 24px -apple-system,Segoe UI,Arial,sans-serif;
+                          color:{PRI[p][0]}">{c.get(p, 0)}</div>
               <div style="font:700 11px -apple-system,Segoe UI,Arial,sans-serif;
                           color:{PRI[p][0]};letter-spacing:.5px">{p}</div></td>"""
-        for p in ("P1", "P2", "P3", "P4"))
+        for p in SEV_ORDER)
 
     sections = []
-    for p in ("P1", "P2", "P3", "P4"):
+    for p in SEV_ORDER:
         group = [f for f in findings if f["priority"] == p]
         if not group or limits[p] == 0:
             continue
@@ -406,6 +464,9 @@ def render(data, kind):
        style="max-width:640px;background:#fff;border-radius:6px;overflow:hidden">
 
   <tr><td style="background:#12203a;padding:16px 20px">
+    <div style="font:700 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
+                color:#9fb0cc;letter-spacing:1.2px;text-transform:uppercase">
+      {esc(org)}</div>
     <div style="font:700 17px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#fff">
       CTI {'Weekly' if kind == 'weekly' else 'Daily'} Brief</div>
     <div style="font:400 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
@@ -427,6 +488,7 @@ def render(data, kind):
       {degraded}{''.join(sections)}
     </table></td></tr>
 
+{subjects_section(data)}
   <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
     <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#718096">
@@ -435,7 +497,7 @@ def render(data, kind):
       Advisory text supplies urgency, never proof of exposure.
       <b>UNKNOWN</b> means no QID mapping existed &mdash; treat it as unverified
       coverage, not as clean.<br>
-      Generated by the CTI agent fleet &middot; {esc(data['generated'])}
+      Generated by the {esc(org)} CTI agent fleet &middot; {esc(data['generated'])}
     </div></td></tr>
 
 </table></td></tr></table></body></html>"""
@@ -444,8 +506,8 @@ def render(data, kind):
 def render_text(data, kind):
     c = data["counts"]
     lines = [subject(data, kind), "=" * 68, ""]
-    lines.append(f"P1 {c['P1']}   P2 {c['P2']}   P3 {c['P3']}   P4 {c['P4']}"
-                 f"   (total {data['total']})")
+    lines.append("   ".join(f"{p} {c.get(p, 0)}" for p in SEV_ORDER)
+                 + f"   (total {data['total']})")
     if data.get("degraded"):
         lines += ["", f"DEGRADED - unavailable this run: {', '.join(data['degraded'])}"]
     nov = data.get("novelty") or {}
@@ -464,15 +526,15 @@ def render_text(data, kind):
         if kev.get("overdue_cves"):
             lines.append(f"  overdue: {', '.join(kev['overdue_cves'][:8])}")
     lines.append("")
-    for p in ("P1", "P2", "P3", "P4"):
+    for p in SEV_ORDER:
         group = [f for f in data["findings"] if f["priority"] == p]
-        if not group or (kind == "daily" and p == "P4"):
+        if not group or (kind == "daily" and p == "Sev1"):
             continue
         lines += [f"{p} - {PRI[p][2]} ({len(group)})", "-" * 68]
         if p in MIXED_NOTE and band_needs_caveat(group):
             lines.append("  NOTE: UNKNOWN rows below are unverified coverage, "
                          "not confirmed exposure.")
-        for f in group[: 99 if p in ("P1", "P2") else 10]:
+        for f in group[: 99 if p in ("Sev5", "Sev4", "Sev3") else 10]:
             lines.append(f"  {f['cve']}  {f.get('status')}  "
                          f"{f.get('host_count') or 0} host(s)")
             lines.append(f"    {f.get('rationale')}")
@@ -496,7 +558,7 @@ def main():
 
     with open(args.enriched) as f:
         data = json.load(f)
-    data.setdefault("counts", {p: 0 for p in ("P1", "P2", "P3", "P4")})
+    data.setdefault("counts", {p: 0 for p in SEV_ORDER})
     data.setdefault("findings", [])
     data.setdefault("total", len(data["findings"]))
     data.setdefault("generated", datetime.now(timezone.utc).isoformat(timespec="seconds"))
@@ -512,7 +574,8 @@ def main():
     with open(args.out, "w") as f:
         f.write(render(data, kind))
     print(f"[brief] wrote {args.out} ({kind}) "
-          f"P1={data['counts']['P1']} P2={data['counts']['P2']}", file=sys.stderr)
+          " ".join(f"{p}={data['counts'].get(p, 0)}" for p in SEV_ORDER),
+          file=sys.stderr)
     if args.text_out:
         with open(args.text_out, "w") as f:
             f.write(render_text(data, kind))
