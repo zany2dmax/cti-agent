@@ -27,6 +27,7 @@ Environment (from ~/fleet/fleet.env):
   GRAPH_MAILBOX         mailbox that sends as (required)
   DIGEST_TO             digest recipients, comma-separated (required)
   DIGEST_CC             additional recipients on CC, comma-separated (optional)
+  DIGEST_CC_FROM_ALLOW_TO  true: CC everyone on FLEET_ALLOW_TO as well
   FLEET_OPERATOR_EMAIL  where --to-operator escalations go
   CTI_REPLY_MAILBOX     mailbox the operator replies to; defaults to GRAPH_MAILBOX
   FLEET_ALLOW_TO        allowlist; anything else needs --approve.
@@ -136,6 +137,16 @@ def graph_post(path, payload, tok, retries=3):
     return None
 
 
+def env_true(name):
+    """Boolean from the environment, tolerant about how people write yes.
+
+    fleet.env is edited by hand, so "true", "True", "1" and "yes" all have to
+    work. Anything unrecognised is false: a flag that turns a security control
+    into a distribution list should not be enabled by a typo.
+    """
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def env_path():
     """Where load_env() actually read from, for error messages.
 
@@ -158,6 +169,7 @@ REQUIRED = [
 OPTIONAL = [
     ("DIGEST_TO", "digest recipients; without it every send needs --to"),
     ("DIGEST_CC", "extra recipients on CC; also gated by FLEET_ALLOW_TO"),
+    ("DIGEST_CC_FROM_ALLOW_TO", "true: also CC everyone on the allowlist"),
     ("FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"),
     ("NVD_API_KEY", "without it NVD throttles to 5 requests/30s"),
     ("CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"),
@@ -306,12 +318,31 @@ def main():
     cc_raw = "" if args.to_operator else (args.cc or os.environ.get("DIGEST_CC") or "")
     cc = [r.strip() for r in cc_raw.split(",") if r.strip()]
 
+    # Optionally derive the CC from the allowlist, so a standing recipient is
+    # one edit rather than two. Opt-in, because it changes what FLEET_ALLOW_TO
+    # MEANS: from "addresses this fleet may mail" to "addresses this fleet
+    # mails". The cost is that adding someone to the allowlist for a single
+    # approved off-cycle send then subscribes them to every digest - so keep
+    # the allowlist to standing recipients and use --approve for one-offs.
+    #
+    # Read from the RAW variable, not the augmented allow set below: that one
+    # has FLEET_OPERATOR_EMAIL added so the orchestrator can always escalate,
+    # and silently CC-ing the operator on every digest is not what enabling
+    # this asks for. List them in FLEET_ALLOW_TO explicitly if you want that.
+    if not args.to_operator and env_true("DIGEST_CC_FROM_ALLOW_TO"):
+        from_allow = [a.strip() for a
+                      in (os.environ.get("FLEET_ALLOW_TO") or "").split(",")
+                      if a.strip()]
+        have = {r.lower() for r in cc}
+        cc += [a for a in from_allow if a.lower() not in have]
+
     for r in recipients + cc:
         if not EMAIL_RE.match(r):
             die(f"{r!r} is not a valid address")
 
     # A CC that is already a To recipient is a duplicate delivery, and Graph
-    # will happily send both.
+    # will happily send both. This matters more with the allowlist as the CC
+    # source, since DIGEST_TO is normally in FLEET_ALLOW_TO by definition.
     seen = {r.lower() for r in recipients}
     cc = [r for r in cc if r.lower() not in seen]
 

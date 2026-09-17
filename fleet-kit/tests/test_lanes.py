@@ -583,6 +583,78 @@ class MailerCc(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["cc"], ["ok@example.com"])
 
+    def test_allowlist_can_supply_the_cc(self):
+        # One edit instead of two: add a standing recipient to FLEET_ALLOW_TO
+        # and they receive the digest.
+        code, out = self.run_mailer(self.env(
+            FLEET_ALLOW_TO="dl@example.com,alice@example.com,bob@example.com",
+            DIGEST_CC_FROM_ALLOW_TO="true"))
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(json.loads(out)["cc"]),
+                         ["alice@example.com", "bob@example.com"])
+
+    def test_allowlist_cc_excludes_the_to_recipients(self):
+        # DIGEST_TO is in the allowlist by definition, so without this every
+        # digest would CC its own To line.
+        code, out = self.run_mailer(self.env(
+            FLEET_ALLOW_TO="dl@example.com", DIGEST_CC_FROM_ALLOW_TO="1"))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["cc"], [])
+
+    def test_allowlist_cc_does_not_include_the_operator(self):
+        # The operator is added to the allow SET in code so escalations always
+        # work. Deriving the CC from the raw variable keeps them off the
+        # digest unless they are listed deliberately.
+        code, out = self.run_mailer(self.env(
+            FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+            DIGEST_CC_FROM_ALLOW_TO="yes"))
+        self.assertEqual(code, 0)
+        self.assertNotIn("op@example.com", json.loads(out)["cc"])
+
+    def test_allowlist_cc_merges_with_an_explicit_digest_cc(self):
+        code, out = self.run_mailer(self.env(
+            FLEET_ALLOW_TO="dl@example.com,alice@example.com,carol@example.com",
+            DIGEST_CC="alice@example.com",
+            DIGEST_CC_FROM_ALLOW_TO="on"))
+        self.assertEqual(code, 0)
+        cc = json.loads(out)["cc"]
+        self.assertEqual(sorted(cc), ["alice@example.com", "carol@example.com"])
+        self.assertEqual(len(cc), len(set(cc)), "merged CC contains a duplicate")
+
+    def test_allowlist_cc_is_off_unless_explicitly_enabled(self):
+        for value in ("", "ture", "maybe", "0", "false", "no"):
+            code, out = self.run_mailer(self.env(
+                FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+                DIGEST_CC_FROM_ALLOW_TO=value))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out)["cc"], [],
+                             f"{value!r} should not enable allowlist CC")
+
+    def test_allowlist_cc_never_applies_to_an_escalation(self):
+        tmp = tempfile.TemporaryDirectory()
+        old = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(self.env(FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+                                   DIGEST_CC_FROM_ALLOW_TO="true"),
+                          FLEET_HOME=tmp.name,
+                          FLEET_ENV=os.path.join(tmp.name, "absent.env"))
+        sys.argv = ["mailer.py", "--to-operator", "--subject", "S",
+                    "--message", "M", "--dry-run"]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                mailer.main()
+        except SystemExit:
+            pass
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+            tmp.cleanup()
+        d = json.loads(out.getvalue())
+        self.assertEqual(d["to"], ["op@example.com"])
+        self.assertEqual(d["cc"], [], "a question to one person is not a thread")
+
     def test_invalid_cc_address_is_refused(self):
         code, _ = self.run_mailer(
             self.env(FLEET_ALLOW_TO="dl@example.com,notanemail"), "--cc", "notanemail")
