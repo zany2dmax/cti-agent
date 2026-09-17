@@ -716,6 +716,7 @@ play.
 |---|---|
 | `DIGEST_TO` | scheduled digest recipients, comma-separated |
 | `DIGEST_CC` | additional recipients on CC, comma-separated. For individuals who should see the digest but are not the DL |
+| `DIGEST_CC_FROM_ALLOW_TO` | `true` to also Cc everyone on `FLEET_ALLOW_TO`. One edit instead of two — read the caveat below |
 | `FLEET_ALLOW_TO` | **hard allowlist, enforced in code, covering To *and* Cc.** A send to any address not listed is refused. Defaults to `DIGEST_TO` only — so a `DIGEST_CC` address must be added here too |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
@@ -742,6 +743,40 @@ That is the right direction to fail, but it does mean two edits.
 A Cc that duplicates a To recipient is dropped rather than delivered twice.
 Operator escalations are never Cc'd — a question addressed to one person
 should not become a thread.
+
+#### One edit instead of two
+
+Maintaining the same addresses in both `DIGEST_CC` and `FLEET_ALLOW_TO` is
+annoying and easy to get half-right. Set `DIGEST_CC_FROM_ALLOW_TO=true` and the
+Cc is derived from the allowlist:
+
+```bash
+DIGEST_TO=soc@example.com
+FLEET_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com
+DIGEST_CC_FROM_ALLOW_TO=true
+# -> To: soc@  Cc: alice@, bob@
+```
+
+**Know what this changes.** `FLEET_ALLOW_TO` is a *permission* list — addresses
+the fleet **may** mail. Enabling this makes it also a *distribution* list —
+addresses the fleet **does** mail. The cost is that adding someone to the
+allowlist to approve a single off-cycle send then subscribes them to every
+digest from then on. Keep the allowlist to standing recipients and use
+`--approve` for one-offs.
+
+Three things it deliberately does not do:
+
+- **It does not Cc `FLEET_OPERATOR_EMAIL`.** That address is added to the allow
+  *set* in code so the orchestrator can always escalate; Cc-ing them on every
+  digest is not what enabling this asks for. List them in `FLEET_ALLOW_TO`
+  explicitly if you want it.
+- **It does not Cc the To recipients.** `DIGEST_TO` is in the allowlist by
+  definition, so without this every digest would Cc its own To line.
+- **It does not apply to escalations.** Still one recipient, still no thread.
+
+It accepts `true`, `yes`, `1`, `on`. Anything else — including a typo — leaves
+it off, because a flag that converts a security control into a mailing list
+should not be enabled by accident.
 
 `FLEET_ALLOW_TO` is the control that stops a confused or compromised agent
 mailing your findings somewhere else. Keep it as tight as the job allows.
