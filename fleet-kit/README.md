@@ -29,7 +29,7 @@ the vulnerability scanner whether the environment is actually exposed, write
 markdown. What it doesn't do is decide what matters, or tell anyone. The fleet
 wraps it. An orchestrator wakes every two hours, three executor lanes add
 exploitability context and find CVEs the mailbox missed, and a digest lands in
-the security inbox each morning with P1 items at the top. Nobody has to remember
+the security inbox each morning with Sev5 items at the top. Nobody has to remember
 to run anything, and nobody has to read a fifty-row table to find the four rows
 that matter.
 
@@ -48,7 +48,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 │   · THE ONLY AGENT THAT SENDS MAIL
 │
 ├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
-├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → P1–P4
+├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 └── @brief    lanes/brief.py          enriched JSON → HTML digest
                                             │
@@ -73,13 +73,13 @@ place where the recipient allowlist lives.
 **Delivery doesn't depend on the LLM noticing the clock.** The morning digest
 runs from a plain systemd timer calling `bin/run-digest` — a deterministic shell
 pipeline. The orchestrator's heartbeat does judgment work: chasing UNKNOWNs,
-nudging stale P1s, correlating scout backlog. If the model has a bad day, the
+nudging stale Sev5s, correlating scout backlog. If the model has a bad day, the
 digest still goes out. If the timer is disabled, the orchestrator notices on its
 next beat and says so.
 
 ---
 
-## Why P1–P4 instead of CVSS
+## Why Sev5–Sev1 instead of CVSS
 
 CVSS answers "how bad is this vulnerability in the abstract," which is close to
 useless for deciding what to do on a Tuesday. A representative report makes the
@@ -92,23 +92,24 @@ environment**:
 
 | | Definition | What it means |
 |---|---|---|
-| **P1** | `PRESENT` with hosts > 0 **and** (on CISA KEV **or** EPSS ≥ 10%) | Being exploited right now, and you have it. Today. |
-| **P2** | `PRESENT` with hosts > 0, any severity — or `UNKNOWN` on something with KEV / EPSS ≥ 50% | You have it, or you can't prove you don't. This patch cycle. **The band is mixed, and the digest says which rows are which.** |
-| **P3** | Exploited or EPSS ≥ 10% but not detected — or `UNKNOWN` with CVSS ≥ 9.0 | Verify scan coverage actually reaches it. |
-| **P4** | Everything else | Awareness. Suppressed from the daily; appears in the weekly. |
+| **Sev5** | `PRESENT` with hosts > 0 **and** (on CISA KEV **or** EPSS ≥ 10%) | Being exploited right now, and you have it. Today. |
+| **Sev4** | `PRESENT` with hosts > 0, any severity | You have it and nobody is exploiting it yet. This patch cycle. |
+| **Sev3** | `UNKNOWN` coverage **and** (KEV **or** EPSS ≥ 50%) | Being exploited, and the scanner could not tell you whether you are exposed. Not a finding; an unresolved question. |
+| **Sev2** | Exploited or EPSS ≥ 10% but `NOT_PRESENT` — or `UNKNOWN` with CVSS ≥ 9.0 | Verify scan coverage actually reaches it. |
+| **Sev1** | Everything else | Awareness. Suppressed from the daily; appears in the weekly. |
 
 Three deliberate choices, each of which came out of testing the scoring against
 real report data:
 
-**Presence alone earns P2, regardless of CVSS.** An earlier cut gated P2 on
-CVSS ≥ 7.0, which put a CVE present on 186 hosts with CVSS 5.5 into P3 — *below*
+**Presence alone earns Sev4, regardless of CVSS.** An earlier cut gated Sev4 on
+CVSS ≥ 7.0, which put a CVE present on 186 hosts with CVSS 5.5 into Sev2 — *below*
 a NOT_PRESENT CVE. That inverts the exact thing this scoring exists to fix. If
 it's on your machines, it's a patching obligation.
 
-**`UNKNOWN` + actively exploited lands in P2, and `UNKNOWN` + CVSS ≥ 9.0 lands
-in P3.** A CVE comes back UNKNOWN when the scanner's KnowledgeBase has no QID
+**`UNKNOWN` + actively exploited lands in Sev4, and `UNKNOWN` + CVSS ≥ 9.0 lands
+in Sev2.** A CVE comes back UNKNOWN when the scanner's KnowledgeBase has no QID
 mapping for it. That is not "we're clean" — it's "we didn't look." Letting
-missing data sink to P4 is the failure mode that shows up in a post-incident
+missing data sink to Sev1 is the failure mode that shows up in a post-incident
 review.
 
 **Host count breaks ties before CVSS does.** A 6.5 on 305 hosts outranks a 9.8
@@ -136,7 +137,7 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:doctor` | `dev-run doctor` | Tools, `.env` completeness, Graph token, granted app roles | no |
 | `task dev:ingest:none` | `dev-run ingest --provider none` | Mailbox → CVEs, **no scanner** | no |
 | `task dev:ingest` | `dev-run ingest` | Mailbox → CVEs → scanner lookup | no |
-| `task dev:enrich` | `dev-run enrich` | + NVD CVSS, EPSS, KEV → P1–P4 | no |
+| `task dev:enrich` | `dev-run enrich` | + NVD CVSS, EPSS, KEV → Sev5–Sev1 | no |
 | `task dev:brief` | `dev-run brief` | Render HTML + text digest | no |
 | `task dev:send TO=…` | `dev-run send --to …` | Validate the send path and gate | **dry run** |
 | `task dev:send:real TO=…` | `dev-run send --to … --for-real` | Deliver it | **YES** |
@@ -231,12 +232,12 @@ Via the `cti-agent` wrapper the installer writes:
 |---|---|
 | `bin/run-digest daily` | Deterministic ingest → enrich → brief → **send** |
 | `bin/run-digest daily --dry-run` | Same, sends nothing |
-| `bin/run-digest weekly` | Weekly rollup, includes P4 |
+| `bin/run-digest weekly` | Weekly rollup, includes Sev1 |
 | `bin/run-checkin` | One orchestrator heartbeat |
 | `bin/fleet-board tail 30` | Recent board lines |
 | `bin/fleet-board read @you` | Lines addressed to the orchestrator |
 | `bin/fleet-db recent` | Memory, open tasks, unacked mailbox, priority counts |
-| `bin/fleet-db findings --priority P1` | Query findings |
+| `bin/fleet-db findings --severity Sev5` | Query findings |
 | `bin/fleet-db findings --stale-days 7` | Findings with no remediation note |
 | `lanes/mailer.py --check` | Decode the token, list granted app roles |
 | `lanes/scout.py --out …` | Poll advisory feeds for new CVEs |
@@ -304,7 +305,7 @@ Work up in stages, so a failure tells you *where* it failed:
 | `dev-run doctor` | Go and Python present, `.env` complete, Graph token acquired, which app roles are actually granted |
 | `dev-run ingest --provider none` | Graph can read the mailbox and CVEs extract — **no scanner involved**, so a failure here is auth or parsing, never Qualys |
 | `dev-run ingest` | the scanner lookup works and returns PRESENT / NOT_PRESENT / UNKNOWN |
-| `dev-run enrich` | NVD, EPSS and KEV are reachable and P1–P4 comes out sane |
+| `dev-run enrich` | NVD, EPSS and KEV are reachable and Sev5–Sev1 comes out sane |
 | `dev-run brief` | the digest renders; prints a plain-text preview |
 | `dev-run send --to you@example.com` | the send path and the recipient gate work — **dry run**, sends nothing |
 | `dev-run send --to you@example.com --for-real` | actually delivers, so you can see what lands in an inbox |
@@ -858,12 +859,12 @@ Three deliberate choices:
 
 **The deadline does not change the priority.** A due date is an obligation
 about a risk, not a change to the risk. If it moved findings between bands, the
-same CVE would be P1 one week and P2 the next with nothing about your
+same CVE would be Sev5 one week and Sev4 the next with nothing about your
 environment having changed.
 
 **Host count still outranks lateness in the digest.** An earlier cut sorted by
-lateness first, which pushed a 40-host P1 below a 4-host P1 — the same
-inversion as the CVSS-gated P2 bug this scoring exists to prevent. Blast radius
+lateness first, which pushed a 40-host Sev5 below a 4-host Sev5 — the same
+inversion as the CVSS-gated Sev4 bug this scoring exists to prevent. Blast radius
 is the risk; lateness breaks ties after it. `cti-kev` orders by lateness
 instead, because that is where compliance questions get answered.
 
@@ -900,11 +901,11 @@ recipient outside the allowlist; creating tickets, changing scanner config or
 scan exceptions; deleting anything outside logs and archive; touching a
 production host.
 
-The P1 case is the one you'll be tempted to loosen, so it's explicit: a new P1
+The Sev5 case is the one you'll be tempted to loosen, so it's explicit: a new Sev5
 does *not* buy the fleet an off-cycle blast. It posts to the board tagged
-`[P1 APPROVE-TO-SEND]`, emails the operator, and waits. It also guarantees
+`[Sev5 APPROVE-TO-SEND]`, emails the operator, and waits. It also guarantees
 the item leads the next scheduled digest regardless of length. If you later
-decide P1s should auto-send, wire a separate `FLEET_P1_AUTO` path rather than
+decide Sev5s should auto-send, wire a separate `FLEET_Sev5_AUTO` path rather than
 widening the allowlist — those are different risks and deserve different
 switches.
 
@@ -954,7 +955,7 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 | every 2h | `/checkin` heartbeat — relay, decide, one proactive task. Subject to the quota ceiling below | `cti-agent-checkin.timer` |
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
-| Mon 07:00 | weekly rollup, includes P4 | `cti-agent-weekly.timer` |
+| Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then
@@ -1012,18 +1013,18 @@ twice.
 Subject lines are written to be triaged from a lock screen:
 
 ```
-[P1] CTI Aug 18: 3 exploited vulns present in the environment
-CTI Aug 18: 12 confirmed present, no P1
+[Sev5] CTI Aug 18: 3 exploited vulns present in the environment
+CTI Aug 18: 12 confirmed present, no Sev5
 CTI Aug 18: no new CVEs in the last 24h
 ```
 
-Body: a one-line lead saying whether to care, P1–P4 count tiles, then findings
+Body: a one-line lead saying whether to care, Sev5–Sev1 count tiles, then findings
 grouped by priority. Each carries KEV / ransomware / CVSS / EPSS / status
 badges, a plain-English "why it ranks here," the NVD description, and
 deduplicated sample hostnames. Table-based layout with inline CSS, because
 Outlook. The raw markdown report is attached for anyone who wants every row.
 
-P4 is suppressed from the daily and appears in the weekly. P2 and P3 are capped
+Sev1 is suppressed from the daily and appears in the weekly. Sev4 and Sev2 are capped
 at 12 and 10 items on the daily, sorted by host count, with a "+N more in the
 full report" note — the attachment has everything. If a run couldn't reach NVD
 or EPSS, the digest carries an explicit **DEGRADED** banner naming what was
@@ -1037,7 +1038,7 @@ targeting list if it leaks. Keep `SECURITY_DL` internal.
 
 Real hostnames are the default, deliberately: `REPORT_HOSTNAMES=redact`
 produces pseudonyms like `host-69a692a2` that cannot be looked up in the
-scanner or resolved back to a machine, so a redacted P1 tells the reader
+scanner or resolved back to a machine, so a redacted Sev5 tells the reader
 something is wrong without telling them where. Reports and digests are written
 mode `0600` under the fleet home and are gitignored. Use `redact` or `count`
 for a copy that leaves the distribution list.
@@ -1060,7 +1061,7 @@ fleet-kit/
     │   ├── run-digest             deterministic ingest→enrich→brief→send
     │   └── run-checkin            resolves the claude binary, fires one beat
     ├── lanes/
-    │   ├── enrich.py              NVD + EPSS + KEV → P1–P4, with caching
+    │   ├── enrich.py              NVD + EPSS + KEV → Sev5–Sev1, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
     │   ├── brief.py               HTML + plain-text digest renderer
     │   ├── mailer.py              Graph sendMail + recipient allowlist
@@ -1131,7 +1132,7 @@ fleet fleet-board read @you
 fleet run-digest daily --dry-run
 
 # Query findings
-fleet fleet-db findings --priority P1
+fleet fleet-db findings --severity Sev5
 fleet fleet-db findings --stale-days 7
 
 # Confirm Graph still sees the mailbox, and which roles the token actually has
@@ -1157,10 +1158,10 @@ since `CLAUDE.md` and the skills are resolved relative to it:
 ```bash
 # Fedora
 sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env \
-  bash -c 'cd /opt/cti-agent && claude "what P1s are open and unremediated?"'
+  bash -c 'cd /opt/cti-agent && claude "what Sev5s are open and unremediated?"'
 
 # Generic
-sudo -u ctiagent bash -c 'cd ~/fleet && claude "what P1s are open and unremediated?"'
+sudo -u ctiagent bash -c 'cd ~/fleet && claude "what Sev5s are open and unremediated?"'
 ```
 
 ### Troubleshooting
@@ -1227,7 +1228,7 @@ on the generic layout. The lock files live in state, not code, so they follow
 The fleet guide's advice applies here: don't stand up all four lanes on day one.
 
 **Week 1 — pipeline only.** Install, run `run-digest daily --dry-run` by hand,
-read the HTML yourself. Confirm the P1/P2 calls match your judgment. Tune the
+read the HTML yourself. Confirm the Sev5/Sev4 calls match your judgment. Tune the
 thresholds in `enrich.py::prioritize()` before anyone else sees the output. A
 digest that cries wolf in week one gets filtered forever.
 
@@ -1237,7 +1238,7 @@ source of CVEs.
 
 **Week 3 — heartbeat.** Set `FLEET_OPERATOR_EMAIL` and enable
 `cti-agent-checkin.timer`. Now an orchestrator is doing proactive work between
-digests: chasing UNKNOWNs, nudging stale P1s, and emailing you when it needs a
+digests: chasing UNKNOWNs, nudging stale Sev5s, and emailing you when it needs a
 decision. Watch `checkin.log` for a few days and judge whether its proactive
 picks are useful or busywork.
 
@@ -1246,7 +1247,7 @@ vendors you actually run. Expect a noisy first sweep as it backfills; the dedupe
 against `findings` and `scout_items` settles it within a day.
 
 **Later — a fifth lane, when a bottleneck forces it.** The obvious next one is
-asset/exposure correlation: map hostnames to owners and criticality so a P1 on a
+asset/exposure correlation: map hostnames to owners and criticality so a Sev5 on a
 database server routes differently than one on a workstation. A real report puts
 servers, laptops and Macs across several domains in one flat list, and sorting
 that by hand gets old fast. Add the lane when you catch yourself doing it, not

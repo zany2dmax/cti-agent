@@ -145,7 +145,7 @@ That is the Quick start below.
 
 **The agent inside the fleet** (`fleet-kit/`) — an always-on orchestrator plus
 three executor lanes that add exploitability context (NVD CVSS, EPSS, CISA
-KEV), prioritize P1–P4, render an HTML digest and mail it on a schedule. See
+KEV), prioritize Sev5–Sev1, render an HTML digest and mail it on a schedule. See
 [fleet-kit/README.md](fleet-kit/README.md) for the full runbook and a complete
 command reference.
 
@@ -219,7 +219,7 @@ have it." That is a targeting list if it leaks.
 
 The default is nonetheless `full`, because the alternative is worse in practice:
 a pseudonym cannot be looked up in the scanner, so a redacted report tells you a
-P1 exists without telling you where, and you have to rerun the pipeline to act
+Sev5 exists without telling you where, and you have to rerun the pipeline to act
 on it. An unactionable security report is not a safe security report.
 
 What keeps that defensible is everything around it — reports are written `0600`,

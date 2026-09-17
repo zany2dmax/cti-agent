@@ -85,14 +85,14 @@ echo "$RESULT"
 
 # ── 5. log ───────────────────────────────────────────────────────────────────
 if [ -z "$DRY" ]; then
-  read -r P1 P2 P3 P4 < <(python3 -c "
+  read -r S5 S4 S3 S2 S1 < <(python3 -c "
 import json,sys
 c=json.load(open('$ENRICHED'))['counts']
-print(c['P1'],c['P2'],c['P3'],c['P4'])")
+print(c['Sev5'],c['Sev4'],c['Sev3'],c['Sev2'],c['Sev1'])")
   MID=$(printf '%s' "$RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" 2>/dev/null || echo unknown)
-  "$DB" sent "$DAY" "$P1" "$P2" "$P3" "$P4" "$MID" "$KIND"
-  "$BOARD" post @brief @you INFO "$KIND digest sent: P1=$P1 P2=$P2 P3=$P3 P4=$P4 ($SUBJECT)"
-  say "done - P1=$P1 P2=$P2 P3=$P3 P4=$P4"
+  "$DB" sent "$DAY" "$S5" "$S4" "$S3" "$S2" "$S1" "$MID" "$KIND"
+  "$BOARD" post @brief @you INFO "$KIND digest sent: Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1 ($SUBJECT)"
+  say "done - Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1"
 else
   "$BOARD" post @brief @you INFO "DRY RUN $KIND digest ready at $HTML"
   say "dry run complete - $HTML"

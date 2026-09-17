@@ -167,22 +167,26 @@ class Prioritize(unittest.TestCase):
     def test_truth_table(self):
         pri, _ = self.build()
         expected = {
-            # present + actively exploited -> today
-            "CVE-2021-44228": ("P1", "present, KEV, EPSS 100%"),
-            "CVE-2020-1472":  ("P1", "present, KEV, EPSS 99%"),
-            "CVE-2025-33073": ("P1", "present, EPSS 21% (over the 10% bar)"),
-            # present, not being exploited -> this patch cycle, regardless of CVSS
-            "CVE-2026-9110":  ("P2", "present on 379 hosts"),
-            "CVE-2026-45659": ("P2", "present on 186 hosts, CVSS only 5.5"),
-            "CVE-2023-35636": ("P2", "present on 4 hosts, CVSS 6.5"),
-            # cannot prove we are clean, and it is being exploited
-            "CVE-2026-49975": ("P2", "UNKNOWN + KEV + EPSS 78%"),
-            # exploited but not detected here -> verify coverage
-            "CVE-2008-4250":  ("P3", "EPSS 94% but NOT_PRESENT"),
-            "CVE-2022-0492":  ("P3", "KEV but NOT_PRESENT"),
-            "CVE-2026-0826":  ("P3", "UNKNOWN + CVSS 9.8 = coverage gap"),
-            # nothing to act on
-            "CVE-2026-8206":  ("P4", "UNKNOWN, CVSS 4.3, no exploitation"),
+            # Sev5: present AND actively exploited -> today
+            "CVE-2021-44228": ("Sev5", "present, KEV, EPSS 100%"),
+            "CVE-2020-1472":  ("Sev5", "present, KEV, EPSS 99%"),
+            "CVE-2025-33073": ("Sev5", "present, EPSS 21% (over the 10% bar)"),
+            # Sev4: present, nobody exploiting it -> this patch cycle,
+            # regardless of CVSS
+            "CVE-2026-9110":  ("Sev4", "present on 379 hosts"),
+            "CVE-2026-45659": ("Sev4", "present on 186 hosts, CVSS only 5.5"),
+            "CVE-2023-35636": ("Sev4", "present on 4 hosts, CVSS 6.5"),
+            # Sev3: exploited AND we cannot say whether we are exposed. Above
+            # Sev4 deliberately - unbounded risk plus a blind spot beats
+            # bounded scheduled work.
+            "CVE-2026-49975": ("Sev3", "UNKNOWN + KEV + EPSS 78%"),
+            # Sev2: exploited but the scanner checked and found nothing, or a
+            # critical it could not check -> verify coverage
+            "CVE-2008-4250":  ("Sev2", "EPSS 94% but NOT_PRESENT"),
+            "CVE-2022-0492":  ("Sev2", "KEV but NOT_PRESENT"),
+            "CVE-2026-0826":  ("Sev2", "UNKNOWN + CVSS 9.8 = coverage gap"),
+            # Sev1: nothing to act on
+            "CVE-2026-8206":  ("Sev1", "UNKNOWN, CVSS 4.3, no exploitation"),
         }
         for cve, (want, why) in expected.items():
             with self.subTest(cve=cve, rationale=why):
@@ -191,28 +195,28 @@ class Prioritize(unittest.TestCase):
     def test_present_never_ranks_below_not_present(self):
         """The regression that motivated the current thresholds."""
         pri, _ = self.build()
-        order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
         present_worst = max(order[pri[c]] for c in
                             ("CVE-2026-45659", "CVE-2023-35636", "CVE-2026-9110"))
         absent_best = min(order[pri[c]] for c in ("CVE-2008-4250", "CVE-2022-0492"))
         self.assertLess(present_worst, absent_best,
                         "a PRESENT finding ranked at or below a NOT_PRESENT one")
 
-    def test_unknown_with_critical_cvss_is_not_p4(self):
+    def test_unknown_with_critical_cvss_is_not_sev1(self):
         pri, _ = self.build()
-        self.assertNotEqual(pri["CVE-2026-0826"], "P4",
+        self.assertNotEqual(pri["CVE-2026-0826"], "Sev1",
                             "UNKNOWN means we did not look, not that we are clean")
 
     def test_sorted_by_priority_then_host_count(self):
         _, data = self.build()
-        order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
         keys = [(order[f["priority"]], -(f["host_count"] or 0))
                 for f in data["findings"]]
         self.assertEqual(keys, sorted(keys), "findings are not ordered for triage")
 
     def test_counts_match_findings(self):
         _, data = self.build()
-        for p in ("P1", "P2", "P3", "P4"):
+        for p in ("Sev5", "Sev4", "Sev3", "Sev1"):
             self.assertEqual(
                 data["counts"][p],
                 sum(1 for f in data["findings"] if f["priority"] == p))
@@ -243,11 +247,11 @@ class Degradation(unittest.TestCase):
         self.assertIn("EPSS", data["degraded"])
         self.assertIn("KEV catalog", data["degraded"])
         # Presence still comes from the scanner, so PRESENT rows stay actionable.
-        self.assertGreater(data["counts"]["P2"], 0)
+        self.assertGreater(data["counts"]["Sev4"], 0)
 
     def test_degraded_banner_reaches_the_digest(self):
         data = {"generated": "2026-09-02T00:00:00+00:00", "source_meta": {},
-                "counts": {"P1": 0, "P2": 0, "P3": 0, "P4": 0}, "total": 0,
+                "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}, "total": 0,
                 "degraded": ["NVD", "EPSS"], "findings": []}
         html = brief.render(data, "daily")
         self.assertIn("DEGRADED", html)
@@ -267,19 +271,19 @@ class BriefRendering(unittest.TestCase):
             with open(out) as fh:
                 return json.load(fh)
 
-    def test_subject_leads_with_p1(self):
+    def test_subject_leads_with_sev5(self):
         d = self.enriched()
-        self.assertTrue(brief.subject(d, "daily").startswith("[P1]"))
+        self.assertTrue(brief.subject(d, "daily").startswith("[Sev5]"))
 
-    def test_subject_without_p1_does_not_cry_wolf(self):
+    def test_subject_without_sev5_does_not_cry_wolf(self):
         d = self.enriched()
-        d["findings"] = [f for f in d["findings"] if f["priority"] != "P1"]
-        d["counts"]["P1"] = 0
-        self.assertFalse(brief.subject(d, "daily").startswith("[P1]"))
+        d["findings"] = [f for f in d["findings"] if f["priority"] != "Sev5"]
+        d["counts"]["Sev5"] = 0
+        self.assertFalse(brief.subject(d, "daily").startswith("[Sev5]"))
 
     def test_empty_run_still_says_something_useful(self):
         d = {"generated": "x", "source_meta": {}, "total": 0, "degraded": [],
-             "counts": {"P1": 0, "P2": 0, "P3": 0, "P4": 0}, "findings": []}
+             "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}, "findings": []}
         self.assertIn("no new CVEs", brief.subject(d, "daily"))
         self.assertIn("Nothing to action", brief.render(d, "daily"))
 
@@ -288,7 +292,7 @@ class BriefRendering(unittest.TestCase):
         self.assertEqual(html.count("<table"), html.count("</table>"))
         self.assertEqual(html.count("<tr"), html.count("</tr>"))
 
-    def test_p4_suppressed_daily_shown_weekly(self):
+    def test_sev1_suppressed_daily_shown_weekly(self):
         d = self.enriched()
         self.assertNotIn("Awareness only", brief.render(d, "daily"))
         self.assertIn("Awareness only", brief.render(d, "weekly"))
@@ -308,7 +312,7 @@ class BriefRendering(unittest.TestCase):
 
     def test_text_version_renders(self):
         text = brief.render_text(self.enriched(), "daily")
-        self.assertIn("P1", text)
+        self.assertIn("Sev5", text)
         self.assertIn("Presence determined solely", text)
 
 
@@ -395,70 +399,125 @@ class MailerGate(unittest.TestCase):
 
 
 class BandLabelsDoNotOverclaim(unittest.TestCase):
-    """P2 and P3 each hold two kinds of finding. The band heading must not
-    assert presence the scanner never confirmed - the digest previously printed
-    "Present in the environment" directly above rows whose own status read
-    UNKNOWN."""
+    """A band heading must not assert presence the scanner never confirmed.
+
+    The digest once printed "Present in the environment" directly above rows
+    whose own status read UNKNOWN, because one band held both. The five-band
+    split fixes that structurally: these tests check the structure, not just
+    the wording, since wording drifts and structure does not."""
 
     def data(self, findings, **counts):
-        c = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
+        c = {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}
         c.update(counts)
         return {"counts": c, "total": len(findings), "degraded": [],
                 "source_meta": {}, "generated": "g", "kev_deadlines": {},
                 "findings": findings}
 
-    def unknown(self, cve, pri="P2"):
+    def unknown(self, cve, pri="Sev4"):
         return {"cve": cve, "priority": pri, "status": "UNKNOWN", "host_count": 0,
                 "rationale": "No Qualys KnowledgeBase CVE-to-QID mapping found",
                 "sample_hosts": "", "qids": ""}
 
-    def present(self, cve, hosts=3, pri="P2"):
+    def present(self, cve, hosts=3, pri="Sev4"):
         return {"cve": cve, "priority": pri, "status": "PRESENT",
                 "host_count": hosts, "rationale": f"PRESENT on {hosts} host(s)",
                 "sample_hosts": "h1", "qids": "1"}
 
-    def test_p2_heading_never_claims_bare_presence(self):
-        self.assertNotIn("Present in the environment", brief.PRI["P2"][2])
-        self.assertIn("unverified", brief.PRI["P2"][2].lower())
+    def test_sev4_claims_presence_because_only_presence_lands_there(self):
+        # With five bands the label can finally be plain. Sev4 is confirmed
+        # present and nothing else, so saying so is honest rather than the
+        # overclaim it was when the band also held UNKNOWN rows.
+        self.assertIn("Confirmed present", brief.PRI["Sev4"][2])
+        self.assertNotIn("unverified", brief.PRI["Sev4"][2].lower())
 
-    def test_all_unknown_p2_gets_no_presence_claim_anywhere(self):
-        # The reported bug: two P2 rows, both UNKNOWN, under a header saying
-        # they were present.
-        d = self.data([self.unknown("CVE-1"), self.unknown("CVE-2")], P2=2)
-        html = brief.render(d, "daily")
-        self.assertNotIn("Present in the environment", html)
-        self.assertIn("coverage could not be established", html)
+    def test_no_band_label_claims_presence_for_unverified_rows(self):
+        # The structural fix for the reported bug. Sev3 and Sev2 are where
+        # UNKNOWN rows live, and neither may assert presence.
+        for band in ("Sev3", "Sev2"):
+            label = brief.PRI[band][2].lower()
+            self.assertNotIn("confirmed present", label, band)
 
-    def test_mixed_band_explains_itself(self):
-        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+    def test_scoring_cannot_put_an_unknown_row_in_sev4(self):
+        # Stronger than checking the wording: if the scoring itself can never
+        # place an unverified finding in the confirmed-present band, the
+        # heading cannot lie no matter how it is worded later.
+        for kev, epss, cvss in [(1, 0.9, 9.9), (0, 0.6, 9.9), (0, 0.0, 9.5),
+                                (0, 0.0, 2.0), (1, 0.0, 0.0)]:
+            f = {"status": "UNKNOWN", "host_count": 0, "kev": kev,
+                 "epss": epss, "cvss": cvss}
+            band, _ = enrich.prioritize(f)
+            self.assertNotEqual(band, "Sev4",
+                                f"UNKNOWN reached Sev4 with kev={kev} epss={epss}")
+            self.assertNotEqual(band, "Sev5",
+                                f"UNKNOWN reached Sev5 with kev={kev} epss={epss}")
+
+    def test_the_scale_is_monotonic(self):
+        # A severity number has to mean what it says: Sev4 outranks Sev3, and
+        # no amount of reasoning in a comment changes that. An earlier draft
+        # claimed Sev3 outranked Sev4 and this test caught it.
+        self.assertEqual(list(brief.SEV_ORDER),
+                         ["Sev5", "Sev4", "Sev3", "Sev2", "Sev1"])
+        order = {p: i for i, p in enumerate(brief.SEV_ORDER)}
+        for higher, lower in zip(brief.SEV_ORDER, brief.SEV_ORDER[1:]):
+            self.assertLess(order[higher], order[lower])
+
+    def test_unverified_sits_mid_scale_not_at_the_floor(self):
+        # Below confirmed presence, because a coverage gap may turn out to be
+        # nothing. Well above awareness, because it may turn out to be
+        # everything - that is the reason the old P2 band was split at all.
+        unverified, _ = enrich.prioritize(
+            {"status": "UNKNOWN", "host_count": 0, "kev": 1, "epss": 0.9})
+        present_quiet, _ = enrich.prioritize(
+            {"status": "PRESENT", "host_count": 300, "kev": 0, "epss": 0.001,
+             "cvss": 7.0})
+        noise, _ = enrich.prioritize(
+            {"status": "UNKNOWN", "host_count": 0, "kev": 0, "epss": 0.0001,
+             "cvss": 4.0})
+        order = {p: i for i, p in enumerate(brief.SEV_ORDER)}
+        self.assertEqual(unverified, "Sev3")
+        self.assertGreater(order[unverified], order[present_quiet])
+        self.assertLess(order[unverified], order[noise])
+
+    def test_sev3_explains_why_it_exists(self):
+        d = self.data([self.unknown("CVE-1", pri="Sev3")], Sev3=1)
         html = brief.render(d, "daily")
-        self.assertIn("not a confirmed exposure", html)
+        self.assertIn("it means nobody looked", html)
+        self.assertNotIn("Confirmed present", html.split("Sev3")[1][:400])
 
     def test_all_present_band_carries_no_caveat(self):
         # A caveat on a band that does not need one is noise, and noise is how
         # a caveat stops being read when it matters.
-        d = self.data([self.present("CVE-1"), self.present("CVE-2")], P2=2)
+        d = self.data([self.present("CVE-1"), self.present("CVE-2")], Sev4=2)
         html = brief.render(d, "daily")
-        self.assertNotIn("not a confirmed exposure", html)
+        self.assertNotIn("nobody looked", html)
 
     def test_subject_counts_confirmed_presence_not_band_size(self):
-        # "3 confirmed present" was printed from the P2 count, which can be
-        # entirely UNKNOWN.
-        d = self.data([self.unknown("CVE-1"), self.unknown("CVE-2")], P2=2)
+        # "3 confirmed present" was printed from a band count that could be
+        # entirely UNKNOWN. It now counts rows.
+        d = self.data([self.unknown("CVE-1", pri="Sev3"),
+                       self.unknown("CVE-2", pri="Sev3")], Sev3=2)
         s = brief.subject(d, "daily")
-        self.assertNotIn("confirmed present, no P1", s.replace("0 confirmed present", ""))
+        self.assertIn("0 confirmed present", s)
         self.assertIn("could not check", s)
 
-        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+        d = self.data([self.present("CVE-1"),
+                       self.unknown("CVE-2", pri="Sev3")], Sev4=1, Sev3=1)
         s = brief.subject(d, "daily")
         self.assertIn("1 confirmed present", s)
         self.assertIn("1 unverified", s)
 
     def test_text_digest_carries_the_same_caveat(self):
-        d = self.data([self.present("CVE-1"), self.unknown("CVE-2")], P2=2)
+        d = self.data([self.present("CVE-1"),
+                       self.unknown("CVE-2", pri="Sev3")], Sev4=1, Sev3=1)
         txt = brief.render_text(d, "daily")
         self.assertIn("unverified coverage", txt)
         self.assertIn("not that we are clean", txt)
+
+    def test_label_never_says_p1_through_p4(self):
+        # The point of the rename: no collision with the incident scale.
+        for band, (_, _, label) in brief.PRI.items():
+            for p in ("P1", "P2", "P3", "P4"):
+                self.assertNotIn(p, label, f"{band} label mentions {p}")
 
 
 class MailerCc(unittest.TestCase):
@@ -582,7 +641,7 @@ class KevDeadlines(unittest.TestCase):
             if due:
                 f["kev_due"] = due
             p, _ = enrich.prioritize(f, self.TODAY)
-            self.assertEqual(p, "P1", f"due={due} changed the band")
+            self.assertEqual(p, "Sev5", f"due={due} changed the band")
 
     def test_host_count_still_outranks_lateness(self):
         # The regression guard. An earlier cut sorted by lateness first, which
@@ -601,7 +660,7 @@ class KevDeadlines(unittest.TestCase):
             data = json.load(fh)
         tmp.cleanup()
 
-        order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
         keys = [(order[f["priority"]], -(f.get("host_count") or 0))
                 for f in data["findings"]]
         self.assertEqual(keys, sorted(keys),
@@ -633,26 +692,27 @@ class KevDeadlines(unittest.TestCase):
 
 
 class KevInTheDigest(unittest.TestCase):
-    def data(self, kev, p1=1):
-        return {"counts": {"P1": p1, "P2": 2, "P3": 0, "P4": 0}, "total": 3,
+    def data(self, kev, sev5=1):
+        return {"counts": {"Sev5": sev5, "Sev4": 2, "Sev3": 0, "Sev2": 0,
+                           "Sev1": 0}, "total": 3,
                 "degraded": [], "source_meta": {}, "generated": "2026-09-15T06:00:00Z",
                 "kev_deadlines": kev,
-                "findings": [{"cve": "CVE-2026-1", "priority": "P1",
+                "findings": [{"cve": "CVE-2026-1", "priority": "Sev5",
                               "status": "PRESENT", "host_count": 12,
                               "rationale": "present", "sample_hosts": "a",
                               "qids": "1"}]}
 
-    def test_p1_still_leads_the_subject(self):
-        # An overdue deadline on a P2 is less urgent than a P1. A subject that
+    def test_sev5_still_leads_the_subject(self):
+        # An overdue deadline on a Sev4 is less urgent than a Sev5. A subject that
         # led with OVERDUE would bury the more urgent fact.
         s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
                                      "overdue_cves": ["X", "Y"]}), "daily")
-        self.assertTrue(s.startswith("[P1]"), s)
+        self.assertTrue(s.startswith("[Sev5]"), s)
         self.assertIn("OVERDUE", s, "the deadline should still ride along")
 
-    def test_overdue_leads_when_there_is_no_p1(self):
+    def test_overdue_leads_when_there_is_no_sev5(self):
         s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
-                                     "overdue_cves": ["X", "Y"]}, p1=0), "daily")
+                                     "overdue_cves": ["X", "Y"]}, sev5=0), "daily")
         self.assertTrue(s.startswith("[OVERDUE]"), s)
 
     def test_no_banner_when_nothing_is_due(self):

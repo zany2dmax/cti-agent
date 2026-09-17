@@ -203,7 +203,7 @@ tasks:
       - "{{.DEV_RUN}} ingest"
 
   dev:enrich:
-    desc: Add NVD CVSS, EPSS and CISA KEV, then assign P1-P4
+    desc: Add NVD CVSS, EPSS and CISA KEV, then assign Sev5-Sev1
     cmds:
       - "{{.DEV_RUN}} enrich"
 

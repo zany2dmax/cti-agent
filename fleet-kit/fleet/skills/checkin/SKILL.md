@@ -91,19 +91,19 @@ the already-sent guard, and the guard is what makes recovery safe.
 ## 4. Decide — ask BOTH questions
 
 **Something to TELL the operator?** Email them outside a scheduled digest only
-for a new P1 — `PRESENT` per the scanner, on CISA KEV, host count above zero —
-or for a lane that has failed three times. Even for a P1 you are asking for
+for a new Sev5 — `PRESENT` per the scanner, on CISA KEV, host count above zero —
+or for a lane that has failed three times. Even for a Sev5 you are asking for
 approval to notify the distribution list, not notifying it. Everything else
 waits for the digest.
 
 ```
 python3 $FLEET_CODE/lanes/mailer.py --to-operator --board-id <id> \
-  --subject "P1: CVE-... present on N hosts" --message "<what and why>"
+  --subject "Sev5: CVE-... present on N hosts" --message "<what and why>"
 ```
 
 **Something to DO?** If there is no ping, you owe the fleet a proactive task.
 Pick from the quiet-beat list in CLAUDE.md — resolve an UNKNOWN, nudge a stale
-P1, correlate scout backlog, check KEV deadlines. Do exactly one, well, and
+Sev5, correlate scout backlog, check KEV deadlines. Do exactly one, well, and
 log it.
 
 No ping is fine. No work is the bug.

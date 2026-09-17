@@ -3,7 +3,7 @@
 //
 // WHY A DEADLINE REPORT AT ALL
 //
-// P1-P4 answers "what should we do first". It does not answer "what are we
+// Sev5-Sev1 answers "what should we do first". It does not answer "what are we
 // late on", and those are different conversations with different audiences.
 // A deadline published by CISA under BOD 22-01 is a date somebody else set:
 // far more durable in a patching argument than an internal opinion about
@@ -234,7 +234,7 @@ func (r *Report) Markdown(showHosts bool) string {
 
 func (r *Report) table(rows []Dated, showHosts bool) string {
 	var b strings.Builder
-	b.WriteString("| CVE | Due | Days | Hosts | P | QIDs |")
+	b.WriteString("| CVE | Due | Days | Hosts | Sev | QIDs |")
 	if showHosts {
 		b.WriteString(" Sample hosts |")
 	}

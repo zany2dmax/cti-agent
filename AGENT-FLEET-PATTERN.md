@@ -103,10 +103,24 @@ the failure that shows up in a post-incident review.
 Now something appears that neither axis had alone. Cross **exploitability** with
 **presence** and you get a priority that means something:
 
-|  | Being exploited | Not being exploited |
+| Band | Exploitability × presence | What it means |
 |---|---|---|
-| **Present here** | **P1** — today | **P2** — this patch cycle |
-| **Not present / unverified** | **P3** — verify your scan coverage | **P4** — awareness |
+| **Sev5** | exploited **and** confirmed present | Today |
+| **Sev4** | confirmed present, nobody exploiting it | This patch cycle |
+| **Sev3** | exploited, **coverage unverified** | We cannot say whether we are exposed |
+| **Sev2** | exploited but confirmed absent, or unverified critical | Check the scanner reaches it |
+| **Sev1** | everything else | Awareness |
+
+Five bands rather than four because the earlier version put "confirmed
+present" and "we cannot tell" in the same band, which forced the digest
+heading to claim presence the scanner had never established. Splitting them
+lets every label be true on its own — and gives `Sev3` a home in the middle
+of the scale, where a coverage gap on an actively-exploited CVE gets read
+instead of filed with the awareness items.
+
+The scale is deliberately **not** P1–P4: that is the incident-reporting scale
+in this organisation, and a CTI digest labelled "P1" reads as a live incident
+to anyone on the rota. Different scale, different meaning, no collision.
 
 That two-by-two is the whole argument for this system. CVSS answers "how bad is
 this in the abstract," which is close to useless on a Tuesday. A CVE present on
@@ -142,8 +156,8 @@ months.
 
 ### Axis 6 — translation: *what does a human do with this?*
 
-`@brief` — renders the enriched findings as an HTML digest: P1 at the top, host
-counts visible, deadlines banner-ed, P4 suppressed from the daily and saved for
+`@brief` — renders the enriched findings as an HTML digest: Sev5 at the top, host
+counts visible, deadlines banner-ed, Sev1 suppressed from the daily and saved for
 the weekly.
 
 This lane does no analysis. It exists because analysis nobody reads is
@@ -180,7 +194,7 @@ having an off day, or refuses for reasons nobody can reproduce, **the brief
 still lands at 06:00.**
 
 The orchestrator's heartbeat does the work that actually needs judgment:
-chasing an `UNKNOWN` nobody resolved, noticing a P1 that's been open eleven
+chasing an `UNKNOWN` nobody resolved, noticing a Sev5 that's been open eleven
 days, correlating scout backlog, spotting that a timer got disabled.
 
 This split is the single most important thing in the architecture, and it is a
@@ -222,13 +236,13 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 |---|---|
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
-| Prioritize findings for the patching team | The P1–P4 matrix: exploitability × presence, host count as tiebreak |
+| Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
 | Track known-exploited vulnerabilities and compliance deadlines | `cti-kev`, against CISA's published due dates |
 | Produce a daily brief for the security team | `@brief` → Graph sendMail, 06:00 local |
-| Produce a weekly summary including lower-severity items | The Monday weekly, where suppressed P4s surface |
-| Follow up on items nobody has actioned | The heartbeat's quiet-beat work: stale P1 nudges, unresolved `UNKNOWN`s |
+| Produce a weekly summary including lower-severity items | The Monday weekly, where suppressed Sev1s surface |
+| Follow up on items nobody has actioned | The heartbeat's quiet-beat work: stale Sev5 nudges, unresolved `UNKNOWN`s |
 | Escalate what's urgent; don't escalate what isn't | The autonomy gate: scheduled sends pre-approved, everything else drafted and held |
-| Flag gaps in scan coverage | `UNKNOWN` never sinks to P4; `coverage UNVERIFIED` is reported as its own count |
+| Flag gaps in scan coverage | `UNKNOWN` never sinks to Sev1; `coverage UNVERIFIED` is reported as its own count |
 | Keep notes so context isn't lost between shifts | `memory.db` — findings, decisions, what was sent, what was deferred and why |
 | Say when you're stuck instead of guessing | It has. Its first-ever beat found no config and escalated: *"I am not fabricating these without a real source."* |
 

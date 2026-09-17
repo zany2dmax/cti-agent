@@ -58,7 +58,7 @@ broke. Read them as reference, not as a recipe.
      --out $FLEET_HOME/reports/digest-$(date +%F).html
    ```
 
-4. **Read it before you send it.** Open the HTML. Sanity-check: does the P1
+4. **Read it before you send it.** Open the HTML. Sanity-check: does the Sev5
    count match what enrich found? Are host counts plausible? Is any CVE listed
    as exploitable that the scanner actually returned UNKNOWN for? If the digest
    claims something the data does not support, fix the lane, do not fix the
@@ -73,7 +73,7 @@ broke. Read them as reference, not as a recipe.
    ```
    With `--dry-run`, stop here and post the path to the board instead.
 
-6. **Log.** Write a `digest_sent` memory row with the date, P1/P2/P3/P4 counts,
+6. **Log.** Write a `digest_sent` memory row with the date, Sev5/Sev4/Sev2/Sev1 counts,
    the Graph message id, and anything you chose to omit.
 
 ## Guardrails

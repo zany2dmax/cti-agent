@@ -37,6 +37,7 @@ func main() {
 	// brought new CVE information", when it meant "14 emails arrived".
 	cves := map[string]bool{}
 	withCVEs := 0
+	subjects := make([]report.ScannedEmail, 0, len(messages))
 	for _, msg := range messages {
 		text := msg.Subject + "\n" + msg.BodyText
 		found := cti.ExtractCVEs(text)
@@ -46,6 +47,11 @@ func main() {
 		for _, cve := range found {
 			cves[cve] = true
 		}
+		subjects = append(subjects, report.ScannedEmail{
+			Subject:  msg.Subject,
+			Received: msg.ReceivedDateTime,
+			HasCVE:   len(found) > 0,
+		})
 	}
 
 	provider, err := buildLookupProvider(cfg)
@@ -67,6 +73,7 @@ func main() {
 		Messages:  len(messages),
 		WithCVEs:  withCVEs,
 		CVEsFound: len(cves),
+		Subjects:  subjects,
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		log.Fatalf("write report failed: %v", err)

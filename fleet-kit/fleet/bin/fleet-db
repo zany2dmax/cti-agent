@@ -7,8 +7,8 @@
   fleet-db task add <title> | done <id> | list
   fleet-db mail send <agent> <kind> <body> | inbox <agent> | ack <id>
   fleet-db finding upsert <json>      persist an enriched finding
-  fleet-db findings [--priority P1] [--stale-days N]
-  fleet-db sent <date> <p1> <p2> <p3> <p4> <message_id>
+  fleet-db findings [--priority Sev5] [--stale-days N]
+  fleet-db sent <date> <s5> <s4> <s3> <s2> <s1> <message_id>
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
   fleet-db vacuum
 """
@@ -20,6 +20,30 @@ from datetime import datetime, timezone
 
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 DB = os.path.join(FLEET_HOME, "state", "memory.db")
+
+# Renaming the scale is a data migration, not just a label change: rows
+# already written say P1-P4, and the digests table had four count columns.
+# Applied on every connect, cheap and idempotent - a fleet that upgrades and
+# then silently reports zero findings because the values no longer match is
+# worse than one that refuses to start.
+MIGRATIONS = [
+    # digests: p1..p4 -> sev5..sev1. Old rows keep their numbers under the new
+    # names in urgency order; the split band starts empty rather than guessing.
+    ("digests", "sev5", [
+        "ALTER TABLE digests ADD COLUMN sev5 INTEGER",
+        "ALTER TABLE digests ADD COLUMN sev4 INTEGER",
+        "ALTER TABLE digests ADD COLUMN sev3 INTEGER",
+        "ALTER TABLE digests ADD COLUMN sev2 INTEGER",
+        "ALTER TABLE digests ADD COLUMN sev1 INTEGER",
+        "UPDATE digests SET sev5=p1, sev4=p2, sev3=0, sev2=p3, sev1=p4 "
+        "WHERE sev5 IS NULL",
+    ]),
+]
+
+# findings.priority values, old -> new. P2 mapped to Sev4 rather than Sev3
+# because the old band was mostly confirmed-present; anything that should be
+# Sev3 gets there on the next enrich pass, which recomputes every row anyway.
+PRIORITY_MAP = {"P1": "Sev5", "P2": "Sev4", "P3": "Sev2", "P4": "Sev1"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -55,7 +79,7 @@ CREATE TABLE IF NOT EXISTS scout_items (
 
 CREATE TABLE IF NOT EXISTS digests (
   id INTEGER PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL,
-  p1 INTEGER, p2 INTEGER, p3 INTEGER, p4 INTEGER,
+  sev5 INTEGER, sev4 INTEGER, sev3 INTEGER, sev2 INTEGER, sev1 INTEGER,
   message_id TEXT, ts TEXT NOT NULL, UNIQUE(kind, day));
 """
 
@@ -73,6 +97,42 @@ def conn():
     return c
 
 
+def migrate(c):
+    """Apply the Sev rename to an existing database.
+
+    Runs on every call, after the schema. Each step is guarded by whether the
+    target column already exists, so it is idempotent and costs one PRAGMA.
+
+    Done in code rather than by hand because the alternative is a fleet that
+    upgrades, finds no rows matching the new severity values, and reports a
+    clean estate - the most dangerous wrong answer this system can give.
+    """
+    for table, marker, steps in MIGRATIONS:
+        cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        if not cols or marker in cols:
+            continue          # table absent, or already migrated
+        for stmt in steps:
+            try:
+                c.execute(stmt)
+            except Exception as e:                              # noqa: BLE001
+                print(f"migrate: {table}: {stmt.split()[0]} failed: {e}",
+                      file=sys.stderr)
+        print(f"migrate: {table} -> Sev5..Sev1", file=sys.stderr)
+
+    # findings.priority values.
+    cols = {r[1] for r in c.execute("PRAGMA table_info(findings)")}
+    if "priority" in cols:
+        n = 0
+        for old, new in PRIORITY_MAP.items():
+            cur = c.execute("UPDATE findings SET priority=? WHERE priority=?",
+                            (new, old))
+            n += cur.rowcount or 0
+        if n:
+            print(f"migrate: remapped {n} finding(s) from P1-P4 to Sev5-Sev1",
+                  file=sys.stderr)
+    c.commit()
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -83,11 +143,13 @@ def main(argv):
     if cmd == "init":
         c.executescript(SCHEMA)
         c.commit()
+        migrate(c)
         print(f"initialized {DB}")
         return 0
 
     c.executescript(SCHEMA)  # cheap, keeps schema current on every call
     c.commit()
+    migrate(c)
 
     if cmd == "remember":
         cat, topic, content = args[0], args[1], " ".join(args[2:])
@@ -174,10 +236,11 @@ def main(argv):
         print(json.dumps([dict(r) for r in c.execute(q, p)], indent=2))
 
     elif cmd == "sent":
-        day, p1, p2, p3, p4, mid = args[0], *map(int, args[1:5]), args[5]
+        day, s5, s4, s3, s2, s1, mid = args[0], *map(int, args[1:6]), args[6]
         kind = args[6] if len(args) > 6 else "daily"
-        c.execute("INSERT OR REPLACE INTO digests(kind,day,p1,p2,p3,p4,message_id,ts) "
-                  "VALUES(?,?,?,?,?,?,?,?)", (kind, day, p1, p2, p3, p4, mid, now()))
+        c.execute("INSERT OR REPLACE INTO digests(kind,day,sev5,sev4,sev3,sev2,sev1,"
+                  "message_id,ts) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (kind, day, s5, s4, s3, s2, s1, mid, now()))
         c.commit()
         print("logged")
 
