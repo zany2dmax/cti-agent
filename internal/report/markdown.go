@@ -18,7 +18,7 @@ import (
 //
 // The default is nonetheless "full", because the alternative is worse in
 // practice: a pseudonym cannot be looked up in the scanner, so a redacted
-// report tells you a P1 exists without telling you where, and the reader has
+// report tells you a Sev5 exists without telling you where, and the reader has
 // to rerun the pipeline to act on it. An unactionable security report is not a
 // safe security report.
 //
@@ -87,10 +87,22 @@ func redactHosts(hosts []string, mode, salt string) string {
 // interesting part - 40 emails yielding 2 CVEs and 3 emails yielding 21 are
 // very different days.
 type Scan struct {
-	Messages     int // every message Graph returned in the window
-	WithCVEs     int // how many of those actually mentioned a CVE
-	CVEsFound    int // distinct CVE IDs extracted
-	Truncated    bool // set if the provider capped results (should not happen; we paginate)
+	Messages  int  // every message Graph returned in the window
+	WithCVEs  int  // how many of those actually mentioned a CVE
+	CVEsFound int  // distinct CVE IDs extracted
+	Truncated bool // set if the provider capped results (should not happen; we paginate)
+
+	// Subjects is what was actually read, newest first. The digest lists these
+	// so "N emails" can be checked rather than taken on trust - the single
+	// count invited the question "which fourteen?" and could not answer it.
+	Subjects []ScannedEmail
+}
+
+// ScannedEmail is one message the pass looked at.
+type ScannedEmail struct {
+	Subject  string
+	Received time.Time
+	HasCVE   bool
 }
 
 // Compat wrapper for callers that only have a message count.
@@ -157,6 +169,30 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 			escape(redactHosts(r.SampleHosts, mode, salt)),
 			escape(r.Reason),
 		)
+	}
+
+	// What was actually read. A single "14 emails" count invites the question
+	// "which fourteen?", and a report that cannot answer it is asking to be
+	// taken on trust. Marked so the gap between mail volume and CVE volume is
+	// visible rather than inferred.
+	if len(scan.Subjects) > 0 {
+		b.WriteString("\n## Emails read this run\n\n")
+		fmt.Fprintf(&b, "%d message(s) in the window, %d mentioning a CVE.\n\n",
+			scan.Messages, scan.WithCVEs)
+		b.WriteString("| CVE? | Received | Subject |\n|---|---|---|\n")
+		for _, e := range scan.Subjects {
+			mark := "-"
+			if e.HasCVE {
+				mark = "yes"
+			}
+			subj := strings.TrimSpace(e.Subject)
+			if subj == "" {
+				subj = "(no subject)"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s |\n",
+				mark, e.Received.Format("2006-01-02 15:04"), escape(subj))
+		}
+		b.WriteString("\n")
 	}
 
 	// 0600, not 0644 - this file is sensitive even when redacted, because the
