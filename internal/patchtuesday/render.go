@@ -195,10 +195,25 @@ func e(s string) string { return html.EscapeString(s) }
 func (r *Report) Subject() string {
 	base := fmt.Sprintf("Microsoft Patch Tuesday for %s",
 		MonthLabel(r.Digest.Year, r.Digest.Month))
-	if n := len(r.Exposure.PresentCVEs); n > 0 {
-		return fmt.Sprintf("%s - %d present in our environment", base, n)
+	n := len(r.Exposure.PresentCVEs)
+	if n == 0 {
+		return base
 	}
-	return base
+	// "353 present in our environment" alone reads as 353 things to fix. It is
+	// 353 CVEs carried by twelve detections, and the detection count is what
+	// tells the reader how much work this is - so it goes in the subject,
+	// where a phone shows it before anything else.
+	if q := len(r.Exposure.DetectingQIDs); q > 0 {
+		// ">=" rather than the glyph: a subject header travels through mail
+		// gateways and rules, and ASCII cannot be mangled by any of them.
+		hosts := fmt.Sprintf("%d", r.Exposure.Hosts)
+		if r.Exposure.HostsAreFloor {
+			hosts = ">=" + hosts
+		}
+		return fmt.Sprintf("%s - %d detection(s) on %s hosts, %d CVEs",
+			base, q, hosts, n)
+	}
+	return fmt.Sprintf("%s - %d present in our environment", base, n)
 }
 
 // HTML renders the email. Table layout and inline CSS, same as the digest,
@@ -293,7 +308,8 @@ func (r *Report) HTML() string {
 		}
 		caption := fmt.Sprintf("%d of this release's CVEs", len(r.Highlights))
 		if collapsed(shown) {
-			caption += fmt.Sprintf(", grouped into %d update(s)", len(shown))
+			caption += fmt.Sprintf(" in %d row(s) sharing %d detection(s)",
+				len(shown), len(r.Exposure.DetectingQIDs))
 		}
 		if hidden > 0 {
 			caption += fmt.Sprintf(" &mdash; worst %d shown", len(shown))
@@ -353,8 +369,8 @@ func (r *Report) HTML() string {
 			cveCell := e(h.CVE)
 			if h.SharedWith > 0 {
 				cveCell += fmt.Sprintf(
-					`<span style="color:#718096;font-size:11px"> +%d more fixed `+
-						`by the same update</span>`, h.SharedWith)
+					`<span style="color:#718096;font-size:11px"> +%d more with `+
+						`the same QIDs</span>`, h.SharedWith)
 			}
 			b.WriteString(fmt.Sprintf(`
       <tr><td style="border-bottom:1px solid #edf2f7">
@@ -371,9 +387,9 @@ func (r *Report) HTML() string {
 			b.WriteString(fmt.Sprintf(`
     <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#718096;margin-top:6px">
-      and %d more, ordered by host count. Most of this release's CVEs arrive
-      through the same few cumulative updates, so the %d detection(s) in the
-      QQL above are the actual patching work. Full list in the JSON output.
+      and %d more CVE(s) on lower host counts. The %d detection(s) in the QQL
+      above are the patching work; the CVE count is large because one
+      cumulative update carries many CVEs. Full list in the JSON output.
     </div>`, hidden, len(r.Exposure.DetectingQIDs)))
 		}
 		b.WriteString("</td></tr>\n")
@@ -502,9 +518,16 @@ func (r *Report) Text() string {
 	if len(r.Highlights) > 0 {
 		shown, hidden := r.rows()
 		withSev := r.anySev()
-		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d)", len(r.Highlights))
+		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d CVEs)", len(r.Highlights))
 		if collapsed(shown) {
-			head += fmt.Sprintf(" in %d update(s)", len(shown))
+			// Reconcile the two counts explicitly. The first version said "in
+			// 14 update(s)" while the exposure line above said "12 missing
+			// Qualys detection(s)" - two numbers for the same thing, three
+			// paragraphs apart. They differ because a row is a distinct
+			// COMBINATION of QIDs and several combinations share a QID, so
+			// neither number was wrong and the email never said so.
+			head += fmt.Sprintf(", %d row(s) sharing %d detection(s)",
+				len(shown), len(r.Exposure.DetectingQIDs))
 		}
 		if hidden > 0 {
 			head += " - worst first"
@@ -519,7 +542,12 @@ func (r *Report) Text() string {
 			// when the enrich lane supplied nothing for any row.
 			shared := ""
 			if h.SharedWith > 0 {
-				shared = fmt.Sprintf("  (+%d more CVE(s) fixed by the same update)",
+				// "with the same QIDs", not "fixed by the same update". We
+				// know the detections, not the KB article: [92440] and
+				// [92439 92440] are two rows that share a QID, so calling
+				// each row an update asserts a patch identity this lane never
+				// established.
+				shared = fmt.Sprintf("  (+%d more CVE(s) with the same QIDs)",
 					h.SharedWith)
 			}
 			if withSev {
@@ -539,9 +567,9 @@ func (r *Report) Text() string {
 		}
 		if hidden > 0 {
 			fmt.Fprintf(&b,
-				"  ... and %d more. Most of this release's CVEs arrive through the same\n"+
-					"  few cumulative updates, so the %d detection(s) in the QQL above are\n"+
-					"  the actual patching work. Full list in the JSON output.\n",
+				"  ... and %d more CVE(s) on lower host counts. The %d detection(s) in\n"+
+					"  the QQL above are the patching work; the CVE count is large because\n"+
+					"  one cumulative update carries many CVEs. Full list in the JSON.\n",
 				hidden, len(r.Exposure.DetectingQIDs))
 		}
 		if !withSev {

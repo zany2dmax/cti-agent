@@ -1067,14 +1067,56 @@ func TestOneRowPerUpdateNotOneRowPerCVE(t *testing.T) {
 		t.Errorf("smaller updates lost their place: %s, %s", shown[1].CVE, shown[2].CVE)
 	}
 	txt := r.Text()
-	if !strings.Contains(txt, "+199 more CVE(s) fixed by the same update") {
+	if !strings.Contains(txt, "+199 more CVE(s) with the same QIDs") {
 		t.Errorf("the collapse has to be stated:\n%s", txt)
 	}
-	if !strings.Contains(txt, "(202)") {
+	if !strings.Contains(txt, "(202 CVEs)") {
 		t.Errorf("the true CVE count still has to appear:\n%s", txt)
 	}
-	if !strings.Contains(txt, "in 3 update(s)") {
-		t.Errorf("the heading should say how many updates:\n%s", txt)
+	// Rows and detections are different counts and the heading reconciles
+	// them: 3 rows drawn from 4 detecting QIDs, because [92439 92440] is one
+	// row using two of them.
+	if !strings.Contains(txt, "3 row(s) sharing 4 detection(s)") {
+		t.Errorf("the heading must reconcile rows against detections:\n%s", txt)
+	}
+	if strings.Contains(txt, "update(s)") {
+		t.Errorf("a QID set is not an update; we do not know the KB article:\n%s", txt)
+	}
+}
+
+func TestTheSubjectLeadsWithTheWorkNotTheCVECount(t *testing.T) {
+	// "353 present in our environment" reads as 353 things to fix. It was
+	// twelve detections. The detection count is what tells the reader how big
+	// this is, and a phone shows the subject before anything else.
+	r := &Report{Digest: parsed(t), Org: "CR",
+		Exposure: Exposure{Attempted: true,
+			PresentCVEs:   make([]string, 353),
+			DetectingQIDs: make([]int, 12),
+			Hosts:         452,
+		}}
+	got := r.Subject()
+	for _, want := range []string{
+		"Microsoft Patch Tuesday for August 2026", // the established thread
+		"12 detection(s)", "452 hosts", "353 CVEs",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("subject %q missing %q", got, want)
+		}
+	}
+	// A floor is worded as one, in ASCII so no gateway can mangle it.
+	r.Exposure.HostsAreFloor = true
+	if got := r.Subject(); !strings.Contains(got, ">=452 hosts") {
+		t.Errorf("subject should mark a floor: %q", got)
+	}
+	for _, ch := range r.Subject() {
+		if ch > 127 {
+			t.Errorf("non-ASCII %q in a subject header: %q", ch, r.Subject())
+		}
+	}
+	// Nothing present: the subject stays exactly what it has been for months.
+	clean := &Report{Digest: parsed(t), Org: "CR"}
+	if clean.Subject() != "Microsoft Patch Tuesday for August 2026" {
+		t.Errorf("a clean month should not grow a suffix: %q", clean.Subject())
 	}
 }
 
