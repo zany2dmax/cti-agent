@@ -216,6 +216,8 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 	haveCache := false
 
 	if info, err := os.Stat(cachePath); err == nil {
+		// #nosec G304 -- cachePath is QUALYS_KB_CACHE from the service
+		// configuration, written by this same process.
 		if b, err := os.ReadFile(cachePath); err == nil && len(b) > 0 {
 			if err := json.Unmarshal(b, &existing); err == nil && len(existing) > 0 {
 				haveCache = true
@@ -320,7 +322,14 @@ func writeKBCache(path string, cache KBCache) error {
 	}
 	// Write via a temp file so an interrupted run cannot leave a truncated
 	// cache that later parses as "no mappings for anything".
+	//
+	// The sidecar name is deliberate rather than os.CreateTemp: it has to land
+	// on the same filesystem as the cache for os.Rename to be atomic, and it
+	// has to be predictable so an interrupted run leaves one stale file rather
+	// than accumulating them.
 	tmp := path + ".tmp"
+	// #nosec G304 -- path is QUALYS_KB_CACHE from the service configuration,
+	// and the mode is 0600 because this cache maps CVEs to our QIDs.
 	if err := os.WriteFile(tmp, b, 0600); err != nil {
 		return err
 	}
