@@ -89,8 +89,22 @@ tasks:
 
   patchtuesday:
     desc: "Build the synopsis without sending. Usage: task patchtuesday MONTH=2026-08"
+    # Sources ./.env when present so a local replay can reach the scanner and
+    # produce real exposure figures. Explicit rather than built into the
+    # binary: a command that harvests credentials from whatever directory it
+    # happens to start in is a different thing from one that reads its
+    # environment. On the server systemd supplies these via EnvironmentFile.
+    #
+    # .env is 0600 and gitignored. --dry-run cannot send, so this is safe to
+    # run with live credentials; it prints host names, so do not paste the
+    # output anywhere you would not paste a scan report.
     cmds:
-      - 'go run ./cmd/cti-patchtuesday --dry-run{{if .MONTH}} --month {{.MONTH}}{{end}}'
+      - |
+        # if/fi, not `[ -f ] && .`: a missing .env makes the && chain exit 1
+        # and Task treats that as a failed step, so the absence of an optional
+        # file would look like a broken task.
+        if [ -f ./.env ]; then set -a; . ./.env; set +a; fi
+        go run ./cmd/cti-patchtuesday --dry-run{{if .MONTH}} --month {{.MONTH}}{{end}}
 
   test:kev:
     desc: KEV deadline bands, sign convention, and present-only filtering

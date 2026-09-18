@@ -229,7 +229,8 @@ func discoverBleeping(ctx context.Context, c *http.Client, year int, mon time.Mo
 func correlate(ctx context.Context, d *patchtuesday.Digest,
 	r *patchtuesday.Report) (map[int]patchtuesday.DetectionLike, error) {
 
-	cfg, err := config.Load()
+	// Scanner settings only. This command never touches a mailbox.
+	cfg, err := config.LoadVulnLookup()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
