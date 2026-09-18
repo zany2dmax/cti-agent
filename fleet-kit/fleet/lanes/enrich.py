@@ -46,7 +46,10 @@ KEV_FEED = ("https://www.cisa.gov/sites/default/files/feeds/"
 # for rendering, and fleet-db migrates stored values to match.
 SEV_ORDER = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
 
-CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
+# \d{4,}: the CVE ID sequence number has a four-digit minimum and no maximum.
+# Used with fullmatch below, so the old upper bound of 7 rejected a longer ID
+# outright and the row was skipped without comment.
+CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
 UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.

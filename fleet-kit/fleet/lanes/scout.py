@@ -37,7 +37,10 @@ DB = os.path.join(FLEET_HOME, "state", "memory.db")
 DEFAULT_FEEDS = (os.environ.get("FLEET_FEEDS")
                  or os.path.join(FLEET_HOME, "lanes", "feeds.txt"))
 
-CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
+# \d{4,}: the CVE ID sequence number has a four-digit minimum and no maximum.
+# An upper bound of 7 silently matched the first seven digits of a longer ID,
+# producing a well-formed identifier for a different vulnerability.
+CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
 TAG_RE = re.compile(r"<[^>]+>")
 UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-scout/1.0")
 
