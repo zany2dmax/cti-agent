@@ -25,10 +25,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/kev"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
@@ -46,6 +48,11 @@ func main() {
 	urlBleeping := flag.String("url-bleeping", "", "override the BleepingComputer URL")
 	provider := flag.String("provider", "", "'none' to skip Qualys entirely")
 	timeout := flag.Duration("timeout", 45*time.Second, "per-request HTTP timeout")
+	enriched := flag.String("enriched", "",
+		"path to enriched JSON for the Sev5-Sev1 bands; default is the newest "+
+			"in $FLEET_HOME/state. Without it the severity column is omitted")
+	maxRows := flag.Int("max-rows", 0,
+		"cap the present-CVE table (default 25). The full list is always in --json")
 	flag.Parse()
 
 	now := time.Now()
@@ -129,6 +136,14 @@ func main() {
 	fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s - %d CVE(s) in the sources, "+
 		"%d QID(s) published in the review\n",
 		patchtuesday.MonthLabel(year, mon), len(d.CVEs), len(d.PublishedQIDs()))
+	if n := len(d.ExcludedCVEs); n > 0 {
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday:   scoped out %d CVE(s) as Adobe-only: %s\n",
+			n, strings.Join(d.ExcludedCVEs, " "))
+	}
+	if note := d.CVECountNote(); note != "" {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday:   %s\n", note)
+	}
 	// Provenance. The August replay reported a total of 400 while the Qualys
 	// post said 421, and nothing in the output said which page each figure had
 	// come from, so the discrepancy could only be investigated by reading code.
@@ -138,7 +153,7 @@ func main() {
 		}
 	}
 
-	report := &patchtuesday.Report{Digest: d, Org: org}
+	report := &patchtuesday.Report{Digest: d, Org: org, MaxRows: *maxRows}
 	var detections map[int]patchtuesday.DetectionLike
 
 	if strings.EqualFold(*provider, "none") {
@@ -164,6 +179,32 @@ func main() {
 		}
 	}
 	report.ChooseQQL(report.Exposure.DetectedQIDs(detections))
+
+	// Severity bands, if the enrich lane has produced any. Silence here is
+	// acceptable and is reported; a column of "?" was not.
+	if len(report.Highlights) > 0 {
+		path := *enriched
+		if path == "" {
+			path = newestEnriched()
+		}
+		switch {
+		case path == "":
+			fmt.Fprintln(os.Stderr,
+				"cti-patchtuesday: no enriched JSON found ($FLEET_HOME/state/enriched-*.json); "+
+					"the severity column will be omitted rather than left blank")
+		default:
+			n, err := enrichHighlights(report.Highlights, path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr,
+					"cti-patchtuesday: could not read %s (%v); severity column omitted\n",
+					path, err)
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"cti-patchtuesday: severity bands for %d of %d present CVE(s) from %s\n",
+					n, len(report.Highlights), filepath.Base(path))
+			}
+		}
+	}
 
 	if *jsonOut != "" {
 		f, err := os.OpenFile(*jsonOut, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -288,7 +329,8 @@ func correlate(ctx context.Context, d *patchtuesday.Digest,
 		}
 		for qid, s := range sums {
 			det[qid] = patchtuesday.DetectionLike{
-				QID: s.QID, HostCount: s.HostCount, Hosts: s.Hosts,
+				QID: s.QID, HostCount: s.HostCount,
+				Hosts: s.Hosts, HostsTruncated: s.HostsTruncated,
 			}
 		}
 	}
@@ -310,20 +352,94 @@ func buildHighlights(e patchtuesday.Exposure, cveToQIDs map[string][]int,
 	for _, cve := range e.PresentCVEs {
 		h := patchtuesday.Highlight{CVE: cve}
 		hosts := map[string]bool{}
+		largest := 0
 		for _, q := range cveToQIDs[cve] {
 			d, ok := det[q]
 			if !ok || d.HostCount == 0 {
 				continue
 			}
 			h.QIDs = append(h.QIDs, q)
+			if d.HostsTruncated || len(d.Hosts) < d.HostCount {
+				h.HostsAreFloor = true
+			}
+			if d.HostCount > largest {
+				largest = d.HostCount
+			}
 			for _, x := range d.Hosts {
-				hosts[strings.ToLower(x)] = true
+				if x = strings.TrimSpace(strings.ToLower(x)); x != "" {
+					hosts[x] = true
+				}
 			}
 		}
 		h.Hosts = len(hosts)
+		// A single QID's own count is proven, so never report fewer machines
+		// than that - which is possible only when the host lists were cut off.
+		if largest > h.Hosts {
+			h.Hosts = largest
+			h.HostsAreFloor = true
+		}
 		out = append(out, h)
 	}
 	return out
+}
+
+// enrich fills in the severity band and the reasons behind it from the enrich
+// lane's output, and reports how many rows it could fill.
+//
+// Without this the Sev column was structurally empty - nothing in this command
+// ever set it - so every row printed "?" in a column that could not hold a
+// value. Either the band is real or the column is not shown.
+func enrichHighlights(hs []patchtuesday.Highlight, path string) (int, error) {
+	e, err := kev.Load(path)
+	if err != nil {
+		return 0, err
+	}
+	byCVE := make(map[string]kev.Finding, len(e.Findings))
+	for _, f := range e.Findings {
+		byCVE[strings.ToUpper(strings.TrimSpace(f.CVE))] = f
+	}
+	n := 0
+	for i := range hs {
+		f, ok := byCVE[strings.ToUpper(hs[i].CVE)]
+		if !ok {
+			continue
+		}
+		hs[i].Sev = f.Priority
+		hs[i].KEV = f.KEV == 1
+		hs[i].EPSS = f.EPSS
+		hs[i].CVSS = f.CVSS
+		hs[i].Rationale = f.Rationale
+		if f.Priority != "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// newestEnriched finds the most recent enriched-*.json, the same way cti-kev
+// does. Returns "" when there is none, which is not an error: a fresh install
+// has no enrichment yet and the report simply omits the column.
+func newestEnriched() string {
+	home := os.Getenv("FLEET_HOME")
+	if home == "" {
+		return ""
+	}
+	dir := filepath.Join(home, "state")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	best := ""
+	for _, ent := range entries {
+		n := ent.Name()
+		if strings.HasPrefix(n, "enriched-") && strings.HasSuffix(n, ".json") && n > best {
+			best = n
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return filepath.Join(dir, best)
 }
 
 func dedupe(in []int) []int {
