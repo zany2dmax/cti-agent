@@ -61,6 +61,13 @@ type Digest struct {
 	// dropped so the exclusion can be audited - a filter whose decisions are
 	// invisible is the next bug.
 	ExcludedCVEs []string
+	// UnattributedCVEs are correlated but nothing on either page ties them to
+	// a Microsoft product. They are the most likely members of this set not to
+	// belong to the release.
+	UnattributedCVEs []string
+	// CVEWhere records, per CVE, the places it was seen, with enough
+	// surrounding text to judge the context.
+	CVEWhere map[string][]string `json:",omitempty"`
 
 	// QQL lifted verbatim from the Qualys post when it publishes one. Never
 	// paraphrased: a query someone will paste into a console has to be exactly
@@ -490,6 +497,9 @@ var (
 func collectCVEs(d *Digest) {
 	seen := map[string]bool{}
 	adobeOnly := map[string]bool{}
+	anyMicrosoft := map[string]bool{}
+	d.CVEWhere = map[string][]string{}
+
 	for _, s := range d.Sources {
 		if !s.Fetched {
 			continue
@@ -503,6 +513,18 @@ func collectCVEs(d *Digest) {
 			microsoft := reMicrosoftBlock.MatchString(block)
 			for _, c := range hits {
 				c = strings.ToUpper(c)
+				// Record where it was seen. The August replay put
+				// CVE-2026-6726 at the top of the table on 346 hosts and there
+				// was no way to ask which sentence had claimed it was part of
+				// the release - the same shape of problem as a total of 400
+				// with no named source.
+				if len(d.CVEWhere[c]) < 3 {
+					d.CVEWhere[c] = append(d.CVEWhere[c],
+						fmt.Sprintf("%s: %s", s.Name, excerptAround(block, c)))
+				}
+				if microsoft {
+					anyMicrosoft[c] = true
+				}
 				if !seen[c] {
 					seen[c] = true
 					adobeOnly[c] = adobe && !microsoft
@@ -519,9 +541,72 @@ func collectCVEs(d *Digest) {
 			continue
 		}
 		d.CVEs = append(d.CVEs, c)
+		if !anyMicrosoft[c] {
+			// Kept - dropping a real CVE is worse - but flagged, because a CVE
+			// nothing on either page ties to a Microsoft product is the most
+			// likely thing in this set to not belong to this release at all.
+			d.UnattributedCVEs = append(d.UnattributedCVEs, c)
+		}
 	}
 	sort.Strings(d.CVEs)
 	sort.Strings(d.ExcludedCVEs)
+	sort.Strings(d.UnattributedCVEs)
+}
+
+// excerptAround returns a short window of the block around the CVE, enough to
+// judge the context it appeared in.
+func excerptAround(block, cve string) string {
+	i := strings.Index(strings.ToUpper(block), cve)
+	if i < 0 {
+		i = 0
+	}
+	start, end := i-70, i+90
+	if start < 0 {
+		start = 0
+	}
+	if end > len(block) {
+		end = len(block)
+	}
+	out := strings.TrimSpace(block[start:end])
+	if start > 0 {
+		out = "..." + out
+	}
+	if end < len(block) {
+		out += "..."
+	}
+	return out
+}
+
+// Explain reports every place a CVE was seen, so "why is this in the report?"
+// has an answer that does not require reading code or re-fetching the pages.
+func (d *Digest) Explain(cve string) string {
+	cve = strings.ToUpper(strings.TrimSpace(cve))
+	where := d.CVEWhere[cve]
+	if len(where) == 0 {
+		return fmt.Sprintf("%s does not appear on either source page.", cve)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s was found in %d place(s):\n", cve, len(where))
+	for _, w := range where {
+		fmt.Fprintf(&b, "  - %s\n", w)
+	}
+	for _, x := range d.ExcludedCVEs {
+		if x == cve {
+			b.WriteString("  SCOPED OUT: every sighting mentions Adobe and none " +
+				"mentions a Microsoft product, so it is not correlated as part " +
+				"of this release.\n")
+			return b.String()
+		}
+	}
+	for _, u := range d.UnattributedCVEs {
+		if u == cve {
+			b.WriteString("  UNATTRIBUTED: nothing on either page ties this CVE " +
+				"to a Microsoft product. It is still correlated, because " +
+				"dropping a real CVE is worse than carrying a spare one, but " +
+				"treat its presence in the release as unconfirmed.\n")
+		}
+	}
+	return b.String()
 }
 
 // CVECountNote compares the CVEs we scraped with the total the publisher
