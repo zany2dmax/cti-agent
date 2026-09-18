@@ -221,7 +221,10 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task run` | Run the Go agent directly from env vars |
 | `task install` | Copy the binary to `~/bin` |
 | `task fmt` / `task fmt:check` | Format / fail if unformatted |
-| `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck |
+| `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck. **`scan` is staticcheck**, not a vulnerability scan — it predates the security tasks below |
+| `task gosec` | Insecure code patterns. Deliberate exceptions carry an inline `#nosec <RULE> -- reason` beside the code, never a blanket exclusion in config: a suppression whose justification lives elsewhere is one nobody re-examines |
+| `task govulncheck` | stdlib and dependencies against the Go vulnerability database. `go.mod` has no third-party dependencies, so this is about the stdlib — and the agent parses untrusted HTML and XML off the public internet through `encoding/xml` and `net/http`, so an advisory in either is a live finding here |
+| `task ship` | fmt, build, all tests, lint, scan, gosec, govulncheck, **then** push. Task stops at the first failure, so the push cannot outrun a red gate — which it did once, when `task test` and `git push` were separate lines in the same paste |
 | `task clean` / `task clean:all` | Build artifacts / also local state |
 
 ### Production — Fedora/RHEL layout
