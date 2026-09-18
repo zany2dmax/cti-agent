@@ -50,7 +50,7 @@ In this order, because this is the shape the team already reads:
 5. Zero-days, Edge, products, the category table, Adobe.
 6. Both source links.
 
-## Three things not to get wrong
+## Four things not to get wrong
 
 **The QQL is published verbatim or built from our own QIDs — never
 paraphrased.** A query someone pastes into a console has to be exactly right;
@@ -59,10 +59,31 @@ lane prefers QIDs with live detections here, falls back to whatever Qualys
 published, and only then to a CVE filter. If you are asked to "tidy up" a QQL,
 do not.
 
-**An unmapped CVE is not an absent one.** Within a day or two of a release the
-KnowledgeBase often has no QID for the newest CVEs. The email says "coverage
-could not be established", and the exposure line says "not yet measurable"
-rather than "0". Do not restate either as a clean result.
+**The QQL Qualys publishes is also an input, not just output.** The review
+lists the release's QIDs in its own QQL, and the lane parses them back out and
+queries Host Detection for them *in addition to* whatever the KnowledgeBase
+CVE→QID mapping resolves. The two routes are unioned because neither contains
+the other: the mapping covers CVEs Qualys left out of the QQL, and the QQL
+covers detections the mapping has not caught up with. This matters most on the
+morning the email goes out, which is exactly when the mapping is least
+complete. The stderr log says how many QIDs came from each route.
+
+**An unmapped CVE is not an absent one, and "we did not look" is not either.**
+There are four distinct exposure states and the email must print the right one:
+
+| State | What the line says |
+|---|---|
+| Correlation failed — no credentials, no network, API error | "Exposure … was **NOT MEASURED** in this run: <reason>" |
+| Queried, but no QID from either route | "not yet measurable … not a clean result" |
+| Queried N QIDs, nothing open | "no open detections across the N QID(s) checked … check the last scan date" |
+| Detections found | "~N new vulnerabilities across M hosts" |
+
+The first state is the one that was missing, and its absence was not
+theoretical: a run with no Qualys credentials printed *"the Qualys
+KnowledgeBase has no QID mapping for any CVE in this release"* — a confident
+diagnosis of a system that had never been contacted — directly above a QQL
+listing fifteen usable QIDs. Never say anything about the KnowledgeBase, the
+scanner, or the estate unless the scanner was actually queried.
 
 **A synopsis from one source is still worth sending, labelled.** If
 BleepingComputer is unreachable the counts may be missing and the banner says

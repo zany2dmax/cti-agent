@@ -190,6 +190,19 @@ schedule wakes up before the thing it summarises exists. The correct
 expression is the Wednesday after the second Tuesday, which is always the
 9th–15th.
 
+The correlation had a subtlety of its own, and it is a good illustration of
+reading a source properly. The obvious route from an article to our estate is
+CVE → QID via the scanner's KnowledgeBase, and on the morning after a release
+that mapping is at its least complete — precisely when the email goes out. But
+the Qualys review *publishes the release's QIDs itself*, inside the QQL it
+prints for readers to paste. Those QIDs are a vendor-curated statement of what
+this release introduced, available on day one, and the lane parses them back
+out of the published query and asks the scanner about them alongside the
+mapping. The first version used only the mapping, so it announced "exposure is
+not yet measurable" in one paragraph while printing fifteen perfectly usable
+QIDs in the next. The source was telling us the answer in a format we were
+treating as decoration.
+
 ### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
 
 Two lanes that watch the fleet rather than the estate:
@@ -245,11 +258,37 @@ Nearly every bug we hit during deployment was a variant of this:
 | The alert unit never started | Its template was the one unit `systemd-analyze verify` never checked — because a template needs an instance name. The one unit whose job is reporting failure was the one nobody verified |
 | The first automated digest arrived at 2am | `OnCalendar=` uses the *system* timezone, and servers are UTC. A "morning" brief landed in the middle of the night |
 | A test of the alert path posted `ERROR: digest failed (result=success exit=0)` | Testing the alerting manufactured the incident it was testing for. The orchestrator reads the board and would have opened a case for it |
+| A count matched a pattern written for raw HTML but run against stripped text | The pattern required a literal `<`, so it could never match. Both figures read "not stated in the sources" in every email, which looks like a publisher who did not say |
+| A headline count of 400 where the primary source says 421 | The page separates the number from the word with a non-breaking space, and Go's `\s` is ASCII-only. The pattern failed, the parse fell through to the *other* publisher, and produced a number that was plausible, sourced, and wrong |
+| "Exposure is not yet measurable — the KnowledgeBase has no QID mapping" printed above fifteen usable QIDs | Correlation had failed outright, leaving a zero-value struct whose zero state was indistinguishable from a real measurement. The report diagnosed a system it had never contacted |
+| A product list published as "Windows HTTP, and more." | The sentence was terminated at the first `.`, which fell inside `HTTP.sys`. Truncation at a plausible point reads as a short list, not as a bug |
+| A verification script that printed "ALL CHECKS PASS" with a field extracted as empty | It counted the failures it had been taught to count. An empty result was not one of them |
 
 None of these were logic errors. Every one was a **check that ran and had no
 effect**, or a **failure with no observable difference from success**. If you
 build one of these fleets, budget more time for making failure visible than for
 making success work. Success is easy — you can see it.
+
+Two corollaries earned the hard way, both about the tools rather than the
+system:
+
+**A fixture written in clean ASCII cannot test a publisher's typography.** The
+parser fixtures were hand-written to look like the real pages and passed
+completely while two patterns could not match the actual HTML at all. Fixtures
+now carry the published bytes — the curly apostrophe, the non-breaking space,
+the wrapped paragraph, and a slab of the site's own navigation — because those
+are the things that break parsers, and a tidy fixture is a test of your
+assumptions rather than of the page.
+
+**Validating in the wrong language validates nothing.** A regex was checked by
+compiling it as a Python pattern. Python accepts backreferences; Go's RE2 does
+not, and because the pattern was a package-level `MustCompile` it panicked
+during `init()` — so the package failed to load and the test binary died
+before running a single test. "It compiles in Python" had stood in for "it
+compiles." Where a toolchain is genuinely unavailable, a simulation is worth
+running only if it is forced into the target's semantics (here, Python's
+`re.ASCII`, because the ASCII-vs-Unicode `\s` difference *was* the bug) and
+only if it is honest that it cannot catch a compile error at all.
 
 ---
 

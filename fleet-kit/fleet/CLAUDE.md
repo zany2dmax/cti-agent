@@ -103,6 +103,13 @@ Concretely, a quiet beat should pick up one of these:
   having no QID mapping. The KnowledgeBase usually catches up within a week,
   and an unmapped exploited CVE that nobody revisited is the coverage gap this
   fleet exists to find.
+- If the Patch Tuesday synopsis said exposure **was not measured** — as
+  opposed to "not yet measurable" — that is a broken run, not a finding.
+  Something stopped the lane reaching the scanner; the reason is in the line
+  itself and in the journal. Post it to the board and re-run once the cause is
+  fixed. Do not summarise that email as though the estate were clean, and do
+  not repeat any claim about the KnowledgeBase from a run that never reached
+  it.
 
 ## Autonomy — this is the gate, respect it exactly
 
@@ -199,7 +206,7 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 | `@enrich` | `$FLEET_CODE/lanes/enrich.py` | Add NVD CVSS, EPSS, CISA KEV; compute Sev5–Sev1 priority |
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
-| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection, publish the QQL |
+| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. **You** invoke this, never a lane. |
 
 Lanes do not talk to the operator. They post to the board and you relay. Lanes

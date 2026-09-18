@@ -14,13 +14,26 @@ import (
 
 // Source is one fetched wrap-up article.
 type Source struct {
-	Name    string
+	Name string
+	// Role says what this source IS, independently of what it is called.
+	// Parse used to identify the Qualys blog by looking for "qualys" in the
+	// name, and the exposure placeholder appended after a failed correlation is
+	// called "Qualys Host Detection (exposure)" - it matches that test, has no
+	// text, and would take the blog's place. Roles cannot collide by wording.
+	Role    string
 	URL     string
 	Fetched bool
 	Err     string // why it failed, for the DEGRADED banner
 	Text    string // tags stripped, entities decoded
 	RawHTML string
 }
+
+// Source roles.
+const (
+	RoleQualysBlog = "qualys-blog"
+	RoleBleeping   = "bleepingcomputer"
+	RoleExposure   = "qualys-host-detection"
+)
 
 // Digest is everything the lane extracted, before correlation.
 type Digest struct {
@@ -48,6 +61,22 @@ type Digest struct {
 	// paraphrased: a query someone will paste into a console has to be exactly
 	// what the source said, or it silently returns the wrong set.
 	SourceQQL []string
+
+	// From records which source each figure came from. Added because the
+	// August replay printed a total of 400 when the Qualys post says 421, and
+	// there was no way to tell from the output which page had been believed.
+	// A number that might be wrong should name its own source.
+	From map[string]string
+}
+
+// PublishedQIDs are the QIDs Qualys itself lists in the review's QQL. These
+// are the release's QIDs, curated by the vendor on the day, and they arrive
+// before the KnowledgeBase CVE-to-QID mapping catches up - so they are the
+// difference between measurable exposure on Patch Tuesday + 1 and a report
+// that says "not yet measurable" while printing the QIDs in the next
+// paragraph.
+func (d *Digest) PublishedQIDs() []int {
+	return QIDsFromQQL(d.SourceQQL)
 }
 
 // Category is one row of the Qualys "classified as follows" table.
@@ -154,10 +183,40 @@ var reDropBlocks = []*regexp.Regexp{
 }
 
 var (
-	reTag     = regexp.MustCompile(`(?s)<[^>]+>`)
-	reSpaces  = regexp.MustCompile(`[ \t]+`)
-	reNewline = regexp.MustCompile(`\n{3,}`)
+	reTag      = regexp.MustCompile(`(?s)<[^>]+>`)
+	reBlockEnd = regexp.MustCompile(`(?i)</(p|div|tr|li|h[1-6]|table|blockquote)>`)
+	reBR       = regexp.MustCompile(`(?i)<br\s*/?>`)
+	// Every kind of space, collapsed to one. U+00A0 and friends are included
+	// deliberately: Go's \s is ASCII-only ([\t\n\f\r ]), so a literal
+	// non-breaking space - which WordPress emits constantly, and which the
+	// &nbsp; entity map never sees because it is already a character, not an
+	// entity - does not match \s and silently breaks every "number followed by
+	// a word" pattern in this file. Newlines are in here too; block boundaries
+	// are preserved separately, see blockSep.
+	reWS = regexp.MustCompile("[ \t\r\n\f\v\u00a0\u2007\u202f\u2009\u200a]+")
 )
+
+// blockSep marks a block boundary while whitespace is being normalised, so
+// that after StripHTML each block is exactly ONE line.
+//
+// That invariant is what the prose patterns rely on when they bound a sentence
+// with [^.\n]. Without it, a paragraph that merely WRAPPED in the page source
+// is two lines here, and a bounded pattern cuts the sentence in half. Not
+// hypothetical: the review's zero-day sentence wraps, and line-bounding
+// without this reduced it from the vendor's full sentence to nothing at all -
+// which the renderer would have shown by silently omitting the Zero-days
+// section, with no error anywhere.
+const blockSep = "\x00"
+
+// punctuation maps the characters a CMS substitutes for ASCII. Entities are
+// decoded elsewhere; these arrive as literal UTF-8 and are the reason
+// `month'?s` failed to match the real page's "month’s".
+var punctuation = map[string]string{
+	"\u2019": "'", "\u2018": "'", "\u201c": `"`, "\u201d": `"`,
+	"\u2013": "-", "\u2014": "-", "\u2026": "...", "\u2011": "-",
+	"\u00a0": " ", "\u2007": " ", "\u202f": " ", "\u2009": " ", "\u200a": " ",
+	"\u200b": "", "\ufeff": "",
+}
 
 // StripHTML reduces a page to readable text. Deliberately crude: the numbers
 // we want appear in prose, and a real HTML parser would be a dependency for
@@ -166,26 +225,33 @@ func StripHTML(h string) string {
 	for _, re := range reDropBlocks {
 		h = re.ReplaceAllString(h, " ")
 	}
-	h = regexp.MustCompile(`(?i)</(p|div|tr|li|h[1-6]|table)>`).ReplaceAllString(h, "\n")
-	h = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(h, "\n")
+	h = reBlockEnd.ReplaceAllString(h, blockSep)
+	h = reBR.ReplaceAllString(h, blockSep)
 	h = reTag.ReplaceAllString(h, " ")
 	for from, to := range map[string]string{
 		"&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": `"`,
 		"&#8217;": "'", "&#8216;": "'", "&#8220;": `"`, "&#8221;": `"`,
 		"&#8211;": "-", "&#8212;": "-", "&rsquo;": "'", "&lsquo;": "'",
 		"&ldquo;": `"`, "&rdquo;": `"`, "&ndash;": "-", "&mdash;": "-",
-		"&#39;": "'", "&apos;": "'",
+		"&#39;": "'", "&apos;": "'", "&#160;": " ", "&#8230;": "...",
 	} {
 		h = strings.ReplaceAll(h, from, to)
 	}
-	h = reSpaces.ReplaceAllString(h, " ")
+	// Then the same characters in their literal form. Decoding entities is not
+	// enough: the published page contains "month’s" as UTF-8, not as &rsquo;.
+	for from, to := range punctuation {
+		h = strings.ReplaceAll(h, from, to)
+	}
+	// Collapse all whitespace, newlines included, so a wrapped paragraph
+	// becomes one line; then put the block boundaries back.
+	h = reWS.ReplaceAllString(h, " ")
 	var out []string
-	for _, l := range strings.Split(h, "\n") {
-		if t := strings.TrimSpace(l); t != "" {
+	for _, blk := range strings.Split(h, blockSep) {
+		if t := strings.TrimSpace(blk); t != "" {
 			out = append(out, t)
 		}
 	}
-	return reNewline.ReplaceAllString(strings.Join(out, "\n"), "\n\n")
+	return strings.Join(out, "\n")
 }
 
 var (
@@ -201,20 +267,48 @@ var (
 		regexp.MustCompile(`(?i)([\d,]+)\s+security\s+(?:flaws?|vulnerabilit\w+)\s+(?:were\s+)?fixed`),
 		regexp.MustCompile(`(?i)release\s+addresses\s+([\d,]+)`),
 	}
-	reCritical  = regexp.MustCompile(`(?i)([\d,]+)\s*</?b?>?\s*critical`)
-	reImportant = regexp.MustCompile(`(?i)([\d,]+)\s*</?b?>?\s*important`)
-	reEdge      = regexp.MustCompile(`(?i)addressed\s+([\d,]+)\s+vulnerabilit\w+\s+in\s+Microsoft\s+Edge`)
+	// These used to be one pattern each, of the form
+	//   ([\d,]+)\s*</?b?>?\s*critical
+	// which was written against raw HTML and then applied to stripped text. The
+	// `<` in it is NOT optional, so against text it could never match, and both
+	// figures silently read "not stated" in every email. Anchoring on the
+	// publisher's actual wording is both correct and narrower: a bare
+	// "N critical" would otherwise match the category table's "Critical: 3".
+	reCritical = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)including\s+([\d,]+)\s+critical\b`),
+		regexp.MustCompile(`(?i)([\d,]+)\s+critical[\s-]severity`),
+	}
+	reImportant = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\band\s+([\d,]+)\s+important\b`),
+		regexp.MustCompile(`(?i)([\d,]+)\s+important[\s-]severity`),
+	}
+	reEdge = regexp.MustCompile(`(?i)addressed\s+([\d,]+)\s+vulnerabilit\w+\s+in\s+Microsoft\s+Edge`)
 
+	// Prose patterns are bounded to a single line. StripHTML turns block
+	// boundaries into newlines, so [^.\n] keeps a sentence match inside the
+	// paragraph it started in. With plain [^.] the last of these ran off the
+	// end of BleepingComputer's headline and through the site navigation until
+	// it found a full stop, and the email published
+	// "3 zero-days News Featured Latest OpenAI details more cases of..." as the
+	// zero-day summary.
 	reZeroDay = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)(In this month'?s updates?,? Microsoft has (?:not )?addressed[^.]*zero-day[^.]*\.)`),
-		regexp.MustCompile(`(?i)(Microsoft has (?:not )?addressed [^.]*zero-day[^.]*\.)`),
-		regexp.MustCompile(`(?i)((?:two|three|four|five|six|one|no|\d+) (?:actively exploited )?zero-day[^.]*\.)`),
+		regexp.MustCompile(`(?i)(In this month'?s updates?,?\s+Microsoft has (?:not )?addressed[^.\n]*zero-day[^.\n]*\.)`),
+		regexp.MustCompile(`(?i)(Microsoft has (?:not )?addressed[^.\n]*zero-day[^.\n]*\.)`),
+		regexp.MustCompile(`(?i)(includ\w+[^.\n]*\bzero-day[^.\n]*\.)`),
+		regexp.MustCompile(`(?i)((?:two|three|four|five|six|seven|one|no|\d+)\s+(?:actively exploited\s+)?zero-days?[^.\n]*\.)`),
 	}
 
-	reProducts = regexp.MustCompile(
-		`(?i)includes updates for vulnerabilities in ([^.]+?)(?:, and more)?\.`)
-	reAdobe = regexp.MustCompile(
-		`(?i)(Adobe has released [^.]*\.(?:[^.]*\.)?)`)
+	// A product list is full of dots - "Windows HTTP.sys", ".NET", "ASP.NET" -
+	// so it cannot be terminated with [^.]+. The published sentence ends with
+	// ", and more.", which is a reliable anchor; failing that, a sentence ends
+	// at a period followed by whitespace, which ".sys" is not.
+	reProducts = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)includes updates for vulnerabilities in ([^\n]+?),?\s+and more\.`),
+		regexp.MustCompile(`(?im)includes updates for vulnerabilities in ([^\n]+?)\.(?:\s|$)`),
+	}
+	reAdobe = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(Adobe has released[^.\n]*\.(?:[^.\n]*\.)?)`),
+	}
 
 	// QQL. The Qualys posts publish a query as prose or in a code block; both
 	// forms start with the same field path.
@@ -236,13 +330,44 @@ func firstNumber(text string, pats []*regexp.Regexp) int {
 	return 0
 }
 
+// maxProse caps a captured sentence. A runaway pattern produces a plausible
+// paragraph of someone else's website rather than an obvious error, and the
+// only reliable tell is that it is far too long to be the sentence asked for.
+const maxProse = 400
+
 func firstString(text string, pats []*regexp.Regexp) string {
 	for _, re := range pats {
-		if m := re.FindStringSubmatch(text); len(m) > 1 {
-			return strings.Join(strings.Fields(m[1]), " ")
+		for _, m := range re.FindAllStringSubmatch(text, -1) {
+			s := strings.Join(strings.Fields(m[1]), " ")
+			if s != "" && len(s) <= maxProse {
+				return s
+			}
 		}
 	}
 	return ""
+}
+
+var reQIDInQQL = regexp.MustCompile(`(?i)\bqid\s*:\s*(\d{3,9})`)
+
+// QIDsFromQQL pulls the QID list out of a published QQL string, deduped and
+// sorted. Parsing our own output format back in is deliberate: the QQL is the
+// vendor's machine-readable statement of which detections this release
+// introduced, and it is the only such statement available on day one.
+func QIDsFromQQL(qqls []string) []int {
+	seen := map[int]bool{}
+	var out []int
+	for _, q := range qqls {
+		for _, m := range reQIDInQQL.FindAllStringSubmatch(q, -1) {
+			n, err := strconv.Atoi(m[1])
+			if err != nil || n <= 0 || seen[n] {
+				continue
+			}
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // Parse pulls the synopsis fields out of the fetched sources.
@@ -252,60 +377,76 @@ func firstString(text string, pats []*regexp.Regexp) string {
 // BleepingComputer contributes the headline flaw count and the zero-day
 // narrative, which is what the subject line needs.
 func Parse(d *Digest) {
-	var qualys, bleeping *Source
-	for i := range d.Sources {
-		switch {
-		case strings.Contains(strings.ToLower(d.Sources[i].Name), "qualys"):
-			qualys = &d.Sources[i]
-		default:
-			bleeping = &d.Sources[i]
-		}
-	}
+	qualys, bleeping := roles(d.Sources)
+	d.From = map[string]string{}
 
-	pick := func(get func(*Source) int, order ...*Source) int {
+	// name records provenance alongside the value. Every figure in the email
+	// can then be traced to the page that supplied it.
+	pick := func(field string, get func(*Source) int, order ...*Source) int {
 		for _, s := range order {
 			if s == nil || !s.Fetched {
 				continue
 			}
 			if v := get(s); v > 0 {
+				d.From[field] = s.Name
 				return v
 			}
 		}
+		d.From[field] = "not found in any source"
 		return 0
 	}
-
-	d.Total = pick(func(s *Source) int { return firstNumber(s.Text, reTotal) }, qualys, bleeping)
-	d.Critical = pick(func(s *Source) int { return firstNumber(s.Text, []*regexp.Regexp{reCritical}) }, qualys, bleeping)
-	d.Important = pick(func(s *Source) int { return firstNumber(s.Text, []*regexp.Regexp{reImportant}) }, qualys, bleeping)
-	d.EdgeFixes = pick(func(s *Source) int { return firstNumber(s.Text, []*regexp.Regexp{reEdge}) }, qualys, bleeping)
-
-	for _, s := range []*Source{bleeping, qualys} { // zero-days: the news source says it better
-		if s != nil && s.Fetched && d.ZeroDayText == "" {
-			d.ZeroDayText = firstString(s.Text, reZeroDay)
-		}
-	}
-	for _, s := range []*Source{qualys, bleeping} {
-		if s == nil || !s.Fetched {
-			continue
-		}
-		if len(d.Products) == 0 {
-			if m := reProducts.FindStringSubmatch(s.Text); len(m) > 1 {
-				for _, p := range strings.Split(m[1], ",") {
-					p = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(p), "and "))
-					if p != "" && !strings.EqualFold(p, "and more") {
-						d.Products = append(d.Products, p)
-					}
-				}
+	pickText := func(field string, pats []*regexp.Regexp, order ...*Source) string {
+		for _, s := range order {
+			if s == nil || !s.Fetched {
+				continue
+			}
+			if v := firstString(s.Text, pats); v != "" {
+				d.From[field] = s.Name
+				return v
 			}
 		}
-		if d.AdobeText == "" {
-			d.AdobeText = firstString(s.Text, []*regexp.Regexp{reAdobe})
+		d.From[field] = "not found in any source"
+		return ""
+	}
+
+	d.Total = pick("total", func(s *Source) int { return firstNumber(s.Text, reTotal) }, qualys, bleeping)
+	d.Critical = pick("critical", func(s *Source) int { return firstNumber(s.Text, reCritical) }, qualys, bleeping)
+	d.Important = pick("important", func(s *Source) int { return firstNumber(s.Text, reImportant) }, qualys, bleeping)
+	d.EdgeFixes = pick("edge", func(s *Source) int { return firstNumber(s.Text, []*regexp.Regexp{reEdge}) }, qualys, bleeping)
+
+	// Zero-days from the Qualys post first. The news headline reads better in
+	// isolation, but it is a headline: it has no sentence end of its own, which
+	// is how site navigation ended up quoted in the August replay. The blog
+	// writes a full sentence, and a full sentence is what gets quoted.
+	d.ZeroDayText = pickText("zero_days", reZeroDay, qualys, bleeping)
+	d.AdobeText = pickText("adobe", reAdobe, qualys, bleeping)
+
+	for _, s := range []*Source{qualys, bleeping} {
+		if s == nil || !s.Fetched || len(d.Products) > 0 {
+			continue
+		}
+		for _, re := range reProducts {
+			m := re.FindStringSubmatch(s.Text)
+			if len(m) < 2 || len(m[1]) > maxProse {
+				continue
+			}
+			for _, p := range strings.Split(m[1], ",") {
+				p = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(p), "and "))
+				if p != "" && !strings.EqualFold(p, "and more") {
+					d.Products = append(d.Products, p)
+				}
+			}
+			if len(d.Products) > 0 {
+				d.From["products"] = s.Name
+				break
+			}
 		}
 	}
 
 	if qualys != nil && qualys.Fetched {
 		d.Categories = parseCategoryTable(qualys.RawHTML)
 		d.SourceQQL = extractQQL(qualys.RawHTML, qualys.Text)
+		d.From["qql"] = qualys.Name
 	}
 
 	// CVEs from every source that loaded, deduped and sorted.
@@ -322,6 +463,39 @@ func Parse(d *Digest) {
 		d.CVEs = append(d.CVEs, c)
 	}
 	sort.Strings(d.CVEs)
+}
+
+// roles finds the two article sources. Role wins; the name heuristic is only a
+// fallback for hand-built Digests, and it excludes anything calling itself a
+// detection source so the exposure placeholder can never be read as the blog.
+func roles(sources []Source) (qualys, bleeping *Source) {
+	for i := range sources {
+		s := &sources[i]
+		switch s.Role {
+		case RoleQualysBlog:
+			qualys = s
+			continue
+		case RoleBleeping:
+			bleeping = s
+			continue
+		case RoleExposure:
+			continue
+		}
+		name := strings.ToLower(s.Name)
+		switch {
+		case strings.Contains(name, "detection") || strings.Contains(name, "exposure"):
+			// Not an article.
+		case strings.Contains(name, "qualys"):
+			if qualys == nil {
+				qualys = s
+			}
+		default:
+			if bleeping == nil {
+				bleeping = s
+			}
+		}
+	}
+	return qualys, bleeping
 }
 
 func extractQQL(raw, text string) []string {

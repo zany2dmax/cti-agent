@@ -94,15 +94,17 @@ func main() {
 	if qURL == "" {
 		qURL = patchtuesday.QualysURL(year, mon)
 	}
-	d.Sources = append(d.Sources,
-		patchtuesday.Fetch(ctx, client, "Qualys security update review", qURL))
+	qs := patchtuesday.Fetch(ctx, client, "Qualys security update review", qURL)
+	qs.Role = patchtuesday.RoleQualysBlog
+	d.Sources = append(d.Sources, qs)
 
 	bURL := *urlBleeping
 	if bURL == "" {
 		bURL = discoverBleeping(ctx, client, year, mon)
 	}
-	d.Sources = append(d.Sources,
-		patchtuesday.Fetch(ctx, client, "BleepingComputer Patch Tuesday", bURL))
+	bs := patchtuesday.Fetch(ctx, client, "BleepingComputer Patch Tuesday", bURL)
+	bs.Role = patchtuesday.RoleBleeping
+	d.Sources = append(d.Sources, bs)
 
 	patchtuesday.Parse(d)
 
@@ -124,25 +126,39 @@ func main() {
 				"if the URL pattern has changed.")
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s - %d CVE(s) in the sources\n",
-		patchtuesday.MonthLabel(year, mon), len(d.CVEs))
+	fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s - %d CVE(s) in the sources, "+
+		"%d QID(s) published in the review\n",
+		patchtuesday.MonthLabel(year, mon), len(d.CVEs), len(d.PublishedQIDs()))
+	// Provenance. The August replay reported a total of 400 while the Qualys
+	// post said 421, and nothing in the output said which page each figure had
+	// come from, so the discrepancy could only be investigated by reading code.
+	for _, k := range []string{"total", "critical", "important", "zero_days", "products", "qql"} {
+		if v := d.From[k]; v != "" {
+			fmt.Fprintf(os.Stderr, "cti-patchtuesday:   %-10s <- %s\n", k, v)
+		}
+	}
 
 	report := &patchtuesday.Report{Digest: d, Org: org}
 	var detections map[int]patchtuesday.DetectionLike
 
 	if strings.EqualFold(*provider, "none") {
-		fmt.Fprintln(os.Stderr,
-			"cti-patchtuesday: --provider none, skipping Qualys. Exposure will read "+
-				"as unmeasurable, which is accurate for this run.")
+		reason := "--provider none was passed, so Qualys was not queried"
+		fmt.Fprintln(os.Stderr, "cti-patchtuesday: "+reason)
+		report.Exposure = patchtuesday.Unmeasured(reason)
 	} else {
 		var err error
 		detections, err = correlate(ctx, d, report)
 		if err != nil {
 			// The synopsis still goes out. Losing our own exposure numbers is
-			// a real loss, so it is stated, not swallowed.
+			// a real loss, so it is stated, not swallowed - and it is recorded
+			// as "not measured" rather than left as a zero-value Exposure,
+			// which the email would otherwise have rendered as a finding about
+			// the KnowledgeBase.
 			fmt.Fprintf(os.Stderr, "cti-patchtuesday: Qualys correlation failed: %v\n", err)
+			report.Exposure = patchtuesday.Unmeasured(err.Error())
 			d.Sources = append(d.Sources, patchtuesday.Source{
-				Name: "Qualys Host Detection (exposure)", URL: "-",
+				Name: "Qualys Host Detection (exposure)",
+				Role: patchtuesday.RoleExposure, URL: "-",
 				Err: err.Error(),
 			})
 		}
@@ -217,16 +233,29 @@ func correlate(ctx context.Context, d *patchtuesday.Digest,
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	if len(d.CVEs) == 0 {
-		return nil, fmt.Errorf("no CVEs found in the sources to correlate")
+	published := d.PublishedQIDs()
+	if len(d.CVEs) == 0 && len(published) == 0 {
+		return nil, fmt.Errorf("no CVEs and no published QIDs in the sources to correlate")
 	}
 
 	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
 		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
 
+	// A KnowledgeBase that will not load is no longer fatal. The review's own
+	// QID list is an independent route to a number, and on the morning after a
+	// release it is usually the better one - so losing the mapping degrades the
+	// correlation rather than cancelling it.
+	kbStale := false
 	kb, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath)
 	if err != nil {
-		return nil, fmt.Errorf("KnowledgeBase cache: %w", err)
+		if len(published) == 0 {
+			return nil, fmt.Errorf("KnowledgeBase cache: %w", err)
+		}
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday: KnowledgeBase cache unavailable (%v); correlating on "+
+				"the %d QID(s) Qualys published in this month's review instead\n",
+			err, len(published))
+		kb, kbStale = map[string][]int{}, true
 	}
 	cveToQIDs := map[string][]int{}
 	var allQIDs []int
@@ -236,11 +265,21 @@ func correlate(ctx context.Context, d *patchtuesday.Digest,
 			allQIDs = append(allQIDs, qids...)
 		}
 	}
+	// Union, not fallback. The two routes overlap but neither contains the
+	// other: the mapping covers CVEs Qualys did not put in the QQL, and the
+	// QQL covers detections the mapping has not caught up with.
+	kbQIDs := len(dedupe(allQIDs))
+	allQIDs = append(allQIDs, published...)
 
 	det := map[int]patchtuesday.DetectionLike{}
 	// One batched call rather than one per CVE. A Patch Tuesday can carry
 	// hundreds of CVEs and thousands of QIDs; per-CVE lookups would take hours
 	// and hammer the API.
+	if len(allQIDs) == 0 {
+		// Attempted, and honestly empty: Summarise records that we looked.
+		r.Exposure = patchtuesday.Summarise(d.CVEs, cveToQIDs, published, det, kbStale)
+		return det, nil
+	}
 	for _, chunk := range chunkInts(allQIDs, 300) {
 		sums, err := q.HostDetections(ctx, chunk)
 		if err != nil {
@@ -253,8 +292,13 @@ func correlate(ctx context.Context, d *patchtuesday.Digest,
 		}
 	}
 
-	r.Exposure = patchtuesday.Summarise(d.CVEs, cveToQIDs, det, false)
+	r.Exposure = patchtuesday.Summarise(d.CVEs, cveToQIDs, published, det, kbStale)
 	r.Highlights = buildHighlights(r.Exposure, cveToQIDs, det)
+	fmt.Fprintf(os.Stderr,
+		"cti-patchtuesday: queried %d QID(s) (%d from the KnowledgeBase mapping, "+
+			"%d published in the review); %d detection(s) on %d host(s)\n",
+		len(r.Exposure.QIDs), kbQIDs, len(published),
+		r.Exposure.Detections, r.Exposure.Hosts)
 	return det, nil
 }
 
@@ -281,15 +325,20 @@ func buildHighlights(e patchtuesday.Exposure, cveToQIDs map[string][]int,
 	return out
 }
 
-func chunkInts(in []int, n int) [][]int {
+func dedupe(in []int) []int {
 	seen := map[int]bool{}
-	var uniq []int
+	var out []int
 	for _, v := range in {
 		if !seen[v] {
 			seen[v] = true
-			uniq = append(uniq, v)
+			out = append(out, v)
 		}
 	}
+	return out
+}
+
+func chunkInts(in []int, n int) [][]int {
+	uniq := dedupe(in)
 	var out [][]int
 	for i := 0; i < len(uniq); i += n {
 		j := i + n

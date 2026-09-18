@@ -2,7 +2,7 @@
 // synopsis: two public wrap-ups, correlated against what the scanner actually
 // finds in this environment, rendered as one email.
 //
-// WHY THIS IS ITS OWN LANE
+// # WHY THIS IS ITS OWN LANE
 //
 // It looks like the scout lane but is not. @scout polls feeds continuously for
 // CVE IDs and dedupes them; it has no notion of a monthly anchor, cannot pull
