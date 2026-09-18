@@ -61,11 +61,10 @@ type Digest struct {
 	// dropped so the exclusion can be audited - a filter whose decisions are
 	// invisible is the next bug.
 	ExcludedCVEs []string
-	// UnattributedCVEs are correlated but nothing on either page ties them to
-	// a Microsoft product. They are the most likely members of this set not to
-	// belong to the release.
-	UnattributedCVEs []string
-	// CVEWhere records, per CVE, the places it was seen, with enough
+	// ExcludedWhy names the other vendor that caused each exclusion, so the
+	// filter's decisions can be checked rather than trusted.
+	ExcludedWhy map[string]string `json:",omitempty"`
+	// CVEWhere records, per CVE, the distinct places it was seen, with enough
 	// surrounding text to judge the context.
 	CVEWhere map[string][]string `json:",omitempty"`
 
@@ -267,7 +266,17 @@ func StripHTML(h string) string {
 }
 
 var (
-	reCVE = regexp.MustCompile(`CVE-\d{4}-\d{4,7}`)
+	// \d{4,} with word boundaries, not \d{4,7}.
+	//
+	// The CVE ID syntax sets a MINIMUM of four digits and no maximum - the
+	// sequence number is whatever the CNA was assigned, which is also why a
+	// four-digit suffix means "reserved early in the year" and nothing else.
+	// An upper bound of 7 does not reject a longer ID, it MATCHES THE FIRST
+	// SEVEN DIGITS: CVE-2026-12345678 came out as CVE-2026-1234567, a
+	// well-formed identifier for a different vulnerability, which would then
+	// find no QID mapping and be reported as coverage-unverified. Silent
+	// corruption, not a dropped row.
+	reCVE = regexp.MustCompile(`(?i)\bCVE-\d{4}-\d{4,}\b`)
 
 	// Counts. Several phrasings across months and publishers, so each pattern
 	// is tried in turn and the first match wins. A number that cannot be found
@@ -471,20 +480,37 @@ func Parse(d *Digest) {
 }
 
 var (
-	// A block that mentions Adobe and nothing Microsoft belongs to the Adobe
-	// advisory section, which these posts carry alongside the Microsoft
-	// release. Its CVEs are real but they are not "this release's CVEs", and
-	// correlating them made the scraped count (422) exceed the count Microsoft
-	// published (421) - a small discrepancy that is a symptom of taking every
-	// CVE-shaped string on two entire web pages.
-	reAdobeBlock = regexp.MustCompile(`(?i)\badobe\b`)
-	// Anything that places a block inside the Microsoft release. Deliberately
-	// broad: the cost of a false positive here is including one extra CVE, and
-	// the cost of a false negative is dropping a real one.
+	// Positive evidence that a CVE belongs to somebody else's advisory. These
+	// posts carry an Adobe section alongside the Microsoft release, and the
+	// news article links out to other vendors' stories, so some CVE-shaped
+	// strings on the page are not part of this release.
+	//
+	// Evidence-based, and that is the whole design. The first version of this
+	// asked the opposite question - "is there a Microsoft word near this
+	// CVE?" - and flagged 30 of 422 as unattributed, including CVE-2026-6726,
+	// which BleepingComputer lists as "Windows TPM ... TPM 2.0 Improper
+	// Object Slot Reuse". The rest were real Microsoft CVEs whose product
+	// names happen to contain none of the words on any keyword list:
+	// "Storvsp.sys Driver", "Kernel Streaming WOW Thunk", "Routing and Remote
+	// Access Service". Absence of a keyword is not evidence of anything, and a
+	// flag that cries wolf 30 times teaches the reader to ignore it - which is
+	// worse than not having it, because it is still there to be pointed at
+	// after an incident.
+	//
+	// Deliberately omits Intel, AMD and NVIDIA: their names appear in
+	// Microsoft advisories for firmware and driver fixes that this release
+	// does ship.
+	reForeignVendor = regexp.MustCompile(
+		`(?i)\b(adobe|chrome|chromium|mozilla|firefox|cisco|fortinet|oracle|` +
+			`apache|vmware|citrix|ivanti|sap|atlassian|jenkins|wordpress|` +
+			`openssl|android|linux kernel|macos|ios)\b`)
+	// Microsoft context, used ONLY to veto an exclusion. Its narrowness is
+	// harmless here: a missing keyword can no longer flag a CVE, it can only
+	// fail to rescue one that already sits beside another vendor's name.
 	reMicrosoftBlock = regexp.MustCompile(
 		`(?i)\b(microsoft|windows|office|outlook|exchange|sharepoint|azure|dynamics|` +
 			`hyper-v|ntfs|copilot|visual studio|sql server|\.net|asp\.net|edge|` +
-			`defender|kerberos|bitlocker|powershell|wsus|rdp|smb)\b`)
+			`defender|kerberos|bitlocker|powershell|wsus|win32k|tpm)\b`)
 )
 
 // collectCVEs gathers the release's CVE identifiers, scoped to Microsoft.
@@ -496,9 +522,9 @@ var (
 // one only widens a scanner query.
 func collectCVEs(d *Digest) {
 	seen := map[string]bool{}
-	adobeOnly := map[string]bool{}
-	anyMicrosoft := map[string]bool{}
+	foreignOnly := map[string]bool{}
 	d.CVEWhere = map[string][]string{}
+	d.ExcludedWhy = map[string]string{}
 
 	for _, s := range d.Sources {
 		if !s.Fetched {
@@ -509,7 +535,7 @@ func collectCVEs(d *Digest) {
 			if len(hits) == 0 {
 				continue
 			}
-			adobe := reAdobeBlock.MatchString(block)
+			vendor := reForeignVendor.FindString(block)
 			microsoft := reMicrosoftBlock.MatchString(block)
 			for _, c := range hits {
 				c = strings.ToUpper(c)
@@ -517,40 +543,49 @@ func collectCVEs(d *Digest) {
 				// CVE-2026-6726 at the top of the table on 346 hosts and there
 				// was no way to ask which sentence had claimed it was part of
 				// the release - the same shape of problem as a total of 400
-				// with no named source.
-				if len(d.CVEWhere[c]) < 3 {
-					d.CVEWhere[c] = append(d.CVEWhere[c],
-						fmt.Sprintf("%s: %s", s.Name, excerptAround(block, c)))
+				// with no named source. Deduped: a table row that names the
+				// CVE twice ("Windows TPM CVE-x MITRE: CVE-x ...") is one
+				// place, and printing it twice under "found in 2 place(s)"
+				// made an occurrence count look like corroboration.
+				w := fmt.Sprintf("%s: %s", s.Name, excerptAround(block, c))
+				if len(d.CVEWhere[c]) < 3 && !contains(d.CVEWhere[c], w) {
+					d.CVEWhere[c] = append(d.CVEWhere[c], w)
 				}
-				if microsoft {
-					anyMicrosoft[c] = true
-				}
+				isForeign := vendor != "" && !microsoft
 				if !seen[c] {
 					seen[c] = true
-					adobeOnly[c] = adobe && !microsoft
-				} else if !(adobe && !microsoft) {
-					// Seen somewhere that is not Adobe-only, so keep it.
-					adobeOnly[c] = false
+					foreignOnly[c] = isForeign
+					if isForeign {
+						d.ExcludedWhy[c] = vendor
+					}
+				} else if !isForeign {
+					// Seen somewhere with Microsoft context, or with no other
+					// vendor named: keep it.
+					foreignOnly[c] = false
+					delete(d.ExcludedWhy, c)
 				}
 			}
 		}
 	}
 	for c := range seen {
-		if adobeOnly[c] {
+		if foreignOnly[c] {
 			d.ExcludedCVEs = append(d.ExcludedCVEs, c)
 			continue
 		}
+		delete(d.ExcludedWhy, c)
 		d.CVEs = append(d.CVEs, c)
-		if !anyMicrosoft[c] {
-			// Kept - dropping a real CVE is worse - but flagged, because a CVE
-			// nothing on either page ties to a Microsoft product is the most
-			// likely thing in this set to not belong to this release at all.
-			d.UnattributedCVEs = append(d.UnattributedCVEs, c)
-		}
 	}
 	sort.Strings(d.CVEs)
 	sort.Strings(d.ExcludedCVEs)
-	sort.Strings(d.UnattributedCVEs)
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // excerptAround returns a short window of the block around the CVE, enough to
@@ -592,20 +627,14 @@ func (d *Digest) Explain(cve string) string {
 	}
 	for _, x := range d.ExcludedCVEs {
 		if x == cve {
-			b.WriteString("  SCOPED OUT: every sighting mentions Adobe and none " +
-				"mentions a Microsoft product, so it is not correlated as part " +
-				"of this release.\n")
+			fmt.Fprintf(&b,
+				"  SCOPED OUT: every sighting names %q and none names a Microsoft "+
+					"product, so it is not correlated as part of this release.\n",
+				d.ExcludedWhy[cve])
 			return b.String()
 		}
 	}
-	for _, u := range d.UnattributedCVEs {
-		if u == cve {
-			b.WriteString("  UNATTRIBUTED: nothing on either page ties this CVE " +
-				"to a Microsoft product. It is still correlated, because " +
-				"dropping a real CVE is worse than carrying a spare one, but " +
-				"treat its presence in the release as unconfirmed.\n")
-		}
-	}
+	b.WriteString("  Correlated as part of this release.\n")
 	return b.String()
 }
 
