@@ -27,7 +27,7 @@ type Report struct {
 // Highlight is one CVE that is actually in the estate.
 type Highlight struct {
 	CVE       string
-	Sev       string // Sev5..Sev1 from the enrich lane, blank if unavailable
+	Sev       string  // Sev5..Sev1 from the enrich lane, blank if unavailable
 	Hosts     int
 	QIDs      []int
 	KEV       bool
