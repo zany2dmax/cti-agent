@@ -3,7 +3,7 @@
 // systemd invokes it via OnFailure=; it is not meant to be run by hand,
 // though it is safe to.
 //
-// WHY THIS EXISTS
+// # WHY THIS EXISTS
 //
 // The fleet's whole premise is that a quiet inbox means a quiet day. That only
 // holds if a broken pipeline is loud. Without this, a failed digest timer

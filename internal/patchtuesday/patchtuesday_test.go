@@ -155,38 +155,72 @@ func TestQualysURLMatchesTheKnownPosts(t *testing.T) {
 
 // ---------------------------------------------------------------- parsing
 
-// Shaped on the real Qualys review: the phrasing, the QQL as a bare paragraph,
-// and the category table are all as published.
-const qualysFixture = `<html><body>
-<p>This month's release addresses <b>137</b> vulnerabilities, including <b>30 </b>critical
-and <b>103</b> important-severity<b> </b>vulnerabilities.</p>
-<p>vulnerabilities.vulnerability: ( qid: 110525 or qid: 110526 or qid: 387304 )</p>
-<p>In this month's updates, Microsoft has not addressed any publicly disclosed zero-day vulnerability.</p>
+// The sentences below are the real August 2026 Qualys review, copied as
+// published - including its typography, which is the point.
+//
+// The previous version of this fixture was hand-written in clean ASCII, and
+// every pattern passed against it while two of them could not match the actual
+// page at all:
+//
+//   - "month’s" uses U+2019, so `month'?s` never matched, and the entity map
+//     in StripHTML never saw it because it is a character, not an entity.
+//   - "421<U+00A0>vulnerabilities" separates the number from the word with a
+//     non-breaking space, and Go's \s is ASCII-only, so `([\d,]+)\s+vulnerabilit`
+//     did not match either. The total silently fell through to
+//     BleepingComputer's different, lower headline count.
+//
+// Injected rather than typed into the literal so the two characters are
+// visible in the source instead of being invisible bytes someone later
+// "tidies" away.
+var punctuationAsPublished = strings.NewReplacer(
+	"{RSQUO}", "\u2019", "{NBSP}", "\u00a0")
+
+var qualysFixture = punctuationAsPublished.Replace(`<html><body>
+<p>As attackers continue to exploit unpatched vulnerabilities, timely patching
+remains critical for reducing exposure and strengthening enterprise security.</p>
+<p>This month{RSQUO}s release addresses <strong>421</strong>{NBSP}vulnerabilities, including <strong>62 </strong>critical
+and <strong>357</strong> important-severity<strong> </strong>vulnerabilities.</p>
+<p>vulnerabilities.vulnerability: ( qid: 110531 or qid: 110532 or qid: 388257 )</p>
+<p>In this month{RSQUO}s updates, Microsoft has addressed <strong>three</strong> zero-day
+vulnerabilities: <strong>two</strong> publicly disclosed and <strong>one</strong> exploited in the wild.</p>
 <p>Microsoft has addressed 128 vulnerabilities in Microsoft Edge (Chromium-based) that were patched earlier this month.</p>
-<p>Microsoft Patch Tuesday, May edition, includes updates for vulnerabilities in Windows Hyper-V, .NET, M365 Copilot, Windows Kernel, and more.</p>
-<p>The May 2026 Microsoft vulnerabilities are classified as follows:</p>
+<p>Microsoft Patch Tuesday, August edition, includes updates for vulnerabilities in Windows HTTP.sys, Windows Hyper-V, .NET, Microsoft Exchange Server, and more.</p>
+<p>The August 2026 Microsoft vulnerabilities are classified as follows:</p>
 <table><tbody>
 <tr><td><b>Vulnerability Category</b></td><td><b>Quantity</b></td><td><b>Severities</b></td></tr>
-<tr><td>Spoofing Vulnerability</td><td>15</td><td>Critical: 4<br/>Important: 11</td></tr>
-<tr><td>Remote Code Execution Vulnerability</td><td>31</td><td>Critical: 16<br/>Important: 15</td></tr>
+<tr><td>Spoofing Vulnerability</td><td>20</td><td>Critical: 3<br/>Important: 17</td></tr>
+<tr><td>Remote Code Execution Vulnerability</td><td>109</td><td>Critical: 39<br/>Important: 70</td></tr>
 </tbody></table>
-<p>Adobe has released 10 security advisories to address 52 vulnerabilities in Adobe Premiere Pro and others. 27 of these are rated critical.</p>
+<p>Adobe has released five security advisories addressing 51 vulnerabilities across Adobe ColdFusion and Adobe Commerce. 33 of these vulnerabilities are rated critical.</p>
 <p>Affected: CVE-2026-1111, CVE-2026-2222 and CVE-2025-9999.</p>
-</body></html>`
+</body></html>`)
 
+// The headline, then the site's own navigation, then the prose. The nav block
+// is here deliberately: with an unbounded [^.] the zero-day pattern ran off
+// the end of the headline - which has no full stop of its own - and through
+// these list items until it found one, and the August replay published
+// "3 zero-days News Featured Latest OpenAI details more cases of AI agents
+// taking unauthorized actions ... just $82." as the zero-day summary.
 const bleepingFixture = `<html><body>
-<h1>Microsoft September 2026 Patch Tuesday fixes 966 flaws, 2 zero-days</h1>
-<p>Today is Microsoft's September 2026 Patch Tuesday, which fixes 966 flaws,
-including two actively exploited zero-day vulnerabilities.</p>
+<h1>Microsoft August 2026 Patch Tuesday fixes 400 flaws, 3 zero-days</h1>
+<ul>
+<li>News Featured Latest OpenAI details more cases of AI agents taking unauthorized actions</li>
+<li>Cisco warns of max severity ISE zero-day exploited in attacks</li>
+<li>Need a second laptop? This refurbished Chromebook is just $82.</li>
+</ul>
+<p>Today is Microsoft's August 2026 Patch Tuesday, which fixes 400 flaws,
+including three actively exploited zero-day vulnerabilities.</p>
 <p>See CVE-2026-3333 for details.</p>
 </body></html>`
 
 func parsed(t *testing.T) *Digest {
 	t.Helper()
-	dg := &Digest{Year: 2026, Month: time.May, Sources: []Source{
-		{Name: "Qualys security update review", URL: "q", Fetched: true,
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog,
+			URL: "q", Fetched: true,
 			RawHTML: qualysFixture, Text: StripHTML(qualysFixture)},
-		{Name: "BleepingComputer Patch Tuesday", URL: "b", Fetched: true,
+		{Name: "BleepingComputer Patch Tuesday", Role: RoleBleeping,
+			URL: "b", Fetched: true,
 			RawHTML: bleepingFixture, Text: StripHTML(bleepingFixture)},
 	}}
 	Parse(dg)
@@ -195,17 +229,62 @@ func parsed(t *testing.T) *Digest {
 
 func TestParseCounts(t *testing.T) {
 	dg := parsed(t)
-	if dg.Total != 137 {
-		t.Errorf("Total = %d, want 137", dg.Total)
+	// 421, not BleepingComputer's 400: the two publishers count differently
+	// and the Qualys post is the primary source. Getting 400 here means the
+	// Qualys sentence did not match and the parse fell through.
+	if dg.Total != 421 {
+		t.Errorf("Total = %d, want 421 (400 means it fell through to BleepingComputer)", dg.Total)
 	}
-	if dg.Critical != 30 {
-		t.Errorf("Critical = %d, want 30", dg.Critical)
+	if dg.Critical != 62 {
+		t.Errorf("Critical = %d, want 62", dg.Critical)
 	}
-	if dg.Important != 103 {
-		t.Errorf("Important = %d, want 103", dg.Important)
+	if dg.Important != 357 {
+		t.Errorf("Important = %d, want 357", dg.Important)
 	}
 	if dg.EdgeFixes != 128 {
 		t.Errorf("EdgeFixes = %d, want 128", dg.EdgeFixes)
+	}
+}
+
+func TestParseSurvivesThePublishersTypography(t *testing.T) {
+	// Guards the two silent failures directly, because both are invisible in
+	// the rendered output: a wrong-but-plausible number, and a missing
+	// sentence. Go's \s does not match U+00A0 and 'month'?s' does not match
+	// "month’s".
+	if !strings.Contains(qualysFixture, "\u00a0") ||
+		!strings.Contains(qualysFixture, "\u2019") {
+		t.Fatal("fixture no longer contains the published typography it exists to test")
+	}
+	text := StripHTML(qualysFixture)
+	if strings.ContainsAny(text, "\u00a0\u2019") {
+		t.Error("StripHTML left smart punctuation in the text it hands to the patterns")
+	}
+	if !strings.Contains(text, "addresses 421 vulnerabilities") {
+		t.Errorf("the non-breaking space was not normalised:\n%.200s", text)
+	}
+	if !strings.Contains(text, "month's") {
+		t.Error("the curly apostrophe was not normalised")
+	}
+}
+
+func TestStripHTMLMakesOneLinePerBlock(t *testing.T) {
+	// The invariant the prose patterns depend on. Bounding a sentence with
+	// [^.\n] is only correct if a line is a block; if a merely WRAPPED
+	// paragraph stays two lines, the bound cuts sentences in half. That is
+	// what happened to the review's zero-day sentence, which wraps in the
+	// page source - it went from the vendor's full sentence to empty, and the
+	// renderer's response to empty is to omit the section silently.
+	got := StripHTML("<p>one sentence that\nwraps across\nthree source lines.</p>" +
+		"<p>second block</p><div>third<br>fourth</div>")
+	want := "one sentence that wraps across three source lines.\nsecond block\nthird\nfourth"
+	if got != want {
+		t.Errorf("\ngot  %q\nwant %q", got, want)
+	}
+	// And on the fixture, where it matters.
+	for _, line := range strings.Split(StripHTML(qualysFixture), "\n") {
+		if strings.Contains(line, "zero-day") && !strings.HasSuffix(line, ".") {
+			t.Errorf("zero-day block is not a whole sentence on one line: %q", line)
+		}
 	}
 }
 
@@ -217,6 +296,105 @@ func TestParseZeroDaySentenceIsQuotedNotCounted(t *testing.T) {
 	if !strings.Contains(strings.ToLower(dg.ZeroDayText), "zero-day") {
 		t.Errorf("ZeroDayText = %q", dg.ZeroDayText)
 	}
+	if !strings.Contains(dg.ZeroDayText, "exploited in the wild") {
+		t.Errorf("expected the blog's full sentence, got %q", dg.ZeroDayText)
+	}
+}
+
+func TestZeroDayTextDoesNotSwallowSiteNavigation(t *testing.T) {
+	// The bug this guards, reproduced exactly: BleepingComputer alone, whose
+	// headline has no sentence end. An unbounded [^.] walked out of the
+	// headline and into the nav until it found a full stop three stories
+	// later. Patterns are line-bounded now, and capped in length.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "BleepingComputer Patch Tuesday", Role: RoleBleeping, Fetched: true,
+			RawHTML: bleepingFixture, Text: StripHTML(bleepingFixture)},
+	}}
+	Parse(dg)
+	for _, junk := range []string{"OpenAI", "Chromebook", "$82", "Featured Latest"} {
+		if strings.Contains(dg.ZeroDayText, junk) {
+			t.Errorf("site navigation leaked into the zero-day summary (%q):\n%s",
+				junk, dg.ZeroDayText)
+		}
+	}
+	if len(dg.ZeroDayText) > maxProse {
+		t.Errorf("zero-day text is %d chars - too long to be one sentence", len(dg.ZeroDayText))
+	}
+	if !strings.Contains(dg.ZeroDayText, "zero-day") {
+		t.Errorf("nothing extracted at all: %q", dg.ZeroDayText)
+	}
+}
+
+func TestProductListSurvivesProductNamesContainingDots(t *testing.T) {
+	// "Windows HTTP.sys" and ".NET" are why [^.]+ cannot terminate this
+	// sentence. It used to cut at the dot in ".sys" and publish
+	// "Products: Windows HTTP, and more."
+	dg := parsed(t)
+	got := strings.Join(dg.Products, " | ")
+	for _, want := range []string{"Windows HTTP.sys", ".NET", "Microsoft Exchange Server"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q from products: %v", want, dg.Products)
+		}
+	}
+	if len(dg.Products) < 4 {
+		t.Errorf("expected the whole list, got %v", dg.Products)
+	}
+	for _, p := range dg.Products {
+		if strings.EqualFold(p, "and more") || p == "" {
+			t.Errorf("junk entry %q in %v", p, dg.Products)
+		}
+	}
+}
+
+func TestParseRecordsWhereEachFigureCameFrom(t *testing.T) {
+	// Provenance exists because a total of 400 looked exactly as plausible as
+	// 421 in the rendered email, and nothing said which page it came from.
+	dg := parsed(t)
+	if got := dg.From["total"]; !strings.Contains(got, "Qualys") {
+		t.Errorf("total provenance = %q, want the Qualys review", got)
+	}
+	if got := dg.From["critical"]; !strings.Contains(got, "Qualys") {
+		t.Errorf("critical provenance = %q", got)
+	}
+	// A figure that was not found says so, rather than being absent from the
+	// map and indistinguishable from one nobody looked for.
+	bare := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog,
+			Fetched: true, Text: "nothing useful", RawHTML: "<p>nothing useful</p>"},
+	}}
+	Parse(bare)
+	if bare.From["total"] != "not found in any source" {
+		t.Errorf("From[total] = %q", bare.From["total"])
+	}
+}
+
+func TestTheExposurePlaceholderCannotBeMistakenForTheBlog(t *testing.T) {
+	// Roles exist because the source appended after a failed correlation is
+	// called "Qualys Host Detection (exposure)", which matched the old
+	// name-contains-"qualys" test, has no text, and displaced the real blog.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog, Fetched: true,
+			RawHTML: qualysFixture, Text: StripHTML(qualysFixture)},
+		{Name: "Qualys Host Detection (exposure)", Role: RoleExposure,
+			Fetched: false, Err: "config: missing QUALYS_PASSWORD"},
+	}}
+	Parse(dg)
+	if dg.Total != 421 {
+		t.Errorf("Total = %d - the exposure placeholder displaced the blog", dg.Total)
+	}
+	if len(dg.Categories) == 0 {
+		t.Error("category table lost: the wrong source was treated as the blog")
+	}
+	// And with no Role set at all, the name heuristic must still exclude it.
+	dg2 := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Fetched: true,
+			RawHTML: qualysFixture, Text: StripHTML(qualysFixture)},
+		{Name: "Qualys Host Detection (exposure)", Fetched: false, Err: "no creds"},
+	}}
+	Parse(dg2)
+	if dg2.Total != 421 {
+		t.Errorf("Total = %d with roles unset", dg2.Total)
+	}
 }
 
 func TestParseQQLIsVerbatim(t *testing.T) {
@@ -226,7 +404,7 @@ func TestParseQQLIsVerbatim(t *testing.T) {
 	if len(dg.SourceQQL) == 0 {
 		t.Fatal("no QQL extracted")
 	}
-	want := "vulnerabilities.vulnerability: ( qid: 110525 or qid: 110526 or qid: 387304 )"
+	want := "vulnerabilities.vulnerability: ( qid: 110531 or qid: 110532 or qid: 388257 )"
 	found := false
 	for _, q := range dg.SourceQQL {
 		if q == want {
@@ -238,15 +416,45 @@ func TestParseQQLIsVerbatim(t *testing.T) {
 	}
 }
 
+func TestPublishedQIDsComeOutOfTheReviewsOwnQQL(t *testing.T) {
+	// The QQL is Qualys stating which detections this release introduced, on
+	// the day, in machine-readable form. Reading it back is the difference
+	// between measurable exposure on Patch Tuesday + 1 and a report that says
+	// "not yet measurable" directly above a list of usable QIDs.
+	got := parsed(t).PublishedQIDs()
+	want := []int{110531, 110532, 388257}
+	if len(got) != len(want) {
+		t.Fatalf("PublishedQIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("PublishedQIDs = %v, want %v", got, want)
+			break
+		}
+	}
+	// Deduped, sorted, and tolerant of the spacing variants that appear in
+	// hand-written queries.
+	mixed := QIDsFromQQL([]string{
+		"vulnerabilities.vulnerability: ( qid:5 or qid: 5 or QID : 3 )",
+		"vulnerabilities.vulnerability: ( qid: 999999 )",
+	})
+	if len(mixed) != 3 || mixed[0] != 3 || mixed[1] != 5 || mixed[2] != 999999 {
+		t.Errorf("QIDsFromQQL = %v, want [3 5 999999]", mixed)
+	}
+	if len(QIDsFromQQL(nil)) != 0 {
+		t.Error("no QQL should yield no QIDs")
+	}
+}
+
 func TestParseCategoryTable(t *testing.T) {
 	dg := parsed(t)
 	if len(dg.Categories) != 2 {
 		t.Fatalf("got %d categories: %+v", len(dg.Categories), dg.Categories)
 	}
-	if dg.Categories[0].Name != "Spoofing Vulnerability" || dg.Categories[0].Quantity != 15 {
+	if dg.Categories[0].Name != "Spoofing Vulnerability" || dg.Categories[0].Quantity != 20 {
 		t.Errorf("row 0 = %+v", dg.Categories[0])
 	}
-	if !strings.Contains(dg.Categories[1].Severities, "Critical: 16") {
+	if !strings.Contains(dg.Categories[1].Severities, "Critical: 39") {
 		t.Errorf("severities lost: %q", dg.Categories[1].Severities)
 	}
 }
@@ -321,7 +529,7 @@ func TestSummariseUnionsHostsRatherThanSumming(t *testing.T) {
 		101: {QID: 101, HostCount: 2, Hosts: []string{"h1", "h2"}},
 		102: {QID: 102, HostCount: 1, Hosts: []string{"h2"}},
 	}
-	e := Summarise(cves, kb, det, false)
+	e := Summarise(cves, kb, nil, det, false)
 	if e.Hosts != 2 {
 		t.Errorf("Hosts = %d, want 2 distinct (h1, h2)", e.Hosts)
 	}
@@ -330,11 +538,28 @@ func TestSummariseUnionsHostsRatherThanSumming(t *testing.T) {
 	}
 }
 
+func TestSummariseCountsEachQIDOnceHoweverManyCVEsReachIt(t *testing.T) {
+	// Two CVEs sharing a QID is one set of findings on those machines, not
+	// two. Summing per (CVE, QID) pair inflated the detection count by
+	// however many CVEs happened to map to the same detection.
+	e := Summarise([]string{"CVE-A", "CVE-B"},
+		map[string][]int{"CVE-A": {100}, "CVE-B": {100}},
+		nil,
+		map[int]DetectionLike{100: {QID: 100, HostCount: 3, Hosts: []string{"h1", "h2", "h3"}}},
+		false)
+	if e.Detections != 3 {
+		t.Errorf("Detections = %d, want 3 counted once for QID 100", e.Detections)
+	}
+	if len(e.PresentCVEs) != 2 {
+		t.Errorf("both CVEs are still present: %v", e.PresentCVEs)
+	}
+}
+
 func TestSummariseSeparatesUnmappedFromAbsent(t *testing.T) {
 	// A CVE with no QID is unmeasurable, not clean. Folding it into "not
 	// present" is the failure this whole system is built to avoid.
 	e := Summarise([]string{"CVE-MAPPED", "CVE-NOQID"},
-		map[string][]int{"CVE-MAPPED": {1}},
+		map[string][]int{"CVE-MAPPED": {1}}, nil,
 		map[int]DetectionLike{1: {QID: 1, HostCount: 1, Hosts: []string{"h"}}}, false)
 	if len(e.MappedCVEs) != 1 || e.MappedCVEs[0] != "CVE-MAPPED" {
 		t.Errorf("MappedCVEs = %v", e.MappedCVEs)
@@ -346,13 +571,56 @@ func TestSummariseSeparatesUnmappedFromAbsent(t *testing.T) {
 
 func TestSummariseOnlyCountsPresentCVEsAsPresent(t *testing.T) {
 	e := Summarise([]string{"CVE-HERE", "CVE-CLEAN"},
-		map[string][]int{"CVE-HERE": {1}, "CVE-CLEAN": {2}},
+		map[string][]int{"CVE-HERE": {1}, "CVE-CLEAN": {2}}, nil,
 		map[int]DetectionLike{
 			1: {QID: 1, HostCount: 3, Hosts: []string{"a", "b", "c"}},
 			2: {QID: 2, HostCount: 0},
 		}, false)
 	if len(e.PresentCVEs) != 1 || e.PresentCVEs[0] != "CVE-HERE" {
 		t.Errorf("PresentCVEs = %v", e.PresentCVEs)
+	}
+}
+
+func TestPublishedQIDsMakeExposureMeasurableWithNoCVEMapping(t *testing.T) {
+	// The day-one case, and the one the lane got wrong: the KnowledgeBase has
+	// no CVE mapping yet, so the CVE route yields nothing - but Qualys
+	// published the release's QIDs in the review, and two of them are on our
+	// machines. The old code queried neither and reported "not yet
+	// measurable" while printing those QIDs in the next paragraph.
+	e := Summarise(
+		[]string{"CVE-2026-1111", "CVE-2026-2222"},
+		map[string][]int{}, // KnowledgeBase has not caught up
+		[]int{110531, 110532, 388257},
+		map[int]DetectionLike{
+			110531: {QID: 110531, HostCount: 40, Hosts: []string{"h1", "h2"}},
+			110532: {QID: 110532, HostCount: 2, Hosts: []string{"h2", "h3"}},
+			388257: {QID: 388257, HostCount: 0},
+		}, true)
+
+	if !e.Measurable() {
+		t.Fatal("published QIDs were queried, so this is measurable")
+	}
+	if e.Detections != 42 || e.Hosts != 3 {
+		t.Errorf("Detections = %d (want 42), Hosts = %d (want 3)", e.Detections, e.Hosts)
+	}
+	if len(e.PublishedOnlyQIDs) != 2 {
+		t.Errorf("PublishedOnlyQIDs = %v, want the 2 detecting QIDs no CVE reached",
+			e.PublishedOnlyQIDs)
+	}
+	// Still honest about the CVEs themselves: none of them mapped, so none is
+	// claimed as present.
+	if len(e.PresentCVEs) != 0 {
+		t.Errorf("PresentCVEs = %v - a QID hit does not name a CVE", e.PresentCVEs)
+	}
+	if len(e.UnmappedCVEs) != 2 {
+		t.Errorf("UnmappedCVEs = %v", e.UnmappedCVEs)
+	}
+	line := e.ExposureLine("CR")
+	if strings.Contains(line, "not yet measurable") || strings.Contains(line, "NOT MEASURED") {
+		t.Errorf("42 detections is a measurement: %q", line)
+	}
+	if !strings.Contains(line, "published") {
+		t.Errorf("should credit the route that found them: %q", line)
 	}
 }
 
@@ -383,24 +651,82 @@ func TestDetectedQIDsExcludesQIDsWithNothingFound(t *testing.T) {
 }
 
 func TestExposureLineDistinguishesUnmeasuredFromClean(t *testing.T) {
-	// Three genuinely different states, and the difference matters most on the
-	// morning after a release when the KnowledgeBase has not caught up.
-	unmeasured := Exposure{}.ExposureLine("CR")
-	if !strings.Contains(unmeasured, "not yet measurable") ||
-		!strings.Contains(unmeasured, "not a clean result") {
-		t.Errorf("unmeasured: %q", unmeasured)
+	// Four genuinely different states. The difference matters most on the
+	// morning after a release, when the KnowledgeBase has not caught up and
+	// the reader is deciding whether to act before breakfast.
+	notMeasured := Unmeasured("config: missing QUALYS_PASSWORD").ExposureLine("CR")
+	if !strings.Contains(notMeasured, "NOT MEASURED") ||
+		!strings.Contains(notMeasured, "QUALYS_PASSWORD") ||
+		!strings.Contains(notMeasured, "not a clean result") {
+		t.Errorf("not measured: %q", notMeasured)
 	}
 
-	clean := Exposure{MappedCVEs: []string{"CVE-1"}}.ExposureLine("CR")
+	noQIDs := Exposure{Attempted: true}.ExposureLine("CR")
+	if !strings.Contains(noQIDs, "not yet measurable") ||
+		!strings.Contains(noQIDs, "not a clean result") {
+		t.Errorf("no QIDs: %q", noQIDs)
+	}
+
+	clean := Exposure{Attempted: true, MappedCVEs: []string{"CVE-1"},
+		QIDs: []int{1, 2}}.ExposureLine("CR")
 	if !strings.Contains(clean, "no open detections") ||
 		!strings.Contains(clean, "last scan date") {
 		t.Errorf("clean: %q", clean)
 	}
 
-	real := Exposure{MappedCVEs: []string{"CVE-1"}, Detections: 1510, Hosts: 777}
-	line := real.ExposureLine("CR")
-	if !strings.Contains(line, "~1510 new vulnerabilities across 777 hosts") {
+	real := Exposure{Attempted: true, MappedCVEs: []string{"CVE-1"},
+		QIDs: []int{1}, Detections: 1510, Hosts: 777}
+	if line := real.ExposureLine("CR"); !strings.Contains(line,
+		"~1510 new vulnerabilities across 777 hosts") {
 		t.Errorf("real: %q", line)
+	}
+}
+
+func TestAFailedCorrelationNeverDiagnosesTheKnowledgeBase(t *testing.T) {
+	// The report he caught. A zero-value Exposure - which is what a failed
+	// correlation left behind - printed "the Qualys KnowledgeBase has no QID
+	// mapping for any CVE in this release", a confident finding about a
+	// system that was never contacted, sitting above a QQL full of QIDs.
+	//
+	// The rule: nothing may be said about the KnowledgeBase, the scanner or
+	// the estate unless the scanner was actually queried.
+	for _, e := range []Exposure{
+		{},                              // never populated at all
+		Unmeasured("no Qualys credentials"), // populated honestly
+	} {
+		line := e.ExposureLine("CR")
+		for _, forbidden := range []string{
+			"KnowledgeBase", "no open detections", "not affected", "clean estate",
+		} {
+			if strings.Contains(line, forbidden) {
+				t.Errorf("an unattempted correlation claimed %q:\n%s", forbidden, line)
+			}
+		}
+		if !strings.Contains(line, "NOT MEASURED") {
+			t.Errorf("should say plainly that it did not look: %q", line)
+		}
+		if e.Measurable() {
+			t.Error("an unattempted correlation is not measurable")
+		}
+		if note := e.CoverageNote(); note != "" {
+			t.Errorf("no coverage claim either way without a query: %q", note)
+		}
+	}
+}
+
+func TestCoverageNoteCreditsThePublishedQIDsItQueried(t *testing.T) {
+	e := Exposure{Attempted: true, UnmappedCVEs: []string{"CVE-1", "CVE-2"},
+		PublishedQIDs: []int{110531}, QIDs: []int{110531}}
+	note := e.CoverageNote()
+	if !strings.Contains(note, "not the same as not being present") {
+		t.Errorf("note = %q", note)
+	}
+	if !strings.Contains(note, "published") {
+		t.Errorf("unmapped CVEs may still be covered by the published QIDs: %q", note)
+	}
+	if !strings.Contains(Exposure{Attempted: true, UnmappedCVEs: []string{"CVE-1"},
+		KBStale: true}.CoverageNote(), "stale") {
+		t.Error("a stale cache has to be said out loud")
 	}
 }
 
@@ -410,28 +736,29 @@ func report(t *testing.T) *Report {
 	t.Helper()
 	r := &Report{Digest: parsed(t), Org: "Construction Resources",
 		Exposure: Exposure{
+			Attempted:  true,
 			MappedCVEs: []string{"CVE-2026-1111"}, PresentCVEs: []string{"CVE-2026-1111"},
 			UnmappedCVEs: []string{"CVE-2025-9999"},
-			QIDs:         []int{110525}, Detections: 1510, Hosts: 777,
+			QIDs:         []int{110531}, Detections: 1510, Hosts: 777,
 		},
 		Highlights: []Highlight{{CVE: "CVE-2026-1111", Sev: "Sev5", Hosts: 12,
-			QIDs: []int{110525}, KEV: true, EPSS: 0.94, CVSS: 9.8,
+			QIDs: []int{110531}, KEV: true, EPSS: 0.94, CVSS: 9.8,
 			Rationale: "on CISA KEV; PRESENT on 12 host(s)"}},
 	}
-	r.ChooseQQL([]int{110525})
+	r.ChooseQQL([]int{110531})
 	return r
 }
 
 func TestSubjectMatchesTheEstablishedThread(t *testing.T) {
 	r := report(t)
-	if !strings.HasPrefix(r.Subject(), "Microsoft Patch Tuesday for May 2026") {
+	if !strings.HasPrefix(r.Subject(), "Microsoft Patch Tuesday for August 2026") {
 		t.Errorf("subject = %q", r.Subject())
 	}
 }
 
 func TestQQLPrefersOurOwnDetections(t *testing.T) {
 	r := report(t)
-	if !strings.Contains(r.QQL, "qid: 110525") {
+	if !strings.Contains(r.QQL, "qid: 110531") {
 		t.Errorf("QQL = %q", r.QQL)
 	}
 	if !strings.Contains(r.QQLSource, "open detections in our environment") {
@@ -442,7 +769,7 @@ func TestQQLPrefersOurOwnDetections(t *testing.T) {
 func TestQQLFallsBackToTheSourcesThenToCVEs(t *testing.T) {
 	r := &Report{Digest: parsed(t), Org: "CR"}
 	r.ChooseQQL(nil) // nothing detected here
-	if !strings.Contains(r.QQL, "qid: 110525") {
+	if !strings.Contains(r.QQL, "qid: 110531") {
 		t.Errorf("should fall back to the published QQL, got %q", r.QQL)
 	}
 	if !strings.Contains(r.QQLSource, "verbatim") {
@@ -460,17 +787,18 @@ func TestQQLFallsBackToTheSourcesThenToCVEs(t *testing.T) {
 func TestHTMLCarriesTheThingsTheReaderCameFor(t *testing.T) {
 	h := report(t).HTML()
 	for _, want := range []string{
-		"Construction Resources",                        // whose it is
-		"~1510 new vulnerabilities across 777 hosts",    // the exposure line
-		"qid: 110525",                                   // the QQL, pasteable
-		"CVE-2026-1111",                                 // present here
-		"Sev5",                                          // banded
-		"no Qualys QID mapping",                         // the coverage caveat
-		"Present in our environment",                    // the section that makes it ours
-		"137",                                           // Microsoft's count
-		"Spoofing Vulnerability",                        // category table
-		"Adobe",                                         // Adobe section
-		"determined solely by Qualys Host Detection",    // the standing caveat
+		"Construction Resources",                     // whose it is
+		"~1510 new vulnerabilities across 777 hosts", // the exposure line
+		"qid: 110531",                                // the QQL, pasteable
+		"CVE-2026-1111",                              // present here
+		"Sev5",                                       // banded
+		"no Qualys QID mapping",                      // the coverage caveat
+		"Present in our environment",                 // the section that makes it ours
+		"421",                                        // Microsoft's count, per Qualys
+		"Windows HTTP.sys",                           // the product list, dots intact
+		"Spoofing Vulnerability",                     // category table
+		"Adobe",                                      // Adobe section
+		"determined solely by Qualys Host Detection", // the standing caveat
 	} {
 		if !strings.Contains(h, want) {
 			t.Errorf("HTML missing %q", want)
@@ -502,23 +830,41 @@ func TestDegradedBannerAppearsAndSaysExposureIsUnaffected(t *testing.T) {
 	dg := parsed(t)
 	dg.Sources[1].Fetched = false
 	dg.Sources[1].Err = "HTTP 403"
-	r := &Report{Digest: dg, Org: "CR"}
+	r := &Report{Digest: dg, Org: "CR", Exposure: Exposure{Attempted: true,
+		QIDs: []int{1}, Detections: 5, Hosts: 2}}
 	h := r.HTML()
 	if !strings.Contains(h, "Incomplete sources") || !strings.Contains(h, "403") {
 		t.Error("degraded banner missing")
 	}
-	if !strings.Contains(h, "exposure figures come from Qualys and are unaffected") {
+	if !strings.Contains(h, "unaffected") {
 		t.Error("should say which numbers are still trustworthy")
+	}
+}
+
+func TestDegradedBannerDoesNotVouchForExposureItNeverGot(t *testing.T) {
+	// The banner used to say "the exposure figures come from Qualys and are
+	// unaffected" in the same breath as listing the Qualys exposure query
+	// among the things that failed.
+	dg := parsed(t)
+	dg.Sources[1].Fetched = false
+	dg.Sources[1].Err = "HTTP 403"
+	r := &Report{Digest: dg, Org: "CR", Exposure: Unmeasured("no credentials")}
+	h := r.HTML()
+	if strings.Contains(h, "unaffected") {
+		t.Error("claimed the exposure figures survived when there are none")
+	}
+	if !strings.Contains(h, "NOT MEASURED") {
+		t.Error("the exposure line still has to say it did not look")
 	}
 }
 
 func TestTextVersionLeadsWithTheQQLOnItsOwnLine(t *testing.T) {
 	// Someone will copy this out of a plain-text client.
 	txt := report(t).Text()
-	if !strings.Contains(txt, "vulnerabilities.vulnerability: ( qid: 110525 )") {
+	if !strings.Contains(txt, "vulnerabilities.vulnerability: ( qid: 110531 )") {
 		t.Errorf("QQL not in the text version:\n%s", txt)
 	}
-	if !strings.Contains(txt, "coverage unverified") {
+	if !strings.Contains(txt, "not the same as not being present") {
 		t.Error("text version should carry the unmapped caveat too")
 	}
 }
