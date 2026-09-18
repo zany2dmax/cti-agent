@@ -182,6 +182,10 @@ func (r *Report) Clean() bool {
 
 // Load reads an enriched JSON file.
 func Load(path string) (*Enriched, error) {
+	// #nosec G304 -- path is an operator-supplied --enriched flag or a path
+	// derived from $FLEET_HOME, both of which are trusted to the same degree
+	// as the binary itself. There is no untrusted input on this path: a
+	// service that cannot be told which file to read is not configurable.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("kev: reading %s: %w", path, err)

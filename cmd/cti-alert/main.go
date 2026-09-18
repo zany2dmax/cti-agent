@@ -165,6 +165,12 @@ func journal(unit string) string {
 func run(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	// #nosec G204 -- name is a compile-time constant at both call sites
+	// ("systemctl" and "journalctl"); nothing computes it. Arguments go
+	// through argv, not a shell, so a unit name containing shell
+	// metacharacters is passed as one opaque argument rather than
+	// interpreted. The unit name itself is a systemd specifier supplied by
+	// the unit that invoked this alerter.
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
@@ -249,6 +255,9 @@ func loadEnvFile() {
 	if path == "" {
 		path = filepath.Join(envOr("FLEET_HOME", "/var/lib/cti-agent"), "fleet.env")
 	}
+	// #nosec G304 -- path is FLEET_ENV, or fleet.env under FLEET_HOME. Both
+	// are service configuration; the file itself holds the credentials this
+	// process needs, so reading it is the point.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return

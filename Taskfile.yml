@@ -32,7 +32,10 @@ tasks:
         echo "all Go files formatted"
 
   scan:
-    desc: Run staticcheck
+    # Named "scan" long before this repo had security tooling. It is
+    # staticcheck - correctness and dead code, NOT a vulnerability scan. The
+    # security gates are `gosec` and `govulncheck` below.
+    desc: Run staticcheck (correctness, not a security scan)
     cmds:
       - staticcheck ./...
 
@@ -45,6 +48,36 @@ tasks:
     desc: Run go vet
     cmds:
       - go vet ./...
+
+  gosec:
+    desc: Run gosec (insecure code patterns)
+    # Deliberate exceptions carry an inline "#nosec <RULE> -- reason" with the
+    # reason next to the code, rather than a blanket exclusion list here:
+    # a suppression whose justification lives in a config file is a
+    # suppression nobody will ever re-examine.
+    cmds:
+      - |
+        if ! command -v gosec >/dev/null 2>&1; then
+          echo "gosec not installed:" >&2
+          echo "  go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
+          exit 1
+        fi
+        gosec ./...
+
+  govulncheck:
+    desc: Check stdlib and dependencies against the Go vulnerability database
+    # This matters more than the empty go.mod suggests. The agent parses
+    # untrusted HTML and XML off the public internet with encoding/xml and
+    # net/http, so a stdlib advisory in either is a live finding here - and
+    # govulncheck reports only vulnerabilities the code actually reaches.
+    cmds:
+      - |
+        if ! command -v govulncheck >/dev/null 2>&1; then
+          echo "govulncheck not installed:" >&2
+          echo "  go install golang.org/x/vuln/cmd/govulncheck@latest" >&2
+          exit 1
+        fi
+        govulncheck ./...
 
   tidy:
     desc: Download and tidy Go dependencies
@@ -88,15 +121,23 @@ tasks:
       - go test ./internal/patchtuesday/ -v
 
   ship:
-    desc: "fmt, build, full test suite, then push. Refuses to push if any step fails."
+    desc: "Everything, then push. Refuses to push unless all of it passes."
     # Exists because `task test` and `git push` typed as separate lines are not
     # a gate: a red test scrolled past and the push went out anyway. Task stops
     # at the first failing command, so here the ordering is the enforcement
-    # rather than something to remember.
+    # rather than something to remember at the end of a long session.
+    #
+    # Tests run before the analysers: they are the fastest and the most
+    # informative, so a broken change should fail on behaviour rather than on
+    # a lint rule.
     cmds:
       - task: fmt
       - go build ./...
       - task: test
+      - task: lint
+      - task: scan
+      - task: gosec
+      - task: govulncheck
       - git push
 
   patchtuesday:
@@ -190,13 +231,19 @@ tasks:
         PY
 
   check:
-    desc: Everything CI should run - format, vet, all tests, syntax
+    desc: Everything CI should run - format, vet, security, all tests, syntax
+    # Kept in step with `ship`. A push gate that is stricter than CI means the
+    # build passes and the push is refused, or worse, the reverse.
     cmds:
       - task: fmt:check
       - task: vet
       - task: test:go
       - task: test:lanes
       - task: test:syntax
+      - task: lint
+      - task: scan
+      - task: gosec
+      - task: govulncheck
 
 # ── build ────────────────────────────────────────────────────────────────────
 

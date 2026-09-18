@@ -214,6 +214,9 @@ func main() {
 	}
 
 	if *jsonOut != "" {
+		// #nosec G304 -- *jsonOut is an operator-supplied --json path; 0o600
+		// because the structured digest carries the same host names as the
+		// email.
 		f, err := os.OpenFile(*jsonOut, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err == nil {
 			enc := json.NewEncoder(f)
@@ -234,6 +237,7 @@ func main() {
 	wrote := false
 	// 0600: this names vulnerable machines, same as every other report here.
 	if *out != "" {
+		// #nosec G304 -- *out is an operator-supplied --out path.
 		if err := os.WriteFile(*out, []byte(report.HTML()), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "cti-patchtuesday: %v\n", err)
 			os.Exit(1)
@@ -242,6 +246,7 @@ func main() {
 		wrote = true
 	}
 	if *textOut != "" {
+		// #nosec G304 -- *textOut is an operator-supplied --text-out path.
 		if err := os.WriteFile(*textOut, []byte(report.Text()), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "cti-patchtuesday: %v\n", err)
 			os.Exit(1)
