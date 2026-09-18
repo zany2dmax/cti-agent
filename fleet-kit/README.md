@@ -115,6 +115,16 @@ review.
 **Host count breaks ties before CVSS does.** A 6.5 on 305 hosts outranks a 9.8
 on one.
 
+> **Host counts changed in September 2026, downwards.** The Qualys client used
+> to *sum* host counts across a CVE's QIDs. A Microsoft CVE routinely maps to
+> several QIDs for the same cumulative update, so the same machines were
+> counted once per QID and the digest overstated blast radius — and since host
+> count is the tiebreak above, it also shuffled the ordering. The client now
+> unions the host sets. If yesterday's digest said 379 hosts and today's says
+> 140 for the same CVE, today's is the correct one and nothing improved
+> overnight. A count prefixed "at least" means the scanner truncated its host
+> lists and the figure is a lower bound.
+
 **EPSS** (FIRST's Exploit Prediction Scoring System) is the probability a CVE
 will be exploited in the next 30 days, from `api.first.org/data/v1/epss`. **KEV**
 membership comes from NVD's `cisaExploitAdd` field, with CISA's catalog feed

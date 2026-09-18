@@ -263,6 +263,10 @@ Nearly every bug we hit during deployment was a variant of this:
 | "Exposure is not yet measurable — the KnowledgeBase has no QID mapping" printed above fifteen usable QIDs | Correlation had failed outright, leaving a zero-value struct whose zero state was indistinguishable from a real measurement. The report diagnosed a system it had never contacted |
 | A product list published as "Windows HTTP, and more." | The sentence was terminated at the first `.`, which fell inside `HTTP.sys`. Truncation at a plausible point reads as a short list, not as a bug |
 | A verification script that printed "ALL CHECKS PASS" with a field extracted as empty | It counted the failures it had been taught to count. An empty result was not one of them |
+| Every host count in a report divisible by ten | The scanner client capped its host *name* list at ten per detection as a display sample. Callers kept using it as data, so the column was reporting a buffer size. Ten and twenty look like host counts; nothing about them looks like a bug |
+| The same machines counted once per detection ID | `HostCount += d.HostCount` across a CVE's QIDs. Microsoft CVEs routinely map to several QIDs for one cumulative update, so ten machines became twenty — in the *daily* digest, for months, where it also fed the host-count tiebreak in the severity bands |
+| A severity column containing `?` in all 353 rows | Nothing in that lane ever set it. The column could not hold a value, and a placeholder made "not wired up" look like "unknown for this CVE" |
+| "353 of this release's CVEs are present in our environment" | True, and useless: Qualys maps every CVE in a monthly rollup to one QID, so twelve missing updates read as 353 independent findings. Technically-correct inflation is the hardest kind to notice, because nothing is wrong with any single row |
 
 None of these were logic errors. Every one was a **check that ran and had no
 effect**, or a **failure with no observable difference from success**. If you
