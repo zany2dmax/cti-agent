@@ -57,7 +57,7 @@ run()  { if [ "$MODE" = dryrun ]; then info "would run: $*"; else "$@"; fi; }
 if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   [ "$(id -u)" = 0 ] || { bad "run with sudo"; exit 1; }
   bold "Stopping and disabling timers"
-  for t in digest weekly checkin scout; do
+  for t in digest weekly checkin scout patchtuesday; do
     systemctl disable --now "cti-agent-$t.timer" 2>/dev/null || true
     ok "cti-agent-$t.timer"
   done
@@ -144,7 +144,8 @@ esac
 # failure here is almost always an Azure NSG or a proxy.
 bold "Outbound connectivity"
 for host in login.microsoftonline.com graph.microsoft.com \
-            services.nvd.nist.gov api.first.org www.cisa.gov; do
+            services.nvd.nist.gov api.first.org www.cisa.gov \
+            blog.qualys.com www.bleepingcomputer.com; do
   if timeout 6 bash -c "</dev/tcp/$host/443" 2>/dev/null; then
     ok "$host:443"
   else
@@ -178,7 +179,7 @@ info "$CONF_DIR   config (root:$FLEET_GROUP 0750)"
 info "$STATE_DIR  state  ($FLEET_USER:$FLEET_GROUP 0750)"
 
 bold "Installing code"
-for f in fleet-board fleet-db run-digest run-checkin; do
+for f in fleet-board fleet-db run-digest run-checkin run-patchtuesday; do
   run install -m 0755 -o root -g root "$SRC/fleet/bin/$f" "$CODE_DIR/bin/$f"
   info "bin/$f"
 done
@@ -207,7 +208,7 @@ fi
 bold "Skills"
 SKILLS="$STATE_DIR/.claude/skills"
 run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$STATE_DIR/.claude" "$SKILLS"
-for s in checkin cti-digest scout-sweep; do
+for s in checkin cti-digest scout-sweep patch-tuesday; do
   run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$SKILLS/$s"
   run install -m 0640 -o "$FLEET_USER" -g "$FLEET_GROUP" \
       "$SRC/fleet/skills/$s/SKILL.md" "$SKILLS/$s/SKILL.md"
@@ -317,6 +318,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-kev" ./cmd/cti-kev )
   chmod 0755 "$CODE_DIR/bin/cti-kev"
   ok "built $CODE_DIR/bin/cti-kev"
+
+  # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
+  # against Qualys, so it needs outbound 443 to two more hosts - checked in
+  # the preflight above.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-patchtuesday" ./cmd/cti-patchtuesday )
+  chmod 0755 "$CODE_DIR/bin/cti-patchtuesday"
+  ok "built $CODE_DIR/bin/cti-patchtuesday"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -343,11 +351,13 @@ ok "daemon-reload"
 # FAIL from PATHFAIL and would overwrite anything set here. Setting FAIL early
 # looked correct and silently did nothing.
 TZFAIL=0
-FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"
+FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"
 if [ -r "$CONF_DIR/fleet.env" ]; then
   FLEET_TZ="$(grep -E '^FLEET_TIMEZONE=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
   _dt="$(grep -E '^FLEET_DIGEST_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
   _wt="$(grep -E '^FLEET_WEEKLY_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+  _pt="$(grep -E '^FLEET_PATCHTUESDAY_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+  [ -n "$_pt" ] && PATCHTUE_AT="$_pt"
   [ -n "$_dt" ] && DIGEST_AT="$_dt"
   [ -n "$_wt" ] && WEEKLY_AT="$_wt"
 fi
@@ -362,7 +372,8 @@ if [ -n "$FLEET_TZ" ]; then
     # The bare OnCalendar= is required: it is a LIST, so without clearing it
     # first the drop-in ADDS a schedule and the digest sends twice.
     for pair in "cti-agent-digest.timer:*-*-* $DIGEST_AT" \
-                "cti-agent-weekly.timer:Mon *-*-* $WEEKLY_AT"; do
+                "cti-agent-weekly.timer:Mon *-*-* $WEEKLY_AT" \
+                "cti-agent-patchtuesday.timer:Wed *-*-09..15 $PATCHTUE_AT"; do
       unit="${pair%%:*}"; cal="${pair#*:}"
       if [ "$MODE" != dryrun ]; then
         install -d -m 0755 "$UNIT_DIR/$unit.d"
@@ -470,6 +481,8 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
 #   cti-agent cti-budget status
 #   cti-agent cti-kev --horizon 30
+#   cti-agent run-patchtuesday --dry-run
+#   cti-agent run-patchtuesday --month 2026-08   (replay, never sends)
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -478,7 +491,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|cti-alert|cti-budget|cti-kev|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
@@ -503,6 +516,7 @@ FAIL=0
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
          "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
+         "$CODE_DIR/bin/cti-patchtuesday" "$CODE_DIR/bin/run-patchtuesday" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
@@ -550,7 +564,8 @@ if [ "$MODE" != dryrun ]; then
     bad "fleet.env is world-accessible (mode $envmode) - it holds the client secret"
     FAIL=1
   fi
-  for u in cti-agent-digest cti-agent-checkin cti-agent-scout cti-agent-weekly; do
+  for u in cti-agent-digest cti-agent-checkin cti-agent-scout cti-agent-weekly \
+         cti-agent-patchtuesday; do
     if systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | grep -q .; then
       warn "$u.service: systemd-analyze reported warnings (see below)"
       systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | sed 's/^/      /'

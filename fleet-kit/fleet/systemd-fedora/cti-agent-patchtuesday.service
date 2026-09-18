@@ -1,0 +1,67 @@
+[Unit]
+Description=CTI monthly Microsoft Patch Tuesday synopsis
+Documentation=file:///opt/cti-agent/README.md
+# If this fails, tell the operator. Without this a failed digest is
+# silent, and no email looks exactly like a quiet day.
+OnFailure=cti-agent-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ctiagent
+Group=ctiagent
+
+# FHS layout. Nothing lives under /home, which is what lets ProtectHome=yes
+# hide it entirely - the original units used ProtectHome=read-only plus a
+# ReadWritePaths punch-through into /home, which is order-dependent in systemd
+# and the exact pattern SELinux is most likely to deny on Fedora.
+#
+#   /opt/cti-agent     code      root-owned, read-only to this service
+#   /etc/cti-agent     config    root:ctiagent 0750, secrets 0640
+#   /var/lib/cti-agent state     systemd creates and chowns this
+StateDirectory=cti-agent
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/cti-agent
+# EnvironmentFile FIRST, then Environment=. systemd applies these in
+# written order and the last assignment wins, so with the file last a
+# stale FLEET_HOME in fleet.env silently replaced the layout this unit
+# specifies. The unit owns the layout; fleet.env owns the settings.
+EnvironmentFile=/etc/cti-agent/fleet.env
+Environment=HOME=/var/lib/cti-agent
+Environment=FLEET_HOME=/var/lib/cti-agent
+Environment=FLEET_CODE=/opt/cti-agent
+Environment=FLEET_ENV=/etc/cti-agent/fleet.env
+Environment=FLEET_FEEDS=/etc/cti-agent/feeds.txt
+
+ExecStart=/opt/cti-agent/bin/run-patchtuesday
+TimeoutStartSec=1800
+Nice=10
+
+# Least privilege. ProtectHome=yes is stronger than the read-only variant and
+# safe here only because no fleet path is under /home.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+
+# journald, not hand-rolled log files: Fedora ships journald and it handles
+# rotation, size caps and retention already.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cti-agent-patchtuesday

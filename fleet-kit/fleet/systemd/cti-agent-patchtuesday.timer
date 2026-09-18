@@ -1,0 +1,23 @@
+[Unit]
+Description=Monthly Patch Tuesday synopsis, the morning after
+
+[Timer]
+# The Wednesday AFTER the second Tuesday - deliberately not "the second
+# Wednesday of the month", which is the usual way to say this and is wrong in
+# roughly one month in seven. Whenever the 1st falls on a Wednesday the second
+# Wednesday lands SIX DAYS BEFORE Patch Tuesday (April and July 2026,
+# September and December 2027, ...), so a timer set that way would wake up
+# before the content it is meant to summarise exists.
+#
+# Patch Tuesday + 1 is always a Wednesday and always falls on the 9th..15th,
+# verified across 2026-2040. That is what this expresses.
+OnCalendar=Wed *-*-09..15 07:30:00
+RandomizedDelaySec=900
+# Catch up if the box was down: a missed month is a missed month, and the
+# already-sent guard makes a late run safe.
+Persistent=true
+AccuracySec=1min
+Unit=cti-agent-patchtuesday.service
+
+[Install]
+WantedBy=timers.target
