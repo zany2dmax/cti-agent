@@ -193,7 +193,7 @@ vulnerabilities: <strong>two</strong> publicly disclosed and <strong>one</strong
 <tr><td>Remote Code Execution Vulnerability</td><td>109</td><td>Critical: 39<br/>Important: 70</td></tr>
 </tbody></table>
 <p>Adobe has released five security advisories addressing 51 vulnerabilities across Adobe ColdFusion and Adobe Commerce. 33 of these vulnerabilities are rated critical.</p>
-<p>Affected: CVE-2026-1111, CVE-2026-2222 and CVE-2025-9999.</p>
+<p>Affected: CVE-2026-1111 in Windows Kernel, CVE-2026-2222 in Microsoft Office and CVE-2025-9999 in Windows NTFS.</p>
 </body></html>`)
 
 // The headline, then the site's own navigation, then the prose. The nav block
@@ -997,9 +997,11 @@ func TestTheSeverityColumnIsOmittedRatherThanFilledWithQuestionMarks(t *testing.
 
 func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
 	dg := parsed(t)
+	// Distinct QID per CVE, so nothing collapses and the cap is what bites.
 	var hs []Highlight
 	for i := 0; i < 40; i++ {
-		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i), Hosts: i, QIDs: []int{1}})
+		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i),
+			Hosts: i, QIDs: []int{1000 + i}})
 	}
 	r := &Report{Digest: dg, Org: "CR", MaxRows: 5,
 		Exposure: Exposure{Attempted: true, QIDs: []int{1}, DetectingQIDs: []int{1},
@@ -1021,11 +1023,121 @@ func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
 	}
 	// An unenriched row must never outrank a known Sev5 at equal host counts.
 	tie := &Report{Digest: dg, Org: "CR", Highlights: []Highlight{
-		{CVE: "CVE-2026-00001", Hosts: 5},
-		{CVE: "CVE-2026-00002", Hosts: 5, Sev: "Sev5"},
+		{CVE: "CVE-2026-00001", Hosts: 5, QIDs: []int{1}},
+		{CVE: "CVE-2026-00002", Hosts: 5, QIDs: []int{2}, Sev: "Sev5"},
 	}}
 	if got, _ := tie.rows(); got[0].CVE != "CVE-2026-00002" {
 		t.Errorf("Sev5 should break the tie, got %s first", got[0].CVE)
+	}
+}
+
+func TestOneRowPerUpdateNotOneRowPerCVE(t *testing.T) {
+	// The August replay's capped table was 24 CVEs carrying the identical QID
+	// pair on the identical 331 hosts, then one other. It stated one fact 24
+	// times and pushed the remaining eleven patches below the cut - a cap
+	// without collapsing just moves the noise around.
+	var hs []Highlight
+	for i := 0; i < 200; i++ {
+		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i),
+			Hosts: 331, QIDs: []int{92439, 92440}})
+	}
+	hs = append(hs,
+		Highlight{CVE: "CVE-2026-70000", Hosts: 12, QIDs: []int{110532}},
+		Highlight{CVE: "CVE-2026-70001", Hosts: 2, QIDs: []int{388257}})
+
+	r := &Report{Digest: parsed(t), Org: "CR", MaxRows: 25,
+		Exposure: Exposure{Attempted: true, QIDs: []int{92439, 92440, 110532, 388257},
+			DetectingQIDs: []int{92439, 92440, 110532, 388257},
+			Detections:    600, Hosts: 340},
+		Highlights: hs}
+
+	shown, hidden := r.rows()
+	if len(shown) != 3 {
+		t.Fatalf("got %d rows, want 3 - one per distinct QID set", len(shown))
+	}
+	if hidden != 0 {
+		t.Errorf("nothing should be hidden: 3 rows is under the cap, got hidden=%d", hidden)
+	}
+	if shown[0].SharedWith != 199 {
+		t.Errorf("the rollup row should account for 199 others, got %d", shown[0].SharedWith)
+	}
+	// Order is still worst-first, and the small patches survive rather than
+	// being pushed under the cut by the big one.
+	if shown[1].CVE != "CVE-2026-70000" || shown[2].CVE != "CVE-2026-70001" {
+		t.Errorf("smaller updates lost their place: %s, %s", shown[1].CVE, shown[2].CVE)
+	}
+	txt := r.Text()
+	if !strings.Contains(txt, "+199 more CVE(s) fixed by the same update") {
+		t.Errorf("the collapse has to be stated:\n%s", txt)
+	}
+	if !strings.Contains(txt, "(202)") {
+		t.Errorf("the true CVE count still has to appear:\n%s", txt)
+	}
+	if !strings.Contains(txt, "in 3 update(s)") {
+		t.Errorf("the heading should say how many updates:\n%s", txt)
+	}
+}
+
+func TestABandedCVEIsNeverCollapsedBehindAnUnbandedOne(t *testing.T) {
+	// An actively exploited CVE has to stay visible even when it shares an
+	// update with two hundred others.
+	hs := []Highlight{
+		{CVE: "CVE-2026-00001", Hosts: 50, QIDs: []int{92439}},
+		{CVE: "CVE-2026-00002", Hosts: 50, QIDs: []int{92439}, Sev: "Sev5",
+			KEV: true, Rationale: "on CISA KEV"},
+		{CVE: "CVE-2026-00003", Hosts: 50, QIDs: []int{92439}},
+	}
+	r := &Report{Digest: parsed(t), Org: "CR", Highlights: hs}
+	shown, _ := r.rows()
+	if len(shown) != 1 {
+		t.Fatalf("one QID set, want one row, got %d", len(shown))
+	}
+	if shown[0].CVE != "CVE-2026-00002" || shown[0].Sev != "Sev5" {
+		t.Errorf("the banded CVE should represent the group, got %s (%q)",
+			shown[0].CVE, shown[0].Sev)
+	}
+	if shown[0].SharedWith != 2 {
+		t.Errorf("SharedWith = %d, want 2", shown[0].SharedWith)
+	}
+}
+
+func TestACorrelatedCVECanNameTheSentenceThatPutItThere(t *testing.T) {
+	// CVE-2026-6726 sorted to the top of the August table on 346 hosts and
+	// there was no way to ask which sentence had claimed it belonged to this
+	// release. Same class of problem as a total of 400 with no named source.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog, Fetched: true,
+			RawHTML: "x", Text: "Microsoft Patch Tuesday fixes CVE-2026-1111 in Windows NTFS.\n" +
+				"Related reading: a Chrome zero-day, CVE-2026-6726, was fixed last week."},
+	}}
+	Parse(dg)
+
+	got := dg.Explain("CVE-2026-1111")
+	if !strings.Contains(got, "Windows NTFS") {
+		t.Errorf("should quote the sentence it was found in:\n%s", got)
+	}
+	if strings.Contains(got, "UNATTRIBUTED") {
+		t.Errorf("this one has Microsoft context:\n%s", got)
+	}
+
+	// The suspicious one is kept - dropping a real CVE is worse - but named.
+	got = dg.Explain("CVE-2026-6726")
+	if !strings.Contains(got, "Chrome zero-day") {
+		t.Errorf("should quote the context:\n%s", got)
+	}
+	if !strings.Contains(got, "UNATTRIBUTED") {
+		t.Errorf("no Microsoft product context, so say so:\n%s", got)
+	}
+	if len(dg.UnattributedCVEs) != 1 || dg.UnattributedCVEs[0] != "CVE-2026-6726" {
+		t.Errorf("UnattributedCVEs = %v", dg.UnattributedCVEs)
+	}
+	// Still correlated: presence is a fact about our estate either way.
+	if !strings.Contains(strings.Join(dg.CVEs, " "), "CVE-2026-6726") {
+		t.Error("an unattributed CVE is flagged, not dropped")
+	}
+
+	if !strings.Contains(dg.Explain("CVE-2026-9999"), "does not appear") {
+		t.Error("a CVE that was never seen should say exactly that")
 	}
 }
 
