@@ -18,7 +18,22 @@ type Result struct {
 	Status      string
 	Source      string
 	ExternalIDs []string
-	HostCount   int
+
+	// HostCount is the number of distinct MACHINES affected: the union across
+	// this CVE's detection IDs, not the sum of their host counts. A CVE
+	// routinely maps to several QIDs for the same cumulative update, and
+	// summing counted the same machine once per QID.
+	HostCount int
+	// HostCountIsFloor means the provider truncated its host lists, so the
+	// union is a lower bound. Anything printing HostCount has to say "at
+	// least" when this is set, or it is reporting a floor as a measurement.
+	HostCountIsFloor bool
+	// Detections is the number of open detections - roughly QID-by-host pairs.
+	// Kept distinct from HostCount because "1234 detections" and "1234
+	// machines" are wildly different facts and the old code produced one
+	// number that was quietly used as both.
+	Detections int
+
 	MaxScore    int
 	LastSeen    string
 	SampleHosts []string

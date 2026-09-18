@@ -3,6 +3,7 @@ package patchtuesday
 import (
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 )
 
@@ -22,18 +23,91 @@ type Report struct {
 	// Highlights are the CVEs confirmed present, enriched with severity where
 	// the enrich lane supplied it.
 	Highlights []Highlight
+
+	// MaxRows caps the present-CVE table. Zero means defaultMaxRows.
+	//
+	// The August replay produced 353 rows, nearly all of them one of two
+	// cumulative-update QIDs, in no particular order. Nobody reads that, and
+	// an unread table is indistinguishable from an absent one. The full list
+	// stays in the JSON output.
+	MaxRows int
 }
+
+// defaultMaxRows is a table someone will actually read on a phone before
+// they are fully awake, which is the stated audience.
+const defaultMaxRows = 25
 
 // Highlight is one CVE that is actually in the estate.
 type Highlight struct {
-	CVE       string
-	Sev       string // Sev5..Sev1 from the enrich lane, blank if unavailable
-	Hosts     int
-	QIDs      []int
-	KEV       bool
-	EPSS      float64
-	CVSS      float64
-	Rationale string
+	CVE string
+	// Sev is Sev5..Sev1 from the enrich lane, blank when no enriched data was
+	// available for this CVE. Blank is rendered by omitting the column
+	// entirely rather than by printing a placeholder: the August replay
+	// printed a "?" in every row of a column that, as written, could never
+	// hold a value, because nothing populated it.
+	Sev   string
+	Hosts int
+	// HostsAreFloor means Hosts is a lower bound, not a count.
+	HostsAreFloor bool
+	QIDs          []int
+	KEV           bool
+	EPSS          float64
+	CVSS          float64
+	Rationale     string
+}
+
+// anySev reports whether the enrich lane supplied a band for anything. When it
+// did not, the severity column is left out.
+func (r *Report) anySev() bool {
+	for _, h := range r.Highlights {
+		if h.Sev != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// rows returns the highlights to print, worst first, and how many were left
+// out. Ordered by blast radius then severity then CVE, so the truncation drops
+// the least important rows rather than the alphabetically last ones.
+func (r *Report) rows() (shown []Highlight, hidden int) {
+	sorted := make([]Highlight, len(r.Highlights))
+	copy(sorted, r.Highlights)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Hosts != sorted[j].Hosts {
+			return sorted[i].Hosts > sorted[j].Hosts
+		}
+		if si, sj := sevRank(sorted[i].Sev), sevRank(sorted[j].Sev); si != sj {
+			return si > sj
+		}
+		return sorted[i].CVE < sorted[j].CVE
+	})
+	limit := r.MaxRows
+	if limit <= 0 {
+		limit = defaultMaxRows
+	}
+	if len(sorted) <= limit {
+		return sorted, 0
+	}
+	return sorted[:limit], len(sorted) - limit
+}
+
+// sevRank orders the bands. Unknown sorts last so an unenriched row never
+// displaces a known Sev5.
+func sevRank(s string) int {
+	switch s {
+	case "Sev5":
+		return 5
+	case "Sev4":
+		return 4
+	case "Sev3":
+		return 3
+	case "Sev2":
+		return 2
+	case "Sev1":
+		return 1
+	}
+	return 0
 }
 
 // ChooseQQL picks the query to publish and records why.
@@ -149,23 +223,33 @@ func (r *Report) HTML() string {
 	// Highlights: the CVEs actually here. This is the section that makes the
 	// email ours rather than a forwarded blog post.
 	if len(r.Highlights) > 0 {
+		shown, hidden := r.rows()
+		withSev := r.anySev()
+		sevHead := ""
+		if withSev {
+			sevHead = `<th align="left" style="border-bottom:1px solid #e2e8f0">Sev</th>`
+		}
+		caption := fmt.Sprintf("%d of this release's CVEs", len(r.Highlights))
+		if hidden > 0 {
+			caption += fmt.Sprintf(" &mdash; %d worst shown", len(shown))
+		}
 		b.WriteString(fmt.Sprintf(`
   <tr><td style="padding:18px 20px 0 20px">
     <div style="font:700 13px -apple-system,Segoe UI,Arial,sans-serif;color:#b3001b;
                 letter-spacing:.6px;text-transform:uppercase;
                 border-bottom:2px solid #b3001b;padding-bottom:5px">
-      Present in our environment &mdash; %d of this release's CVEs</div>
+      Present in our environment &mdash; %s</div>
     <table width="100%%" cellpadding="6" cellspacing="0" role="presentation"
            style="font:400 13px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                   margin-top:8px;border-collapse:collapse">
       <tr style="background:#f4f5f7">
         <th align="left" style="border-bottom:1px solid #e2e8f0">CVE</th>
-        <th align="left" style="border-bottom:1px solid #e2e8f0">Sev</th>
+        %s
         <th align="right" style="border-bottom:1px solid #e2e8f0">Hosts</th>
         <th align="left" style="border-bottom:1px solid #e2e8f0">QIDs</th>
         <th align="left" style="border-bottom:1px solid #e2e8f0">Why</th></tr>`,
-			len(r.Highlights)))
-		for _, h := range r.Highlights {
+			caption, sevHead))
+		for _, h := range shown {
 			flags := []string{}
 			if h.KEV {
 				flags = append(flags, "<b style='color:#b3001b'>KEV</b>")
@@ -188,21 +272,40 @@ func (r *Report) HTML() string {
 				}
 				qids = strings.Join(ps, ", ")
 			}
-			sev := h.Sev
-			if sev == "" {
-				sev = "&mdash;"
+			sevCell := ""
+			if withSev {
+				sev := h.Sev
+				if sev == "" {
+					sev = "&mdash;"
+				}
+				sevCell = fmt.Sprintf(
+					`<td style="border-bottom:1px solid #edf2f7"><b>%s</b></td>`, sev)
+			}
+			hosts := fmt.Sprint(h.Hosts)
+			if h.HostsAreFloor {
+				hosts = "&ge;" + hosts
 			}
 			b.WriteString(fmt.Sprintf(`
       <tr><td style="border-bottom:1px solid #edf2f7">
             <a href="https://nvd.nist.gov/vuln/detail/%s" style="color:#1a202c">%s</a></td>
-          <td style="border-bottom:1px solid #edf2f7"><b>%s</b></td>
-          <td align="right" style="border-bottom:1px solid #edf2f7">%d</td>
+          %s
+          <td align="right" style="border-bottom:1px solid #edf2f7">%s</td>
           <td style="border-bottom:1px solid #edf2f7;font:400 12px ui-monospace,
                      SFMono-Regular,Menlo,monospace">%s</td>
           <td style="border-bottom:1px solid #edf2f7;color:#4a5568">%s</td></tr>`,
-				e(h.CVE), e(h.CVE), sev, h.Hosts, qids, why))
+				e(h.CVE), e(h.CVE), sevCell, hosts, qids, why))
 		}
-		b.WriteString("\n    </table></td></tr>\n")
+		b.WriteString("\n    </table>")
+		if hidden > 0 {
+			b.WriteString(fmt.Sprintf(`
+    <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
+                color:#718096;margin-top:6px">
+      and %d more, ordered by host count. Most of this release's CVEs arrive
+      through the same few cumulative updates, so the %d detection(s) in the
+      QQL above are the actual patching work. Full list in the JSON output.
+    </div>`, hidden, len(r.Exposure.DetectingQIDs)))
+		}
+		b.WriteString("</td></tr>\n")
 	}
 
 	// Coverage caveat. An unmapped CVE is not an absent one, and this email
@@ -277,6 +380,10 @@ func (r *Report) HTML() string {
 			`<div style="margin:3px 0"><a href="%s" style="color:#2c5282">%s</a>%s</div>`,
 			e(s.URL), e(s.Name), state))
 	}
+	countNote := ""
+	if n := d.CVECountNote(); n != "" {
+		countNote = e(n) + "<br>"
+	}
 	b.WriteString(fmt.Sprintf(`
   <tr><td style="padding:16px 20px 18px 20px;border-top:1px solid #e2e8f0">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;color:#4a5568;
@@ -284,13 +391,15 @@ func (r *Report) HTML() string {
     <div style="font:400 13px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">%s</div>
     <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#718096;margin-top:12px">
+      %s
       Counts above are Microsoft's, as reported by the sources. Presence in our
       environment is determined solely by Qualys Host Detection &mdash; the
       articles supply context, never proof of exposure.<br>
       Generated by the %s CTI agent fleet.
     </div></td></tr>
 
-</table></td></tr></table></body></html>`, links.String(), e(r.Org)))
+</table></td></tr></table></body></html>`,
+		links.String(), countNote, e(r.Org)))
 
 	return b.String()
 }
@@ -320,17 +429,45 @@ func (r *Report) Text() string {
 		fmt.Fprintf(&b, "QQL (%s):\n\n%s\n\n", r.QQLSource, r.QQL)
 	}
 	if len(r.Highlights) > 0 {
-		fmt.Fprintf(&b, "PRESENT IN OUR ENVIRONMENT (%d)\n%s\n", len(r.Highlights),
-			strings.Repeat("-", 68))
-		for _, h := range r.Highlights {
-			sev := h.Sev
-			if sev == "" {
-				sev = "?"
+		shown, hidden := r.rows()
+		withSev := r.anySev()
+		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d)", len(r.Highlights))
+		if hidden > 0 {
+			head += fmt.Sprintf(" - %d worst by host count", len(shown))
+		}
+		fmt.Fprintf(&b, "%s\n%s\n", head, strings.Repeat("-", 68))
+		for _, h := range shown {
+			hosts := fmt.Sprintf("%4d", h.Hosts)
+			if h.HostsAreFloor {
+				hosts = fmt.Sprintf(">=%2d", h.Hosts)
 			}
-			fmt.Fprintf(&b, "  %-18s %-5s %4d host(s)  QIDs %v\n", h.CVE, sev, h.Hosts, h.QIDs)
+			// The severity column is omitted, not filled with a placeholder,
+			// when the enrich lane supplied nothing for any row.
+			if withSev {
+				sev := h.Sev
+				if sev == "" {
+					sev = "-"
+				}
+				fmt.Fprintf(&b, "  %-18s %-5s %s host(s)  QIDs %v\n",
+					h.CVE, sev, hosts, h.QIDs)
+			} else {
+				fmt.Fprintf(&b, "  %-18s %s host(s)  QIDs %v\n", h.CVE, hosts, h.QIDs)
+			}
 			if h.Rationale != "" {
 				fmt.Fprintf(&b, "      %s\n", h.Rationale)
 			}
+		}
+		if hidden > 0 {
+			fmt.Fprintf(&b,
+				"  ... and %d more. Most of this release's CVEs arrive through the same\n"+
+					"  few cumulative updates, so the %d detection(s) in the QQL above are\n"+
+					"  the actual patching work. Full list in the JSON output.\n",
+				hidden, len(r.Exposure.DetectingQIDs))
+		}
+		if !withSev {
+			b.WriteString(
+				"  (No severity band: no enriched data was available for these CVEs.\n" +
+					"   Run the digest first, or pass --enriched, to get Sev5-Sev1 here.)\n")
 		}
 		b.WriteString("\n")
 	}
@@ -362,6 +499,9 @@ func (r *Report) Text() string {
 			state = " (unavailable: " + s.Err + ")"
 		}
 		fmt.Fprintf(&b, "  %s%s\n  %s\n", s.Name, state, s.URL)
+	}
+	if note := d.CVECountNote(); note != "" {
+		b.WriteString("\n" + note + "\n")
 	}
 	b.WriteString("\nPresence determined solely by Qualys Host Detection.\n")
 	return b.String()

@@ -1,6 +1,7 @@
 package patchtuesday
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -635,6 +636,84 @@ func TestPublishedQIDsMakeExposureMeasurableWithNoCVEMapping(t *testing.T) {
 	}
 }
 
+func TestHostsAreUnionedNotCappedBySampleSize(t *testing.T) {
+	// The August table printed "20 host(s)" for every CVE mapped to two QIDs
+	// and "10" for every CVE mapped to one, because the client capped its host
+	// NAME list at ten per QID and this package unioned the caps. Every number
+	// in the column was the buffer size.
+	//
+	// Same ten machines under both QIDs: the answer is ten, not twenty.
+	same := []string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10"}
+	e := Summarise([]string{"CVE-A"},
+		map[string][]int{"CVE-A": {92439, 92440}}, nil,
+		map[int]DetectionLike{
+			92439: {QID: 92439, HostCount: 10, Hosts: same},
+			92440: {QID: 92440, HostCount: 10, Hosts: same},
+		}, false)
+	if e.Hosts != 10 {
+		t.Errorf("Hosts = %d, want 10 distinct machines (20 means samples were summed)", e.Hosts)
+	}
+	if e.Detections != 20 {
+		t.Errorf("Detections = %d, want 20 - detections do sum, machines do not", e.Detections)
+	}
+	if e.HostsAreFloor {
+		t.Error("nothing was truncated, so the count is exact")
+	}
+}
+
+func TestATruncatedHostListIsReportedAsAFloor(t *testing.T) {
+	// When the provider does cut the list off, the union is a lower bound.
+	// Printing it as a count is the same lie in a bigger estate.
+	e := Summarise([]string{"CVE-A"},
+		map[string][]int{"CVE-A": {1}}, nil,
+		map[int]DetectionLike{
+			1: {QID: 1, HostCount: 4000, Hosts: []string{"h1", "h2"}, HostsTruncated: true},
+		}, false)
+	if !e.HostsAreFloor {
+		t.Error("a truncated host list makes the union a floor")
+	}
+	line := e.ExposureLine("CR")
+	if !strings.Contains(line, "at least") {
+		t.Errorf("a floor has to be worded as one: %q", line)
+	}
+	// And the floor is detected even when the provider forgets the flag.
+	e2 := Summarise([]string{"CVE-A"},
+		map[string][]int{"CVE-A": {1}}, nil,
+		map[int]DetectionLike{1: {QID: 1, HostCount: 900, Hosts: []string{"h1"}}}, false)
+	if !e2.HostsAreFloor {
+		t.Error("HostCount above len(Hosts) means the list was incomplete")
+	}
+}
+
+func TestDetectingQIDsAreTheUnitOfWork(t *testing.T) {
+	// 353 "present" CVEs was twelve missing patches: Qualys maps every CVE in
+	// a monthly cumulative update to one QID. The email has to carry the patch
+	// count or a dozen updates read as hundreds of separate findings.
+	kb := map[string][]int{}
+	var cves []string
+	for i := 0; i < 200; i++ {
+		c := fmt.Sprintf("CVE-2026-%05d", i)
+		cves = append(cves, c)
+		kb[c] = []int{92439} // one rollup QID for all of them
+	}
+	e := Summarise(cves, kb, nil,
+		map[int]DetectionLike{92439: {QID: 92439, HostCount: 10,
+			Hosts: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}}}, false)
+	if len(e.PresentCVEs) != 200 {
+		t.Fatalf("PresentCVEs = %d, want 200", len(e.PresentCVEs))
+	}
+	if len(e.DetectingQIDs) != 1 {
+		t.Errorf("DetectingQIDs = %v, want the single rollup QID", e.DetectingQIDs)
+	}
+	line := e.ExposureLine("CR")
+	if !strings.Contains(line, "1 missing Qualys detection") {
+		t.Errorf("the patch count belongs in the headline: %q", line)
+	}
+	if !strings.Contains(line, "200 of this release's CVEs") {
+		t.Errorf("and so does the CVE count: %q", line)
+	}
+}
+
 func TestQQLMatchesTheFormatAlreadyInUse(t *testing.T) {
 	// Byte-compatible with what has gone out by hand for months. Someone
 	// pasting this should not be able to tell a machine wrote it.
@@ -877,6 +956,136 @@ func TestTextVersionLeadsWithTheQQLOnItsOwnLine(t *testing.T) {
 	}
 	if !strings.Contains(txt, "not the same as not being present") {
 		t.Error("text version should carry the unmapped caveat too")
+	}
+}
+
+func TestTheSeverityColumnIsOmittedRatherThanFilledWithQuestionMarks(t *testing.T) {
+	// The August replay printed "?" in every row of the Sev column, because
+	// nothing in the lane ever set it. A column that cannot hold a value is
+	// not a column.
+	r := &Report{Digest: parsed(t), Org: "CR",
+		Exposure: Exposure{Attempted: true, QIDs: []int{1}, Detections: 5, Hosts: 2},
+		Highlights: []Highlight{
+			{CVE: "CVE-2026-1111", Hosts: 9, QIDs: []int{1}},
+			{CVE: "CVE-2026-2222", Hosts: 3, QIDs: []int{1}},
+		}}
+	txt := r.Text()
+	for _, line := range strings.Split(txt, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "CVE-") &&
+			strings.Contains(line, "?") {
+			t.Errorf("placeholder severity still printed on a CVE row: %q", line)
+		}
+	}
+	if !strings.Contains(txt, "No severity band") {
+		t.Error("the absence should be explained once, not implied per row")
+	}
+	if strings.Contains(r.HTML(), ">Sev<") {
+		t.Error("HTML should drop the Sev header when nothing populates it")
+	}
+
+	// With enrichment, the column appears and carries the band.
+	r.Highlights[0].Sev = "Sev5"
+	r.Highlights[0].Rationale = "on CISA KEV; PRESENT on 9 host(s)"
+	txt = r.Text()
+	if !strings.Contains(txt, "Sev5") {
+		t.Errorf("band missing from the text version:\n%s", txt)
+	}
+	if !strings.Contains(r.HTML(), ">Sev<") {
+		t.Error("HTML should show the Sev header once a band exists")
+	}
+}
+
+func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
+	dg := parsed(t)
+	var hs []Highlight
+	for i := 0; i < 40; i++ {
+		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i), Hosts: i, QIDs: []int{1}})
+	}
+	r := &Report{Digest: dg, Org: "CR", MaxRows: 5,
+		Exposure: Exposure{Attempted: true, QIDs: []int{1}, DetectingQIDs: []int{1},
+			Detections: 40, Hosts: 39},
+		Highlights: hs}
+	shown, hidden := r.rows()
+	if len(shown) != 5 || hidden != 35 {
+		t.Fatalf("rows() = %d shown, %d hidden; want 5 and 35", len(shown), hidden)
+	}
+	if shown[0].Hosts != 39 {
+		t.Errorf("worst first: got %d hosts at the top", shown[0].Hosts)
+	}
+	txt := r.Text()
+	if !strings.Contains(txt, "and 35 more") {
+		t.Errorf("truncation must be stated, not silent:\n%s", txt)
+	}
+	if !strings.Contains(txt, "(40)") {
+		t.Error("the full count still has to appear")
+	}
+	// An unenriched row must never outrank a known Sev5 at equal host counts.
+	tie := &Report{Digest: dg, Org: "CR", Highlights: []Highlight{
+		{CVE: "CVE-2026-00001", Hosts: 5},
+		{CVE: "CVE-2026-00002", Hosts: 5, Sev: "Sev5"},
+	}}
+	if got, _ := tie.rows(); got[0].CVE != "CVE-2026-00002" {
+		t.Errorf("Sev5 should break the tie, got %s first", got[0].CVE)
+	}
+}
+
+func TestAdobeOnlyCVEsAreNotCorrelatedAsPartOfTheRelease(t *testing.T) {
+	// The scrape found 422 CVE IDs against a stated 421, because it takes
+	// every CVE-shaped string off two entire pages - Adobe's advisories
+	// included. "This release's CVEs" has to mean Microsoft's release.
+	dg := parsed(t)
+	joined := strings.Join(dg.CVEs, " ")
+	// CVE-2025-9999 sits in a Microsoft "Affected:" line in the fixture and
+	// must survive; nothing in the fixture is Adobe-only, so nothing is cut.
+	if !strings.Contains(joined, "CVE-2025-9999") {
+		t.Errorf("a Microsoft-context CVE was dropped: %v", dg.CVEs)
+	}
+
+	scoped := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog, Fetched: true,
+			RawHTML: "x", Text: "Microsoft Patch Tuesday fixes CVE-2026-1111 in Windows.\n" +
+				"Adobe has released advisories for CVE-2026-9001 and CVE-2026-9002.\n" +
+				"Microsoft Exchange Server is affected by CVE-2026-9002 as well."},
+	}}
+	Parse(scoped)
+	got := strings.Join(scoped.CVEs, " ")
+	if !strings.Contains(got, "CVE-2026-1111") {
+		t.Errorf("Microsoft CVE dropped: %v", scoped.CVEs)
+	}
+	if strings.Contains(got, "CVE-2026-9001") {
+		t.Errorf("Adobe-only CVE was correlated: %v", scoped.CVEs)
+	}
+	// Seen in an Adobe line AND a Microsoft line: benefit of the doubt, keep
+	// it. Dropping a real CVE is a silent false negative; keeping a spare one
+	// only widens a scanner query.
+	if !strings.Contains(got, "CVE-2026-9002") {
+		t.Errorf("a CVE with Microsoft context was excluded on the Adobe sighting: %v",
+			scoped.CVEs)
+	}
+	if len(scoped.ExcludedCVEs) != 1 || scoped.ExcludedCVEs[0] != "CVE-2026-9001" {
+		t.Errorf("exclusions must be recorded for audit, got %v", scoped.ExcludedCVEs)
+	}
+}
+
+func TestACountMismatchWithThePublisherIsStatedNotHidden(t *testing.T) {
+	// The only independent check available on a scrape is the publisher's own
+	// total. 422 against 421 is small, and a small unexplained wrongness is
+	// what costs a report its credibility.
+	d := &Digest{Total: 421, CVEs: make([]string, 422)}
+	note := d.CVECountNote()
+	if !strings.Contains(note, "422") || !strings.Contains(note, "421") ||
+		!strings.Contains(note, "1 more than") {
+		t.Errorf("note = %q", note)
+	}
+	d2 := &Digest{Total: 421, CVEs: make([]string, 400)}
+	if !strings.Contains(d2.CVECountNote(), "fewer than") {
+		t.Errorf("note = %q", d2.CVECountNote())
+	}
+	if (&Digest{Total: 421, CVEs: make([]string, 421)}).CVECountNote() != "" {
+		t.Error("agreement needs no note")
+	}
+	if (&Digest{Total: 0, CVEs: make([]string, 5)}).CVECountNote() != "" {
+		t.Error("no stated total means nothing to compare against")
 	}
 }
 

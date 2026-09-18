@@ -56,6 +56,11 @@ type Digest struct {
 	AdobeText  string
 
 	CVEs []string
+	// ExcludedCVEs were found on the pages but scoped out as belonging to the
+	// Adobe advisories rather than the Microsoft release. Kept rather than
+	// dropped so the exclusion can be audited - a filter whose decisions are
+	// invisible is the next bug.
+	ExcludedCVEs []string
 
 	// QQL lifted verbatim from the Qualys post when it publishes one. Never
 	// paraphrased: a query someone will paste into a console has to be exactly
@@ -455,20 +460,96 @@ func Parse(d *Digest) {
 		d.From["qql"] = qualys.Name
 	}
 
-	// CVEs from every source that loaded, deduped and sorted.
+	collectCVEs(d)
+}
+
+var (
+	// A block that mentions Adobe and nothing Microsoft belongs to the Adobe
+	// advisory section, which these posts carry alongside the Microsoft
+	// release. Its CVEs are real but they are not "this release's CVEs", and
+	// correlating them made the scraped count (422) exceed the count Microsoft
+	// published (421) - a small discrepancy that is a symptom of taking every
+	// CVE-shaped string on two entire web pages.
+	reAdobeBlock = regexp.MustCompile(`(?i)\badobe\b`)
+	// Anything that places a block inside the Microsoft release. Deliberately
+	// broad: the cost of a false positive here is including one extra CVE, and
+	// the cost of a false negative is dropping a real one.
+	reMicrosoftBlock = regexp.MustCompile(
+		`(?i)\b(microsoft|windows|office|outlook|exchange|sharepoint|azure|dynamics|` +
+			`hyper-v|ntfs|copilot|visual studio|sql server|\.net|asp\.net|edge|` +
+			`defender|kerberos|bitlocker|powershell|wsus|rdp|smb)\b`)
+)
+
+// collectCVEs gathers the release's CVE identifiers, scoped to Microsoft.
+//
+// Scoping is per BLOCK, which StripHTML guarantees is one line: a CVE is kept
+// unless every block it appears in mentions Adobe and none mentions anything
+// Microsoft. Benefit of the doubt goes to inclusion, because dropping a real
+// CVE from the correlation is a silent false negative and including a spare
+// one only widens a scanner query.
+func collectCVEs(d *Digest) {
 	seen := map[string]bool{}
+	adobeOnly := map[string]bool{}
 	for _, s := range d.Sources {
 		if !s.Fetched {
 			continue
 		}
-		for _, c := range reCVE.FindAllString(s.Text, -1) {
-			seen[strings.ToUpper(c)] = true
+		for _, block := range strings.Split(s.Text, "\n") {
+			hits := reCVE.FindAllString(block, -1)
+			if len(hits) == 0 {
+				continue
+			}
+			adobe := reAdobeBlock.MatchString(block)
+			microsoft := reMicrosoftBlock.MatchString(block)
+			for _, c := range hits {
+				c = strings.ToUpper(c)
+				if !seen[c] {
+					seen[c] = true
+					adobeOnly[c] = adobe && !microsoft
+				} else if !(adobe && !microsoft) {
+					// Seen somewhere that is not Adobe-only, so keep it.
+					adobeOnly[c] = false
+				}
+			}
 		}
 	}
 	for c := range seen {
+		if adobeOnly[c] {
+			d.ExcludedCVEs = append(d.ExcludedCVEs, c)
+			continue
+		}
 		d.CVEs = append(d.CVEs, c)
 	}
 	sort.Strings(d.CVEs)
+	sort.Strings(d.ExcludedCVEs)
+}
+
+// CVECountNote compares the CVEs we scraped with the total the publisher
+// stated, and returns a sentence when they disagree.
+//
+// The scrape takes every CVE-shaped string off two web pages, so it can pick
+// up sidebar links and other months. The publisher's own total is the only
+// independent check available, and a mismatch that nobody mentions is exactly
+// the kind of small wrongness that erodes trust in the whole email.
+func (d *Digest) CVECountNote() string {
+	if d.Total <= 0 || len(d.CVEs) == 0 {
+		return ""
+	}
+	diff := len(d.CVEs) - d.Total
+	if diff == 0 {
+		return ""
+	}
+	word := "more than"
+	if diff < 0 {
+		word = "fewer than"
+		diff = -diff
+	}
+	return fmt.Sprintf(
+		"Correlated %d CVE IDs found on the source pages, %d %s the %d this "+
+			"release is said to contain. The identifiers are scraped from the "+
+			"published articles, so the set can include neighbouring content or "+
+			"miss a CVE the articles never name.",
+		len(d.CVEs), diff, word, d.Total)
 }
 
 // roles finds the two article sources. Role wins; the name heuristic is only a

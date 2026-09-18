@@ -85,6 +85,17 @@ diagnosis of a system that had never been contacted — directly above a QQL
 listing fifteen usable QIDs. Never say anything about the KnowledgeBase, the
 scanner, or the estate unless the scanner was actually queried.
 
+**Count patches, not CVEs, when describing the work.** Qualys maps every CVE
+in a monthly cumulative update to a single QID, so "353 of this release's CVEs
+are present" is usually a dozen missing updates. Both numbers go in the
+exposure line, and the QQL is built from the detecting QIDs, because that list
+is the actual work. If you are asked how much there is to patch, answer with
+the QID count and mention the CVE count second.
+
+Related: a host figure prefixed `>=`, or an exposure line saying "at least N
+hosts", means the scanner truncated its host lists and the number is a lower
+bound. Do not restate it as a count.
+
 **A synopsis from one source is still worth sending, labelled.** If
 BleepingComputer is unreachable the counts may be missing and the banner says
 so. If *both* fail the lane exits non-zero and sends nothing — a synopsis

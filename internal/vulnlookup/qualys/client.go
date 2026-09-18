@@ -40,8 +40,31 @@ type DetectionSummary struct {
 	HostCount int
 	MaxQDS    int
 	LastSeen  string
-	Hosts     []string
+
+	// Hosts is every host carrying this detection, not a sample.
+	//
+	// It used to be capped at ten, which quietly made it a display sample
+	// while callers kept using it as data. The Patch Tuesday table unioned
+	// these lists across a CVE's QIDs and printed the result as a host count,
+	// so every CVE mapped to two QIDs read "20 host(s)" and every CVE mapped
+	// to one read "10" - the cap, not the estate. A number that is really a
+	// buffer size is worse than no number.
+	Hosts []string
+	// HostsTruncated means the estate is larger than maxHostsPerQID, so any
+	// union built from Hosts is a lower bound and must be reported as one.
+	HostsTruncated bool
+	// SampleHosts is a short list for printing. Separate from Hosts so that
+	// "some names to show a human" and "the set to do arithmetic on" cannot be
+	// confused for each other again.
+	SampleHosts []string
 }
+
+const (
+	// Generous enough that no realistic estate truncates, bounded so a
+	// pathological one cannot exhaust memory.
+	maxHostsPerQID = 5000
+	sampleHostsPer = 10
+)
 
 type KBCache map[string][]int
 
@@ -109,20 +132,69 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 		ExternalIDs: qidStrings(qids),
 		Status:      vulnlookup.StatusNotPresent,
 	}
+	// Hosts are UNIONED across the CVE's QIDs, not summed.
+	//
+	// This used to be `res.HostCount += d.HostCount`, which double-counts
+	// every machine that carries more than one QID for the same CVE - and
+	// Microsoft CVEs routinely map to several QIDs for the same monthly
+	// cumulative update, so the same ten machines were being counted once per
+	// QID. The inflated figure then fed the digest's "PRESENT on N host(s)"
+	// line and the host-count tiebreak in the Sev bands, which means it has
+	// been overstating blast radius in the daily brief, not just here.
+	//
+	// The sum is still available as a count of detections; it is not a count
+	// of machines, and the two were being used interchangeably.
+	hostUnion := map[string]bool{}
+	largestSingleQID := 0
+	truncated := false
 	for _, qid := range qids {
-		if d, ok := detections[qid]; ok && d.HostCount > 0 {
-			res.Status = vulnlookup.StatusPresent
-			res.HostCount += d.HostCount
-			if d.MaxQDS > res.MaxScore {
-				res.MaxScore = d.MaxQDS
-			}
-			if d.LastSeen > res.LastSeen {
-				res.LastSeen = d.LastSeen
-			}
-			res.SampleHosts = append(res.SampleHosts, d.Hosts...)
+		d, ok := detections[qid]
+		if !ok || d.HostCount == 0 {
+			continue
 		}
+		res.Status = vulnlookup.StatusPresent
+		res.Detections += d.HostCount
+		if d.HostCount > largestSingleQID {
+			largestSingleQID = d.HostCount
+		}
+		if d.HostsTruncated || len(d.Hosts) < d.HostCount {
+			truncated = true
+		}
+		if d.MaxQDS > res.MaxScore {
+			res.MaxScore = d.MaxQDS
+		}
+		if d.LastSeen > res.LastSeen {
+			res.LastSeen = d.LastSeen
+		}
+		for _, h := range d.Hosts {
+			if h = strings.TrimSpace(strings.ToLower(h)); h != "" {
+				hostUnion[h] = true
+			}
+		}
+		res.SampleHosts = appendCapped(res.SampleHosts, d.SampleHosts, sampleHostsPer)
 	}
+	res.HostCount = len(hostUnion)
+	// A union built from truncated lists can come out smaller than a single
+	// QID's own count, which would understate exposure. One QID's count is a
+	// proven floor, so never report less than the largest of them.
+	if largestSingleQID > res.HostCount {
+		res.HostCount = largestSingleQID
+	}
+	res.HostCountIsFloor = truncated
 	return res, nil
+}
+
+// appendCapped keeps a display list short without letting it grow per QID.
+// (limit, not cap: cap is a builtin and shadowing it here would be asking for
+// trouble in a file that also does arithmetic on slice lengths.)
+func appendCapped(dst, src []string, limit int) []string {
+	for _, s := range src {
+		if len(dst) >= limit {
+			return dst
+		}
+		dst = append(dst, s)
+	}
+	return dst
 }
 
 // LoadOrBuildKBCache returns the CVE->QID map, refreshing it when it has aged
@@ -390,8 +462,13 @@ func parseHostDetections(b []byte) (map[int]DetectionSummary, error) {
 			if !seenHostPerQID[d.QID][name] {
 				seenHostPerQID[d.QID][name] = true
 				s.HostCount++
-				if len(s.Hosts) < 10 {
+				if len(s.Hosts) < maxHostsPerQID {
 					s.Hosts = append(s.Hosts, name)
+				} else {
+					s.HostsTruncated = true
+				}
+				if len(s.SampleHosts) < sampleHostsPer {
+					s.SampleHosts = append(s.SampleHosts, name)
 				}
 			}
 			if qds, err := strconv.Atoi(strings.TrimSpace(d.QDS)); err == nil && qds > s.MaxQDS {
