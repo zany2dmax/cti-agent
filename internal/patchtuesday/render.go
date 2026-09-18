@@ -50,10 +50,13 @@ type Highlight struct {
 	// HostsAreFloor means Hosts is a lower bound, not a count.
 	HostsAreFloor bool
 	QIDs          []int
-	KEV           bool
-	EPSS          float64
-	CVSS          float64
-	Rationale     string
+	// SharedWith is how many other CVEs in this release resolve to exactly the
+	// same QIDs - i.e. are fixed by the same update. Set during rendering.
+	SharedWith int
+	KEV        bool
+	EPSS       float64
+	CVSS       float64
+	Rationale  string
 }
 
 // anySev reports whether the enrich lane supplied a band for anything. When it
@@ -67,9 +70,17 @@ func (r *Report) anySev() bool {
 	return false
 }
 
-// rows returns the highlights to print, worst first, and how many were left
-// out. Ordered by blast radius then severity then CVE, so the truncation drops
-// the least important rows rather than the alphabetically last ones.
+// rows returns the highlights to print, worst first, and how many CVEs were
+// left out.
+//
+// Ordered by blast radius, then severity, then CVE - and then collapsed by
+// QID set, which is the part that makes the table readable. Sorting by host
+// count alone floods the top with whichever cumulative update is on the most
+// machines: the August replay's first 25 rows were 24 CVEs carrying the
+// identical pair [92439 92440] and the same 331 hosts, which tells the reader
+// one fact 24 times and hides the other eleven patches below the cut. One row
+// per distinct QID set, carrying how many CVEs share it, says the same thing
+// in a twelfth of the space.
 func (r *Report) rows() (shown []Highlight, hidden int) {
 	sorted := make([]Highlight, len(r.Highlights))
 	copy(sorted, r.Highlights)
@@ -82,14 +93,65 @@ func (r *Report) rows() (shown []Highlight, hidden int) {
 		}
 		return sorted[i].CVE < sorted[j].CVE
 	})
+
+	// Collapse, keeping the first (worst) CVE of each QID set. A row with a
+	// severity band is never collapsed away behind one without: an actively
+	// exploited CVE has to stay visible even when it shares an update with
+	// two hundred others.
+	byQIDs := map[string]int{} // QID set -> index in shown
+	for _, h := range sorted {
+		key := qidKey(h.QIDs)
+		if at, ok := byQIDs[key]; ok {
+			shown[at].SharedWith++
+			// A banded CVE displaces the unbanded representative.
+			if sevRank(h.Sev) > sevRank(shown[at].Sev) {
+				n := shown[at].SharedWith
+				h.SharedWith = n
+				shown[at] = h
+			}
+			continue
+		}
+		byQIDs[key] = len(shown)
+		shown = append(shown, h)
+	}
+
 	limit := r.MaxRows
 	if limit <= 0 {
 		limit = defaultMaxRows
 	}
-	if len(sorted) <= limit {
-		return sorted, 0
+	if len(shown) > limit {
+		for _, h := range shown[limit:] {
+			hidden += 1 + h.SharedWith
+		}
+		shown = shown[:limit]
 	}
-	return sorted[:limit], len(sorted) - limit
+	// Everything folded into a shown row is still reported as covered, so the
+	// "and N more" figure counts CVEs, not rows.
+	return shown, hidden
+}
+
+// collapsed reports whether any row stands in for more than itself.
+func collapsed(rows []Highlight) bool {
+	for _, h := range rows {
+		if h.SharedWith > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func qidKey(qids []int) string {
+	if len(qids) == 0 {
+		return "-"
+	}
+	s := make([]int, len(qids))
+	copy(s, qids)
+	sort.Ints(s)
+	parts := make([]string, len(s))
+	for i, q := range s {
+		parts[i] = fmt.Sprint(q)
+	}
+	return strings.Join(parts, ",")
 }
 
 // sevRank orders the bands. Unknown sorts last so an unenriched row never
@@ -230,8 +292,11 @@ func (r *Report) HTML() string {
 			sevHead = `<th align="left" style="border-bottom:1px solid #e2e8f0">Sev</th>`
 		}
 		caption := fmt.Sprintf("%d of this release's CVEs", len(r.Highlights))
+		if collapsed(shown) {
+			caption += fmt.Sprintf(", grouped into %d update(s)", len(shown))
+		}
 		if hidden > 0 {
-			caption += fmt.Sprintf(" &mdash; %d worst shown", len(shown))
+			caption += fmt.Sprintf(" &mdash; worst %d shown", len(shown))
 		}
 		b.WriteString(fmt.Sprintf(`
   <tr><td style="padding:18px 20px 0 20px">
@@ -285,6 +350,12 @@ func (r *Report) HTML() string {
 			if h.HostsAreFloor {
 				hosts = "&ge;" + hosts
 			}
+			cveCell := e(h.CVE)
+			if h.SharedWith > 0 {
+				cveCell += fmt.Sprintf(
+					`<span style="color:#718096;font-size:11px"> +%d more fixed `+
+						`by the same update</span>`, h.SharedWith)
+			}
 			b.WriteString(fmt.Sprintf(`
       <tr><td style="border-bottom:1px solid #edf2f7">
             <a href="https://nvd.nist.gov/vuln/detail/%s" style="color:#1a202c">%s</a></td>
@@ -293,7 +364,7 @@ func (r *Report) HTML() string {
           <td style="border-bottom:1px solid #edf2f7;font:400 12px ui-monospace,
                      SFMono-Regular,Menlo,monospace">%s</td>
           <td style="border-bottom:1px solid #edf2f7;color:#4a5568">%s</td></tr>`,
-				e(h.CVE), e(h.CVE), sevCell, hosts, qids, why))
+				e(h.CVE), cveCell, sevCell, hosts, qids, why))
 		}
 		b.WriteString("\n    </table>")
 		if hidden > 0 {
@@ -432,8 +503,11 @@ func (r *Report) Text() string {
 		shown, hidden := r.rows()
 		withSev := r.anySev()
 		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d)", len(r.Highlights))
+		if collapsed(shown) {
+			head += fmt.Sprintf(" in %d update(s)", len(shown))
+		}
 		if hidden > 0 {
-			head += fmt.Sprintf(" - %d worst by host count", len(shown))
+			head += " - worst first"
 		}
 		fmt.Fprintf(&b, "%s\n%s\n", head, strings.Repeat("-", 68))
 		for _, h := range shown {
@@ -443,15 +517,21 @@ func (r *Report) Text() string {
 			}
 			// The severity column is omitted, not filled with a placeholder,
 			// when the enrich lane supplied nothing for any row.
+			shared := ""
+			if h.SharedWith > 0 {
+				shared = fmt.Sprintf("  (+%d more CVE(s) fixed by the same update)",
+					h.SharedWith)
+			}
 			if withSev {
 				sev := h.Sev
 				if sev == "" {
 					sev = "-"
 				}
-				fmt.Fprintf(&b, "  %-18s %-5s %s host(s)  QIDs %v\n",
-					h.CVE, sev, hosts, h.QIDs)
+				fmt.Fprintf(&b, "  %-18s %-5s %s host(s)  QIDs %v%s\n",
+					h.CVE, sev, hosts, h.QIDs, shared)
 			} else {
-				fmt.Fprintf(&b, "  %-18s %s host(s)  QIDs %v\n", h.CVE, hosts, h.QIDs)
+				fmt.Fprintf(&b, "  %-18s %s host(s)  QIDs %v%s\n",
+					h.CVE, hosts, h.QIDs, shared)
 			}
 			if h.Rationale != "" {
 				fmt.Fprintf(&b, "      %s\n", h.Rationale)

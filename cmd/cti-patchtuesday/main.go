@@ -53,6 +53,9 @@ func main() {
 			"in $FLEET_HOME/state. Without it the severity column is omitted")
 	maxRows := flag.Int("max-rows", 0,
 		"cap the present-CVE table (default 25). The full list is always in --json")
+	explain := flag.String("explain", "",
+		"print every place a CVE was found on the source pages, and whether "+
+			"anything ties it to a Microsoft product, then exit")
 	flag.Parse()
 
 	now := time.Now()
@@ -141,8 +144,27 @@ func main() {
 			"cti-patchtuesday:   scoped out %d CVE(s) as Adobe-only: %s\n",
 			n, strings.Join(d.ExcludedCVEs, " "))
 	}
+	if n := len(d.UnattributedCVEs); n > 0 {
+		// These are the ones worth looking at by hand: correlated, but nothing
+		// on either page connects them to a Microsoft product. In the August
+		// replay two such CVEs sorted to the top of the table on 346 hosts.
+		shown := d.UnattributedCVEs
+		if len(shown) > 12 {
+			shown = shown[:12]
+		}
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday:   %d CVE(s) have no Microsoft product context on "+
+				"either page: %s%s\n", n, strings.Join(shown, " "),
+			map[bool]string{true: " ...", false: ""}[len(shown) < n])
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday:   run with --explain <CVE> to see where one came from\n")
+	}
 	if note := d.CVECountNote(); note != "" {
 		fmt.Fprintf(os.Stderr, "cti-patchtuesday:   %s\n", note)
+	}
+	if *explain != "" {
+		fmt.Print(d.Explain(*explain))
+		return
 	}
 	// Provenance. The August replay reported a total of 400 while the Qualys
 	// post said 421, and nothing in the output said which page each figure had
