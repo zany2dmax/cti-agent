@@ -31,6 +31,12 @@ type Exposure struct {
 
 	// QIDs is every QID actually queried, from either route below.
 	QIDs []int
+	// DetectingQIDs are the QIDs that came back with something. This is the
+	// number that measures work: Qualys maps every CVE in a monthly
+	// cumulative update to one QID, so 353 "present" CVEs can be twelve
+	// missing patches. Reporting only the CVE count makes a dozen updates
+	// look like hundreds of independent findings.
+	DetectingQIDs []int
 
 	// PublishedQIDs are the QIDs Qualys listed in the review's own QQL, and
 	// the second route to a number. The KnowledgeBase CVE-to-QID mapping lags
@@ -49,6 +55,9 @@ type Exposure struct {
 	// detections on 777 hosts is a very different picture from 1510 on three.
 	Detections int
 	Hosts      int
+	// HostsAreFloor means the provider truncated its host lists, so Hosts is a
+	// lower bound and every sentence printing it has to say "at least".
+	HostsAreFloor bool
 
 	// PresentCVEs are those with at least one detection somewhere. These are
 	// the ones to highlight.
@@ -74,9 +83,17 @@ func (e Exposure) Measurable() bool { return e.Attempted && len(e.QIDs) > 0 }
 // rather than importing the client so this package stays testable without a
 // scanner and without a cyclic dependency.
 type DetectionLike struct {
-	QID       int
+	QID int
+	// HostCount is the provider's own count for this QID.
 	HostCount int
-	Hosts     []string
+	// Hosts is every host with this detection - the set, not a sample. The
+	// client used to cap this at ten names, and this package unioned the caps
+	// and printed the result as a host count, which is why every row of the
+	// August table read 10 or 20.
+	Hosts []string
+	// HostsTruncated means Hosts is incomplete, so any union built from it is
+	// a lower bound.
+	HostsTruncated bool
 }
 
 // Summarise folds per-QID detections into the numbers the email prints.
@@ -107,6 +124,9 @@ func Summarise(cves []string, cveToQIDs map[string][]int, publishedQIDs []int,
 		if !counted[q] {
 			counted[q] = true
 			e.Detections += d.HostCount
+			if d.HostsTruncated || len(d.Hosts) < d.HostCount {
+				e.HostsAreFloor = true
+			}
 			for _, h := range d.Hosts {
 				if h = strings.TrimSpace(strings.ToLower(h)); h != "" {
 					hostSet[h] = true
@@ -146,6 +166,10 @@ func Summarise(cves []string, cveToQIDs map[string][]int, publishedQIDs []int,
 		e.QIDs = append(e.QIDs, q)
 	}
 	sort.Ints(e.QIDs)
+	for q := range counted {
+		e.DetectingQIDs = append(e.DetectingQIDs, q)
+	}
+	sort.Ints(e.DetectingQIDs)
 	for c := range presentSet {
 		e.PresentCVEs = append(e.PresentCVEs, c)
 	}
@@ -160,7 +184,13 @@ func Summarise(cves []string, cveToQIDs map[string][]int, publishedQIDs []int,
 // from these rather than from every mapped QID, so pasting it into Qualys
 // returns the vulnerabilities that are actually there - a query listing QIDs
 // with no detections returns an empty set and looks broken.
+//
+// Prefers the set Summarise already computed; the detections argument is only
+// needed for an Exposure built by hand.
 func (e Exposure) DetectedQIDs(detections map[int]DetectionLike) []int {
+	if len(e.DetectingQIDs) > 0 {
+		return e.DetectingQIDs
+	}
 	var out []int
 	for _, q := range e.QIDs {
 		if d, ok := detections[q]; ok && d.HostCount > 0 {
@@ -235,9 +265,26 @@ func (e Exposure) ExposureLine(org string) string {
 				"as good news.", org, len(e.QIDs))
 
 	default:
+		hosts := fmt.Sprintf("%d hosts", e.Hosts)
+		if e.HostsAreFloor {
+			hosts = fmt.Sprintf("at least %d hosts", e.Hosts)
+		}
 		line := fmt.Sprintf(
-			"The Exposure for %s is ~%d new vulnerabilities across %d hosts.",
-			org, e.Detections, e.Hosts)
+			"The Exposure for %s is ~%d new vulnerabilities across %s.",
+			org, e.Detections, hosts)
+		// The count of "present" CVEs is dominated by cumulative-update QIDs:
+		// Qualys maps every CVE in a monthly rollup to the same QID, so one
+		// missing patch makes hundreds of CVEs "present" at once. That is true
+		// but it reads as hundreds of separate problems, so the patch count -
+		// which is what somebody actually has to action - goes in the same
+		// sentence as the CVE count.
+		if n := len(e.PresentCVEs); n > 0 && len(e.DetectingQIDs) > 0 {
+			line += fmt.Sprintf(
+				" Those are %d of this release's CVEs, covered by %d missing "+
+					"Qualys detection(s) - a single cumulative update accounts "+
+					"for many CVEs, so patch count is the better measure of work.",
+				n, len(e.DetectingQIDs))
+		}
 		// Worth saying out loud: these would have been invisible if the report
 		// had only trusted the CVE-to-QID mapping.
 		if n := len(e.PublishedOnlyQIDs); n > 0 {
