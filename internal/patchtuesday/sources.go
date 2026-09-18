@@ -14,12 +14,12 @@ import (
 
 // Source is one fetched wrap-up article.
 type Source struct {
-	Name     string
-	URL      string
-	Fetched  bool
-	Err      string // why it failed, for the DEGRADED banner
-	Text     string // tags stripped, entities decoded
-	RawHTML  string
+	Name    string
+	URL     string
+	Fetched bool
+	Err     string // why it failed, for the DEGRADED banner
+	Text    string // tags stripped, entities decoded
+	RawHTML string
 }
 
 // Digest is everything the lane extracted, before correlation.
@@ -52,8 +52,8 @@ type Digest struct {
 
 // Category is one row of the Qualys "classified as follows" table.
 type Category struct {
-	Name      string
-	Quantity  int
+	Name       string
+	Quantity   int
 	Severities string
 }
 
@@ -141,8 +141,19 @@ func Fetch(ctx context.Context, client *http.Client, name, url string) Source {
 	return s
 }
 
+// Go's regexp is RE2: no backreferences, no lookaround. This started life as
+// <(script|style|noscript)\b.*?</\1> - valid PCRE, and a PANIC at init in Go,
+// so the whole package failed to load rather than failing a test. One pattern
+// per tag instead.
+var reDropBlocks = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script\s*>`),
+	regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style\s*>`),
+	regexp.MustCompile(`(?is)<noscript\b[^>]*>.*?</noscript\s*>`),
+	// A truncated page can leave an unclosed <script>; drop bare openers too.
+	regexp.MustCompile(`(?is)<script\b[^>]*>`),
+}
+
 var (
-	reScript  = regexp.MustCompile(`(?is)<(script|style|noscript)\b.*?</\1>`)
 	reTag     = regexp.MustCompile(`(?s)<[^>]+>`)
 	reSpaces  = regexp.MustCompile(`[ \t]+`)
 	reNewline = regexp.MustCompile(`\n{3,}`)
@@ -152,7 +163,9 @@ var (
 // we want appear in prose, and a real HTML parser would be a dependency for
 // no gain. Block-level tags become newlines so sentences do not run together.
 func StripHTML(h string) string {
-	h = reScript.ReplaceAllString(h, " ")
+	for _, re := range reDropBlocks {
+		h = re.ReplaceAllString(h, " ")
+	}
 	h = regexp.MustCompile(`(?i)</(p|div|tr|li|h[1-6]|table)>`).ReplaceAllString(h, "\n")
 	h = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(h, "\n")
 	h = reTag.ReplaceAllString(h, " ")

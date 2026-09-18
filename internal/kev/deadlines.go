@@ -88,13 +88,13 @@ func (f Finding) IsRansomware() bool {
 
 // Report is the deadline picture at one moment.
 type Report struct {
-	Now       time.Time
-	Overdue   []Dated // deadline passed, present here
-	DueSoon   []Dated // deadline within the horizon, present here
-	Later     []Dated // present here, deadline further out
-	NotHere   int     // KEV with a deadline that the scanner did not find
-	Unverified int    // KEV with a deadline whose coverage is UNKNOWN
-	Horizon   int
+	Now        time.Time
+	Overdue    []Dated   // deadline passed, present here
+	DueSoon    []Dated   // deadline within the horizon, present here
+	Later      []Dated   // present here, deadline further out
+	NotHere    int       // KEV with a deadline that the scanner did not find
+	Unverified int       // KEV with a deadline whose coverage is UNKNOWN
+	Horizon    int
 }
 
 // Dated pairs a finding with its computed deadline distance.
