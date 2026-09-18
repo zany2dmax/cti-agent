@@ -139,25 +139,10 @@ func main() {
 	fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s - %d CVE(s) in the sources, "+
 		"%d QID(s) published in the review\n",
 		patchtuesday.MonthLabel(year, mon), len(d.CVEs), len(d.PublishedQIDs()))
-	if n := len(d.ExcludedCVEs); n > 0 {
+	for _, c := range d.ExcludedCVEs {
 		fmt.Fprintf(os.Stderr,
-			"cti-patchtuesday:   scoped out %d CVE(s) as Adobe-only: %s\n",
-			n, strings.Join(d.ExcludedCVEs, " "))
-	}
-	if n := len(d.UnattributedCVEs); n > 0 {
-		// These are the ones worth looking at by hand: correlated, but nothing
-		// on either page connects them to a Microsoft product. In the August
-		// replay two such CVEs sorted to the top of the table on 346 hosts.
-		shown := d.UnattributedCVEs
-		if len(shown) > 12 {
-			shown = shown[:12]
-		}
-		fmt.Fprintf(os.Stderr,
-			"cti-patchtuesday:   %d CVE(s) have no Microsoft product context on "+
-				"either page: %s%s\n", n, strings.Join(shown, " "),
-			map[bool]string{true: " ...", false: ""}[len(shown) < n])
-		fmt.Fprintf(os.Stderr,
-			"cti-patchtuesday:   run with --explain <CVE> to see where one came from\n")
+			"cti-patchtuesday:   scoped out %s - every sighting names %q, none "+
+				"names a Microsoft product\n", c, d.ExcludedWhy[c])
 	}
 	if note := d.CVECountNote(); note != "" {
 		fmt.Fprintf(os.Stderr, "cti-patchtuesday:   %s\n", note)

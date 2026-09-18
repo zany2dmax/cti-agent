@@ -117,7 +117,7 @@ class ReportParsing(unittest.TestCase):
 
     def test_header_and_separator_rows_are_skipped(self):
         for cve in enrich.parse_report(self.path):
-            self.assertRegex(cve, r"^CVE-\d{4}-\d{4,7}$")
+            self.assertRegex(cve, r"^CVE-\d{4}-\d{4,}$")
 
     def test_fields_are_typed(self):
         row = enrich.parse_report(self.path)["CVE-2026-9110"]

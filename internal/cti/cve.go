@@ -7,7 +7,14 @@ import (
 	"strings"
 )
 
-var cveRe = regexp.MustCompile(`\bCVE-\d{4}-\d{4,7}\b`)
+// The CVE ID sequence number has a minimum of four digits and no maximum, so
+// the bound is open. With {4,7} and the trailing \b, an eight-digit ID matched
+// nothing at all: the engine tried seven digits, found no boundary before the
+// eighth, backtracked, and failed - so the CVE was dropped from the report
+// silently. (Without the \b it would have been worse: a truncated ID naming a
+// different vulnerability.) This is the mailbox scanner, so a dropped ID is an
+// advisory that never reaches the digest.
+var cveRe = regexp.MustCompile(`\bCVE-\d{4}-\d{4,}\b`)
 
 func ExtractCVEs(text string) []string {
 	matches := cveRe.FindAllString(strings.ToUpper(text), -1)

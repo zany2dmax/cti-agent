@@ -1116,28 +1116,106 @@ func TestACorrelatedCVECanNameTheSentenceThatPutItThere(t *testing.T) {
 	if !strings.Contains(got, "Windows NTFS") {
 		t.Errorf("should quote the sentence it was found in:\n%s", got)
 	}
-	if strings.Contains(got, "UNATTRIBUTED") {
+	if !strings.Contains(got, "Correlated as part of this release") {
 		t.Errorf("this one has Microsoft context:\n%s", got)
 	}
 
-	// The suspicious one is kept - dropping a real CVE is worse - but named.
+	// Named beside another vendor and nothing Microsoft: scoped out, with the
+	// vendor named so the decision can be checked.
 	got = dg.Explain("CVE-2026-6726")
 	if !strings.Contains(got, "Chrome zero-day") {
 		t.Errorf("should quote the context:\n%s", got)
 	}
-	if !strings.Contains(got, "UNATTRIBUTED") {
-		t.Errorf("no Microsoft product context, so say so:\n%s", got)
-	}
-	if len(dg.UnattributedCVEs) != 1 || dg.UnattributedCVEs[0] != "CVE-2026-6726" {
-		t.Errorf("UnattributedCVEs = %v", dg.UnattributedCVEs)
-	}
-	// Still correlated: presence is a fact about our estate either way.
-	if !strings.Contains(strings.Join(dg.CVEs, " "), "CVE-2026-6726") {
-		t.Error("an unattributed CVE is flagged, not dropped")
+	if !strings.Contains(got, "SCOPED OUT") || !strings.Contains(got, "Chrome") {
+		t.Errorf("should name the vendor that caused the exclusion:\n%s", got)
 	}
 
 	if !strings.Contains(dg.Explain("CVE-2026-9999"), "does not appear") {
 		t.Error("a CVE that was never seen should say exactly that")
+	}
+}
+
+func TestExclusionNeedsEvidenceOfAnotherVendorNotAbsenceOfKeywords(t *testing.T) {
+	// The rule this replaces asked "is there a Microsoft word near this CVE?"
+	// and flagged 30 of 422 - including CVE-2026-6726, which BleepingComputer
+	// lists as "Windows TPM | TPM 2.0 Improper Object Slot Reuse". The others
+	// were real Microsoft CVEs whose product names contain no keyword any list
+	// would hold: "Storvsp.sys Driver", "Kernel Streaming WOW Thunk",
+	// "Routing and Remote Access Service".
+	//
+	// Absence of a keyword is not evidence, and a flag that fires 30 times
+	// teaches the reader to ignore it.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "BleepingComputer Patch Tuesday", Role: RoleBleeping, Fetched: true,
+			RawHTML: "x", Text: strings.Join([]string{
+				"Storvsp.sys Driver CVE-2026-11111 Elevation of Privilege Important",
+				"Kernel Streaming WOW Thunk Service Driver CVE-2026-22222 Important",
+				"Routing and Remote Access Service CVE-2026-33333 Important",
+				"Windows TPM CVE-2026-6726 MITRE: CVE-2026-6726 TPM 2.0 Improper Object Slot Reuse Important",
+				"Adobe ColdFusion CVE-2026-99999 arbitrary code execution",
+			}, "\n")},
+	}}
+	Parse(dg)
+
+	// Not one of the four Microsoft rows may be excluded, keyword or no keyword.
+	for _, c := range []string{"CVE-2026-11111", "CVE-2026-22222",
+		"CVE-2026-33333", "CVE-2026-6726"} {
+		if !strings.Contains(strings.Join(dg.CVEs, " "), c) {
+			t.Errorf("%s was excluded with no evidence of another vendor", c)
+		}
+	}
+	// Only the one naming another vendor goes.
+	if len(dg.ExcludedCVEs) != 1 || dg.ExcludedCVEs[0] != "CVE-2026-99999" {
+		t.Errorf("ExcludedCVEs = %v, want only the Adobe row", dg.ExcludedCVEs)
+	}
+	if got := dg.ExcludedWhy["CVE-2026-99999"]; !strings.EqualFold(got, "Adobe") {
+		t.Errorf("ExcludedWhy = %q, want the vendor named", got)
+	}
+}
+
+func TestARepeatedSightingInOneRowIsOnePlace(t *testing.T) {
+	// The table rows name the CVE twice - once as the ID, once after "MITRE:".
+	// Recording one entry per match printed the identical excerpt twice under
+	// "found in 2 place(s)", turning an occurrence count into what looked like
+	// corroboration from two sources.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "BleepingComputer Patch Tuesday", Role: RoleBleeping, Fetched: true,
+			RawHTML: "x",
+			Text: "Windows TPM CVE-2026-6726 MITRE: CVE-2026-6726 TPM 2.0 " +
+				"Improper Object Slot Reuse Important"},
+	}}
+	Parse(dg)
+	if n := len(dg.CVEWhere["CVE-2026-6726"]); n != 1 {
+		t.Errorf("CVEWhere has %d entries for one table row: %v",
+			n, dg.CVEWhere["CVE-2026-6726"])
+	}
+	if !strings.Contains(dg.Explain("CVE-2026-6726"), "found in 1 place(s)") {
+		t.Errorf("place count should be distinct places:\n%s",
+			dg.Explain("CVE-2026-6726"))
+	}
+}
+
+func TestTheCVEPatternHasNoUpperBoundOnTheSequenceNumber(t *testing.T) {
+	// The CVE ID syntax sets a four-digit MINIMUM and no maximum; the sequence
+	// number only reflects when the CNA reserved the block, which is also why
+	// a four-digit suffix means "reserved early in the year" and nothing more.
+	// With {4,7} the pattern matched the first seven digits of a longer ID and
+	// produced a well-formed identifier for a DIFFERENT vulnerability.
+	dg := &Digest{Year: 2026, Month: time.August, Sources: []Source{
+		{Name: "Qualys security update review", Role: RoleQualysBlog, Fetched: true,
+			RawHTML: "x", Text: "Windows Kernel CVE-2026-12345678 and Windows TPM CVE-2026-6726."},
+	}}
+	Parse(dg)
+	// Exactly these two, whole. Any truncation shows up as a third entry or a
+	// wrong one, so comparing the set is the assertion.
+	want := []string{"CVE-2026-12345678", "CVE-2026-6726"}
+	if len(dg.CVEs) != len(want) {
+		t.Fatalf("got %v, want %v", dg.CVEs, want)
+	}
+	for _, w := range want {
+		if !contains(dg.CVEs, w) {
+			t.Errorf("missing %s from %v", w, dg.CVEs)
+		}
 	}
 }
 
