@@ -1,7 +1,7 @@
 // Package kev reports on CISA KEV remediation deadlines for vulnerabilities
 // that are actually present in the environment.
 //
-// WHY A DEADLINE REPORT AT ALL
+// # WHY A DEADLINE REPORT AT ALL
 //
 // Sev5-Sev1 answers "what should we do first". It does not answer "what are we
 // late on", and those are different conversations with different audiences.
@@ -10,7 +10,7 @@
 // severity, and the only line item in this whole system that a non-technical
 // reader can act on without translation.
 //
-// EVERYTHING HERE IS RESTRICTED TO PRESENT FINDINGS
+// # EVERYTHING HERE IS RESTRICTED TO PRESENT FINDINGS
 //
 // A deadline on a CVE we do not run is not an obligation. Counting those
 // inflates the number, and the first time someone checks one and finds it
@@ -89,11 +89,11 @@ func (f Finding) IsRansomware() bool {
 // Report is the deadline picture at one moment.
 type Report struct {
 	Now        time.Time
-	Overdue    []Dated   // deadline passed, present here
-	DueSoon    []Dated   // deadline within the horizon, present here
-	Later      []Dated   // present here, deadline further out
-	NotHere    int       // KEV with a deadline that the scanner did not find
-	Unverified int       // KEV with a deadline whose coverage is UNKNOWN
+	Overdue    []Dated // deadline passed, present here
+	DueSoon    []Dated // deadline within the horizon, present here
+	Later      []Dated // present here, deadline further out
+	NotHere    int     // KEV with a deadline that the scanner did not find
+	Unverified int     // KEV with a deadline whose coverage is UNKNOWN
 	Horizon    int
 }
 

@@ -1003,14 +1003,29 @@ top of `--month`.
 
 | Situation | Behaviour |
 |---|---|
-| One source unreachable | Sends, with a banner naming which and warning counts may be low. The Qualys exposure figures are unaffected and it says so |
+| One source unreachable | Sends, with a banner naming which and warning counts may be low. The banner says the exposure figures are unaffected — but only when they actually are |
 | Both sources unreachable | **Sends nothing**, exits non-zero, `cti-alert` fires. A synopsis assembled from nothing looks like a quiet month |
-| Qualys correlation fails | Sends the public synopsis, states that our own exposure could not be measured |
-| No QID mapping for the new CVEs | Exposure reads *"not yet measurable"*, never *"0"*. Normal within a day or two of a release, and not a clean result |
+| Qualys correlation fails | Sends the public synopsis. Exposure reads *"was **NOT MEASURED** in this run: <reason>"* and names the reason. It must not say anything about the KnowledgeBase, which it never reached |
+| KnowledgeBase cache unavailable, review published QIDs | Correlates on the published QIDs alone and marks the coverage note stale. Losing the mapping degrades the measurement; it no longer cancels it |
+| No QID from *either* route | Exposure reads *"not yet measurable"*, never *"0"*. Normal within a day or two of a release, and not a clean result |
+| QIDs queried, nothing open | *"no open detections across the N QID(s) checked"* — with the count, so the reader can see the query had something to ask about |
 
-That last row matters most. On the morning after a release the KnowledgeBase
-frequently has not caught up, and "0 new vulnerabilities" would announce a
-clean estate on the strength of missing data.
+The distinction between rows three and five is the one that matters most.
+"We did not look" and "we looked and found nothing mappable" are opposite
+facts, and the first version of this lane could not tell them apart: a run
+with no Qualys credentials printed *"the Qualys KnowledgeBase has no QID
+mapping for any CVE in this release"* — above a QQL listing fifteen usable
+QIDs. `Exposure.Attempted` exists so that the zero value cannot be mistaken
+for a measurement.
+
+**Both routes to a QID are used, not just the mapping.** The Qualys review
+prints the release's QIDs inside the QQL it publishes for readers; the lane
+parses them out and queries Host Detection for them in addition to whatever
+the CVE→QID mapping resolves. The union matters because neither route
+contains the other, and because the mapping is least complete on exactly the
+morning the email goes out. The stderr log reports how many QIDs came from
+each route, and the exposure line credits the published route when it found
+detections the mapping would have missed.
 
 ### Two new outbound hosts
 

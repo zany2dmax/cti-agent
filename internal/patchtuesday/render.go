@@ -27,7 +27,7 @@ type Report struct {
 // Highlight is one CVE that is actually in the estate.
 type Highlight struct {
 	CVE       string
-	Sev       string  // Sev5..Sev1 from the enrich lane, blank if unavailable
+	Sev       string // Sev5..Sev1 from the enrich lane, blank if unavailable
 	Hosts     int
 	QIDs      []int
 	KEV       bool
@@ -101,14 +101,22 @@ func (r *Report) HTML() string {
 	// Degraded banner first: a synopsis assembled from one source instead of
 	// two is still useful, but the reader has to know which.
 	if deg := d.Degraded(); len(deg) > 0 {
+		// Only claim the exposure numbers survived if they did. This banner
+		// used to say "the exposure figures come from Qualys and are
+		// unaffected" while listing the Qualys exposure query as one of the
+		// things that failed.
+		tail := "The exposure figures come from Qualys Host Detection and are unaffected."
+		if !r.Exposure.Attempted {
+			tail = "The exposure figures are missing too &mdash; see the line below."
+		}
 		b.WriteString(fmt.Sprintf(`
   <tr><td style="padding:14px 20px 0 20px">
     <div style="background:#fffbe6;border:1px solid #d69e2e;border-radius:4px;
                 padding:10px 12px;font:400 13px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#744210">
       <b>Incomplete sources.</b> Could not read: %s. Counts below may be
-      missing or low. The exposure figures come from Qualys and are unaffected.
-    </div></td></tr>`, e(strings.Join(deg, "; "))))
+      missing or low. %s
+    </div></td></tr>`, e(strings.Join(deg, "; ")), tail))
 	}
 
 	// The lead. Microsoft's numbers, then ours, then the query.
@@ -199,18 +207,12 @@ func (r *Report) HTML() string {
 
 	// Coverage caveat. An unmapped CVE is not an absent one, and this email
 	// would otherwise imply the difference away.
-	if n := len(r.Exposure.UnmappedCVEs); n > 0 {
-		stale := ""
-		if r.Exposure.KBStale {
-			stale = " The KnowledgeBase cache is stale, so treat all of these as unverified."
-		}
+	if note := r.Exposure.CoverageNote(); note != "" {
 		b.WriteString(fmt.Sprintf(`
   <tr><td style="padding:14px 20px 0 20px">
     <div style="background:#fffbe6;border-left:4px solid #d69e2e;padding:10px 12px;
                 font:400 13px/1.55 -apple-system,Segoe UI,Arial,sans-serif;color:#744210">
-      <b>%d of this release's CVEs have no Qualys QID mapping.</b> That is not
-      the same as not being present &mdash; it means coverage could not be
-      established for them.%s</div></td></tr>`, n, stale))
+      %s</div></td></tr>`, e(note)))
 	}
 
 	// The narrative fields, each omitted when the sources did not carry it.
@@ -332,9 +334,8 @@ func (r *Report) Text() string {
 		}
 		b.WriteString("\n")
 	}
-	if len(r.Exposure.UnmappedCVEs) > 0 {
-		fmt.Fprintf(&b, "%d CVE(s) have no Qualys QID mapping - coverage unverified, "+
-			"not confirmed absent.\n\n", len(r.Exposure.UnmappedCVEs))
+	if note := r.Exposure.CoverageNote(); note != "" {
+		b.WriteString(note + "\n\n")
 	}
 	if d.ZeroDayText != "" {
 		b.WriteString("Zero-days: " + d.ZeroDayText + "\n\n")
