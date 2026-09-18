@@ -1,0 +1,21 @@
+[Unit]
+Description=CTI monthly Microsoft Patch Tuesday synopsis
+# If this fails, tell the operator. Without this a failed digest is
+# silent, and no email looks exactly like a quiet day.
+OnFailure=cti-agent-alert@%n.service
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ctiagent
+Group=ctiagent
+WorkingDirectory=/home/ctiagent/fleet
+EnvironmentFile=/home/ctiagent/fleet/fleet.env
+ExecStart=/home/ctiagent/fleet/bin/run-patchtuesday
+TimeoutStartSec=1800
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ctiagent/fleet
+StandardOutput=append:/home/ctiagent/fleet/logs/digest.log
+StandardError=append:/home/ctiagent/fleet/logs/digest.log

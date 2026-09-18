@@ -164,6 +164,32 @@ This lane does no analysis. It exists because analysis nobody reads is
 indistinguishable from analysis nobody did. The digest is written for someone
 reading on a phone before they're fully awake.
 
+### Axis 8 — the vendor's clock: *what did this release land on us?*
+
+`cti-patchtuesday` — once a month, on the morning after Microsoft's Patch
+Tuesday, reads the two public wrap-ups everyone already reads and adds the one
+thing neither can provide: how much of that release is on our machines,
+according to the scanner, with the exact query to see it yourself.
+
+This axis is different in kind from the others. Axes 1–4 are continuous: mail
+arrives, feeds update, scores move. This one is a **cadence** — a vendor
+publishes on a fixed schedule, and the interesting work is aligning to
+someone else's calendar rather than watching a stream.
+
+It is also the clearest example of the compounding. The public article says
+"966 flaws fixed". Crossed with axis 2 it becomes "and 14 of them are on 777
+of our hosts". Crossed with the scanner's own identifiers it becomes a query
+the patching team can paste into a console. Same article, three levels of
+usefulness, and only the third one gets acted on.
+
+The scheduling turned out to be the subtle part. "The second Wednesday of the
+month" is how everyone describes the day after Patch Tuesday, and it is wrong
+in roughly one month in seven: when the 1st falls on a Wednesday, the second
+Wednesday arrives six days *before* the second Tuesday. A lane on that
+schedule wakes up before the thing it summarises exists. The correct
+expression is the Wednesday after the second Tuesday, which is always the
+9th–15th.
+
 ### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
 
 Two lanes that watch the fleet rather than the estate:
@@ -235,6 +261,7 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | The job | The fleet |
 |---|---|
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
+| Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, with our own exposure and the scanner query |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
 | Track known-exploited vulnerabilities and compliance deadlines | `cti-kev`, against CISA's published due dates |

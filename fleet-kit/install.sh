@@ -30,12 +30,13 @@ install -m 750 "$SRC/fleet/bin/fleet-board"  "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/fleet-db"     "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/run-digest"   "$FLEET_HOME/bin/"
 install -m 750 "$SRC/fleet/bin/run-checkin"  "$FLEET_HOME/bin/"
+install -m 750 "$SRC/fleet/bin/run-patchtuesday" "$FLEET_HOME/bin/"
 # The Go helpers are optional on this path - this installer assumes a prebuilt
 # agent and does not compile anything. Copy them if they are lying next to the
 # kit, and say so plainly if they are not: run-checkin skips the budget gate
 # when cti-budget is absent, so an ungated heartbeat looks identical to a
 # governed one right up until it exhausts the operator's quota.
-for helper in cti-alert cti-budget; do
+for helper in cti-alert cti-budget cti-kev cti-patchtuesday; do
   if [ -x "$SRC/$helper" ]; then
     install -m 750 "$SRC/$helper" "$FLEET_HOME/bin/"
     echo "  installed bin/$helper"
@@ -59,7 +60,7 @@ install -m 640 "$SRC/fleet/CLAUDE.md" "$FLEET_HOME/CLAUDE.md"
 # ── 3. skills ────────────────────────────────────────────────────────────────
 say "Skills"
 SKILLS="$(dirname "$FLEET_HOME")/.claude/skills"
-for s in checkin cti-digest scout-sweep; do
+for s in checkin cti-digest scout-sweep patch-tuesday; do
   install -d -m 750 "$SKILLS/$s"
   install -m 640 "$SRC/fleet/skills/$s/SKILL.md" "$SKILLS/$s/SKILL.md"
   echo "  /$s"

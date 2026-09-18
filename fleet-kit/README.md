@@ -146,6 +146,9 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:clean` | — | Wipe `.fleet-local/` | no |
 | `task kev` | `cti-kev` | CISA KEV deadlines for findings present in the estate | no |
 | `task test:kev` | — | Deadline bands, sign convention, present-only filtering | no |
+| `task patchtuesday` | `run-patchtuesday --dry-run` | Build the monthly Patch Tuesday synopsis | **dry run** |
+| `task patchtuesday MONTH=2026-08` | `--month 2026-08` | Replay a past month to check the lane | never sends |
+| `task test:patchtuesday` | — | Date maths, source parsing, exposure, QQL | no |
 
 ### Failure alerting
 
@@ -916,6 +919,109 @@ could not check coverage for is not a clean result, it means you did not look.
 
 ---
 
+## The monthly Patch Tuesday synopsis
+
+Once a month Microsoft ships a defined set of fixes and the patching team needs
+one email. This lane builds it: the two public wrap-ups everyone reads, plus the
+one thing neither of them can tell you — what landed on *our* machines.
+
+```bash
+fleet run-patchtuesday --dry-run          # render, send nothing
+fleet run-patchtuesday                    # send to DIGEST_TO
+fleet run-patchtuesday --month 2026-08    # replay a past month, never sends
+```
+
+### Why it is a lane and not part of @scout
+
+`@scout` polls feeds continuously for CVE IDs and dedupes them. It has no
+notion of a monthly anchor, cannot lift a QQL query string out of prose, and
+produces findings rather than an article. This lane adds a different axis: the
+**vendor release cycle**. The question is not "what is new today" but "what did
+this release land on us, and what do we tell the people who have to patch it".
+
+It reuses rather than reinvents: the Qualys KnowledgeBase cache for CVE→QID,
+Host Detection for presence, the Sev5–Sev1 bands, and `mailer.py` as the single
+outbound channel. Presence still comes only from the scanner.
+
+### What the email contains
+
+In this order, matching the format the team already reads:
+
+1. **Microsoft's numbers** — total, critical, important. From the sources.
+2. **Our exposure** — *"The Exposure for <org> is ~1510 new vulnerabilities
+   across 777 hosts."* From Host Detection. Detections sum; **hosts are
+   unioned**, because the same machine appears under many QIDs and summing
+   them produces a host count larger than the estate.
+3. **The QQL** — the most-used line in the whole email.
+4. CVEs confirmed present, with QIDs and severity band.
+5. Zero-days, Edge, products covered, the category table, Adobe.
+6. Both source links, with any that failed marked as such.
+
+### The QQL is never paraphrased
+
+Someone pastes this into the Qualys console. A reworded query silently returns
+a different set and they act on it. Preference order:
+
+| Source | When | Why first |
+|---|---|---|
+| QIDs with open detections here | normal case | Returns *our* machines, not every machine in the world |
+| Whatever Qualys published, verbatim | no detections mapped yet | It is their query; it is reproduced byte-for-byte |
+| A CVE filter | no QID mapping at all | Still usable on the morning it matters |
+
+The generated form is byte-compatible with what has gone out by hand for
+months: `vulnerabilities.vulnerability: ( qid: 110525 or qid: 110526 ... )`.
+
+### The timing is not "the second Wednesday"
+
+It is **the Wednesday after the second Tuesday**, which is not the same thing
+and the difference is not cosmetic. Whenever the 1st of the month falls on a
+Wednesday, the second Wednesday lands **six days before** Patch Tuesday —
+April and July 2026, September and December 2027, and ten of the next
+seventy-two months. A timer set on the second Wednesday would wake up before
+the content it is meant to summarise exists, find nothing, and report an empty
+month.
+
+Patch Tuesday + 1 is always a Wednesday and always falls on the 9th–15th,
+verified across 2026–2040. Hence `OnCalendar=Wed *-*-09..15`, and
+`FLEET_PATCHTUESDAY_TIME` for the hour.
+
+The lane also refuses to summarise a release that has not happened yet, so a
+manual run early in the month reports on last month rather than producing a
+confidently empty email.
+
+### Testing it against a month you already sent
+
+```bash
+fleet run-patchtuesday --month 2026-08
+```
+
+A replay renders and **stops**. Re-mailing August's synopsis in September to
+the distribution list is not a test, so sending a replay needs `--for-real` on
+top of `--month`.
+
+### Degradation
+
+| Situation | Behaviour |
+|---|---|
+| One source unreachable | Sends, with a banner naming which and warning counts may be low. The Qualys exposure figures are unaffected and it says so |
+| Both sources unreachable | **Sends nothing**, exits non-zero, `cti-alert` fires. A synopsis assembled from nothing looks like a quiet month |
+| Qualys correlation fails | Sends the public synopsis, states that our own exposure could not be measured |
+| No QID mapping for the new CVEs | Exposure reads *"not yet measurable"*, never *"0"*. Normal within a day or two of a release, and not a clean result |
+
+That last row matters most. On the morning after a release the KnowledgeBase
+frequently has not caught up, and "0 new vulnerabilities" would announce a
+clean estate on the strength of missing data.
+
+### Two new outbound hosts
+
+The lane reads `blog.qualys.com` and `www.bleepingcomputer.com` over 443. Both
+are now in the installer's connectivity preflight. If your egress is filtered
+as tightly as port 22 was, expect to need a firewall change — and note that a
+publisher blocking an unrecognised user agent shows up here as `HTTP 403`,
+which the banner reports rather than working around.
+
+---
+
 ## Autonomy — where the gates are
 
 The shipped default is **auto-send scheduled digests, gate everything else**,
@@ -991,6 +1097,7 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
 | Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
+| Wed after the 2nd Tuesday, 07:30 | Microsoft Patch Tuesday synopsis | `cti-agent-patchtuesday.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then

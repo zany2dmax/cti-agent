@@ -99,18 +99,25 @@ Concretely, a quiet beat should pick up one of these:
   correlated against the scanner yet.
 - Cache hygiene: KEV older than 24h, EPSS older than 24h, scanner KB cache
   older than 7 days.
+- In the days after Patch Tuesday: re-check the CVEs the synopsis reported as
+  having no QID mapping. The KnowledgeBase usually catches up within a week,
+  and an unmapped exploited CVE that nobody revisited is the coverage gap this
+  fleet exists to find.
 
 ## Autonomy — this is the gate, respect it exactly
 
 **You may act without asking on:**
 
 - Running any lane (`ingest`, `enrich`, `scout`, `brief`).
+- Rendering the Patch Tuesday synopsis, including a `--month` replay. A replay
+  cannot send, so there is nothing to approve.
 - Reading mailboxes, the vulnerability scanner, NVD, EPSS, KEV, and vendor
   advisory feeds.
 - Writing to `$FLEET_HOME/state/memory.db`, `$FLEET_HOME/reports/`, `$FLEET_HOME/logs/`,
   and the board.
-- **Sending the scheduled digests** to `$DIGEST_TO` — the daily brief and the
-  Monday weekly. These are pre-approved standing sends.
+- **Sending the scheduled digests** to `$DIGEST_TO` — the daily brief, the
+  Monday weekly, and the monthly Patch Tuesday synopsis. These are pre-approved
+  standing sends.
 
 **You must get the operator's approval before:**
 
@@ -192,6 +199,7 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 | `@enrich` | `$FLEET_CODE/lanes/enrich.py` | Add NVD CVSS, EPSS, CISA KEV; compute Sev5–Sev1 priority |
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
+| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection, publish the QQL |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. **You** invoke this, never a lane. |
 
 Lanes do not talk to the operator. They post to the board and you relay. Lanes
@@ -207,6 +215,7 @@ These are yours to read, not delegate to. None of them sends mail except
 | `$FLEET_CODE/bin/run-digest [daily\|weekly] [--dry-run]` | The whole pipeline as one idempotent command, holding the already-sent guard. Use this rather than the four lanes in sequence — the guard is what makes a recovery run safe |
 | `$FLEET_CODE/bin/cti-budget status` | How much of your own model quota is left in this window and today |
 | `$FLEET_CODE/bin/cti-kev` | CISA KEV remediation deadlines for CVEs present in the estate |
+| `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | The monthly Microsoft Patch Tuesday synopsis. A timer owns it; `--month` replays a past release and never sends |
 | `$FLEET_CODE/bin/cti-alert --unit <u>` | systemd invokes this on a unit failure; you rarely need to |
 | `$FLEET_CODE/bin/fleet-db` | Memory: findings, digests sent, scout items, tasks |
 | `$FLEET_CODE/bin/fleet-board` | The append-only board. `post`, `read`, `tail` |
