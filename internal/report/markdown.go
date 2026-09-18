@@ -197,6 +197,10 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 
 	// 0600, not 0644 - this file is sensitive even when redacted, because the
 	// CVE/host-count pairs alone describe where the environment is weak.
+	//
+	// #nosec G304 -- path comes from REPORT_PATH in the service configuration.
+	// The mode is the control that matters here and it is deliberately 0600;
+	// see the package comment.
 	return os.WriteFile(path, []byte(b.String()), 0600)
 }
 
