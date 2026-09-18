@@ -432,17 +432,28 @@ func TestPublishedQIDsComeOutOfTheReviewsOwnQQL(t *testing.T) {
 			break
 		}
 	}
-	// Deduped, sorted, and tolerant of the spacing variants that appear in
-	// hand-written queries.
+	// Deduped, sorted, case-insensitive, and tolerant of the spacing variants
+	// that appear in hand-written queries.
+	//
+	// The short QIDs are here on purpose. This assertion failed first time
+	// against a three-digit floor in the pattern, which had looked like
+	// harmless defensiveness: Patch Tuesday QIDs are always five or six
+	// digits. But Qualys issues low QIDs too, and a floor drops one out of a
+	// published query silently - the exact shape of bug this lane keeps
+	// producing. The "qid:" label is what makes a short number trustworthy.
 	mixed := QIDsFromQQL([]string{
-		"vulnerabilities.vulnerability: ( qid:5 or qid: 5 or QID : 3 )",
-		"vulnerabilities.vulnerability: ( qid: 999999 )",
+		"vulnerabilities.vulnerability: ( qid:6 or qid: 6 or QID : 45 )",
+		"vulnerabilities.vulnerability: ( qid: 110531 )",
 	})
-	if len(mixed) != 3 || mixed[0] != 3 || mixed[1] != 5 || mixed[2] != 999999 {
-		t.Errorf("QIDsFromQQL = %v, want [3 5 999999]", mixed)
+	if len(mixed) != 3 || mixed[0] != 6 || mixed[1] != 45 || mixed[2] != 110531 {
+		t.Errorf("QIDsFromQQL = %v, want [6 45 110531]", mixed)
 	}
 	if len(QIDsFromQQL(nil)) != 0 {
 		t.Error("no QQL should yield no QIDs")
+	}
+	// A number with no label is not a QID, however plausible it looks.
+	if got := QIDsFromQQL([]string{"110531 or something: 92437"}); len(got) != 0 {
+		t.Errorf("unlabelled numbers should not be read as QIDs: %v", got)
 	}
 }
 
@@ -691,7 +702,7 @@ func TestAFailedCorrelationNeverDiagnosesTheKnowledgeBase(t *testing.T) {
 	// The rule: nothing may be said about the KnowledgeBase, the scanner or
 	// the estate unless the scanner was actually queried.
 	for _, e := range []Exposure{
-		{},                              // never populated at all
+		{},                                  // never populated at all
 		Unmeasured("no Qualys credentials"), // populated honestly
 	} {
 		line := e.ExposureLine("CR")

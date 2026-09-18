@@ -347,7 +347,13 @@ func firstString(text string, pats []*regexp.Regexp) string {
 	return ""
 }
 
-var reQIDInQQL = regexp.MustCompile(`(?i)\bqid\s*:\s*(\d{3,9})`)
+// The digit floor is 1, not 3. Patch Tuesday QIDs are all five or six digits,
+// so a minimum of three looked harmlessly defensive - but Qualys does issue
+// low QIDs (qid: 6 is DNS hostname), and a floor would have dropped one from a
+// published query with no error anywhere. The literal "qid:" prefix is the
+// context that makes a short number trustworthy; a bare number needs a length
+// guard, a labelled one does not. The upper bound stays as a sanity limit.
+var reQIDInQQL = regexp.MustCompile(`(?i)\bqid\s*:\s*(\d{1,9})`)
 
 // QIDsFromQQL pulls the QID list out of a published QQL string, deduped and
 // sorted. Parsing our own output format back in is deliberate: the QQL is the
