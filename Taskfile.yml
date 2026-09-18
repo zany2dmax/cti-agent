@@ -87,6 +87,18 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  ship:
+    desc: "fmt, build, full test suite, then push. Refuses to push if any step fails."
+    # Exists because `task test` and `git push` typed as separate lines are not
+    # a gate: a red test scrolled past and the push went out anyway. Task stops
+    # at the first failing command, so here the ordering is the enforcement
+    # rather than something to remember.
+    cmds:
+      - task: fmt
+      - go build ./...
+      - task: test
+      - git push
+
   patchtuesday:
     desc: "Build the synopsis without sending. Usage: task patchtuesday MONTH=2026-08"
     # Sources ./.env when present so a local replay can reach the scanner and

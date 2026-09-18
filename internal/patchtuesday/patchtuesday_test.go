@@ -1018,8 +1018,8 @@ func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
 	if !strings.Contains(txt, "and 35 more") {
 		t.Errorf("truncation must be stated, not silent:\n%s", txt)
 	}
-	if !strings.Contains(txt, "(40)") {
-		t.Error("the full count still has to appear")
+	if !strings.Contains(txt, "(40 CVEs)") {
+		t.Errorf("the full count still has to appear:\n%s", txt)
 	}
 	// An unenriched row must never outrank a known Sev5 at equal host counts.
 	tie := &Report{Digest: dg, Org: "CR", Highlights: []Highlight{
