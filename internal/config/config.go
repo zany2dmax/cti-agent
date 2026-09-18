@@ -38,9 +38,9 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		TenantID:          os.Getenv("TENANT_ID"),
-		ClientID:          os.Getenv("CLIENT_ID"),
-		ClientSecret:      os.Getenv("CLIENT_SECRET"),
+		TenantID:     os.Getenv("TENANT_ID"),
+		ClientID:     os.Getenv("CLIENT_ID"),
+		ClientSecret: os.Getenv("CLIENT_SECRET"),
 		// No default. A hardcoded address here shipped one organisation's
 		// internal distribution list as the fallback for everyone else's
 		// deployment, and an unconfigured install read that mailbox instead
