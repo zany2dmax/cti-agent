@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# run-patchtuesday [--dry-run] [--month YYYY-MM]
+#
+# The monthly Microsoft Patch Tuesday synopsis: read the two public wrap-ups,
+# correlate against Qualys, render, send. Deterministic shell, same as
+# run-digest - the orchestrator does not run this and delivery does not depend
+# on a model being available.
+#
+# --month replays a past release, which is how you check the lane against an
+# email you already sent by hand. A replay never sends unless you also pass
+# --for-real, because re-mailing August's Patch Tuesday in September to the
+# whole distribution list is not a test, it is an incident.
+set -euo pipefail
+
+DRY=""
+MONTH=""
+FOR_REAL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run"; shift ;;
+    --month)    MONTH="$2"; shift 2 ;;
+    --for-real) FOR_REAL=1; shift ;;
+    *) echo "usage: run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real]" >&2; exit 2 ;;
+  esac
+done
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+# See run-digest: fleet.env must not overwrite the layout the unit injected.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+export FLEET_HOME FLEET_CODE
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+BOARD="$FLEET_CODE/bin/fleet-board"
+DB="$FLEET_CODE/bin/fleet-db"
+PT="$FLEET_CODE/bin/cti-patchtuesday"
+
+mkdir -p "$FLEET_HOME"/{reports,state,logs}
+say()  { echo "[run-patchtuesday $(date '+%F %H:%M:%S')] $*"; }
+fail() { say "FAILED: $*"; "$BOARD" post @patchtuesday @you ERROR \
+         "run-patchtuesday failed: $*" 2>/dev/null || true; exit 1; }
+
+[ -x "$PT" ] || fail "cti-patchtuesday not found at $PT - rerun the installer"
+
+# Which month, resolved here so the filenames and the already-sent guard agree
+# with what the binary reports on.
+if [ -n "$MONTH" ]; then
+  TAG="$MONTH"
+  MONTH_ARG=(--month "$MONTH")
+else
+  TAG="$("$PT" --subject-only | sed -n 's/.*for \([A-Za-z]*\) \([0-9]*\).*/\2-\1/p')"
+  [ -n "$TAG" ] || TAG="$(date +%Y-%m)"
+  MONTH_ARG=()
+fi
+
+HTML="$FLEET_HOME/reports/patchtuesday-$TAG.html"
+TXT="$FLEET_HOME/reports/patchtuesday-$TAG.txt"
+JSON="$FLEET_HOME/state/patchtuesday-$TAG.json"
+
+# Do not send twice for the same release. The guard is keyed on the month, so a
+# rerun after a failure is safe and a second timer firing is a no-op.
+KIND="patchtuesday"
+if [ -z "$DRY" ] && [ -z "$FOR_REAL" ] \
+   && [ "$("$DB" was-sent "$TAG" "$KIND" 2>/dev/null || echo no)" = "yes" ]; then
+  say "$TAG synopsis already sent - nothing to do"
+  exit 0
+fi
+
+say "building the $TAG synopsis"
+"$PT" "${MONTH_ARG[@]}" --out "$HTML" --text-out "$TXT" --json "$JSON" \
+  || fail "cti-patchtuesday exited non-zero (check outbound 443 to blog.qualys.com and www.bleepingcomputer.com)"
+[ -s "$HTML" ] || fail "no HTML written to $HTML"
+
+SUBJECT="$("$PT" "${MONTH_ARG[@]}" --subject-only)"
+say "subject: $SUBJECT"
+
+# A replayed month is a test. Sending it to the distribution list would be a
+# mis-send, so it needs --for-real on top of --month.
+if [ -n "$MONTH" ] && [ -z "$FOR_REAL" ] && [ -z "$DRY" ]; then
+  say "replay of $MONTH - rendered but NOT sent. Review $HTML, then add"
+  say "--for-real if you actually want this mailed."
+  "$BOARD" post @patchtuesday @you INFO \
+    "replayed $MONTH Patch Tuesday synopsis to $HTML (not sent)" 2>/dev/null || true
+  exit 0
+fi
+
+say "send: $SUBJECT"
+RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+           --subject "$SUBJECT" $DRY) || fail "send failed"
+echo "$RESULT"
+
+if [ -z "$DRY" ]; then
+  MID=$(printf '%s' "$RESULT" | python3 -c \
+    "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" \
+    2>/dev/null || echo unknown)
+  PRESENT=$(python3 -c "
+import json
+try:
+    d=json.load(open('$JSON'))
+    print(len(d.get('exposure',{}).get('PresentCVEs') or []))
+except Exception:
+    print(0)")
+  # Reuse the digests table: same shape, distinct kind, so was-sent works and
+  # the counts column carries something meaningful for this lane too.
+  "$DB" sent "$TAG" "$PRESENT" 0 0 0 0 "$MID" "$KIND" 2>/dev/null || true
+  "$BOARD" post @patchtuesday @you INFO \
+    "$TAG Patch Tuesday synopsis sent: $PRESENT CVE(s) present here ($SUBJECT)" \
+    2>/dev/null || true
+  say "done - $PRESENT CVE(s) present in our environment"
+else
+  "$BOARD" post @patchtuesday @you INFO \
+    "DRY RUN $TAG Patch Tuesday synopsis ready at $HTML" 2>/dev/null || true
+  say "dry run complete - $HTML"
+fi
