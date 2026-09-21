@@ -223,7 +223,7 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL |
-| `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive processed advisories, move header-confirmed auto-replies to Deleted Items, leave unread mail alone. **You do not run this with `--for-real`** - see below |
+| `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive CTI advisories the agent took a CVE from, move header-confirmed auto-replies to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. **You** invoke this, never a lane. |
 
 Lanes do not talk to the operator. They post to the board and you relay. Lanes

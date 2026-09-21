@@ -1027,11 +1027,49 @@ The rules run in this order and the order is the safety property:
 2. Carries a CVE → **archive**, never delete. A message that contributed a
    finding is evidence.
 3. Declared an auto-reply by its own headers → **Deleted Items**.
-4. Anything else that was processed → **archive**.
+4. Anything else → **leave**.
 
 Rule 2 sits above rule 3 because an out-of-office reply that quotes an advisory
 back matches both, and archiving something that should have been deleted is a
 tidiness failure while deleting a real advisory is a loss.
+
+#### Rule 4 was "archive", and the first production dry run showed why it cannot be
+
+`cybersecurity@` is not a feed. It is the team's shared reporting mailbox:
+everyone reads it, and its contents are how a new starter finds out what has
+been happening and how work survives somebody leaving. Mail moved out of it by
+a bot is institutional memory taken away from the people who need it, on a
+timer, with nobody watching.
+
+With rule 4 as archive, the first real dry run proposed archiving:
+
+```
+archive suspicious                                       (processed, no CVE, not an automatic reply)
+archive FW: Atlanta Office Technologies Inc Invoice      (processed, no CVE, not an automatic reply)
+archive Microsoft Defender for Cloud found potential ... (processed, no CVE, not an automatic reply)
+archive Qualys: Scheduled Web Application Vuln Scan ...  (processed, no CVE, not an automatic reply)
+archive pathway missing again                            (processed, no CVE, not an automatic reply)
+```
+
+A colleague reporting a phish in one word, a forwarded invoice, an alert about
+an attack path, and two pieces of operational mail — filed away before anybody
+triaged them.
+
+The bug is in the reason text. **"The agent read it looking for CVEs and found
+none" is not "this has been dealt with"**, and only the first of those is what
+the processed-message log records. The instruction was to archive the CTI
+emails; archiving everything the agent happened to glance at was a reading of
+that instruction nobody asked for.
+
+So exactly two kinds of message may ever move: a CTI advisory the agent took a
+CVE from, and a message whose own headers declare it an automatic reply.
+Everything else stays where a human can see it. The same ten messages now plan
+as **archive 3, delete 2, leave 5**.
+
+`TestOnlyCTIAdvisoriesAndAutoRepliesEverMove` is the regression test, written
+from those real subjects, and `TestEveryInputCombinationIsPinnedDown`
+enumerates all ten reachable input combinations so a future edit to the rule
+order fails a test instead of losing mail.
 
 Detection is **headers only** — `Auto-Submitted: auto-replied` or Exchange's
 `X-Auto-Response-Suppress`. Subject text does not delete mail: "Automatic
@@ -1042,8 +1080,19 @@ headers stays in the inbox, which is the failure we want.
 
 #### The backlog count is an ingest monitor
 
-Cleanup reports how many inbox messages it left alone for want of a processing
-record, and escalates above the threshold. That number is not really about
+Cleanup reports how many inbox messages it left alone **for want of a
+processing record** — not the total it left alone. Once rule 4 became "leave",
+the leave count started including a security team's ordinary daily traffic, and
+an alarm keyed to it would have fired every day on a perfectly healthy fleet.
+An alert that is always on is an alert nobody reads, so the two are counted
+separately and the dry run prints both:
+
+```
+archive 3   delete 2   leave 5 (0 never read, 5 not CTI mail)
+```
+
+Only the first number can indicate a fault. Cleanup escalates above the
+threshold. That number is not really about
 tidiness: **the digest succeeding every morning while silently reading nothing
 looks exactly like a quiet week.** A failed digest is loud; a digest that reads
 zero messages and cheerfully reports zero findings is not. A climbing backlog is

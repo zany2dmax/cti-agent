@@ -137,8 +137,13 @@ func run() int {
 
 	fmt.Printf("%s: %d message(s) in the window; %d CTI email(s) processed today\n",
 		cfg.GraphMailbox, len(candidates), todayCount)
-	fmt.Printf("  archive %d   delete %d   leave %d\n",
-		counts.Archive, counts.Delete, counts.Leave)
+	// The leave count is split, because its two halves mean opposite things:
+	// mail the agent read and is not responsible for is a security team's
+	// ordinary inbox, while mail it never read is the number that indicates a
+	// fault. One figure covering both told the operator nothing.
+	fmt.Printf("  archive %d   delete %d   leave %d (%d never read, %d not CTI mail)\n",
+		counts.Archive, counts.Delete, counts.Leave,
+		counts.Unread, counts.Leave-counts.Unread)
 	if !*forReal {
 		fmt.Println("  DRY RUN - nothing was moved. Add --for-real to apply.")
 	}

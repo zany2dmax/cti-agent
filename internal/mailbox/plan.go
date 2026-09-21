@@ -37,6 +37,16 @@ type Decision struct {
 	Candidate
 	Action Action
 	Reason string
+
+	// Known records whether the processed-message log had an entry for this
+	// message. It exists because "leave" now has two causes that mean
+	// opposite things: the agent never read it (which may mean the agent has
+	// stopped reading the mailbox), or the agent read it and it simply is not
+	// a CTI advisory (which is normal and permanent). Counting both as one
+	// number would make the backlog alarm fire on a healthy mailbox, and
+	// deriving the difference from the Reason string afterwards would be
+	// parsing our own prose.
+	Known bool
 }
 
 // Plan decides what to do with each candidate.
@@ -49,12 +59,35 @@ type Decision struct {
 //  2. Carries a CVE -> archive, never delete. A message that contributed a
 //     finding is evidence; it goes to Archive whatever else it looks like.
 //  3. Declared an auto-reply by its own headers -> Deleted Items.
-//  4. Anything else that was processed -> archive.
+//  4. Anything else -> leave.
 //
 // Rule 2 sits above rule 3 deliberately. An out-of-office reply quoting an
 // advisory in its body would match both, and archiving something that should
 // have been deleted is a tidiness failure, whereas deleting a genuine advisory
 // is a loss.
+//
+// # WHY RULE 4 IS "LEAVE" AND NOT "ARCHIVE"
+//
+// It used to be archive, and the first real dry run showed what that means.
+// This is a shared security mailbox: alongside the advisories it receives
+// user-reported phishing, Defender alerts, scan notifications and ordinary
+// mail from colleagues. The plan proposed archiving a message whose entire
+// subject was "suspicious", a forwarded invoice, and an alert about a
+// potential attack path - all with the reason "processed, no CVE, not an
+// automatic reply".
+//
+// "The agent read it looking for CVEs and found none" and "this has been
+// dealt with" are different facts, and only the first one is in the
+// processed-message log. Filing away a colleague's phishing report before
+// anybody triaged it is precisely the quiet damage this package's own doc
+// comment warns about, and the operator asked for the CTI emails to be
+// archived - not for everything the agent happened to glance at.
+//
+// So the default is now to do nothing, which also makes the rules match what
+// was actually asked for: CTI mail is archived, out-of-office replies are
+// deleted, everything else is somebody's job. The leave count feeds
+// BacklogNote, so mail accumulating here is reported rather than silently
+// tidied.
 func Plan(candidates []Candidate, processed map[string]Processed) []Decision {
 	out := make([]Decision, 0, len(candidates))
 	for _, c := range candidates {
@@ -65,14 +98,17 @@ func Plan(candidates []Candidate, processed map[string]Processed) []Decision {
 				Reason: "no record that a completed run has read this message"})
 		case rec.HasCVE:
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
-				Reason: "processed and carried at least one CVE"})
+				Reason: "processed and carried at least one CVE", Known: true})
 		case rec.AutoReply || c.AutoReply:
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: "processed, no CVE, and the sending system declared it " +
-					"an automatic reply"})
+					"an automatic reply", Known: true})
 		default:
-			out = append(out, Decision{Candidate: c, Action: ActionArchive,
-				Reason: "processed, no CVE, not an automatic reply"})
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: "read by the agent but carried no CVE, so it is not a " +
+					"CTI advisory this lane is responsible for - could be a " +
+					"reported phish, an alert or a person writing to the team",
+				Known: true})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -89,6 +125,13 @@ type Counts struct {
 	Archive int
 	Delete  int
 	Leave   int
+
+	// Unread is the subset of Leave the agent has no record of reading. It is
+	// the only number here that can indicate a fault: mail the agent read and
+	// left alone is a security team's ordinary inbox, while mail it never read
+	// piling up is what "the digest succeeds every morning and reads nothing"
+	// looks like from outside.
+	Unread int
 }
 
 func Summarise(plan []Decision) Counts {
@@ -101,6 +144,9 @@ func Summarise(plan []Decision) Counts {
 			c.Delete++
 		case ActionLeave:
 			c.Leave++
+			if !d.Known {
+				c.Unread++
+			}
 		}
 	}
 	return c
@@ -116,7 +162,11 @@ func Summarise(plan []Decision) Counts {
 // while silently reading nothing is not, and this is the check that catches
 // it.
 func BacklogNote(c Counts, threshold int) string {
-	if threshold <= 0 || c.Leave < threshold {
+	// c.Unread, not c.Leave. Once "read but not a CTI advisory" became a
+	// leave, c.Leave started counting a healthy security mailbox's ordinary
+	// traffic, and this alarm would have fired every day on a working fleet -
+	// an alert that is always on is an alert nobody reads.
+	if threshold <= 0 || c.Unread < threshold {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -124,5 +174,5 @@ func BacklogNote(c Counts, threshold int) string {
 			"threshold of %d. Cleanup left them alone, which is correct, but a "+
 			"growing backlog usually means messages are arriving outside the "+
 			"agent's lookback window - or that it has stopped reading the "+
-			"mailbox while still reporting success.", c.Leave, threshold)
+			"mailbox while still reporting success.", c.Unread, threshold)
 }
