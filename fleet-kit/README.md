@@ -367,6 +367,7 @@ tree using logic from the old script. Nothing warns you.
 sudo find / -xdev -name install-fedora.sh -path '*fleet-kit*' 2>/dev/null
 # If the only hit is /opt/cti-agent/agent/..., you have no kit checkout yet:
 sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit
+# /root or /usr/local/src - NOT a personal home. See below.
 
 # ── 1. every deploy after that ───────────────────────────────────────────────
 # No `cd ~/...`: the deploy runs under sudo, so ~ is whichever account is
@@ -378,6 +379,14 @@ sudo "$KIT/fleet-kit/install-fedora.sh"
 
 The repository is public and `AGENT_REPO` is plain HTTPS, so the clone needs no
 credentials on the box.
+
+**Not in a personal home directory.** A kit in `/home/<you>` is invisible to the
+next admin, and `find / -xdev` will not even reach it if `/home` is a separate
+filesystem. On a box using directory-based SSH logins the home may not survive
+a logout at all - which is exactly how a working checkout under one account
+became "No such file or directory" under the next login, with `find` reporting
+only the copy inside `/opt/cti-agent/agent`. Put it somewhere tied to the
+machine rather than to whoever happened to deploy last.
 
 The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
 rebuilds all six binaries, rewrites the units, runs `daemon-reload` and
