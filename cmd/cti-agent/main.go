@@ -9,6 +9,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/cti"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/report"
@@ -20,6 +21,13 @@ import (
 
 func main() {
 	ctx := context.Background()
+
+	// fleet.env. run-digest sources it in shell before calling this, so under
+	// systemd this is a no-op; `sudo cti-agent cti-agent` does not, and the
+	// wrapper passes only the FLEET_* layout. Existing environment always
+	// wins, so the runner's values are untouched.
+	fleetenv.Load()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config error: %v", err)

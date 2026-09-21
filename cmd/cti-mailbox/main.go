@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 )
@@ -64,9 +65,18 @@ func run() int {
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall Graph timeout")
 	flag.Parse()
 
-	cfg, err := config.Load()
+	// fleet.env, for a run by hand. The cti-agent wrapper exports only the
+	// FLEET_* layout, so without this every credential reads as missing even
+	// though it is sitting in the file the wrapper just pointed at.
+	fleetenv.Load()
+
+	// Graph only. This lane reads the inbox and moves messages; it never asks
+	// the scanner anything, so demanding Qualys credentials would fail a run
+	// for settings it has no use for.
+	cfg, err := config.LoadGraphOnly()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cti-mailbox: config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "cti-mailbox: read %s\n", fleetenv.Path())
 		return exitFailure
 	}
 
