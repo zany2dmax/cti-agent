@@ -52,8 +52,37 @@ func TestMessagesURLQueryDecodesCorrectly(t *testing.T) {
 	if got := q.Get("$filter"); got != "receivedDateTime ge 2026-09-02T15:08:48Z" {
 		t.Errorf("$filter = %q", got)
 	}
-	if got := q.Get("$select"); got != "id,subject,receivedDateTime,from,body" {
-		t.Errorf("$select = %q", got)
+	// Per field, not as one exact string.
+	//
+	// The old assertion compared the whole comma-separated list, so adding a
+	// field failed the test while REMOVING one - the change that actually
+	// breaks something - would have passed as long as the remainder still
+	// matched some literal. Membership is the property worth holding: each
+	// field is here because something downstream reads it.
+	selected := strings.Split(q.Get("$select"), ",")
+	has := func(f string) bool {
+		for _, s := range selected {
+			if s == f {
+				return true
+			}
+		}
+		return false
+	}
+	for field, why := range map[string]string{
+		"id":               "the message identity; the cleanup lane's whole record is keyed on it",
+		"subject":          "CVE extraction reads it, and the digest lists it",
+		"receivedDateTime": "the lookback window and the report ordering",
+		"from":             "shown in the report",
+		"body":             "where most CVEs actually are",
+		"internetMessageHeaders": "Auto-Submitted and X-Auto-Response-Suppress. " +
+			"Without these every message looks like a human wrote it, so mailbox " +
+			"cleanup would archive out-of-office replies instead of deleting them " +
+			"- and would look like it was working",
+	} {
+		if !has(field) {
+			t.Errorf("$select is missing %q, needed for: %s\n  got %q",
+				field, why, q.Get("$select"))
+		}
 	}
 	if got := q.Get("$top"); got != "50" {
 		t.Errorf("$top = %q, want 50", got)
