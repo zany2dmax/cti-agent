@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,6 +97,18 @@ type Scan struct {
 	// so "N emails" can be checked rather than taken on trust - the single
 	// count invited the question "which fourteen?" and could not answer it.
 	Subjects []ScannedEmail
+
+	// Held maps a CVE withheld from this report to the month whose Patch
+	// Tuesday synopsis already covered it.
+	//
+	// Withheld from the TABLE, listed in full below it. The whole reason to
+	// hold a Patch Tuesday release back from the daily is that a few hundred
+	// rows about one vendor's monthly update drown everything else - but a
+	// CVE that was suppressed and not written down anywhere is a CVE the
+	// audit trail lost. The list is not in the `| CVE-` table format, so the
+	// enrich lane and the row count in run-digest ignore it, and a human
+	// reading the attachment can still see every ID.
+	Held map[string]string
 }
 
 // ScannedEmail is one message the pass looked at.
@@ -125,6 +138,15 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 		scan.Messages)
 	fmt.Fprintf(&b, "- Emails mentioning a CVE: `%d`\n", scan.WithCVEs)
 	fmt.Fprintf(&b, "- Distinct CVEs extracted: `%d`\n", scan.CVEsFound)
+	// Three numbers that add up, printed next to each other. Held CVEs were
+	// extracted and then deliberately left out of the table, and a reader who
+	// cannot reconcile "extracted 361" with a 9-row table will assume the
+	// extraction is broken.
+	if n := len(scan.Held); n > 0 {
+		fmt.Fprintf(&b,
+			"- Held for the monthly Patch Tuesday synopsis: `%d` (listed below, not in the table)\n", n)
+		fmt.Fprintf(&b, "- Looked up and reported in the table: `%d`\n", len(results))
+	}
 	fmt.Fprintf(&b, "- Lookup provider: `%s`\n", provider)
 	fmt.Fprintf(&b, "- Generated: `%s`\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&b, "- Hostname disclosure: `%s`\n\n", mode)
@@ -169,6 +191,37 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 			escape(redactHosts(r.SampleHosts, mode, salt)),
 			escape(r.Reason),
 		)
+	}
+
+	// The held CVEs, in full, outside the table. Suppression that leaves no
+	// record is indistinguishable from a parser that missed them.
+	if len(scan.Held) > 0 {
+		byMonth := map[string][]string{}
+		for cve, month := range scan.Held {
+			byMonth[month] = append(byMonth[month], cve)
+		}
+		months := make([]string, 0, len(byMonth))
+		for m := range byMonth {
+			months = append(months, m)
+		}
+		sort.Strings(months)
+
+		fmt.Fprintf(&b,
+			"\n## Held for the monthly Patch Tuesday synopsis (%d)\n\n", len(scan.Held))
+		b.WriteString("These were extracted from this window's mail and deliberately kept\n")
+		b.WriteString("out of the table above: the monthly synopsis for the month shown has\n")
+		b.WriteString("already been sent, and it organises them by the update that fixes\n")
+		b.WriteString("them. They were not looked up against the scanner here. Listed in\n")
+		b.WriteString("full so nothing is suppressed without a record.\n")
+		for _, m := range months {
+			list := byMonth[m]
+			sort.Strings(list)
+			fmt.Fprintf(&b, "\n**%s** (%d):\n\n", m, len(list))
+			for _, cve := range list {
+				fmt.Fprintf(&b, "- %s\n", cve)
+			}
+		}
+		b.WriteString("\n")
 	}
 
 	// What was actually read. A single "14 emails" count invites the question

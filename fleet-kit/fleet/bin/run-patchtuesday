@@ -137,6 +137,16 @@ RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
 echo "$RESULT"
 
 if [ -z "$DRY" ]; then
+  # The synopsis is out, so the daily digest may now leave this release's CVEs
+  # to it. This is the ONLY place that flag gets set, and it is deliberately
+  # after the mailer: a manifest marked sent by a run whose email failed would
+  # silence the daily about CVEs that then appeared in no email at all.
+  #
+  # Failure here is not fatal. Unmarked means the daily keeps reporting them -
+  # noisy, and the safe direction.
+  "$PT" "${MONTH_ARG[@]}" --mark-sent \
+    || say "WARNING: could not mark the manifest sent; the daily digest will keep reporting this release's CVEs"
+
   MID=$(printf '%s' "$RESULT" | python3 -c \
     "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" \
     2>/dev/null || echo unknown)

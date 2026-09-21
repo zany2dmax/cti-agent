@@ -65,11 +65,11 @@ scripts/                       history scrub + exposure remediation notes
 
 | Binary | Run by | Purpose |
 |---|---|---|
-| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown |
+| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
 | `cti-alert` | systemd `OnFailure=` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found in the estate |
-| `cti-patchtuesday` | `run-patchtuesday`, monthly | Reads the Qualys and BleepingComputer wrap-ups, correlates against Host Detection — using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL — and renders the synopsis with a pasteable QQL |
+| `cti-patchtuesday` | `run-patchtuesday`, monthly | Reads the Qualys and BleepingComputer wrap-ups, correlates against Host Detection — using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL — and renders the synopsis with a pasteable QQL. One table row per QID, not per CVE. Writes the release manifest the daily digest reads |
 | `cti-mailbox`      | `run-mailbox-cleanup`, daily    | The only binary that **modifies** the mailbox: processed advisories to Archive, header-confirmed auto-replies to Deleted Items, anything unread left alone. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
 
 All six are stdlib-only. `go.mod` has no dependencies, and adding one would

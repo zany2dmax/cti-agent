@@ -831,9 +831,9 @@ func report(t *testing.T) *Report {
 			UnmappedCVEs: []string{"CVE-2025-9999"},
 			QIDs:         []int{110531}, Detections: 1510, Hosts: 777,
 		},
-		Highlights: []Highlight{{CVE: "CVE-2026-1111", Sev: "Sev5", Hosts: 12,
-			QIDs: []int{110531}, KEV: true, EPSS: 0.94, CVSS: 9.8,
-			Rationale: "on CISA KEV; PRESENT on 12 host(s)"}},
+		Patches: []Patch{{QID: 110531, Hosts: 12, QDS: 95,
+			LastSeen: "2026-08-14T06:22:11Z", CVEs: []string{"CVE-2026-1111"},
+			Published: true, FromKB: true}},
 	}
 	r.ChooseQQL([]int{110531})
 	return r
@@ -846,31 +846,60 @@ func TestSubjectMatchesTheEstablishedThread(t *testing.T) {
 	}
 }
 
-func TestQQLPrefersOurOwnDetections(t *testing.T) {
+// The review's own QQL leads, because run in the console it returns every QID
+// in the release that has assets against it. A query built from the QIDs this
+// lane managed to correlate is a subset of that whenever the KnowledgeBase
+// mapping lags, and the old preference order put that subset in the headline
+// without saying it was one.
+func TestTheReviewsPublishedQQLLeadsAndOursIsTheSecondBlock(t *testing.T) {
 	r := report(t)
-	if !strings.Contains(r.QQL, "qid: 110531") {
-		t.Errorf("QQL = %q", r.QQL)
+	if !strings.Contains(r.QQLSource, "verbatim") {
+		t.Errorf("the published query should lead; QQLSource = %q", r.QQLSource)
 	}
-	if !strings.Contains(r.QQLSource, "open detections in our environment") {
-		t.Errorf("QQLSource = %q", r.QQLSource)
+	if !strings.Contains(r.QQLSource, "every QID in the release") {
+		t.Errorf("the source line should say what makes it the complete one: %q",
+			r.QQLSource)
+	}
+	if r.QQL != r.Digest.SourceQQL[0] {
+		t.Errorf("the published query must be byte-identical to the review's:\n"+
+			"  got  %q\n  want %q", r.QQL, r.Digest.SourceQQL[0])
+	}
+	// Ours is still there, labelled as the subset it is.
+	if !strings.Contains(r.QQLNarrow, "qid: 110531") {
+		t.Errorf("the narrowed query should carry our detecting QIDs, got %q", r.QQLNarrow)
+	}
+	if !strings.Contains(r.QQLNarrowSource, "subset") {
+		t.Errorf("the narrowed query has to admit it is a subset: %q", r.QQLNarrowSource)
+	}
+	// Both blocks reach the reader.
+	txt := r.Text()
+	if !strings.Contains(txt, r.QQL) || !strings.Contains(txt, r.QQLNarrow) {
+		t.Errorf("both queries belong in the email:\n%s", txt)
 	}
 }
 
-func TestQQLFallsBackToTheSourcesThenToCVEs(t *testing.T) {
-	r := &Report{Digest: parsed(t), Org: "CR"}
-	r.ChooseQQL(nil) // nothing detected here
-	if !strings.Contains(r.QQL, "qid: 110531") {
-		t.Errorf("should fall back to the published QQL, got %q", r.QQL)
+// Identical content twice is not two queries.
+func TestTheNarrowedQQLIsDroppedWhenItWouldRepeatTheFirst(t *testing.T) {
+	bare := &Digest{Year: 2026, Month: time.May, CVEs: []string{"CVE-2026-1"}}
+	r := &Report{Digest: bare, Org: "CR"}
+	r.ChooseQQL([]int{4242})
+	if !strings.Contains(r.QQL, "qid: 4242") {
+		t.Errorf("with no published QQL, ours is the query: %q", r.QQL)
 	}
-	if !strings.Contains(r.QQLSource, "verbatim") {
-		t.Errorf("QQLSource = %q", r.QQLSource)
+	if !strings.Contains(r.QQLSource, "not the complete release") {
+		t.Errorf("and it must say it is not the whole release: %q", r.QQLSource)
 	}
+	if r.QQLNarrow != "" {
+		t.Errorf("the same query should not be printed twice, got %q", r.QQLNarrow)
+	}
+}
 
+func TestQQLFallsBackToCVEsWhenThereAreNoQIDsAtAll(t *testing.T) {
 	bare := &Digest{Year: 2026, Month: time.May, CVEs: []string{"CVE-1", "CVE-2"}}
-	r2 := &Report{Digest: bare, Org: "CR"}
-	r2.ChooseQQL(nil)
-	if !strings.Contains(r2.QQL, "cveIds") {
-		t.Errorf("last resort should be a CVE filter, got %q", r2.QQL)
+	r := &Report{Digest: bare, Org: "CR"}
+	r.ChooseQQL(nil)
+	if !strings.Contains(r.QQL, "cveIds") {
+		t.Errorf("last resort should be a CVE filter, got %q", r.QQL)
 	}
 }
 
@@ -881,7 +910,10 @@ func TestHTMLCarriesTheThingsTheReaderCameFor(t *testing.T) {
 		"~1510 new vulnerabilities across 777 hosts", // the exposure line
 		"qid: 110531",                                // the QQL, pasteable
 		"CVE-2026-1111",                              // present here
-		"Sev5",                                       // banded
+		">110531",                                    // the QID, which is the row
+		"95",                                         // its QDS, from Host Detection
+		"2026-08-14",                                 // when it was last seen
+		"Qualys Detection Score",                      // the legend for the column
 		"no Qualys QID mapping",                      // the coverage caveat
 		"Present in our environment",                 // the section that makes it ours
 		"421",                                        // Microsoft's count, per Qualys
@@ -959,54 +991,20 @@ func TestTextVersionLeadsWithTheQQLOnItsOwnLine(t *testing.T) {
 	}
 }
 
-func TestTheSeverityColumnIsOmittedRatherThanFilledWithQuestionMarks(t *testing.T) {
-	// The August replay printed "?" in every row of the Sev column, because
-	// nothing in the lane ever set it. A column that cannot hold a value is
-	// not a column.
-	r := &Report{Digest: parsed(t), Org: "CR",
-		Exposure: Exposure{Attempted: true, QIDs: []int{1}, Detections: 5, Hosts: 2},
-		Highlights: []Highlight{
-			{CVE: "CVE-2026-1111", Hosts: 9, QIDs: []int{1}},
-			{CVE: "CVE-2026-2222", Hosts: 3, QIDs: []int{1}},
-		}}
-	txt := r.Text()
-	for _, line := range strings.Split(txt, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "CVE-") &&
-			strings.Contains(line, "?") {
-			t.Errorf("placeholder severity still printed on a CVE row: %q", line)
-		}
-	}
-	if !strings.Contains(txt, "No severity band") {
-		t.Error("the absence should be explained once, not implied per row")
-	}
-	if strings.Contains(r.HTML(), ">Sev<") {
-		t.Error("HTML should drop the Sev header when nothing populates it")
-	}
 
-	// With enrichment, the column appears and carries the band.
-	r.Highlights[0].Sev = "Sev5"
-	r.Highlights[0].Rationale = "on CISA KEV; PRESENT on 9 host(s)"
-	txt = r.Text()
-	if !strings.Contains(txt, "Sev5") {
-		t.Errorf("band missing from the text version:\n%s", txt)
-	}
-	if !strings.Contains(r.HTML(), ">Sev<") {
-		t.Error("HTML should show the Sev header once a band exists")
-	}
-}
 
-func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
+
+func TestTheTableIsOneRowPerQIDSortedByBlastRadiusAndCapped(t *testing.T) {
 	dg := parsed(t)
-	// Distinct QID per CVE, so nothing collapses and the cap is what bites.
-	var hs []Highlight
+	var ps []Patch
 	for i := 0; i < 40; i++ {
-		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i),
-			Hosts: i, QIDs: []int{1000 + i}})
+		ps = append(ps, Patch{QID: 1000 + i, Hosts: i, CVEs: []string{
+			fmt.Sprintf("CVE-2026-%05d", i)}})
 	}
 	r := &Report{Digest: dg, Org: "CR", MaxRows: 5,
 		Exposure: Exposure{Attempted: true, QIDs: []int{1}, DetectingQIDs: []int{1},
 			Detections: 40, Hosts: 39},
-		Highlights: hs}
+		Patches: ps}
 	shown, hidden := r.rows()
 	if len(shown) != 5 || hidden != 35 {
 		t.Fatalf("rows() = %d shown, %d hidden; want 5 and 35", len(shown), hidden)
@@ -1015,72 +1013,114 @@ func TestTheTableIsSortedByBlastRadiusAndCapped(t *testing.T) {
 		t.Errorf("worst first: got %d hosts at the top", shown[0].Hosts)
 	}
 	txt := r.Text()
-	if !strings.Contains(txt, "and 35 more") {
+	if !strings.Contains(txt, "and 35 more QID(s)") {
 		t.Errorf("truncation must be stated, not silent:\n%s", txt)
 	}
-	if !strings.Contains(txt, "(40 CVEs)") {
+	if !strings.Contains(txt, "40 QID(s) with assets") {
 		t.Errorf("the full count still has to appear:\n%s", txt)
 	}
-	// An unenriched row must never outrank a known Sev5 at equal host counts.
-	tie := &Report{Digest: dg, Org: "CR", Highlights: []Highlight{
-		{CVE: "CVE-2026-00001", Hosts: 5, QIDs: []int{1}},
-		{CVE: "CVE-2026-00002", Hosts: 5, QIDs: []int{2}, Sev: "Sev5"},
+	// QDS breaks a tie on host count, so the riskier of two equally widespread
+	// patches is the one that survives the cap.
+	tie := &Report{Digest: dg, Org: "CR", Patches: []Patch{
+		{QID: 111, Hosts: 5, QDS: 30},
+		{QID: 222, Hosts: 5, QDS: 95},
 	}}
-	if got, _ := tie.rows(); got[0].CVE != "CVE-2026-00002" {
-		t.Errorf("Sev5 should break the tie, got %s first", got[0].CVE)
+	if got, _ := tie.rows(); got[0].QID != 222 {
+		t.Errorf("QDS should break the tie, got QID %d first", got[0].QID)
 	}
 }
 
-func TestOneRowPerUpdateNotOneRowPerCVE(t *testing.T) {
-	// The August replay's capped table was 24 CVEs carrying the identical QID
-	// pair on the identical 331 hosts, then one other. It stated one fact 24
-	// times and pushed the remaining eleven patches below the cut - a cap
-	// without collapsing just moves the noise around.
-	var hs []Highlight
+// The August replay's table was 353 CVE rows, nearly all carrying one of two
+// cumulative-update QIDs on the same 331 hosts: one fact stated hundreds of
+// times. The unit is now the QID, so the same input is a handful of rows and
+// the CVE count becomes a number in the caption rather than the shape of the
+// table.
+func TestTwoCumulativeUpdatesAreTwoRowsNotTwoHundred(t *testing.T) {
+	cves := make([]string, 0, 200)
 	for i := 0; i < 200; i++ {
-		hs = append(hs, Highlight{CVE: fmt.Sprintf("CVE-2026-%05d", i),
-			Hosts: 331, QIDs: []int{92439, 92440}})
+		cves = append(cves, fmt.Sprintf("CVE-2026-%05d", i))
 	}
-	hs = append(hs,
-		Highlight{CVE: "CVE-2026-70000", Hosts: 12, QIDs: []int{110532}},
-		Highlight{CVE: "CVE-2026-70001", Hosts: 2, QIDs: []int{388257}})
-
 	r := &Report{Digest: parsed(t), Org: "CR", MaxRows: 25,
-		Exposure: Exposure{Attempted: true, QIDs: []int{92439, 92440, 110532, 388257},
+		Exposure: Exposure{Attempted: true,
+			QIDs:          []int{92439, 92440, 110532, 388257},
 			DetectingQIDs: []int{92439, 92440, 110532, 388257},
 			Detections:    600, Hosts: 340},
-		Highlights: hs}
+		Patches: []Patch{
+			{QID: 92439, Hosts: 331, QDS: 70, CVEs: cves},
+			{QID: 92440, Hosts: 331, QDS: 65, CVEs: cves},
+			{QID: 110532, Hosts: 12, CVEs: []string{"CVE-2026-70000"}},
+			{QID: 388257, Hosts: 2, CVEs: []string{"CVE-2026-70001"}},
+		}}
 
 	shown, hidden := r.rows()
-	if len(shown) != 3 {
-		t.Fatalf("got %d rows, want 3 - one per distinct QID set", len(shown))
+	if len(shown) != 4 {
+		t.Fatalf("got %d rows, want 4 - one per QID", len(shown))
 	}
 	if hidden != 0 {
-		t.Errorf("nothing should be hidden: 3 rows is under the cap, got hidden=%d", hidden)
+		t.Errorf("4 rows is under the cap, got hidden=%d", hidden)
 	}
-	if shown[0].SharedWith != 199 {
-		t.Errorf("the rollup row should account for 199 others, got %d", shown[0].SharedWith)
+	// The small patches keep their place instead of being pushed under the cut
+	// by the rollups.
+	if shown[2].QID != 110532 || shown[3].QID != 388257 {
+		t.Errorf("smaller updates lost their place: %d, %d", shown[2].QID, shown[3].QID)
 	}
-	// Order is still worst-first, and the small patches survive rather than
-	// being pushed under the cut by the big one.
-	if shown[1].CVE != "CVE-2026-70000" || shown[2].CVE != "CVE-2026-70001" {
-		t.Errorf("smaller updates lost their place: %s, %s", shown[1].CVE, shown[2].CVE)
+	// 200 CVEs across two QIDs is 200 distinct CVEs, not 400. Summing per-row
+	// CVE counts is the same double-count that made every row read "10 hosts".
+	if n := CVEsCovered(r.Patches); n != 202 {
+		t.Errorf("CVEsCovered = %d, want 202 distinct", n)
 	}
 	txt := r.Text()
-	if !strings.Contains(txt, "+199 more CVE(s) with the same QIDs") {
-		t.Errorf("the collapse has to be stated:\n%s", txt)
+	if !strings.Contains(txt, "covering 202 CVEs") {
+		t.Errorf("the CVE count belongs in the caption:\n%s", txt)
 	}
-	if !strings.Contains(txt, "(202 CVEs)") {
-		t.Errorf("the true CVE count still has to appear:\n%s", txt)
-	}
-	// Rows and detections are different counts and the heading reconciles
-	// them: 3 rows drawn from 4 detecting QIDs, because [92439 92440] is one
-	// row using two of them.
-	if !strings.Contains(txt, "3 row(s) sharing 4 detection(s)") {
-		t.Errorf("the heading must reconcile rows against detections:\n%s", txt)
+	if !strings.Contains(txt, "+196 more") {
+		t.Errorf("a row should sample its CVEs and count the rest:\n%s", txt)
 	}
 	if strings.Contains(txt, "update(s)") {
-		t.Errorf("a QID set is not an update; we do not know the KB article:\n%s", txt)
+		t.Errorf("a QID is not a named update; we do not know the KB article:\n%s", txt)
+	}
+}
+
+// A QID reachable only from the review's published QQL is real exposure the
+// KnowledgeBase route would have missed, so the row says where it came from
+// rather than printing an empty CVE cell.
+func TestAQIDFromThePublishedListSaysSoRatherThanLookingEmpty(t *testing.T) {
+	r := &Report{Digest: parsed(t), Org: "CR",
+		Exposure: Exposure{Attempted: true, QIDs: []int{90001},
+			DetectingQIDs: []int{90001}, PublishedQIDs: []int{90001},
+			PublishedOnlyQIDs: []int{90001}, Detections: 3, Hosts: 3},
+		Patches: []Patch{{QID: 90001, Hosts: 3, QDS: 80, Published: true}}}
+
+	txt := r.Text()
+	if !strings.Contains(txt, "mapping not yet available") {
+		t.Errorf("an unmapped QID must not read as fixing nothing:\n%s", txt)
+	}
+	if !strings.Contains(txt, "from the review's QQL") {
+		t.Errorf("the row should name its route:\n%s", txt)
+	}
+	h := r.HTML()
+	if !strings.Contains(h, "mapping not yet available") ||
+		!strings.Contains(h, "from the review's QQL") {
+		t.Errorf("the HTML row needs the same provenance:\n%s", h)
+	}
+}
+
+// QDS 0 means "the response carried no score", and printing it as a number
+// reads as "no risk" - the same class of mistake as a column of "?".
+func TestAMissingQDSIsADashNotAZero(t *testing.T) {
+	r := &Report{Digest: parsed(t), Org: "CR",
+		Exposure: Exposure{Attempted: true, QIDs: []int{7}, DetectingQIDs: []int{7},
+			Detections: 1, Hosts: 1},
+		Patches: []Patch{{QID: 7, Hosts: 1, CVEs: []string{"CVE-2026-1111"}}}}
+	txt := r.Text()
+	if !strings.Contains(txt, "QDS    -") {
+		t.Errorf("a missing score should print as a dash:\n%s", txt)
+	}
+	if strings.Contains(txt, "QDS    0") {
+		t.Errorf("a missing score printed as zero:\n%s", txt)
+	}
+	if h := r.HTML(); strings.Contains(h, ">0</td>") {
+		t.Errorf("a missing score printed as zero in HTML:\n%s", h)
 	}
 }
 
@@ -1120,28 +1160,6 @@ func TestTheSubjectLeadsWithTheWorkNotTheCVECount(t *testing.T) {
 	}
 }
 
-func TestABandedCVEIsNeverCollapsedBehindAnUnbandedOne(t *testing.T) {
-	// An actively exploited CVE has to stay visible even when it shares an
-	// update with two hundred others.
-	hs := []Highlight{
-		{CVE: "CVE-2026-00001", Hosts: 50, QIDs: []int{92439}},
-		{CVE: "CVE-2026-00002", Hosts: 50, QIDs: []int{92439}, Sev: "Sev5",
-			KEV: true, Rationale: "on CISA KEV"},
-		{CVE: "CVE-2026-00003", Hosts: 50, QIDs: []int{92439}},
-	}
-	r := &Report{Digest: parsed(t), Org: "CR", Highlights: hs}
-	shown, _ := r.rows()
-	if len(shown) != 1 {
-		t.Fatalf("one QID set, want one row, got %d", len(shown))
-	}
-	if shown[0].CVE != "CVE-2026-00002" || shown[0].Sev != "Sev5" {
-		t.Errorf("the banded CVE should represent the group, got %s (%q)",
-			shown[0].CVE, shown[0].Sev)
-	}
-	if shown[0].SharedWith != 2 {
-		t.Errorf("SharedWith = %d, want 2", shown[0].SharedWith)
-	}
-}
 
 func TestACorrelatedCVECanNameTheSentenceThatPutItThere(t *testing.T) {
 	// CVE-2026-6726 sorted to the top of the August table on 346 hosts and

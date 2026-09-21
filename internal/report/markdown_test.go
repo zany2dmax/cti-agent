@@ -201,3 +201,85 @@ func TestPipesAreEscaped(t *testing.T) {
 		t.Error("pipe characters were not escaped, table will break")
 	}
 }
+
+// A CVE held back for the monthly Patch Tuesday synopsis is left out of the
+// table and listed in full below it.
+//
+// Suppression with no record is indistinguishable from a parser that missed
+// them, and this file is the audit trail that gets attached to the email. The
+// list deliberately does NOT use the `| CVE-` row format: run-digest counts
+// table rows with `grep -c '^| CVE-'` and the enrich lane parses the same
+// shape, so a held CVE must not look like a reported one to either.
+func TestHeldCVEsAreListedButKeptOutOfTheTable(t *testing.T) {
+	t.Setenv("REPORT_HOSTNAMES", "count")
+	path := filepath.Join(t.TempDir(), "report.md")
+
+	scan := Scan{
+		Messages: 9, WithCVEs: 4, CVEsFound: 5,
+		Held: map[string]string{
+			"CVE-2026-1111": "2026-09",
+			"CVE-2026-2222": "2026-09",
+			"CVE-2026-3333": "2026-08",
+		},
+	}
+	// Two results in the table, three held: numbers that have to reconcile.
+	if err := WriteMarkdownScan(path, "cybersecurity@example.com",
+		time.Now().Add(-24*time.Hour), scan, "qualys", sampleResults()); err != nil {
+		t.Fatalf("WriteMarkdownScan: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	out := string(b)
+
+	for _, want := range []string{
+		"Held for the monthly Patch Tuesday synopsis: `3`",
+		"Looked up and reported in the table: `2`",
+		"## Held for the monthly Patch Tuesday synopsis (3)",
+		"**2026-08** (1)",
+		"**2026-09** (2)",
+		"- CVE-2026-1111",
+		"- CVE-2026-3333",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing %q\n%s", want, out)
+		}
+	}
+
+	// The held CVEs must not appear as table rows, or the enrich lane will
+	// pick them up again and the suppression will have achieved nothing.
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "| CVE-") {
+			continue
+		}
+		for cve := range scan.Held {
+			if strings.Contains(line, cve) {
+				t.Errorf("held CVE %s appeared as a table row: %q", cve, line)
+			}
+		}
+	}
+	// Months are sorted, so two runs of the same day produce the same file.
+	if strings.Index(out, "**2026-08**") > strings.Index(out, "**2026-09**") {
+		t.Error("held months should be in order, not map order")
+	}
+}
+
+// Nothing held is the normal case, and it must add nothing at all - no empty
+// heading, no "Held: 0" line implying a feature misfired.
+func TestNothingHeldAddsNothingToTheReport(t *testing.T) {
+	t.Setenv("REPORT_HOSTNAMES", "count")
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := WriteMarkdownScan(path, "cybersecurity@example.com",
+		time.Now().Add(-24*time.Hour),
+		Scan{Messages: 3, WithCVEs: 2, CVEsFound: 2}, "qualys", sampleResults()); err != nil {
+		t.Fatalf("WriteMarkdownScan: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(b), "Held for the monthly") {
+		t.Errorf("a report with nothing held mentioned holding:\n%s", b)
+	}
+}
