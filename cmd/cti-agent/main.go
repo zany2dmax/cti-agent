@@ -192,7 +192,20 @@ func main() {
 	// findings over a bookkeeping file would be worse - but it is loud,
 	// because the consequence is that cleanup will leave everything alone and
 	// otherwise look like it worked.
-	if path := mailbox.LogPath(); path != "" {
+	if path := mailbox.LogPath(); path == "" {
+		// Say it. This branch used to be an implicit no-op, and an implicit
+		// no-op here is the whole failure this file keeps warning about: the
+		// digest is the ONLY writer of the processed-message log, and that log
+		// is the cleanup lane's only authority to move mail. With no
+		// FLEET_HOME the digest wrote nothing, reported nothing, and
+		// cti-mailbox then answered "No CTI email has been processed today"
+		// every single day - a refusal indistinguishable from a quiet mailbox,
+		// forever, with both lanes exiting 0 and looking healthy.
+		log.Printf("NOTE: neither FLEET_PROCESSED_LOG nor FLEET_HOME is set, so "+
+			"no processed-message log was written. %d CVE(s) were still found "+
+			"and reported; only mailbox cleanup is affected, and it will keep "+
+			"refusing to touch the mailbox until this is set", len(cves))
+	} else {
 		store := mailbox.NewStore(path)
 		l, err := store.Load()
 		if err != nil {
