@@ -102,6 +102,27 @@ so. If *both* fail the lane exits non-zero and sends nothing — a synopsis
 assembled from nothing is worse than a missing email, because it looks like a
 quiet month.
 
+## Re-sending a past month
+
+`--month` renders; `--for-real` sends. Together they send a past month to the
+live distribution list, dated today, which is almost never what anyone means.
+
+That nearly happened: `run-patchtuesday --for-real --month 2026-08` in
+September reached the mailer, which refused it because two CC addresses were
+not yet on `FLEET_ALLOW_TO`. The error advised adding them - and doing so would
+have mailed August's synopsis to the team.
+
+So a back-dated send now needs the month named in the environment as well:
+
+```
+sudo FLEET_CONFIRM_RESEND=2026-08 cti-agent run-patchtuesday --for-real --month 2026-08
+```
+
+It confirms rather than refuses, because re-sending a month whose original send
+failed is legitimate. Without the variable it exits 1 and posts a WARN to the
+board. **You never set this.** If a month needs re-sending, say so on the board
+and let the operator run it.
+
 ## If the sources move
 
 The URL patterns are computable but not guaranteed. The Qualys review path

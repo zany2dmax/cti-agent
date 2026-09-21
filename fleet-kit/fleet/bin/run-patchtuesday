@@ -89,6 +89,48 @@ if [ -n "$MONTH" ] && [ -z "$FOR_REAL" ] && [ -z "$DRY" ]; then
   exit 0
 fi
 
+# --for-real is not enough on its own for a month that is not the current one.
+#
+# `run-patchtuesday --for-real --month 2026-08` in September addresses August's
+# synopsis to the live distribution list. That is the mis-send the guard above
+# describes, and one flag was the only thing between the two. It got as far as
+# the mailer, which refused it - for an unrelated reason: two CC addresses
+# happened not to be on the allowlist yet. Had they been, August's email would
+# have gone to the team, and the error message was advising exactly that fix.
+#
+# So a back-dated send now needs a second factor that cannot be typed in a
+# hurry: FLEET_CONFIRM_RESEND must name the month. Re-sending a month whose
+# original send failed is legitimate, which is why this confirms rather than
+# refuses - but it should take a deliberate act, not a flag ordering.
+if [ -n "$MONTH" ] && [ -n "$FOR_REAL" ] && [ -z "$DRY" ]; then
+  CURRENT="$("$PT" --subject-only 2>/dev/null \
+             | sed -n 's/.*for \([A-Za-z]*\) \([0-9]*\).*/\2-\1/p')"
+  MONTH_NAME="$(date -d "${MONTH}-01" +%Y-%B 2>/dev/null || echo "$MONTH")"
+  if [ "$MONTH_NAME" != "$CURRENT" ]; then
+    if [ "${FLEET_CONFIRM_RESEND:-}" != "$MONTH" ]; then
+      say "REFUSING to send $MONTH to $DIGEST_TO."
+      say ""
+      say "  This is not the current month. The most recent release is $CURRENT."
+      say "  Sending $MONTH now puts a synopsis for a past month in front of the"
+      say "  distribution list, dated today."
+      say ""
+      say "  If the original send genuinely failed and you are re-sending it:"
+      say "    sudo FLEET_CONFIRM_RESEND=$MONTH cti-agent run-patchtuesday \\"
+      say "      --for-real --month $MONTH"
+      say ""
+      say "  To review it without sending, drop --for-real."
+      "$BOARD" post @patchtuesday @you WARN \
+        "refused to send back-dated $MONTH synopsis (current is $CURRENT)" \
+        2>/dev/null || true
+      exit 1
+    fi
+    say "CONFIRMED back-dated send of $MONTH (current is $CURRENT)"
+    "$BOARD" post @patchtuesday @you WARN \
+      "sending back-dated $MONTH synopsis to $DIGEST_TO, confirmed via FLEET_CONFIRM_RESEND" \
+      2>/dev/null || true
+  fi
+fi
+
 say "send: $SUBJECT"
 RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" $DRY) || fail "send failed"
