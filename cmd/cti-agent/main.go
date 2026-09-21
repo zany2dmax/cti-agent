@@ -172,6 +172,16 @@ func main() {
 		Held:      held,
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
+		// #nosec G706 -- sanitised by oneLine(), as at the manifest warning
+		// above, where the reasoning is set out in full. The error wraps
+		// cfg.ReportPath, which config.load() reads from REPORT_PATH, so the
+		// taint is real and the control is the scrub the rule cannot see.
+		//
+		// This finding is one I caused: with `%v` on an error gosec said
+		// nothing, and changing it to `%s` on a sanitised string is what made
+		// the flow visible to it. Reverting to `%v` would silence the scanner
+		// by removing the sanitiser - quieter output, worse code - so the
+		// annotation stays and the scrub stays.
 		log.Fatalf("write report failed: %s", oneLine(err.Error()))
 	}
 
