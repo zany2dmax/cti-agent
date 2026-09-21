@@ -195,8 +195,38 @@ def preflight(mailbox):
     return check(token(), mailbox)
 
 
+# What each capability needs, and what satisfies it.
+#
+# Mail.ReadWrite SUPERSEDES Mail.Read. Graph's write role includes the read, so
+# a tenant that prunes Mail.Read after granting Mail.ReadWrite is correctly
+# configured - and the previous version of this check, which required the
+# literal string "Mail.Read", would have called that install broken. Least
+# privilege and a check that only recognises one spelling of it are a bad
+# combination.
+REQUIRED_ROLES = (
+    ("read the CTI mailbox", ("Mail.Read", "Mail.ReadWrite")),
+    ("send the digest", ("Mail.Send",)),
+)
+
+# Needed only by the mailbox cleanup lane. Reported, never fatal: most installs
+# do not run it, and a check that fails for a feature you chose not to use is a
+# check people learn to ignore.
+OPTIONAL_ROLES = (
+    ("move mail - cti-mailbox cleanup", ("Mail.ReadWrite",)),
+)
+
+# Every Graph endpoint in this codebase needs one of these three:
+#   GET  /users/{mbx}/mailFolders/{f}/messages   Mail.Read or Mail.ReadWrite
+#   POST /users/{mbx}/sendMail                   Mail.Send
+#   POST /users/{mbx}/messages/{id}/move         Mail.ReadWrite
+# Anything else consented is unused, and an unused APPLICATION permission on a
+# daemon app is blast radius with no upside: a leaked client secret gets
+# whatever the tenant consented to, not whatever the code calls.
+USED_ROLES = frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send"})
+
+
 def check(tok, mailbox):
-    """Confirm the token carries Mail.Send before the 6am run depends on it."""
+    """Report what the token can actually do, before the 06:00 run depends on it."""
     import base64
     claims = tok.split(".")[1]
     claims += "=" * (-len(claims) % 4)
@@ -204,13 +234,37 @@ def check(tok, mailbox):
     roles = payload.get("roles", [])
     log(f"tenant={payload.get('tid')} app={payload.get('appid')}")
     log(f"granted application roles: {roles or '(none)'}")
+
     ok = True
-    for need in ("Mail.Send", "Mail.Read"):
-        if need in roles:
-            log(f"  OK   {need}")
+    for what, alternatives in REQUIRED_ROLES:
+        have = [r for r in alternatives if r in roles]
+        if have:
+            log(f"  OK       {have[0]:16} {what}")
         else:
-            log(f"  MISSING {need} - add it in Entra and grant admin consent")
+            log(f"  MISSING  {' or '.join(alternatives)} - {what}. "
+                f"Add it in Entra and grant admin consent")
             ok = False
+
+    for what, alternatives in OPTIONAL_ROLES:
+        have = [r for r in alternatives if r in roles]
+        if have:
+            log(f"  OK       {have[0]:16} {what}")
+        else:
+            log(f"  absent   {' or '.join(alternatives):16} {what} - the cleanup "
+                f"lane will 403. Harmless if you are not running it")
+
+    # The unused-permission report. This is not a style note: the app in front
+    # of me had Directory.Read.All, User.Read.All and AuditLog.Read.All
+    # consented and called by nothing, which is a far wider grant than the mail
+    # access it actually uses.
+    extra = sorted(r for r in roles if r not in USED_ROLES)
+    if extra:
+        log(f"  UNUSED   {len(extra)} role(s) granted that this codebase never "
+            f"calls: {', '.join(extra)}")
+        log("           Nothing here reads the directory, lists users or reads "
+            "audit logs. Consider removing them - an application permission is "
+            "blast radius whether or not the code uses it.")
+
     log(f"sending mailbox: {mailbox}")
     return 0 if ok else 1
 
