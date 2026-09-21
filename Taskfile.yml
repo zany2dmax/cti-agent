@@ -167,6 +167,15 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  test:env:
+    desc: fleet.env parsing and which credentials each command may fail on
+    # These two go together: one reads the file, the other decides which names
+    # count as required. Getting either wrong produces the same symptom - a
+    # lane refusing to run over credentials that are present, or that it never
+    # uses - and that symptom has now appeared twice in production.
+    cmds:
+      - go test ./internal/fleetenv/ ./internal/config/ -v
+
   ship:
     desc: "Everything, then push. Refuses to push unless all of it passes."
     # Exists because `task test` and `git push` typed as separate lines are not
