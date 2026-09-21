@@ -188,6 +188,31 @@ cp .env.example .env && vi .env
 the Entra credentials, so it separates "can we read the mailbox" from "does the
 scanner answer" — two failures that look identical together.
 
+## Day-to-day: Mac to Fedora
+
+The development box and the fleet box have different jobs and different gates.
+The full sequence for both — inner loop, the push gate, the deploy order, and
+which timer to enable when — is in
+**[fleet-kit/README.md → The two-box workflow](fleet-kit/README.md#the-two-box-workflow)**.
+
+The short version:
+
+```bash
+# on the Mac
+task test           # while changing one thing
+task ship           # fmt, build, test, lint, scan, gosec, govulncheck, push
+
+# on the Fedora box
+git pull && sudo ./fleet-kit/install-fedora.sh
+sudo vi /etc/cti-agent/fleet.env          # any new settings
+sudo cti-agent mailer.py --check          # token + granted roles
+sudo cti-agent run-digest daily --dry-run # read it before enabling anything
+sudo systemctl enable --now cti-agent-digest.timer
+```
+
+`task ship` is the only thing that pushes, and it stops at the first failing
+gate. Deploy never enables a timer before a dry run has been read.
+
 ## Quick start
 
 ```bash

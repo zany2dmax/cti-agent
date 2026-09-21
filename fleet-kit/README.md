@@ -301,6 +301,128 @@ EPSS and the CISA KEV catalog need no key and no registration.
 
 ---
 
+## The two-box workflow
+
+Development happens on a Mac; the fleet runs on a Fedora box. The two halves
+have different jobs and different gates, and doing them in the wrong order is
+how a broken change reaches a mailbox.
+
+### On the Mac — write, prove, push
+
+```bash
+# ── once ─────────────────────────────────────────────────────────────────────
+brew install go go-task/tap/go-task python@3.12
+brew install gosec                        # the security gate
+go install honnef.co/go/tools/cmd/staticcheck@latest
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go install golang.org/x/vuln/cmd/govulncheck@latest
+cp .env.example .env && vi .env           # 0600, gitignored, never committed
+
+# ── the inner loop, while changing one thing ─────────────────────────────────
+task test:mailbox                         # or test:patchtuesday, test:kev, ...
+task test                                 # everything: Go + the Python lanes
+
+# ── exercising a lane against live data, sending nothing ─────────────────────
+task dev:doctor                           # tools, .env, Graph token, granted roles
+task patchtuesday MONTH=2026-08           # replay a month you already sent
+task mailbox                              # what cleanup WOULD do. Moves nothing
+./fleet-kit/bin/dev-run all               # whole pipeline, opens the digest
+
+# ── the gate, and the push ───────────────────────────────────────────────────
+task ship
+```
+
+`task ship` is `fmt → build → test → lint → scan → gosec → govulncheck → push`,
+and Task stops at the first failure, so the push cannot outrun a red gate. That
+matters because it did once: `task test` and `git push` on separate lines in the
+same paste meant a failing suite scrolled by and the push went out anyway.
+
+**`task ship` is the only thing that pushes.** Nothing else in the Taskfile
+touches the remote.
+
+### On the Fedora box — deploy, verify, then enable
+
+Order is the point here. Nothing below enables a timer until a dry run has
+been read.
+
+```bash
+# ── 1. get the code and rebuild ──────────────────────────────────────────────
+cd ~/cti-agent && git pull
+sudo ./fleet-kit/install-fedora.sh
+```
+
+The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
+rebuilds all six binaries, rewrites the units, runs `daemon-reload` and
+`restorecon`, and refuses to report success if a path or a timezone is wrong.
+
+```bash
+# ── 2. add any new settings ──────────────────────────────────────────────────
+sudo vi /etc/cti-agent/fleet.env
+```
+
+New variables arrive with new lanes, and the installer will not invent values
+for them. Check `fleet-kit/fleet/fleet.env.example` against your file after
+every pull that adds a feature — a variable documented but unset is the
+quietest kind of missing.
+
+```bash
+# ── 3. verify credentials and permissions BEFORE trusting a timer ────────────
+sudo cti-agent mailer.py --check
+```
+
+This decodes the real token and reports the granted application roles. Read all
+of it, not just the exit code: it also names roles that are consented and that
+nothing in this codebase calls.
+
+```bash
+# ── 4. dry run each lane you are about to enable ─────────────────────────────
+sudo cti-agent run-digest daily --dry-run
+sudo cti-agent run-patchtuesday --dry-run --month 2026-08
+sudo cti-agent cti-mailbox                       # moves nothing
+
+# ── 5. enable timers ONE AT A TIME, oldest and least surprising first ────────
+sudo systemctl enable --now cti-agent-digest.timer
+sudo systemctl enable --now cti-agent-checkin.timer
+sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
+sudo systemctl enable --now cti-agent-patchtuesday.timer
+sudo systemctl enable --now cti-agent-mailbox.timer      # last: see below
+
+# ── 6. watch it ──────────────────────────────────────────────────────────────
+systemctl list-timers 'cti-agent-*'
+journalctl -u cti-agent-digest -f
+journalctl -u cti-agent-mailbox -n 50 --no-pager
+sudo cat /var/lib/cti-agent/board.md | tail -20
+```
+
+**Mailbox cleanup goes last, and not on the same day as the pull.** It is the
+only lane that modifies something other people can see, and its first dry run
+will report every message as `leave` — correctly, because it only acts on
+messages a completed digest recorded, and the log starts filling from the next
+digest. Run the dry run again the following day, read what it proposes, and
+enable the timer after that.
+
+It also needs a Graph permission the others do not: `Mail.ReadWrite` as an
+*application* permission with admin consent. `Mail.Read` cannot move a message.
+Apply the Application Access Policy first if you have not — without it the role
+is tenant-wide.
+
+### What runs where, and why the split
+
+| | Mac | Fedora |
+|---|---|---|
+| `task ship` | yes — the push gate | no |
+| `task dev:doctor` | yes — live token check | `sudo cti-agent mailer.py --check` |
+| Unit tests | yes | run by the installer's own gate |
+| `gosec` / `govulncheck` | yes | no — code is already proven by then |
+| Timers | never | yes, one at a time |
+| Sending real mail | only with `dev:send:real` | yes, on a schedule |
+
+The live token check is deliberately **not** in `task ship`. It needs
+credentials and a network, so in a push gate it would fail on any machine
+without `.env`, and a consent problem in Entra would block a code push. Those
+are different kinds of broken and they want different gates: `task dev:doctor`
+before deploying, `task ship` before pushing.
+
 ## Test it locally first
 
 Before any of the server setup below, prove the pipeline works on your laptop.

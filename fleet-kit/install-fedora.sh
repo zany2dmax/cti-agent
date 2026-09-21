@@ -652,6 +652,31 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
 
      sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
 
+6. The monthly Patch Tuesday synopsis. Replay a month you already sent by hand
+   and compare before enabling it - a replay cannot send:
+
+     sudo cti-agent run-patchtuesday --dry-run --month 2026-08
+     sudo systemctl enable --now cti-agent-patchtuesday.timer
+
+   Needs outbound 443 to blog.qualys.com and www.bleepingcomputer.com.
+
+7. LAST, and only when the digest has been running for a few days: mailbox
+   cleanup. It moves mail in a shared mailbox, so it is the one lane whose
+   mistakes other people see.
+
+   It needs Mail.ReadWrite as an APPLICATION permission with admin consent -
+   Mail.Read cannot move a message. Apply the Application Access Policy first
+   if you have not: without it that role is tenant-wide.
+
+     sudo cti-agent mailer.py --check          # expect OK Mail.ReadWrite
+     sudo cti-agent cti-mailbox                # dry run, moves nothing
+     sudo systemctl enable --now cti-agent-mailbox.timer
+
+   The first dry run reports everything as "leave". That is correct: the lane
+   only touches messages a completed digest recorded, and the log starts
+   filling from the next digest. Run the dry run again tomorrow before
+   enabling the timer.
+
 $(printf '\033[1mIf something is denied for no visible reason\033[0m')
 
    sudo ausearch -m avc -ts recent          # SELinux denials
