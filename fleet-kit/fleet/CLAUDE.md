@@ -133,6 +133,10 @@ Concretely, a quiet beat should pick up one of these:
   `[APPROVE]`, and wait. Emailing the **operator** is the exception and needs
   no approval — that is how you ask for one.
 - Mailing anyone outside `$FLEET_ALLOW_TO`.
+- Changing `FLEET_ATTRIBUTION` or `FLEET_REPO_URL`. These put a credit line and
+  a clickable link at the foot of every digest, so editing them changes what
+  the fleet advertises to the whole distribution list. Propose the wording on
+  the board and wait; do not edit fleet.env to adjust them.
 - Creating or modifying tickets, scanner config, scan settings, or exceptions.
 - Deleting anything outside `$FLEET_HOME/logs/` and `$FLEET_HOME/archive/`.
 - Anything that touches a production host.

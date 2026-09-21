@@ -316,6 +316,111 @@ class BriefRendering(unittest.TestCase):
         self.assertIn("Presence determined solely", text)
 
 
+class Attribution(unittest.TestCase):
+    """The footer credit is configuration, not code.
+
+    This kit was deliberately genericised - no organisation name, no
+    addresses, no internal identifiers. An attribution line baked into the
+    renderer would undo that, so unset renders the wording the digest has
+    always had and advertises nobody.
+    """
+
+    def setUp(self):
+        # Isolate from the developer's shell. These tests are about what the
+        # environment does to the output, so ambient values would make them
+        # pass or fail for reasons that have nothing to do with the code -
+        # and sourcing .env before running them is a normal thing to do.
+        self._saved = {k: os.environ.pop(k, None)
+                       for k in ("FLEET_ATTRIBUTION", "FLEET_REPO_URL", "FLEET_ORG")}
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def data(self):
+        return {"generated": "2026-09-21T06:00:00Z", "total": 1,
+                "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 1},
+                "findings": [{"cve": "CVE-2026-1", "priority": "Sev1",
+                              "status": "UNKNOWN", "host_count": 0,
+                              "cvss": 0, "epss": 0, "kev": 0, "qids": "",
+                              "sample_hosts": "", "rationale": "awareness"}],
+                "source_meta": {}}
+
+    def test_unset_keeps_the_footer_it_always_had(self):
+        self.assertEqual(brief.attribution(), ("", ""))
+        html = brief.render(self.data(), "daily")
+        self.assertIn("CTI agent fleet", html)
+        self.assertNotIn("Claude Code Agent Fleet", html)
+
+    def test_a_url_alone_is_enough_and_names_the_org(self):
+        os.environ["FLEET_ORG"] = "Construction Resources"
+        os.environ["FLEET_REPO_URL"] = "https://github.com/example/cti-agent"
+        text, url = brief.attribution()
+        self.assertIn("Construction Resources Claude Code Agent Fleet", text)
+        self.assertEqual(url, "https://github.com/example/cti-agent")
+
+    def test_explicit_text_wins_and_reaches_both_renderings(self):
+        os.environ["FLEET_ATTRIBUTION"] = \
+            "Correlated and published by the CR Claude Code Agent Fleet"
+        os.environ["FLEET_REPO_URL"] = "https://github.com/example/cti-agent"
+        html = brief.render(self.data(), "daily")
+        self.assertIn('href="https://github.com/example/cti-agent"', html)
+        self.assertIn("CR Claude Code Agent Fleet", html)
+        text = brief.render_text(self.data(), "daily")
+        self.assertIn("Correlated and published by the CR Claude Code Agent Fleet", text)
+        # URL on its own line: a text-only reader cannot follow an anchor.
+        self.assertIn("\nhttps://github.com/example/cti-agent", text)
+
+    def test_only_http_links_reach_the_email(self):
+        for bad in ("javascript:alert(1)",
+                    "data:text/html;base64,PHNjcmlwdD4=",
+                    "file:///etc/passwd",
+                    "github.com/example/cti-agent",
+                    "https://",
+                    "   "):
+            self.assertEqual(brief.safe_link_url(bad), "",
+                             f"{bad!r} should be refused")
+        for good in ("https://github.com/example/cti-agent",
+                     "http://intranet.example.com/cti",
+                     "HTTPS://GitHub.com/Example/cti-agent"):
+            self.assertNotEqual(brief.safe_link_url(good), "",
+                                f"{good!r} is a usable link")
+
+    def test_a_refused_url_does_not_take_the_text_with_it(self):
+        os.environ["FLEET_ATTRIBUTION"] = "Published by the CR fleet"
+        os.environ["FLEET_REPO_URL"] = "javascript:alert(1)"
+        text, url = brief.attribution()
+        self.assertEqual(url, "")
+        self.assertEqual(text, "Published by the CR fleet")
+        html = brief.render(self.data(), "daily")
+        self.assertNotIn("javascript", html)
+        self.assertIn("Published by the CR fleet", html)
+
+    def test_the_credit_is_escaped(self):
+        os.environ["FLEET_ATTRIBUTION"] = "CR <script>alert(1)</script> & co"
+        os.environ["FLEET_REPO_URL"] = 'https://example.com/?a=1&b="2"'
+        html = brief.render(self.data(), "daily")
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("&amp;", html)
+        self.assertNotIn('b="2"', html)
+
+    def test_go_and_python_agree_on_what_a_link_is(self):
+        """Both emails must apply the same rule.
+
+        The daily digest is rendered in Python and the monthly synopsis in Go.
+        Two implementations of "is this a safe href" that disagree is a bug
+        waiting for whichever email gets the odd URL.
+        """
+        go = (pathlib.Path(__file__).resolve().parents[2]
+              / "internal" / "patchtuesday" / "render.go").read_text()
+        self.assertIn("safeLinkURL", go)
+        # The Go side must accept exactly http and https, like safe_link_url.
+        self.assertIn('case "http", "https":', go)
+
+
 class MailerGate(unittest.TestCase):
     """The autonomy gate is a control, not advice. It must exit non-zero."""
 
