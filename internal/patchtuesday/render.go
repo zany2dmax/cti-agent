@@ -15,16 +15,29 @@ type Report struct {
 	Exposure Exposure
 	Org      string
 
-	// QQL is what the reader should paste into Qualys. Preference order:
-	// QIDs with live detections here, then whatever the Qualys post published,
-	// then a CVE-list fallback. The first is the most useful because it
-	// returns our machines, not every machine in the world.
-	QQL       string
-	QQLSource string
+	// QQL is the query to paste into the Qualys console, and the review's own
+	// is preferred over anything this lane can build.
+	//
+	// Qualys publishes a QQL with every monthly review, and run in the console
+	// it returns the complete list of the release's QIDs that have assets
+	// against them - which is the question the reader has. A query built from
+	// the QIDs we happened to correlate can only ever be a subset of that, so
+	// it is the second block (QQLNarrow), useful for "just show me today's
+	// work" and not a substitute for the published one.
+	QQL             string
+	QQLSource       string
+	QQLNarrow       string
+	QQLNarrowSource string
 
-	// Highlights are the CVEs confirmed present, enriched with severity where
-	// the enrich lane supplied it.
-	Highlights []Highlight
+	// Patches are the missing updates found here: one row per QID.
+	//
+	// The unit used to be the CVE, which made this table a restatement of
+	// Microsoft's release notes - the August replay produced 353 rows, nearly
+	// all of them carrying one of two cumulative-update QIDs and the same host
+	// count repeated down the page. A QID is one thing somebody installs.
+	// Twelve rows that each mean "patch this" is a report; 353 rows that mean
+	// "Microsoft fixed some things" is a press release.
+	Patches []Patch
 
 	// Attribution is the credit line at the foot of the email. Zero value
 	// renders nothing.
@@ -43,158 +56,203 @@ type Report struct {
 // they are fully awake, which is the stated audience.
 const defaultMaxRows = 25
 
-// Highlight is one CVE that is actually in the estate.
-type Highlight struct {
-	CVE string
-	// Sev is Sev5..Sev1 from the enrich lane, blank when no enriched data was
-	// available for this CVE. Blank is rendered by omitting the column
-	// entirely rather than by printing a placeholder: the August replay
-	// printed a "?" in every row of a column that, as written, could never
-	// hold a value, because nothing populated it.
-	Sev   string
-	Hosts int
-	// HostsAreFloor means Hosts is a lower bound, not a count.
-	HostsAreFloor bool
-	QIDs          []int
-	// SharedWith is how many other CVEs in this release resolve to exactly the
-	// same QIDs - i.e. are fixed by the same update. Set during rendering.
-	SharedWith int
-	KEV        bool
-	EPSS       float64
-	CVSS       float64
-	Rationale  string
-}
-
-// anySev reports whether the enrich lane supplied a band for anything. When it
-// did not, the severity column is left out.
-func (r *Report) anySev() bool {
-	for _, h := range r.Highlights {
-		if h.Sev != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// rows returns the highlights to print, worst first, and how many CVEs were
-// left out.
+// Patch is one QID with open detections: one update somebody has to install.
 //
-// Ordered by blast radius, then severity, then CVE - and then collapsed by
-// QID set, which is the part that makes the table readable. Sorting by host
-// count alone floods the top with whichever cumulative update is on the most
-// machines: the August replay's first 25 rows were 24 CVEs carrying the
-// identical pair [92439 92440] and the same 331 hosts, which tells the reader
-// one fact 24 times and hides the other eleven patches below the cut. One row
-// per distinct QID set, carrying how many CVEs share it, says the same thing
-// in a twelfth of the space.
-func (r *Report) rows() (shown []Highlight, hidden int) {
-	sorted := make([]Highlight, len(r.Highlights))
-	copy(sorted, r.Highlights)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].Hosts != sorted[j].Hosts {
-			return sorted[i].Hosts > sorted[j].Hosts
+// Everything in it comes out of a single Host Detection response. That is the
+// point. The Sev5-Sev1 column this replaces could only be filled from the
+// daily enrich lane's output file, so a monthly report about CVEs the daily
+// had never seen printed "severity bands for 0 of 353" - a column that, as
+// deployed, could not hold a value.
+type Patch struct {
+	QID int
+	// Hosts is the provider's own distinct-machine count for this QID, not the
+	// length of a host list that may have been cut off for display.
+	Hosts         int
+	HostsAreFloor bool
+	// QDS is the Qualys Detection Score, 1-100, highest seen across the hosts
+	// carrying this detection. 0 means the response carried no score, and is
+	// rendered as a dash rather than as a zero: "QDS 0" reads like "no risk".
+	//
+	// The number is printed without a severity word. Qualys does band QDS, but
+	// this lane has not verified the thresholds against Qualys documentation,
+	// and a band that is confidently one step wrong is worse than a bare
+	// number the reader already knows how to read.
+	QDS int
+	// LastSeen is the newest LAST_FOUND_DATETIME across those hosts. It
+	// answers the question the exposure line otherwise hands back to the
+	// reader - "check the last scan date before treating this as good news" -
+	// with a date instead of an instruction.
+	LastSeen string
+	// CVEs are the release's CVEs that resolve to this QID: the evidence for
+	// the row, not a ranking. Empty when the QID was reachable only from the
+	// published QQL, which is normal in the day or two before the
+	// KnowledgeBase mapping catches up.
+	CVEs []string
+	// Published means Qualys listed this QID in the review's own QQL; FromKB
+	// means the KnowledgeBase CVE mapping reached it. Both can be true. Both
+	// being false is impossible by construction, and if it ever happens the
+	// row arrived from nowhere and should be treated as a bug.
+	Published bool
+	FromKB    bool
+}
+
+// rows returns the patches to print, worst first, and how many were left out.
+//
+// Worst is host count, then QDS, then QID for a stable order. There is no
+// collapsing step any more: one row per QID *is* the collapse, which is why
+// this is now ten lines rather than fifty.
+//
+// The hidden count is patches, and only patches. The previous version summed
+// a host figure across hidden rows, which counts the same machine once per
+// QID - the same arithmetic that made every row of the August table read
+// "10 hosts".
+func (r *Report) rows() (shown []Patch, hidden int) {
+	shown = make([]Patch, len(r.Patches))
+	copy(shown, r.Patches)
+	sort.SliceStable(shown, func(i, j int) bool {
+		if shown[i].Hosts != shown[j].Hosts {
+			return shown[i].Hosts > shown[j].Hosts
 		}
-		if si, sj := sevRank(sorted[i].Sev), sevRank(sorted[j].Sev); si != sj {
-			return si > sj
+		if shown[i].QDS != shown[j].QDS {
+			return shown[i].QDS > shown[j].QDS
 		}
-		return sorted[i].CVE < sorted[j].CVE
+		return shown[i].QID < shown[j].QID
 	})
-
-	// Collapse, keeping the first (worst) CVE of each QID set. A row with a
-	// severity band is never collapsed away behind one without: an actively
-	// exploited CVE has to stay visible even when it shares an update with
-	// two hundred others.
-	byQIDs := map[string]int{} // QID set -> index in shown
-	for _, h := range sorted {
-		key := qidKey(h.QIDs)
-		if at, ok := byQIDs[key]; ok {
-			shown[at].SharedWith++
-			// A banded CVE displaces the unbanded representative.
-			if sevRank(h.Sev) > sevRank(shown[at].Sev) {
-				n := shown[at].SharedWith
-				h.SharedWith = n
-				shown[at] = h
-			}
-			continue
-		}
-		byQIDs[key] = len(shown)
-		shown = append(shown, h)
-	}
-
 	limit := r.MaxRows
 	if limit <= 0 {
 		limit = defaultMaxRows
 	}
 	if len(shown) > limit {
-		for _, h := range shown[limit:] {
-			hidden += 1 + h.SharedWith
-		}
+		hidden = len(shown) - limit
 		shown = shown[:limit]
 	}
-	// Everything folded into a shown row is still reported as covered, so the
-	// "and N more" figure counts CVEs, not rows.
 	return shown, hidden
 }
 
-// collapsed reports whether any row stands in for more than itself.
-func collapsed(rows []Highlight) bool {
-	for _, h := range rows {
-		if h.SharedWith > 0 {
-			return true
+// CVEsCovered totals the release CVEs attributed to the given patches.
+func CVEsCovered(patches []Patch) int {
+	seen := map[string]bool{}
+	for _, p := range patches {
+		for _, c := range p.CVEs {
+			seen[strings.ToUpper(c)] = true
 		}
 	}
-	return false
+	return len(seen)
 }
 
-func qidKey(qids []int) string {
-	if len(qids) == 0 {
-		return "-"
-	}
-	s := make([]int, len(qids))
-	copy(s, qids)
-	sort.Ints(s)
-	parts := make([]string, len(s))
-	for i, q := range s {
-		parts[i] = fmt.Sprint(q)
-	}
-	return strings.Join(parts, ",")
-}
-
-// sevRank orders the bands. Unknown sorts last so an unenriched row never
-// displaces a known Sev5.
-func sevRank(s string) int {
-	switch s {
-	case "Sev5":
-		return 5
-	case "Sev4":
-		return 4
-	case "Sev3":
-		return 3
-	case "Sev2":
-		return 2
-	case "Sev1":
-		return 1
-	}
-	return 0
-}
-
-// ChooseQQL picks the query to publish and records why.
+// ChooseQQL sets both queries: the one Qualys published, and ours.
+//
+// The published query leads. Run in the console it returns every QID in the
+// release that has assets against it - the complete answer, from the vendor,
+// for a release Qualys wrote the query for. This used to be third in a
+// preference list behind a query built from whatever QIDs this lane had
+// managed to correlate, which meant the email's headline query was a subset
+// of the release whenever the KnowledgeBase mapping lagged, and said nothing
+// about being one.
 func (r *Report) ChooseQQL(detected []int) {
 	switch {
+	case len(r.Digest.SourceQQL) > 0:
+		r.QQL = r.Digest.SourceQQL[0]
+		r.QQLSource = "published by Qualys in this month's review (verbatim) - " +
+			"returns every QID in the release with assets against it"
 	case len(detected) > 0:
 		r.QQL = QQLForQIDs(detected)
 		r.QQLSource = fmt.Sprintf(
-			"built from the %d QID(s) with open detections in our environment", len(detected))
-	case len(r.Digest.SourceQQL) > 0:
-		r.QQL = r.Digest.SourceQQL[0]
-		r.QQLSource = "published by Qualys in this month's review (verbatim)"
+			"built from the %d QID(s) with open detections here - the review "+
+				"published no QQL this month, so this is our list, not the "+
+				"complete release", len(detected))
 	case len(r.Digest.CVEs) > 0:
 		r.QQL = QQLForCVEs(r.Digest.CVEs)
-		r.QQLSource = "CVE-based fallback - no QID mapping available yet"
+		r.QQLSource = "CVE-based fallback - no published QQL and no QID mapping yet"
+	}
+
+	// The narrowed query, when it adds something the first does not. Identical
+	// output would just be the same block twice.
+	if len(detected) > 0 && r.QQL != QQLForQIDs(detected) {
+		r.QQLNarrow = QQLForQIDs(detected)
+		r.QQLNarrowSource = fmt.Sprintf(
+			"the %d QID(s) with open detections here - a subset of the query above",
+			len(detected))
 	}
 }
 
 func e(s string) string { return html.EscapeString(s) }
+
+// shortDate trims a Qualys timestamp (2026-09-17T04:11:02Z) to the date.
+// Returns the input unchanged if it is not that shape, rather than cutting a
+// string it does not recognise down to ten arbitrary characters.
+func shortDate(s string) string {
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		return s[:10]
+	}
+	return s
+}
+
+// publishedMarkHTML flags a QID that only the review's published QQL knew
+// about. Worth marking on the row: those are the detections a report trusting
+// the KnowledgeBase mapping alone would have missed entirely, which is the
+// whole reason the published list is queried.
+func publishedMarkHTML(p Patch) string {
+	if p.Published && !p.FromKB {
+		return `<span style="color:#718096;font-size:11px"> (from the review's QQL)</span>`
+	}
+	return ""
+}
+
+// cveCellHTML lists a few CVEs and says how many more there are. The full set
+// is in the JSON output; a cell with two hundred CVE IDs in it is a wall.
+func cveCellHTML(p Patch) string {
+	if len(p.CVEs) == 0 {
+		// Not "none". A QID from the published list with no CVE attributed to
+		// it means the mapping has not caught up, not that the update fixes
+		// nothing.
+		return `<span style="color:#718096">mapping not yet available</span>`
+	}
+	const show = 3
+	first := p.CVEs
+	if len(first) > show {
+		first = first[:show]
+	}
+	links := make([]string, 0, len(first))
+	for _, c := range first {
+		links = append(links, fmt.Sprintf(
+			`<a href="https://nvd.nist.gov/vuln/detail/%s" style="color:#1a202c">%s</a>`,
+			e(c), e(c)))
+	}
+	out := strings.Join(links, ", ")
+	if n := len(p.CVEs) - len(first); n > 0 {
+		out += fmt.Sprintf(`<span style="color:#718096;font-size:11px"> +%d more</span>`, n)
+	}
+	return out
+}
+
+// cveLineText is the plain-text counterpart of cveCellHTML.
+func cveLineText(p Patch) string {
+	if len(p.CVEs) == 0 {
+		return "CVEs: mapping not yet available (QID came from the review's QQL)"
+	}
+	const show = 4
+	first := p.CVEs
+	if len(first) > show {
+		first = first[:show]
+	}
+	out := "fixes " + strings.Join(first, ", ")
+	if n := len(p.CVEs) - len(first); n > 0 {
+		out += fmt.Sprintf(" +%d more", n)
+	}
+	if p.Published && !p.FromKB {
+		out += "  (from the review's QQL)"
+	}
+	return out
+}
+
+func hiddenNoteHTML(hidden int) string {
+	if hidden == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%d further QID(s) on lower host counts are in the JSON output.", hidden)
+}
 
 // Attribution is the credit line at the foot of the email.
 //
@@ -395,32 +453,33 @@ func (r *Report) HTML() string {
                 Segoe UI,Helvetica,Arial,sans-serif;color:#1a202c">%s</div>`,
 		e(r.Exposure.ExposureLine(r.Org)))
 
-	if r.QQL != "" {
+	qqlBlock := func(lead, source, query string) {
+		if query == "" {
+			return
+		}
 		fmt.Fprintf(&b, `
     <div style="font:400 14px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#1a202c;margin:12px 0 6px 0">
-      You can use the following QQL to query for it yourself
+      %s
       <span style="color:#718096;font-size:12px">(%s)</span>:</div>
     <div style="font:400 13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
                 background:#f4f5f7;border:1px solid #e2e8f0;border-radius:4px;
                 padding:10px 12px;color:#1a202c;word-break:break-word;
-                white-space:pre-wrap">%s</div>`, e(r.QQLSource), e(r.QQL))
+                white-space:pre-wrap">%s</div>`, lead, e(source), e(query))
 	}
+	qqlBlock("You can use the following QQL to query for it yourself",
+		r.QQLSource, r.QQL)
+	qqlBlock("Or just this release's QIDs that are already on our machines",
+		r.QQLNarrowSource, r.QQLNarrow)
 	b.WriteString("\n  </td></tr>\n")
 
-	// Highlights: the CVEs actually here. This is the section that makes the
-	// email ours rather than a forwarded blog post.
-	if len(r.Highlights) > 0 {
+	// The patches actually here. This is the section that makes the email ours
+	// rather than a forwarded blog post.
+	if len(r.Patches) > 0 {
 		shown, hidden := r.rows()
-		withSev := r.anySev()
-		sevHead := ""
-		if withSev {
-			sevHead = `<th align="left" style="border-bottom:1px solid #e2e8f0">Sev</th>`
-		}
-		caption := fmt.Sprintf("%d of this release's CVEs", len(r.Highlights))
-		if collapsed(shown) {
-			caption += fmt.Sprintf(" in %d row(s) sharing %d detection(s)",
-				len(shown), len(r.Exposure.DetectingQIDs))
+		caption := fmt.Sprintf("%d QID(s) with assets", len(r.Patches))
+		if n := CVEsCovered(r.Patches); n > 0 {
+			caption += fmt.Sprintf(", covering %d of this release's CVEs", n)
 		}
 		if hidden > 0 {
 			caption += fmt.Sprintf(" &mdash; worst %d shown", len(shown))
@@ -435,75 +494,44 @@ func (r *Report) HTML() string {
            style="font:400 13px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                   margin-top:8px;border-collapse:collapse">
       <tr style="background:#f4f5f7">
-        <th align="left" style="border-bottom:1px solid #e2e8f0">CVE</th>
-        %s
+        <th align="left" style="border-bottom:1px solid #e2e8f0">QID</th>
         <th align="right" style="border-bottom:1px solid #e2e8f0">Hosts</th>
-        <th align="left" style="border-bottom:1px solid #e2e8f0">QIDs</th>
-        <th align="left" style="border-bottom:1px solid #e2e8f0">Why</th></tr>`,
-			caption, sevHead)
-		for _, h := range shown {
-			flags := []string{}
-			if h.KEV {
-				flags = append(flags, "<b style='color:#b3001b'>KEV</b>")
-			}
-			if h.EPSS > 0 {
-				flags = append(flags, fmt.Sprintf("EPSS %.0f%%", h.EPSS*100))
-			}
-			if h.CVSS > 0 {
-				flags = append(flags, fmt.Sprintf("CVSS %.1f", h.CVSS))
-			}
-			why := h.Rationale
-			if why == "" {
-				why = strings.Join(flags, " &middot; ")
-			}
-			qids := "&mdash;"
-			if len(h.QIDs) > 0 {
-				ps := make([]string, 0, len(h.QIDs))
-				for _, q := range h.QIDs {
-					ps = append(ps, fmt.Sprint(q))
-				}
-				qids = strings.Join(ps, ", ")
-			}
-			sevCell := ""
-			if withSev {
-				sev := h.Sev
-				if sev == "" {
-					sev = "&mdash;"
-				}
-				sevCell = fmt.Sprintf(
-					`<td style="border-bottom:1px solid #edf2f7"><b>%s</b></td>`, sev)
-			}
-			hosts := fmt.Sprint(h.Hosts)
-			if h.HostsAreFloor {
+        <th align="right" style="border-bottom:1px solid #e2e8f0">QDS</th>
+        <th align="left" style="border-bottom:1px solid #e2e8f0">Last seen</th>
+        <th align="left" style="border-bottom:1px solid #e2e8f0">CVEs fixed</th></tr>`,
+			caption)
+		for _, p := range shown {
+			hosts := fmt.Sprint(p.Hosts)
+			if p.HostsAreFloor {
 				hosts = "&ge;" + hosts
 			}
-			cveCell := e(h.CVE)
-			if h.SharedWith > 0 {
-				cveCell += fmt.Sprintf(
-					`<span style="color:#718096;font-size:11px"> +%d more with `+
-						`the same QIDs</span>`, h.SharedWith)
+			// A dash, not a zero. "QDS 0" reads as "no risk" when it means
+			// "the response carried no score".
+			qds := "&mdash;"
+			if p.QDS > 0 {
+				qds = fmt.Sprint(p.QDS)
+			}
+			seen := "&mdash;"
+			if p.LastSeen != "" {
+				seen = e(shortDate(p.LastSeen))
 			}
 			fmt.Fprintf(&b, `
-      <tr><td style="border-bottom:1px solid #edf2f7">
-            <a href="https://nvd.nist.gov/vuln/detail/%s" style="color:#1a202c">%s</a></td>
-          %s
+      <tr><td style="border-bottom:1px solid #edf2f7;font:400 12px ui-monospace,
+                     SFMono-Regular,Menlo,monospace">%d%s</td>
           <td align="right" style="border-bottom:1px solid #edf2f7">%s</td>
-          <td style="border-bottom:1px solid #edf2f7;font:400 12px ui-monospace,
-                     SFMono-Regular,Menlo,monospace">%s</td>
+          <td align="right" style="border-bottom:1px solid #edf2f7">%s</td>
+          <td style="border-bottom:1px solid #edf2f7;color:#4a5568">%s</td>
           <td style="border-bottom:1px solid #edf2f7;color:#4a5568">%s</td></tr>`,
-				e(h.CVE), cveCell, sevCell, hosts, qids, why)
+				p.QID, publishedMarkHTML(p), hosts, qds, seen, cveCellHTML(p))
 		}
 		b.WriteString("\n    </table>")
-		if hidden > 0 {
-			fmt.Fprintf(&b, `
+		fmt.Fprintf(&b, `
     <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#718096;margin-top:6px">
-      and %d more CVE(s) on lower host counts. The %d detection(s) in the QQL
-      above are the patching work; the CVE count is large because one
-      cumulative update carries many CVEs. Full list in the JSON output.
-    </div>`, hidden, len(r.Exposure.DetectingQIDs))
-		}
-		b.WriteString("</td></tr>\n")
+      One row per QID, because one QID is one update somebody installs. QDS is
+      the Qualys Detection Score (1&ndash;100) from the same Host Detection
+      response as the host count. %s</div></td></tr>
+`, hiddenNoteHTML(hidden))
 	}
 
 	// Coverage caveat. An unmapped CVE is not an absent one, and this email
@@ -626,69 +654,46 @@ func (r *Report) Text() string {
 	if r.QQL != "" {
 		fmt.Fprintf(&b, "QQL (%s):\n\n%s\n\n", r.QQLSource, r.QQL)
 	}
-	if len(r.Highlights) > 0 {
+	if r.QQLNarrow != "" {
+		fmt.Fprintf(&b, "QQL, ours only (%s):\n\n%s\n\n", r.QQLNarrowSource, r.QQLNarrow)
+	}
+	if len(r.Patches) > 0 {
 		shown, hidden := r.rows()
-		withSev := r.anySev()
-		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d CVEs)", len(r.Highlights))
-		if collapsed(shown) {
-			// Reconcile the two counts explicitly. The first version said "in
-			// 14 update(s)" while the exposure line above said "12 missing
-			// Qualys detection(s)" - two numbers for the same thing, three
-			// paragraphs apart. They differ because a row is a distinct
-			// COMBINATION of QIDs and several combinations share a QID, so
-			// neither number was wrong and the email never said so.
-			head += fmt.Sprintf(", %d row(s) sharing %d detection(s)",
-				len(shown), len(r.Exposure.DetectingQIDs))
+		head := fmt.Sprintf("PRESENT IN OUR ENVIRONMENT (%d QID(s) with assets",
+			len(r.Patches))
+		if n := CVEsCovered(r.Patches); n > 0 {
+			head += fmt.Sprintf(", covering %d CVEs", n)
 		}
+		head += ")"
 		if hidden > 0 {
 			head += " - worst first"
 		}
 		fmt.Fprintf(&b, "%s\n%s\n", head, strings.Repeat("-", 68))
-		for _, h := range shown {
-			hosts := fmt.Sprintf("%4d", h.Hosts)
-			if h.HostsAreFloor {
-				hosts = fmt.Sprintf(">=%2d", h.Hosts)
+		for _, p := range shown {
+			hosts := fmt.Sprintf("%5d", p.Hosts)
+			if p.HostsAreFloor {
+				hosts = fmt.Sprintf(">=%3d", p.Hosts)
 			}
-			// The severity column is omitted, not filled with a placeholder,
-			// when the enrich lane supplied nothing for any row.
-			shared := ""
-			if h.SharedWith > 0 {
-				// "with the same QIDs", not "fixed by the same update". We
-				// know the detections, not the KB article: [92440] and
-				// [92439 92440] are two rows that share a QID, so calling
-				// each row an update asserts a patch identity this lane never
-				// established.
-				shared = fmt.Sprintf("  (+%d more CVE(s) with the same QIDs)",
-					h.SharedWith)
+			qds := "   -"
+			if p.QDS > 0 {
+				qds = fmt.Sprintf("%4d", p.QDS)
 			}
-			if withSev {
-				sev := h.Sev
-				if sev == "" {
-					sev = "-"
-				}
-				fmt.Fprintf(&b, "  %-18s %-5s %s host(s)  QIDs %v%s\n",
-					h.CVE, sev, hosts, h.QIDs, shared)
-			} else {
-				fmt.Fprintf(&b, "  %-18s %s host(s)  QIDs %v%s\n",
-					h.CVE, hosts, h.QIDs, shared)
+			seen := "-"
+			if p.LastSeen != "" {
+				seen = shortDate(p.LastSeen)
 			}
-			if h.Rationale != "" {
-				fmt.Fprintf(&b, "      %s\n", h.Rationale)
-			}
+			fmt.Fprintf(&b, "  QID %-9d %s host(s)  QDS %s  last seen %s\n",
+				p.QID, hosts, qds, seen)
+			fmt.Fprintf(&b, "      %s\n", cveLineText(p))
 		}
 		if hidden > 0 {
 			fmt.Fprintf(&b,
-				"  ... and %d more CVE(s) on lower host counts. The %d detection(s) in\n"+
-					"  the QQL above are the patching work; the CVE count is large because\n"+
-					"  one cumulative update carries many CVEs. Full list in the JSON.\n",
-				hidden, len(r.Exposure.DetectingQIDs))
+				"  ... and %d more QID(s) on lower host counts. Full list in the JSON.\n",
+				hidden)
 		}
-		if !withSev {
-			b.WriteString(
-				"  (No severity band: no enriched data was available for these CVEs.\n" +
-					"   Run the digest first, or pass --enriched, to get Sev5-Sev1 here.)\n")
-		}
-		b.WriteString("\n")
+		b.WriteString(
+			"  One row per QID: one QID is one update somebody installs. QDS is the\n" +
+				"  Qualys Detection Score (1-100) from the same Host Detection response.\n\n")
 	}
 	if note := r.Exposure.CoverageNote(); note != "" {
 		b.WriteString(note + "\n\n")
