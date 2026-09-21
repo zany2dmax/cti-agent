@@ -35,6 +35,31 @@ FLEET_GROUP=ctiagent
 AGENT_REPO=https://github.com/zany2dmax/cti-agent
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Refuse to run from inside the tree this script itself pulls.
+#
+# $CODE_DIR/agent is a clone that this installer updates mid-run with
+# `git -C ... pull --ff-only`. Running from there means the second half of the
+# install copies files from the freshly pulled tree while bash is still
+# executing the logic it read from the old one. Nothing announces that, and the
+# result is an install that is neither version.
+#
+# It is also the state a box lands in when it was only ever installed from the
+# agent clone and never had a separate kit checkout - which is easy to do,
+# because that clone does contain a working copy of this script.
+if [ "${SRC#/opt/cti-agent/agent}" != "$SRC" ] || \
+   [ "${SRC#/opt/cti-agent}" != "$SRC" ]; then
+  echo "REFUSING: this script is running from $SRC, inside the tree it pulls." >&2
+  echo "" >&2
+  echo "Clone the kit somewhere outside the installed layout and run it there:" >&2
+  echo "  sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit" >&2
+  echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh" >&2
+  echo "" >&2
+  echo "Why: this installer runs 'git -C /opt/cti-agent/agent pull' partway" >&2
+  echo "through, so from here it would install files from the new tree using" >&2
+  echo "logic from the old script." >&2
+  exit 2
+fi
+
 MODE=install
 for arg in "$@"; do
   case "$arg" in
