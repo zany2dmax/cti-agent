@@ -1,18 +1,171 @@
 # CTI CVE Agent
 
-A modular Go agent that reads daily CTI emails from a shared Microsoft 365 mailbox, extracts CVEs, sends those CVEs to a swappable vulnerability lookup provider, and writes a markdown report.
+A threat-intel agent fleet in Go and Python. It reads CTI advisories from a
+shared Microsoft 365 mailbox, extracts CVEs, asks a vulnerability scanner which
+of them are *actually present in the estate*, and mails a prioritised digest
+every morning — plus a monthly Microsoft Patch Tuesday synopsis, CISA KEV
+deadline tracking, and a cleanup lane that keeps the mailbox tidy without
+touching anything a human still needs to see.
 
-The first implemented lookup provider is Qualys VMDR. The lookup layer is intentionally isolated so it can later be replaced or supplemented with CrowdStrike Exposure Management / Spotlight, Defender, Tenable, Rapid7, or another VM platform.
+The organising principle: **presence is determined only by the scanner.** CTI
+email text provides urgency and context, never proof that a vulnerability
+exists here. A report that cannot tell "we looked and found nothing" from "we
+never looked" will publish the reassuring one, and most of the design exists to
+prevent exactly that.
 
-## What it does
+---
 
-1. Reads recent emails from a configured shared mailbox (`GRAPH_MAILBOX`).
-2. Extracts CVE IDs with regex.
-3. Sends each CVE to the configured lookup provider.
-4. Normalizes provider-specific evidence into a common result model.
-5. Generates a markdown summary showing `PRESENT`, `NOT_PRESENT`, or `UNKNOWN`.
+## Documentation map
 
-Presence should be determined only by the lookup provider. CTI email text provides urgency/context, not proof that a vulnerability exists in the environment.
+| If you want to… | Read |
+|---|---|
+| **get it running**, from empty checkout to a box that mails every morning | **[RUNBOOK.md](RUNBOOK.md)** |
+| understand *why* it is shaped this way — orchestrator, executor lanes, heartbeat, message board, persistent memory | **[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md)** |
+| the full fleet reference: every command, every setting, the schedule, troubleshooting | **[fleet-kit/README.md](fleet-kit/README.md)** |
+| know what the always-on orchestrator is allowed to do, and what it must never do | [fleet-kit/fleet/CLAUDE.md](fleet-kit/fleet/CLAUDE.md) |
+| the individual agent playbooks | [skills/](fleet-kit/fleet/skills/): [checkin](fleet-kit/fleet/skills/checkin/SKILL.md), [cti-digest](fleet-kit/fleet/skills/cti-digest/SKILL.md), [scout-sweep](fleet-kit/fleet/skills/scout-sweep/SKILL.md), [patch-tuesday](fleet-kit/fleet/skills/patch-tuesday/SKILL.md) |
+| see what a report looks like before running anything | [examples/sample-report.md](examples/sample-report.md) |
+| the story of a secret leak and what was done about it | [scripts/EXPOSURE-REMEDIATION.md](scripts/EXPOSURE-REMEDIATION.md) |
+
+Quick jumps into the runbook: [Entra app
+registration](RUNBOOK.md#1-microsoft-entra-app-registration) ·
+[configuration](RUNBOOK.md#4-configuration) · [the two-box
+workflow](RUNBOOK.md#7-the-two-box-workflow-mac-to-fedora) · [enabling
+timers](RUNBOOK.md#9-enabling-the-timers-in-order) · [verifying a
+run](RUNBOOK.md#12-verifying-a-run)
+
+---
+
+## What it produces
+
+**A daily digest.** Reads the mailbox, extracts CVEs, asks the scanner what is
+present, enriches with NVD CVSS, EPSS and CISA KEV, prioritises Sev5–Sev1, and
+mails an HTML digest with the exploited-and-present findings at the top.
+
+**A monthly Patch Tuesday synopsis.** Reads the Qualys and BleepingComputer
+wrap-ups, correlates the release against Host Detection, and answers the
+question neither public write-up can: what landed on *our* machines. One table
+row per QID, the Qualys Detection Score, and the review's own QQL verbatim so
+somebody can paste it into the console and see the same set.
+
+**KEV deadline tracking.** CISA remediation deadlines, but only for CVEs the
+scanner actually found in the estate — a deadline for something you do not have
+is noise.
+
+**A tidy mailbox.** Processed advisories to Archive, header-confirmed
+auto-replies to Deleted Items, and *everything else left exactly where it is.*
+
+**Noise when something breaks.** A failed unit emails the operator and posts to
+the message board, because the whole premise is that a quiet inbox means a
+quiet day — which only holds if a broken pipeline is loud.
+
+---
+
+## The six binaries
+
+| Binary | Run by | Purpose |
+|---|---|---|
+| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
+| `cti-alert` | systemd `OnFailure=` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
+| `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
+| `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
+| `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
+| `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
+
+All six are stdlib-only. `go.mod` has no dependencies, and adding one would make
+a C toolchain or a large generated tree a build-time requirement on the
+deployment host.
+
+```bash
+task build              # all six into bin/
+task test               # Go tests + Python lane tests
+task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
+task --list             # everything else
+```
+
+---
+
+## Design decisions worth knowing
+
+These are the ones that will surprise you if you read the code without them.
+
+**Presence comes only from the scanner.** An advisory saying a CVE is exploited
+is context. Whether it is *here* is a separate question with a separate source,
+and the report never conflates them. Every CVE comes back as one of
+`PRESENT`, `NOT_PRESENT` or `UNKNOWN` — and `UNKNOWN` is load-bearing: it means
+the scanner had no answer, not that the estate is clean.
+
+**A QID is the unit of work, not a CVE.** Qualys maps every CVE in a monthly
+cumulative update to the same QID, so 353 "present" CVEs can be twelve missing
+patches. Keyed by CVE, the Patch Tuesday table was 353 rows stating one fact
+hundreds of times; keyed by QID it is a dozen rows that each mean *patch this*.
+
+**The vendor's own query leads.** The QQL Qualys publishes with each review,
+reproduced byte-for-byte, returns every QID in the release with assets against
+it. A query built from whatever this lane managed to correlate is a subset, and
+is labelled as one.
+
+**Four states, not three.** Exposure distinguishes "not measured" (the scanner
+was never reached) from "not yet measurable" (no QID mapping exists yet) from
+"measured, nothing open" from a real finding. An early version printed a
+confident diagnosis of a KnowledgeBase it had never contacted.
+
+**Suppression requires evidence.** The daily digest holds back a Patch Tuesday
+release's CVEs only when a manifest says that synopsis was *delivered* — never
+on a heuristic about vendors and dates, and never on a manifest from a run
+whose email failed.
+
+**Mailbox cleanup leaves things alone by default.** Only two kinds of message
+ever move: an advisory the agent took a CVE from, and a message whose own
+headers declare it an automatic reply. "The agent read it looking for CVEs and
+found none" is not "this has been dealt with."
+
+**Nothing can permanently delete mail.** `internal/graph` exposes
+move-to-folder and nothing else; Graph's `DELETE` and purge endpoints are
+deliberately not implemented.
+
+**Every failure falls open.** A missing manifest, an unreadable state file, an
+absent `FLEET_HOME` — each means *report more*, never *report less*. The
+recurring bug in this system was never a crash; it was a check that ran and had
+no effect, or a refusal indistinguishable from a quiet day.
+
+**Reports are targeting lists.** They pair "exploitable" with "these machines",
+are written `0600`, are gitignored, and go only to an allowlisted internal
+distribution list. See [RUNBOOK → Report
+sensitivity](RUNBOOK.md#13-report-sensitivity).
+
+---
+
+## The lookup provider boundary
+
+The important abstraction is `internal/vulnlookup.LookupProvider`:
+
+```go
+type LookupProvider interface {
+    Name() string
+    LookupCVE(ctx context.Context, cve string) (Result, error)
+}
+```
+
+The rest of the app does not know whether a CVE was checked in Qualys,
+CrowdStrike or something else. Provider-specific identifiers like Qualys QIDs
+come back as normalised `ExternalIDs`.
+
+| Provider | State |
+|---|---|
+| **Qualys VMDR** | Implemented. Two-step: a local KnowledgeBase cache mapping `CVE → QID[]`, then Host Detection List for active detections |
+| **CrowdStrike** | Placeholder at `internal/vulnlookup/crowdstrike`; returns `UNKNOWN` until a real lookup is added |
+| **noop / none** | Exercises mailbox reading and CVE extraction without calling a scanner. Useful for separating two failures that otherwise look identical |
+
+### Adding another
+
+1. Create a package under `internal/vulnlookup/<provider>`.
+2. Implement `Name()` and `LookupCVE(ctx, cve)`.
+3. Return normalised `vulnlookup.Result` values.
+4. Add the provider to `buildLookupProvider()` in `cmd/cti-agent/main.go`.
+5. Add provider-specific config to `internal/config` only if needed.
+
+---
 
 ## The design pattern
 
@@ -26,6 +179,8 @@ The pattern originates with [Build Your Own Claude Code Agent
 Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet)
 by Limited Edition Jonathan. This repository applies it to threat intel.
 
+---
+
 ## Project layout
 
 ```text
@@ -35,22 +190,26 @@ cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
 cmd/cti-kev/                   CISA KEV remediation deadline report
 cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
 cmd/cti-mailbox/               daily mailbox cleanup (the only writer)
-internal/config/               environment/config loading
+
+internal/config/               environment/config loading, per-command requirements
+internal/fleetenv/             the single fleet.env reader every command uses
 internal/cti/                  CTI parsing and CVE extraction
-internal/graph/                Microsoft Graph mailbox reader and sendMail
+internal/graph/                Microsoft Graph mailbox reader, sendMail, move
 internal/budget/               rolling-window and daily ceilings, backoff
 internal/kev/                  deadline bands, present-only filtering
-internal/patchtuesday/         release-date maths, source parsing, exposure, QQL
+internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
 internal/mailbox/              processed-message log and the cleanup decision table
+internal/report/               markdown report writer, hostname redaction
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
-internal/vulnlookup/crowdstrike/ placeholder for future CrowdStrike implementation
-internal/vulnlookup/noop       For testing the CVE extraction and not calling a VM provider API
-internal/report/               markdown report writer
+internal/vulnlookup/crowdstrike/ placeholder for a future implementation
+internal/vulnlookup/noop/      no scanner: exercises extraction only
+
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
-fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-mailbox-cleanup, fleet-board, fleet-db
+fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
+                               run-mailbox-cleanup, fleet-board, fleet-db
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
 fleet-kit/fleet/systemd/       service + timer pairs, generic layout
@@ -61,322 +220,26 @@ fleet-kit/tests/               lane tests (stdlib unittest, no network)
 scripts/                       history scrub + exposure remediation notes
 ```
 
-### The six binaries
-
-| Binary | Run by | Purpose |
-|---|---|---|
-| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
-| `cti-alert` | systemd `OnFailure=` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
-| `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
-| `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found in the estate |
-| `cti-patchtuesday` | `run-patchtuesday`, monthly | Reads the Qualys and BleepingComputer wrap-ups, correlates against Host Detection — using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL — and renders the synopsis with a pasteable QQL. One table row per QID, not per CVE. Writes the release manifest the daily digest reads |
-| `cti-mailbox`      | `run-mailbox-cleanup`, daily    | The only binary that **modifies** the mailbox: processed advisories to Archive, header-confirmed auto-replies to Deleted Items, anything unread left alone. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
-
-All six are stdlib-only. `go.mod` has no dependencies, and adding one would
-make a C toolchain or a large generated tree a build-time requirement on the
-deployment host.
-
-```bash
-task build        # all six into bin/
-task test         # Go tests + Python lane tests
-task test:kev     # deadline logic
-task test:budget  # quota ceilings and backoff
-task test:patchtuesday  # release dates, parsing, exposure, QQL
-task test:mailbox # the processed-message gate and cleanup precedence
-task test:env     # fleet.env parsing, and which credentials each command may fail on
-```
-
-## Lookup provider boundary
-
-The important abstraction is `internal/vulnlookup.LookupProvider`:
-
-```go
-type LookupProvider interface {
-    Name() string
-    LookupCVE(ctx context.Context, cve string) (Result, error)
-}
-```
-
-The rest of the app does not know whether a CVE was checked in Qualys, CrowdStrike, or another backend. Provider-specific IDs like Qualys QIDs are returned as normalized `ExternalIDs`.
-
-## Current providers
-
-### Qualys
-
-The Qualys provider does a two-step lookup:
-
-1. Build/load a local Qualys KnowledgeBase cache mapping `CVE -> QID[]`.
-2. Query Host Detection List for active detections of those QIDs.
-
-### CrowdStrike
-
-A placeholder provider exists at `internal/vulnlookup/crowdstrike`. It currently returns `UNKNOWN` until a real CrowdStrike API lookup is added.
-
-### noop/none
-
-Allows testing the full CVE parsing of the emails in outlook without calling a VM provider
-
-## Required permissions
-
-### Microsoft Graph
-
-For daemon/service operation, use Microsoft Graph application permissions and grant admin consent:
-
-- `Mail.Read` — required by the agent, to read the CTI mailbox.
-- `Mail.Send` — required only by the fleet, to send digests and escalations.
-- `Mail.ReadWrite` — required only by `cti-mailbox`, to move messages. Skip it
-  if you are not running the cleanup lane.
-
-**`Mail.ReadWrite` is the one to think about before granting.** It supersedes
-`Mail.Read`, and as an *application* permission it is tenant-wide by default —
-the same trap as `Mail.Send`. A leaked client secret goes from "read this
-mailbox and send as it" to "move and delete mail anywhere the policy allows".
-Apply the Application Access Policy below **first**; with it the new role is
-confined to the CTI mailbox like the other two. If you are not running mailbox
-cleanup, do not add it.
-
-Nothing in this codebase can permanently delete mail. `internal/graph` exposes
-move-to-folder and nothing else — Graph's `DELETE /messages/{id}` and the purge
-endpoints are deliberately not implemented, so "delete" means Deleted Items and
-emptying that folder stays a person's job.
-
-The app must be allowed to read the shared mailbox. In production, restrict it
-with an Exchange Application Access Policy: `Mail.Send` as an *application*
-permission is tenant-wide by default, meaning the app could otherwise send as
-any mailbox in the tenant.
-
-```powershell
-New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
-  -PolicyScopeGroupId cti-agent-mailboxes@example.com `
-  -AccessRight RestrictAccess -Description "CTI: security mailbox only"
-Test-ApplicationAccessPolicy -Identity <MAILBOX> -AppId <CLIENT_ID>
-```
-
-`fleet-kit/fleet/lanes/mailer.py --check` decodes the token and reports which
-roles were actually granted — consent is the step people skip.
-
-### Qualys
-
-The Qualys account needs API access to:
-
-- KnowledgeBase vulnerability list
-- Host Detection List
+---
 
 ## Two ways to run this
 
-**The agent alone** — build it, point it at a mailbox, get a markdown report.
-That is the Quick start below.
+**The agent alone.** Build it, point it at a mailbox, get a markdown report. No
+systemd, no service account. [RUNBOOK → The agent
+alone](RUNBOOK.md#5-the-agent-alone).
 
-**The agent inside the fleet** (`fleet-kit/`) — an always-on orchestrator plus
-three executor lanes that add exploitability context (NVD CVSS, EPSS, CISA
-KEV), prioritize Sev5–Sev1, render an HTML digest and mail it on a schedule. See
-[fleet-kit/README.md](fleet-kit/README.md) for the full runbook and a complete
-command reference.
+**The agent inside the fleet** (`fleet-kit/`). An always-on orchestrator plus
+executor lanes that add exploitability context, prioritise Sev5–Sev1, render the
+HTML digest and mail it on a schedule. [RUNBOOK → Installing the
+fleet](RUNBOOK.md#8-installing-the-fleet), and
+[fleet-kit/README.md](fleet-kit/README.md) for the complete reference.
 
-For local development and debugging, `fleet-kit/bin/dev-run` executes the whole
-pipeline from a checkout with no root, no service account and no systemd. It
-sends nothing unless you explicitly ask:
+---
 
-```bash
-cp .env.example .env && vi .env
+## Ideas not yet built
 
-./fleet-kit/bin/dev-run doctor                  # config + Graph token + roles
-./fleet-kit/bin/dev-run ingest --provider none  # mailbox + CVE extraction only
-./fleet-kit/bin/dev-run all                     # full pipeline, opens the digest
-```
-
-`task --list` shows every target. Start with `--provider none`: it needs only
-the Entra credentials, so it separates "can we read the mailbox" from "does the
-scanner answer" — two failures that look identical together.
-
-## Day-to-day: Mac to Fedora
-
-The development box and the fleet box have different jobs and different gates.
-The full sequence for both — inner loop, the push gate, the deploy order, and
-which timer to enable when — is in
-**[fleet-kit/README.md → The two-box workflow](fleet-kit/README.md#the-two-box-workflow)**.
-
-The short version:
-
-```bash
-# on the Mac
-task test           # while changing one thing
-task ship           # fmt, build, test, lint, scan, gosec, govulncheck, push
-
-# on the Fedora box  (KIT = wherever the kit checkout lives; not ~, the
-# deploy runs under sudo)
-sudo git -C "$KIT" pull && sudo "$KIT/fleet-kit/install-fedora.sh"
-sudo vi /etc/cti-agent/fleet.env          # any new settings
-sudo cti-agent mailer.py --check          # token + granted roles
-sudo cti-agent run-digest daily --dry-run # read it before enabling anything
-sudo systemctl enable --now cti-agent-digest.timer
-```
-
-`task ship` is the only thing that pushes, and it stops at the first failing
-gate. Deploy never enables a timer before a dry run has been read.
-
-## Quick start
-
-```bash
-cp .env.example .env
-# edit .env with real values
-
-set -a
-source .env
-set +a
-
-go run ./cmd/cti-agent
-```
-
-Or with Task:
-
-```bash
-task build
-task run
-```
-
-## Environment variables
-
-| Variable | Purpose |
-|---|---|
-| `TENANT_ID` | Entra tenant ID |
-| `CLIENT_ID` | App registration client ID |
-| `CLIENT_SECRET` | App registration client secret |
-| `GRAPH_MAILBOX` | Mailbox to read, e.g. `threatintel@example.com`. Required — there is no default |
-| `GRAPH_FOLDER` | Folder to read, default `inbox` |
-| `GRAPH_LOOKBACK_HOURS` | How far back to read messages |
-| `LOOKUP_PROVIDER` | `qualys`, `crowdstrike`, or `none`/`noop` (skip the scanner) |
-| `QUALYS_BASE_URL` | Qualys API base URL, required when `LOOKUP_PROVIDER=qualys` |
-| `QUALYS_USERNAME` | Qualys username, required when `LOOKUP_PROVIDER=qualys` |
-| `QUALYS_PASSWORD` | Qualys password, required when `LOOKUP_PROVIDER=qualys` |
-| `QUALYS_KB_CACHE` | Local JSON cache path for CVE -> QID map |
-| `REPORT_PATH` | Markdown output file |
-| `QUALYS_KB_MAX_AGE_HOURS` | Hours before the CVE→QID cache refreshes (default 168) |
-| `NVD_API_KEY` | **Free** NVD key — without it enrichment is 10x slower. See below |
-| `FLEET_USER_AGENT` | User-Agent sent to NVD, EPSS, CISA and advisory feeds |
-| `DIGEST_TO` | Digest recipients, comma-separated. No default |
-| `FLEET_ALLOW_TO` | Recipient allowlist; anything else needs `--approve` |
-| `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
-| `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
-| `FLEET_HOME` | Fleet state directory |
-| `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, or `count` |
-| `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. This file is mailbox cleanup's entire authority to move anything — no entry, no move |
-| `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record (default 25) |
-| `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
-
-## Report sensitivity
-
-A CTI report pairs "this CVE is exploitable" with "these are the machines that
-have it." That is a targeting list if it leaks.
-
-The default is nonetheless `full`, because the alternative is worse in practice:
-a pseudonym cannot be looked up in the scanner, so a redacted report tells you a
-Sev5 exists without telling you where, and you have to rerun the pipeline to act
-on it. An unactionable security report is not a safe security report.
-
-What keeps that defensible is everything around it — reports are written `0600`,
-excluded by `.gitignore`, and mailed only to an allowlisted internal DL. Switch
-to `redact` or `count` for any copy leaving that path.
-
-| `REPORT_HOSTNAMES` | Output |
-|---|---|
-| `redact` | Stable pseudonyms — `host-3797a22b`. The same machine keeps the same label across reports, so you can track remediation without naming it. **Not reversible** — there is no lookup table, so you cannot resolve one back to a host. |
-| `count` | Host count only, names withheld entirely. |
-| `full` *(default)* | Real hostnames. The report carries a "do not commit" banner. |
-
-Set `REPORT_REDACTION_SALT` to a private, stable value. Pseudonyms are
-deterministic, so without a salt anyone holding a list of candidate hostnames
-can confirm matches by hashing them. With a salt they cannot.
-
-Generated reports are written mode `0600` and are excluded by `.gitignore`.
-Do not commit them, attach them to tickets, or paste them into chat tools.
-`scripts/scrub-history.sh` exists because this rule was learned the hard way.
-
-## The NVD API key
-
-The fleet's enrich lane calls NVD once per CVE. Get a key before running this
-on a schedule — it is free and takes about a minute:
-**https://nvd.nist.gov/developers/request-an-api-key**
-
-| | Rate limit | 20 CVEs | 50 CVEs |
-|---|---|---|---|
-| No key | 5 req / 30s | ~2 min | ~5 min |
-| With `NVD_API_KEY` | 50 req / 30s | ~15 s | ~35 s |
-
-Responses are cached for 7 days, so the cost is worst on a first run. EPSS and
-the CISA KEV catalog need no key.
-
-## Scanner KB cache freshness
-
-The Qualys provider maps CVE→QID from a local cache of the KnowledgeBase. That
-cache expires after `QUALYS_KB_MAX_AGE_HOURS` (default 168 = 7 days), after
-which the agent tops it up incrementally and falls back to a full rebuild.
-
-This matters more than it sounds. A cache older than a CVE has no mapping for
-it, so the CVE reports `UNKNOWN` — which reads as "not affected" when it
-actually means "never checked". If a refresh fails, the run continues but every
-`UNKNOWN` then says **"coverage UNVERIFIED, not confirmed absent"** rather than
-"no mapping found". Those are different facts and the report distinguishes them.
-
-To force a rebuild, delete the cache file and rerun. The first build is a large
-download and takes a few minutes.
-
-### Microsoft Graph permissions needed
-## Microsoft Graph API Permissions
-
-The CTI Agent uses Microsoft Graph application authentication (Client Credentials Flow) to read emails from the Cyber Security shared mailbox.
-
-### Required Application Permissions
-
-| Permission | Type | Needed by |
-|------------|------|-----------|
-| Mail.Read | Application | the agent — reading the CTI mailbox |
-| Mail.Send | Application | the fleet — sending digests and escalations |
-
-### Grant Admin Consent
-
-After adding the permission in Microsoft Entra:
-
-1. Navigate to Entra ID → App Registrations
-2. Select the CTI Agent application
-3. API Permissions
-4. Add Permission → Microsoft Graph → Application Permissions
-5. Add `Mail.Read`, and `Mail.Send` if you are running the fleet
-6. Click **Grant Admin Consent** — this step is easy to miss, and nothing works without it
-
-### Required Configuration
-
-```env
-TENANT_ID=<tenant-id>
-CLIENT_ID=<app-registration-client-id>
-CLIENT_SECRET=<client-secret>
-GRAPH_MAILBOX=<shared-mailbox-address>
-```
-
-### Authentication Flow
-
-1. Obtain access token from Microsoft Entra ID
-2. Call Microsoft Graph API
-3. Read messages from the Cyber Security shared mailbox
-4. Parse CTI emails and extract CVEs
-
-
-## Adding another lookup provider
-
-1. Create a package under `internal/vulnlookup/<provider>`.
-2. Implement `Name()` and `LookupCVE(ctx, cve)`.
-3. Return normalized `vulnlookup.Result` values.
-4. Add the provider to `buildLookupProvider()` in `cmd/cti-agent/main.go`.
-5. Add provider-specific config to `internal/config` only if needed.
-
-## Notes
-
-- The initial Qualys KnowledgeBase download can be large. The agent caches the CVE/QID mapping locally.
-- For very large Qualys environments, add pagination/truncation handling and batching by QID.
-- This is an MVP scaffold meant to be checked into GitHub and iterated.
-
-## Feature Requests
-
-- Add other VM providers as needed
-- Email the final report back to a distribution list
-- Package this up as a docker container for easy deployment and maintainability
+- More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
+- Qualys severity bands beside the QDS number, once the thresholds are verified
+  against Qualys' own documentation rather than guessed
+- Pagination and QID batching for very large Qualys environments
+- A container image for deployment
