@@ -913,7 +913,7 @@ func TestHTMLCarriesTheThingsTheReaderCameFor(t *testing.T) {
 		">110531",                                    // the QID, which is the row
 		"95",                                         // its QDS, from Host Detection
 		"2026-08-14",                                 // when it was last seen
-		"Qualys Detection Score",                      // the legend for the column
+		"Qualys Detection Score",                     // the legend for the column
 		"no Qualys QID mapping",                      // the coverage caveat
 		"Present in our environment",                 // the section that makes it ours
 		"421",                                        // Microsoft's count, per Qualys
@@ -990,9 +990,6 @@ func TestTextVersionLeadsWithTheQQLOnItsOwnLine(t *testing.T) {
 		t.Error("text version should carry the unmapped caveat too")
 	}
 }
-
-
-
 
 func TestTheTableIsOneRowPerQIDSortedByBlastRadiusAndCapped(t *testing.T) {
 	dg := parsed(t)
@@ -1159,7 +1156,6 @@ func TestTheSubjectLeadsWithTheWorkNotTheCVECount(t *testing.T) {
 		t.Errorf("a clean month should not grow a suffix: %q", clean.Subject())
 	}
 }
-
 
 func TestACorrelatedCVECanNameTheSentenceThatPutItThere(t *testing.T) {
 	// CVE-2026-6726 sorted to the top of the August table on 346 hosts and
