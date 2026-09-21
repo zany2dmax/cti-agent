@@ -522,9 +522,8 @@ deterministic, so without a salt anyone holding a list of candidate hostnames
 can confirm matches by hashing them.
 
 Do not commit generated reports, attach them to tickets, or paste them into
-chat tools. `scripts/scrub-history.sh` and
-[scripts/EXPOSURE-REMEDIATION.md](scripts/EXPOSURE-REMEDIATION.md) exist
-because this rule was learned the hard way.
+chat tools. `scripts/scrub-history.sh` exists because this rule is easier to
+break than it looks.
 
 ---
 

@@ -25,7 +25,6 @@ prevent exactly that.
 | know what the always-on orchestrator is allowed to do, and what it must never do | [fleet-kit/fleet/CLAUDE.md](fleet-kit/fleet/CLAUDE.md) |
 | the individual agent playbooks | [skills/](fleet-kit/fleet/skills/): [checkin](fleet-kit/fleet/skills/checkin/SKILL.md), [cti-digest](fleet-kit/fleet/skills/cti-digest/SKILL.md), [scout-sweep](fleet-kit/fleet/skills/scout-sweep/SKILL.md), [patch-tuesday](fleet-kit/fleet/skills/patch-tuesday/SKILL.md) |
 | see what a report looks like before running anything | [examples/sample-report.md](examples/sample-report.md) |
-| the story of a secret leak and what was done about it | [scripts/EXPOSURE-REMEDIATION.md](scripts/EXPOSURE-REMEDIATION.md) |
 
 Quick jumps into the runbook: [Entra app
 registration](RUNBOOK.md#1-microsoft-entra-app-registration) ·
