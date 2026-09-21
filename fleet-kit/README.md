@@ -224,6 +224,7 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `<fleet> cti-mailbox` | Dry run of mailbox cleanup: what it would archive, delete and leave |
 | `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Add `--for-real` to apply |
 | `task test:mailbox` | The processed-message gate, precedence, retention, backlog note |
+| `task test:env` | `fleet.env` parsing and the per-command credential requirements. A lane that refuses to run over credentials it never uses, or over ones already in the file, has happened twice; this is the regression test for both |
 | `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck. **`scan` is staticcheck**, not a vulnerability scan — it predates the security tasks below |
 | `task gosec` | Insecure code patterns. Deliberate exceptions carry an inline `#nosec <RULE> -- reason` beside the code, never a blanket exclusion in config: a suppression whose justification lives elsewhere is one nobody re-examines |
 | `task govulncheck` | stdlib and dependencies against the Go vulnerability database. `go.mod` has no third-party dependencies, so this is about the stdlib — and the agent parses untrusted HTML and XML off the public internet through `encoding/xml` and `net/http`, so an advisory in either is a live finding here |
@@ -1630,6 +1631,9 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what Sev5s are open and unremedi
 | Heartbeat skipping, unit shows success | Quota ceiling or cooldown — working as designed | `fleet cti-budget status` gives the reason and when it resumes. Raise `FLEET_BUDGET_WINDOW_BEATS` to give the fleet more of your quota |
 | *You* got rate-limited, not the fleet | The fleet's slice is too large for how you work | Lower `FLEET_BUDGET_DAILY_BEATS`, or widen the timer past 2h. The fleet cannot see your usage, so this is tuned by hand |
 | Holds emailed repeatedly for one outage | `AlertedFor` state lost with the ledger | Expected after deleting `budget.json`. One email per distinct cooldown otherwise |
+| `missing required environment variables: [...]` from a by-hand run, but the names are all in `fleet.env` | The wrapper passes the `FLEET_*` layout only; the command has to read `fleet.env` itself | Fixed — every Go command now calls `internal/fleetenv` at startup. If it recurs, `FLEET_ENV` is wrong or the service account cannot read the 0600 file: `sudo -u ctiagent head -1 /etc/cti-agent/fleet.env` |
+| A missing-variable list naming credentials the command never uses | Wrong config loader — `config.Load()` demands Graph *and* Qualys | `LoadGraphOnly()` for mailbox lanes, `LoadVulnLookup()` for scanner lanes. `task test:env` covers this |
+| `export KEY=value` in `fleet.env` had no effect | The old Go parser set a variable literally named `export KEY` | Fixed in `internal/fleetenv`. Both forms work now, in shell and in Go |
 
 
 ### When it works by hand but every timer fails

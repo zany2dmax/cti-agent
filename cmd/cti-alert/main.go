@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 )
 
@@ -247,49 +248,15 @@ func sendEmail(subject, htmlBody string, f failure) (string, error) {
 	})
 }
 
-// loadEnvFile reads fleet.env so a manual run works without exporting
-// everything. systemd already supplies these via EnvironmentFile, and
-// existing environment always wins.
-func loadEnvFile() {
-	path := os.Getenv("FLEET_ENV")
-	if path == "" {
-		path = filepath.Join(envOr("FLEET_HOME", "/var/lib/cti-agent"), "fleet.env")
-	}
-	// #nosec G304,G703 -- path is FLEET_ENV, or fleet.env under FLEET_HOME.
-	// Both are service configuration; the file itself holds the credentials
-	// this process needs, so reading it is the point.
-	//
-	// G703 is taint analysis: os.Getenv reaches os.ReadFile in this function,
-	// which is a real data flow but not a privilege boundary. Anyone who can
-	// set FLEET_ENV in this process's environment can already run code as this
-	// user - there is nothing to escalate to.
-	//
-	// Deliberately NOT "fixed" with filepath.Clean(). Clean normalises ".."
-	// and restricts nothing, so it would silence the rule while providing no
-	// control at all - a check that looks like a security measure and is not,
-	// which is the exact failure this repo keeps cataloguing. The control that
-	// would matter here is refusing a credentials file that is group- or
-	// world-readable, and the installer enforces that at 0600 instead.
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		if _, set := os.LookupEnv(k); !set {
-			_ = os.Setenv(k, v)
-		}
-	}
-}
+// loadEnvFile delegates to internal/fleetenv.
+//
+// This logic lived here first and was duplicated in shell (run-digest,
+// run-patchtuesday), in Python (mailer.py) and then NOT written in
+// cti-mailbox, which is how `sudo cti-agent cti-mailbox` came to report seven
+// credentials missing that were sitting in the file all along. One
+// implementation now, and it also handles an `export KEY=value` line, which
+// this version quietly turned into a variable called "export KEY".
+func loadEnvFile() { fleetenv.Load() }
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

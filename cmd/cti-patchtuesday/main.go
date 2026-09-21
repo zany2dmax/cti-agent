@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/kev"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
@@ -57,6 +58,15 @@ func main() {
 		"print every place a CVE was found on the source pages, and whether "+
 			"anything ties it to a Microsoft product, then exit")
 	flag.Parse()
+
+	// fleet.env. The runner sources it in shell before calling this, so under
+	// systemd this is a no-op; `sudo cti-agent cti-patchtuesday` does not, and
+	// the wrapper passes only the FLEET_* layout. Without this that by-hand
+	// run reports the three Qualys credentials missing and then reports every
+	// CVE as NOT MEASURED - the same latent fault that surfaced in
+	// cti-mailbox. Existing environment always wins, so the runner's values
+	// are untouched.
+	fleetenv.Load()
 
 	now := time.Now()
 	var year int
