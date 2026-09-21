@@ -505,13 +505,16 @@ func moveError(status int, body []byte, mailbox string, dest Folder) error {
 	if len(trimmed) > 600 {
 		trimmed = trimmed[:600] + "..."
 	}
-	switch {
-	case status == 403:
+	// Tagged switch: every case here is a plain status comparison, unlike
+	// sendMailError above, which pairs a status with a body check and so has
+	// to stay untagged.
+	switch status {
+	case http.StatusForbidden:
 		return fmt.Errorf("move to %s 403: the app registration needs Mail.ReadWrite "+
 			"as an APPLICATION permission with admin consent granted - Mail.Read is "+
 			"not enough to move a message - or an Application Access Policy excludes "+
 			"%s: %s", dest, mailbox, trimmed)
-	case status == 404:
+	case http.StatusNotFound:
 		return fmt.Errorf("move to %s 404: message not found in %s. It may already "+
 			"have been moved, by this lane or by a person: %s", dest, mailbox, trimmed)
 	default:
