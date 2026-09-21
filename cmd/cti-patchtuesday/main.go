@@ -451,7 +451,6 @@ func buildPatches(e patchtuesday.Exposure, cveToQIDs map[string][]int,
 	return out
 }
 
-
 func dedupe(in []int) []int {
 	seen := map[int]bool{}
 	var out []int

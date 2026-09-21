@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/cti"
@@ -102,11 +104,28 @@ func main() {
 	if err != nil {
 		// Loud, and then carry on with everything. An unreadable manifest must
 		// not be able to decide anything.
-		log.Printf("WARNING: Patch Tuesday manifest unreadable (%v); reporting "+
-			"every CVE found, including any the monthly synopsis covers", err)
+		//
+		// oneLine() because this message is the one here that really does carry
+		// outside text: the error embeds a path built from FLEET_HOME and a
+		// parse error from the file's own contents. A newline in either forges
+		// a second journal entry (CWE-117), and the journal is where an
+		// operator goes to find out why a lane misbehaved. gosec did not flag
+		// this line - it flagged the one below, which passes only integers -
+		// so the annotation and the fix belong to different lines, and putting
+		// the fix on the flagged line would have been a control in the wrong
+		// place.
+		log.Printf("WARNING: Patch Tuesday manifest unreadable (%s); reporting "+
+			"every CVE found, including any the monthly synopsis covers",
+			oneLine(err.Error()))
 	}
 	keep, held := patchtuesday.Held(all, manifests)
 	if len(held) > 0 {
+		// #nosec G706 -- the taint analysis is right that `held` derives from a
+		// file path read out of the environment, and wrong that anything
+		// tainted reaches the log: the only values interpolated are len(held)
+		// and len(keep). An int cannot carry a newline or a control character,
+		// which is the whole of CWE-117. Not "fixed" by sanitising an integer,
+		// which would be a control that looks like one and is not.
 		log.Printf("holding back %d CVE(s) already sent in a Patch Tuesday "+
 			"synopsis; %d remain", len(held), len(keep))
 	}
@@ -177,6 +196,37 @@ func main() {
 	default:
 		fmt.Printf("Wrote %s\n", cfg.ReportPath)
 	}
+}
+
+// oneLine makes a string safe to put in a log record.
+//
+// A log line is a record, and a record that can contain a newline is a record
+// anyone who can influence the text can forge. journalctl shows the forged
+// line looking exactly like one this program wrote, which makes the journal
+// useless for the one job it has here: telling an operator what actually
+// happened. Tabs and other control characters go too - they let text be
+// pushed off the visible width of a terminal.
+//
+// Replaces rather than strips, so the mangling is visible: a message that
+// arrived with newlines in it should look odd, not look clean.
+func oneLine(s string) string {
+	const maxLogged = 300 // an error, not a file
+	// IsControl covers it: newline, carriage return and tab are all C0
+	// controls, so listing them separately would just be three redundant
+	// comparisons in front of the check that actually decides.
+	out := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
+	// Runes, not bytes. A byte-offset cut lands in the middle of a multi-byte
+	// character often enough, and then the control meant to make the log
+	// readable is the thing that put invalid UTF-8 in it.
+	if r := []rune(out); len(r) > maxLogged {
+		return string(r[:maxLogged]) + "... (truncated)"
+	}
+	return out
 }
 
 func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
