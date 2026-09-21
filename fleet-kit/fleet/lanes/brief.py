@@ -44,6 +44,32 @@ PRI = {
 
 # With five bands each label is already honest, so these are explanations of
 # *why a band exists*, not corrections to a misleading heading.
+# How many rows of each band the digest lists, per kind. 0 means no section
+# at all - the band's number still appears in the count tiles at the top of
+# the email and in the text header, which is the whole of what an awareness
+# item warrants.
+#
+# THE RULE, FROM THE OPERATOR
+#
+# The email says "we have this, it is risky, you should know". Anything that is
+# not that is a number. Sev1 is awareness only, so it gets a count and no
+# prose - listing 25 of them in the weekly was padding, and a large weekly
+# earns a mail rule pointing at Trash. That rule cannot tell a Sev5 from a
+# Sev1, so padding the weekly costs the Sev5s their audience. The cheapest way
+# to make this whole system useless is to make it boring.
+#
+# Sev5 is deliberately uncapped. If thirty CVEs are both actively exploited and
+# on our machines, truncating that list is not a formatting decision.
+#
+# Both renderers read this table. They used not to: render_text had its own
+# hardcoded caps and would print 99 Sev4 rows where the HTML printed 12, so the
+# plain-text alternative - which is what some clients show - was the wordier of
+# the two.
+ROW_LIMITS = {
+    "daily":  {"Sev5": 99, "Sev4": 12, "Sev3": 12, "Sev2": 10, "Sev1": 0},
+    "weekly": {"Sev5": 99, "Sev4": 15, "Sev3": 15, "Sev2": 12, "Sev1": 0},
+}
+
 MIXED_NOTE = {
     "Sev3": ("These are being actively exploited and the scanner has no QID "
              "mapping for them, so it could not tell us whether we are exposed. "
@@ -339,13 +365,7 @@ def subjects_section(data):
 def render(data, kind):
     c, meta = data["counts"], data.get("source_meta", {})
     findings = data["findings"]
-    # Sev4 is capped on the daily because "present in the environment" is a large
-    # set in a real estate - the top offenders by host count carry the message,
-    # and the attached raw report has the rest.
-    # Sev1 is suppressed from the daily and surfaces in the weekly: awareness
-    # items every morning is how a digest becomes something people filter.
-    limits = {"daily":  {"Sev5": 99, "Sev4": 12, "Sev3": 12, "Sev2": 10, "Sev1": 0},
-              "weekly": {"Sev5": 99, "Sev4": 40, "Sev3": 40, "Sev2": 40, "Sev1": 25}}[kind]
+    limits = ROW_LIMITS[kind]
     now = datetime.now().strftime("%A %d %B %Y, %H:%M %Z").strip()
     # Whose digest this is. Named in the header and the footer so a forwarded
     # copy is still identifiable, and so nobody mistakes it for a vendor
@@ -582,18 +602,23 @@ def render_text(data, kind):
         if kev.get("overdue_cves"):
             lines.append(f"  overdue: {', '.join(kev['overdue_cves'][:8])}")
     lines.append("")
+    limits = ROW_LIMITS[kind]
     for p in SEV_ORDER:
         group = [f for f in data["findings"] if f["priority"] == p]
-        if not group or (kind == "daily" and p == "Sev1"):
+        if not group or limits[p] == 0:
             continue
         lines += [f"{p} - {PRI[p][2]} ({len(group)})", "-" * 68]
         if p in MIXED_NOTE and band_needs_caveat(group):
             lines.append("  NOTE: UNKNOWN rows below are unverified coverage, "
                          "not confirmed exposure.")
-        for f in group[: 99 if p in ("Sev5", "Sev4", "Sev3") else 10]:
+        for f in group[:limits[p]]:
             lines.append(f"  {f['cve']}  {f.get('status')}  "
                          f"{f.get('host_count') or 0} host(s)")
             lines.append(f"    {f.get('rationale')}")
+        # Truncation is stated, as it is in the HTML. A list that silently
+        # stops is one the reader believes is complete.
+        if len(group) > limits[p]:
+            lines.append(f"  +{len(group) - limits[p]} more {p} in the full report.")
         lines.append("")
     lines.append("Presence determined solely by the vulnerability lookup provider.")
     lines.append("UNKNOWN means the scanner had no mapping - not that we are clean.")

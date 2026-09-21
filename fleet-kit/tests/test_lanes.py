@@ -293,10 +293,67 @@ class BriefRendering(unittest.TestCase):
         self.assertEqual(html.count("<table"), html.count("</table>"))
         self.assertEqual(html.count("<tr"), html.count("</tr>"))
 
-    def test_sev1_suppressed_daily_shown_weekly(self):
+    def test_sev1_is_a_count_not_a_list_in_either_digest(self):
+        """Awareness items get a number and no prose.
+
+        They used to fill 25 rows of the weekly. A large weekly earns a mail
+        rule pointing at Trash, and that rule cannot tell a Sev5 from a Sev1 -
+        so padding the weekly with things nobody acts on costs the Sev5s their
+        audience.
+
+        The count is not lost: it is in the tiles at the top of the HTML and
+        the header line of the text version, both of which iterate every band
+        regardless of how many rows it lists.
+        """
         d = self.enriched()
-        self.assertNotIn("Awareness only", brief.render(d, "daily"))
-        self.assertIn("Awareness only", brief.render(d, "weekly"))
+        for kind in ("daily", "weekly"):
+            html = brief.render(d, kind)
+            self.assertNotIn("Awareness only", html,
+                             f"{kind}: Sev1 should have no section")
+            # ...but its number is still on the email.
+            self.assertIn(">Sev1<", html, f"{kind}: the Sev1 count tile is missing")
+            text = brief.render_text(d, kind)
+            # Find the counts strip rather than assuming its line number -
+            # blank lines and the degraded/novelty blocks move it around.
+            strip = [l for l in text.split("\n")
+                     if "Sev5" in l and "Sev1" in l and "total" in l]
+            self.assertEqual(len(strip), 1,
+                             f"{kind}: expected exactly one counts strip, got {strip}")
+            self.assertRegex(strip[0], r"Sev1 \d+",
+                             f"{kind}: the strip should carry a Sev1 number")
+            self.assertNotIn("Sev1 - Awareness only", text,
+                             f"{kind}: Sev1 should have no text section")
+
+    def test_both_renderers_cap_the_same_way(self):
+        """render_text used to have its own hardcoded caps.
+
+        It printed up to 99 Sev4 rows where the HTML printed 12, so the
+        plain-text alternative - which is what some clients display - was the
+        wordier of the two. One table, read by both.
+        """
+        d = self.enriched()
+        for kind in ("daily", "weekly"):
+            limits = brief.ROW_LIMITS[kind]
+            text = brief.render_text(d, kind)
+            for band, cap in limits.items():
+                group = [f for f in d["findings"] if f["priority"] == band]
+                shown = sum(1 for line in text.split("\n")
+                            if line.startswith("  CVE-")
+                            and any(f["cve"] in line for f in group))
+                self.assertLessEqual(shown, cap,
+                                     f"{kind}/{band}: {shown} rows exceeds the cap of {cap}")
+
+    def test_truncation_is_stated_in_the_text_version_too(self):
+        d = self.enriched()
+        # Force a truncation: more Sev4 rows than the daily cap allows.
+        cap = brief.ROW_LIMITS["daily"]["Sev4"]
+        d["findings"] = [dict(d["findings"][0], cve=f"CVE-2026-{9000+i}",
+                              priority="Sev4", status="PRESENT", host_count=5)
+                         for i in range(cap + 3)]
+        d["counts"] = {"Sev5": 0, "Sev4": cap + 3, "Sev3": 0, "Sev2": 0, "Sev1": 0}
+        text = brief.render_text(d, "daily")
+        self.assertIn(f"+3 more Sev4 in the full report", text,
+                      "a list that silently stops is one the reader believes is complete")
 
     def test_sample_hosts_are_deduped(self):
         d = self.enriched()
