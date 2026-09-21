@@ -609,6 +609,48 @@ if [ "$MODE" != dryrun ]; then
     fi
   done
 fi
+# Which timers are actually running.
+#
+# This installer deliberately enables nothing - that is the operator's call -
+# but it never said which of the timers it had just written were live, and a
+# timer that was installed and never enabled is invisible: systemd reports no
+# error because nothing asked it to run anything.
+#
+# It happened. Five of six timers sat unenabled on the production box for
+# weeks. The digest ran every morning, so the fleet looked healthy, while the
+# orchestrator had never taken a beat, the scout never swept a feed, the Patch
+# Tuesday lane would have missed its month, and - worst of the five - the
+# weekly never sent. Sev1 findings are suppressed from the daily digest
+# specifically because the weekly carries them, so with the weekly disabled
+# they were being dropped from human view entirely by a config gap rather than
+# a bug.
+if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
+  bold "Timer status"
+  _enabled_any=0
+  for t in "$SRC"/fleet/systemd-fedora/*.timer; do
+    unit="$(basename "$t")"
+    state="$(systemctl is-enabled "$unit" 2>/dev/null || echo disabled)"
+    if [ "$state" = enabled ]; then
+      nxt="$(systemctl list-timers --all --no-legend "$unit" 2>/dev/null \
+             | awk '{print $1, $2, $3}')"
+      ok "$unit enabled${nxt:+ - next $nxt}"
+      _enabled_any=1
+    else
+      info "$unit NOT enabled ($state)"
+    fi
+  done
+  if [ "$_enabled_any" = 0 ]; then
+    info "Nothing is scheduled yet. See the numbered steps below."
+  fi
+  # Named specifically, because this pair loses information silently rather
+  # than failing.
+  if [ "$(systemctl is-enabled cti-agent-weekly.timer 2>/dev/null || echo disabled)" != enabled ]; then
+    info "cti-agent-weekly.timer is off: Sev1 findings are suppressed from the"
+    info "daily digest on the assumption the weekly carries them, so right now"
+    info "they reach nobody. Enable it or raise the daily Sev1 limit."
+  fi
+fi
+
 if [ "$FAIL" != 0 ]; then
   bad "fix the above before enabling anything"
   # The wrapper is already installed by this point, so say so: the natural
