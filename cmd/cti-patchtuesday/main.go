@@ -194,8 +194,8 @@ func main() {
 		if path == "" {
 			path = newestEnriched()
 		}
-		switch {
-		case path == "":
+		switch path {
+		case "":
 			fmt.Fprintln(os.Stderr,
 				"cti-patchtuesday: no enriched JSON found ($FLEET_HOME/state/enriched-*.json); "+
 					"the severity column will be omitted rather than left blank")

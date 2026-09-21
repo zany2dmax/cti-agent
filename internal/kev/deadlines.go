@@ -204,34 +204,34 @@ func (r *Report) Markdown(showHosts bool) string {
 	b.WriteString("## CISA KEV remediation deadlines\n\n")
 
 	if r.Clean() {
-		b.WriteString(fmt.Sprintf(
-			"Nothing overdue and nothing due within %dd.\n\n", r.Horizon))
+		fmt.Fprintf(&b, 
+			"Nothing overdue and nothing due within %dd.\n\n", r.Horizon)
 	}
 
 	if n := len(r.Overdue); n > 0 {
-		b.WriteString(fmt.Sprintf("### %d OVERDUE — deadline already passed\n\n", n))
+		fmt.Fprintf(&b, "### %d OVERDUE — deadline already passed\n\n", n)
 		b.WriteString(r.table(r.Overdue, showHosts))
 		b.WriteString("\n")
 	}
 	if n := len(r.DueSoon); n > 0 {
-		b.WriteString(fmt.Sprintf("### %d due within %dd\n\n", n, r.Horizon))
+		fmt.Fprintf(&b, "### %d due within %dd\n\n", n, r.Horizon)
 		b.WriteString(r.table(r.DueSoon, showHosts))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("| | |\n|---|---:|\n")
-	b.WriteString(fmt.Sprintf("| Overdue, present here | %d |\n", len(r.Overdue)))
-	b.WriteString(fmt.Sprintf("| Due within %dd, present here | %d |\n", r.Horizon, len(r.DueSoon)))
-	b.WriteString(fmt.Sprintf("| Later deadline, present here | %d |\n", len(r.Later)))
-	b.WriteString(fmt.Sprintf("| Ransomware-associated, present here | %d |\n", r.RansomwareCount()))
-	b.WriteString(fmt.Sprintf("| KEV deadlines not detected here | %d |\n", r.NotHere))
-	b.WriteString(fmt.Sprintf("| KEV deadlines, coverage UNVERIFIED | %d |\n", r.Unverified))
+	fmt.Fprintf(&b, "| Overdue, present here | %d |\n", len(r.Overdue))
+	fmt.Fprintf(&b, "| Due within %dd, present here | %d |\n", r.Horizon, len(r.DueSoon))
+	fmt.Fprintf(&b, "| Later deadline, present here | %d |\n", len(r.Later))
+	fmt.Fprintf(&b, "| Ransomware-associated, present here | %d |\n", r.RansomwareCount())
+	fmt.Fprintf(&b, "| KEV deadlines not detected here | %d |\n", r.NotHere)
+	fmt.Fprintf(&b, "| KEV deadlines, coverage UNVERIFIED | %d |\n", r.Unverified)
 
 	if r.Unverified > 0 {
-		b.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&b, 
 			"\n> %d KEV %s a published deadline could not be checked against the "+
 				"scanner. That is not a clean result — it means we did not look.\n",
-			r.Unverified, plural(r.Unverified, "vulnerability with", "vulnerabilities with")))
+			r.Unverified, plural(r.Unverified, "vulnerability with", "vulnerabilities with"))
 	}
 	return b.String()
 }
@@ -256,10 +256,10 @@ func (r *Report) table(rows []Dated, showHosts bool) string {
 		if d.IsRansomware() {
 			flag += " ⚠ransomware"
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s | %s |",
-			d.CVE, d.KEVDue, days, d.HostCount, flag, orDash(d.QIDs)))
+		fmt.Fprintf(&b, "| %s | %s | %s | %d | %s | %s |",
+			d.CVE, d.KEVDue, days, d.HostCount, flag, orDash(d.QIDs))
 		if showHosts {
-			b.WriteString(fmt.Sprintf(" %s |", orDash(d.Hosts)))
+			fmt.Fprintf(&b, " %s |", orDash(d.Hosts))
 		}
 		b.WriteString("\n")
 	}

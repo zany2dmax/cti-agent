@@ -42,7 +42,7 @@ func main() {
 
 func run(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: cti-budget <check|record|status> [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: cti-budget <check|record|status> [flags]")
 		return exitFailure
 	}
 	switch args[0] {
@@ -53,7 +53,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	case "status":
 		return cmdStatus(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "cti-budget: unknown command %q\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "cti-budget: unknown command %q\n", args[0])
 		return exitFailure
 	}
 }
@@ -85,7 +85,7 @@ func envInt(key string, def int) int {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
-		fmt.Fprintf(os.Stderr, "cti-budget: ignoring %s=%q, want a positive integer\n", key, v)
+		_, _ = fmt.Fprintf(os.Stderr, "cti-budget: ignoring %s=%q, want a positive integer\n", key, v)
 	}
 	return def
 }
@@ -97,7 +97,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			return time.Duration(f * float64(time.Hour))
 		}
-		fmt.Fprintf(os.Stderr, "cti-budget: ignoring %s=%q, want hours as a number\n", key, v)
+		_, _ = fmt.Fprintf(os.Stderr, "cti-budget: ignoring %s=%q, want hours as a number\n", key, v)
 	}
 	return def
 }
@@ -117,32 +117,51 @@ func cmdCheck(args []string, stdout, stderr *os.File) int {
 	if err != nil {
 		// A corrupt ledger returns an empty one plus an error. Warn and carry
 		// on: failing closed here would stop the heartbeat over a counter.
-		fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
 	}
 
 	d := s.Check(l)
 	if d.Allow {
 		if !*quiet {
-			fmt.Fprintf(stdout, "budget ok: %s\n", d.Reason)
+			_, _ = fmt.Fprintf(stdout, "budget ok: %s\n", d.Reason)
 		}
 		return exitOK
 	}
 
-	fmt.Fprintf(stdout, "budget denied: %s\n", d.Reason)
+	_, _ = fmt.Fprintf(stdout, "budget denied: %s\n", d.Reason)
 	if !d.RetryAfter.IsZero() {
-		fmt.Fprintf(stdout, "next attempt viable after %s\n", d.RetryAfter.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(stdout, "next attempt viable after %s\n", d.RetryAfter.Format(time.RFC3339))
 	}
 	if *alertFlag {
 		should := s.ShouldAlert(l, d)
 		// ShouldAlert mutates the ledger, so it has to be persisted or every
 		// denial would alert again.
 		if err := s.Save(l); err != nil {
-			fmt.Fprintf(stderr, "cti-budget: could not persist alert state: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "cti-budget: could not persist alert state: %v\n", err)
 		}
+		// This one write is checked rather than discarded. run-checkin reads
+		// the word on stdout to decide whether to raise an alert, so losing it
+		// is not a cosmetic failure: an empty read looks exactly like
+		// "silent", and the alert that should have fired would not. Everything
+		// else this command prints is advisory and the exit code carries the
+		// decision, but this line IS the decision.
+		// alertWord, not "flag": this function calls flag.NewFlagSet above, and
+		// a local named flag shadows the package for the rest of the block.
+		alertWord := "silent"
 		if should {
-			fmt.Fprintln(stdout, "alert")
-		} else {
-			fmt.Fprintln(stdout, "silent")
+			alertWord = "alert"
+		}
+		if _, err := fmt.Fprintln(stdout, alertWord); err != nil {
+			// Report it, but still return exitDenied. run-checkin treats any
+			// code other than 3 as "the check itself failed, proceed with the
+			// beat" - so returning a usage or error code here would defeat the
+			// rate limiter in order to complain about a lost print. The brake
+			// matters more than the alert. run-checkin folds stderr into the
+			// text it posts to the board, so the lost flag is visible there.
+			_, _ = fmt.Fprintf(stderr,
+				"cti-budget: DENIED but could not write the alert flag (%q) to "+
+					"stdout: %v - no alert will be raised for this denial\n",
+				alertWord, err)
 		}
 	}
 	return exitDenied
@@ -165,24 +184,24 @@ func cmdRecord(args []string, stdout, stderr *os.File) int {
 	case string(budget.OutcomeOK), string(budget.OutcomeRateLimit), string(budget.OutcomeError):
 		o = budget.Outcome(*outcome)
 	default:
-		fmt.Fprintf(stderr, "cti-budget: --outcome must be ok, ratelimit or error\n")
+		_, _ = fmt.Fprintf(stderr, "cti-budget: --outcome must be ok, ratelimit or error\n")
 		return exitFailure
 	}
 
 	s := storeFromEnv()
 	l, err := s.Load()
 	if err != nil {
-		fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
 	}
 	s.Record(l, o, *note)
 	if err := s.Save(l); err != nil {
-		fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
 		return exitFailure
 	}
 
-	fmt.Fprintf(stdout, "recorded %s\n", o)
+	_, _ = fmt.Fprintf(stdout, "recorded %s\n", o)
 	if o == budget.OutcomeRateLimit {
-		fmt.Fprintf(stdout, "cooling off until %s\n", l.CooldownUntil.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(stdout, "cooling off until %s\n", l.CooldownUntil.Format(time.RFC3339))
 	}
 	return exitOK
 }
@@ -197,7 +216,7 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 	s := storeFromEnv()
 	l, err := s.Load()
 	if err != nil {
-		fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
 	}
 	d := s.Check(l)
 
@@ -219,14 +238,14 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 		return exitOK
 	}
 
-	fmt.Fprintf(stdout, "ledger:  %s\n", s.Path)
-	fmt.Fprintf(stdout, "limits:  %d beats per %s, %d per day\n",
+	_, _ = fmt.Fprintf(stdout, "ledger:  %s\n", s.Path)
+	_, _ = fmt.Fprintf(stdout, "limits:  %d beats per %s, %d per day\n",
 		s.Limits.WindowBeats, s.Limits.Window, s.Limits.DailyBeats)
-	fmt.Fprintf(stdout, "beats:   %d recorded in the last 48h\n", len(l.Beats))
+	_, _ = fmt.Fprintf(stdout, "beats:   %d recorded in the last 48h\n", len(l.Beats))
 	if d.Allow {
-		fmt.Fprintf(stdout, "state:   ready (%s)\n", d.Reason)
+		_, _ = fmt.Fprintf(stdout, "state:   ready (%s)\n", d.Reason)
 	} else {
-		fmt.Fprintf(stdout, "state:   holding - %s\n", d.Reason)
+		_, _ = fmt.Fprintf(stdout, "state:   holding - %s\n", d.Reason)
 	}
 	return exitOK
 }
