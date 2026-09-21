@@ -26,7 +26,7 @@ type Config struct {
 
 // Load returns the full configuration, Graph included. For commands that read
 // the mailbox or send mail.
-func Load() (Config, error) { return load(true) }
+func Load() (Config, error) { return load(true, true) }
 
 // LoadVulnLookup returns the configuration for a command that only queries the
 // vulnerability scanner.
@@ -43,9 +43,25 @@ func Load() (Config, error) { return load(true) }
 // rotation would take the monthly exposure figures down with it and report
 // them as "NOT MEASURED". A command should only be able to fail on the
 // credentials it actually needs.
-func LoadVulnLookup() (Config, error) { return load(false) }
+func LoadVulnLookup() (Config, error) { return load(false, true) }
 
-func load(needGraph bool) (Config, error) {
+// LoadGraphOnly returns the configuration for a command that only talks to
+// the mailbox.
+//
+// cti-mailbox reads the inbox and moves messages. It never asks the scanner
+// anything, and it failed on a box with a complete fleet.env with:
+//
+//	missing required environment variables: [CLIENT_ID CLIENT_SECRET
+//	GRAPH_MAILBOX QUALYS_BASE_URL QUALYS_PASSWORD QUALYS_USERNAME TENANT_ID]
+//
+// Three of those seven it has no use for. This is the same mistake as
+// cti-patchtuesday demanding Graph credentials to do a Qualys lookup, in the
+// opposite direction: a command should be able to fail on the credentials it
+// needs and no others, because a list that includes irrelevant names sends
+// the reader looking in the wrong file.
+func LoadGraphOnly() (Config, error) { return load(true, false) }
+
+func load(needGraph, needQualys bool) (Config, error) {
 	lookbackHours, err := strconv.Atoi(getenvDefault("GRAPH_LOOKBACK_HOURS", "24"))
 	if err != nil || lookbackHours <= 0 {
 		return Config{}, fmt.Errorf("GRAPH_LOOKBACK_HOURS must be a positive integer")
@@ -94,7 +110,7 @@ func load(needGraph bool) (Config, error) {
 		}
 	}
 
-	if cfg.LookupProvider == "qualys" {
+	if needQualys && cfg.LookupProvider == "qualys" {
 		for name, value := range map[string]string{
 			"QUALYS_BASE_URL": cfg.QualysBaseURL,
 			"QUALYS_USERNAME": cfg.QualysUsername,

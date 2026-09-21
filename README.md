@@ -83,6 +83,7 @@ task test:kev     # deadline logic
 task test:budget  # quota ceilings and backoff
 task test:patchtuesday  # release dates, parsing, exposure, QQL
 task test:mailbox # the processed-message gate and cleanup precedence
+task test:env     # fleet.env parsing, and which credentials each command may fail on
 ```
 
 ## Lookup provider boundary
