@@ -10,6 +10,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/cti"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/report"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/crowdstrike"
@@ -38,6 +39,7 @@ func main() {
 	cves := map[string]bool{}
 	withCVEs := 0
 	subjects := make([]report.ScannedEmail, 0, len(messages))
+	seen := make([]mailbox.Processed, 0, len(messages))
 	for _, msg := range messages {
 		text := msg.Subject + "\n" + msg.BodyText
 		found := cti.ExtractCVEs(text)
@@ -51,6 +53,16 @@ func main() {
 			Subject:  msg.Subject,
 			Received: msg.ReceivedDateTime,
 			HasCVE:   len(found) > 0,
+		})
+		// What the cleanup lane will later be allowed to act on. Recorded here
+		// because this is the only place that knows a message was read AND
+		// what was found in it; deriving either afterwards would be guessing.
+		seen = append(seen, mailbox.Processed{
+			ID:        msg.ID,
+			Subject:   msg.Subject,
+			Received:  msg.ReceivedDateTime,
+			HasCVE:    len(found) > 0,
+			AutoReply: msg.IsAutoReply(),
 		})
 	}
 
@@ -77,6 +89,30 @@ func main() {
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		log.Fatalf("write report failed: %v", err)
+	}
+
+	// Record what was read, AFTER the report is on disk. The ordering is the
+	// point: this log is the cleanup lane's authority to move mail, so it must
+	// never claim a message was processed by a run that then failed to produce
+	// anything. A failure to write the log is not fatal - losing today's
+	// findings over a bookkeeping file would be worse - but it is loud,
+	// because the consequence is that cleanup will leave everything alone and
+	// otherwise look like it worked.
+	if path := mailbox.LogPath(); path != "" {
+		store := mailbox.NewStore(path)
+		l, err := store.Load()
+		if err != nil {
+			log.Printf("WARNING: processed-message log unreadable (%v); mailbox "+
+				"cleanup will not move anything until this is fixed", err)
+		} else {
+			store.Record(l, seen)
+			if err := store.Save(l); err != nil {
+				log.Printf("WARNING: could not write the processed-message log "+
+					"(%v); mailbox cleanup will not move today's mail", err)
+			} else {
+				log.Printf("recorded %d message(s) in %s", len(seen), path)
+			}
+		}
 	}
 	log.Printf("scanned %d email(s) since %s; %d mentioned a CVE; %d distinct CVE(s)",
 		scan.Messages, since.Format(time.RFC3339), scan.WithCVEs, scan.CVEsFound)

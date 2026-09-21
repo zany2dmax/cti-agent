@@ -103,6 +103,11 @@ Concretely, a quiet beat should pick up one of these:
   having no QID mapping. The KnowledgeBase usually catches up within a week,
   and an unmapped exploited CVE that nobody revisited is the coverage gap this
   fleet exists to find.
+- If mailbox cleanup reports messages with **no processing record** at or above
+  the threshold, treat it as a possible ingest failure rather than an untidy
+  inbox. The digest succeeding while reading nothing looks exactly like a quiet
+  week; a growing backlog is the only outward sign. Check the last `cti-agent`
+  run and the lookback window, and escalate if the count keeps climbing.
 - If the Patch Tuesday synopsis said exposure **was not measured** — as
   opposed to "not yet measurable" — that is a broken run, not a finding.
   Something stopped the lane reaching the scanner; the reason is in the line
@@ -118,6 +123,8 @@ Concretely, a quiet beat should pick up one of these:
 - Running any lane (`ingest`, `enrich`, `scout`, `brief`).
 - Rendering the Patch Tuesday synopsis, including a `--month` replay. A replay
   cannot send, so there is nothing to approve.
+- Running `run-mailbox-cleanup` WITHOUT `--for-real`, which moves nothing and
+  shows what the timer would do.
 - Reading mailboxes, the vulnerability scanner, NVD, EPSS, KEV, and vendor
   advisory feeds.
 - Writing to `$FLEET_HOME/state/memory.db`, `$FLEET_HOME/reports/`, `$FLEET_HOME/logs/`,
@@ -137,6 +144,11 @@ Concretely, a quiet beat should pick up one of these:
   a clickable link at the foot of every digest, so editing them changes what
   the fleet advertises to the whole distribution list. Propose the wording on
   the board and wait; do not edit fleet.env to adjust them.
+- Running `run-mailbox-cleanup --for-real`, or `cti-mailbox --for-real`. The
+  daily timer does that; you do not. It moves mail out of a shared mailbox
+  other people read, and a second unscheduled pass is how a person finds their
+  inbox rearranged twice with no explanation. If the timer looks wrong, say so
+  on the board.
 - Creating or modifying tickets, scanner config, scan settings, or exceptions.
 - Deleting anything outside `$FLEET_HOME/logs/` and `$FLEET_HOME/archive/`.
 - Anything that touches a production host.
@@ -211,6 +223,7 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL |
+| `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive processed advisories, move header-confirmed auto-replies to Deleted Items, leave unread mail alone. **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. **You** invoke this, never a lane. |
 
 Lanes do not talk to the operator. They post to the board and you relay. Lanes

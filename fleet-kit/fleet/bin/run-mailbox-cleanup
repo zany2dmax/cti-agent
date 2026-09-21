@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# run-mailbox-cleanup [--for-real]
+#
+# Tidies the shared CTI mailbox once a day: processed advisories to Archive,
+# header-confirmed out-of-office replies to Deleted Items, everything the agent
+# has no record of reading left exactly where it is.
+#
+# DRY RUN UNLESS --for-real. This is the only lane that modifies the mailbox,
+# it runs unattended, and a flag that must be added to cause an effect cannot
+# be triggered by a mis-edited unit file. The systemd unit passes --for-real
+# explicitly, so the decision is visible in the unit rather than buried in a
+# default.
+#
+# It exits 0 when it decides to do nothing - no CTI email processed today, for
+# instance. A working refusal is not a failed unit: a non-zero exit would have
+# systemd mark this failed and cti-alert email about a lane that behaved
+# correctly.
+set -euo pipefail
+
+FOR_REAL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --for-real) FOR_REAL="--for-real"; shift ;;
+    *) echo "usage: run-mailbox-cleanup [--for-real]" >&2; exit 2 ;;
+  esac
+done
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+# See run-digest: fleet.env must not overwrite the layout the unit injected.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+export FLEET_HOME FLEET_CODE
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+
+BOARD="$FLEET_CODE/bin/fleet-board"
+CLEAN="$FLEET_CODE/bin/cti-mailbox"
+
+mkdir -p "$FLEET_HOME"/{state,logs}
+say()  { echo "[run-mailbox-cleanup $(date '+%F %H:%M:%S')] $*"; }
+fail() { say "FAILED: $*"; "$BOARD" post @mailbox @you ERROR \
+         "run-mailbox-cleanup failed: $*" 2>/dev/null || true; exit 1; }
+
+[ -x "$CLEAN" ] || fail "cti-mailbox not found at $CLEAN - rerun the installer"
+
+PLAN="$FLEET_HOME/state/mailbox-cleanup-$(date +%F).json"
+
+# Pass the threshold through only when it is set, so the binary's own default
+# stays the single source of truth for what it is. A variable documented in
+# fleet.env.example that no consumer reads is the bug this repo already went
+# looking for once.
+THRESH=()
+if [ -n "${FLEET_MAILBOX_BACKLOG_THRESHOLD:-}" ]; then
+  THRESH=(--backlog-threshold "$FLEET_MAILBOX_BACKLOG_THRESHOLD")
+fi
+
+if [ -z "$FOR_REAL" ]; then
+  say "dry run - nothing will be moved"
+fi
+
+# Capture the output: it is the audit trail for a lane that moves other
+# people's mail, and it goes to the board so the orchestrator sees it too.
+OUT="$("$CLEAN" $FOR_REAL "${THRESH[@]}" --json "$PLAN" 2>&1)" || {
+  echo "$OUT"
+  fail "cti-mailbox exited non-zero (a failed move usually means the app "\
+"registration is missing Mail.ReadWrite with admin consent)"
+}
+echo "$OUT"
+
+SUMMARY="$(printf '%s' "$OUT" | grep -E '^ +archive [0-9]+' | tr -s ' ' || true)"
+[ -n "$SUMMARY" ] || SUMMARY="nothing to do"
+
+if [ -n "$FOR_REAL" ]; then
+  "$BOARD" post @mailbox @you INFO \
+    "mailbox cleanup:$SUMMARY (plan: $PLAN)" 2>/dev/null || true
+else
+  "$BOARD" post @mailbox @you INFO \
+    "mailbox cleanup DRY RUN:$SUMMARY (plan: $PLAN)" 2>/dev/null || true
+fi
+
+# A backlog of unread mail is reported by the binary on stderr. Surface it as
+# its own board line: it is the symptom of the agent having stopped reading the
+# mailbox, which is otherwise silent because the digest keeps succeeding.
+if printf '%s' "$OUT" | grep -q 'no processing record, at or above'; then
+  "$BOARD" post @mailbox @you WARN \
+    "$(printf '%s' "$OUT" | grep 'no processing record, at or above')" \
+    2>/dev/null || true
+fi
+
+say "done - $SUMMARY"

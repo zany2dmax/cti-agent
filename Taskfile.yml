@@ -148,6 +148,20 @@ tasks:
     cmds:
       - go test ./internal/budget/ -v
 
+  test:mailbox:
+    desc: Mailbox cleanup - the processed-message gate, precedence, retention
+    cmds:
+      - go test ./internal/mailbox/ -v
+
+  mailbox:
+    desc: "Show what mailbox cleanup WOULD do. Moves nothing."
+    # No --for-real here on purpose. A task that modifies a shared mailbox
+    # should be typed out in full, not reachable by tab-completing a name.
+    cmds:
+      - |
+        if [ -f ./.env ]; then set -a; . ./.env; set +a; fi
+        go run ./cmd/cti-mailbox
+
   test:patchtuesday:
     desc: Patch Tuesday date maths, source parsing, exposure and QQL
     cmds:
@@ -281,7 +295,7 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build all five binaries (agent, alerter, quota ledger, KEV, Patch Tuesday)
+    desc: Build all six binaries (agent, alerter, quota ledger, KEV, Patch Tuesday, mailbox)
     deps: [tidy]
     cmds:
       - mkdir -p bin
@@ -290,6 +304,7 @@ tasks:
       - go build -o bin/cti-budget ./cmd/cti-budget
       - go build -o bin/cti-kev ./cmd/cti-kev
       - go build -o bin/cti-patchtuesday ./cmd/cti-patchtuesday
+      - go build -o bin/cti-mailbox ./cmd/cti-mailbox
 
   run:
     desc: Run the agent locally using environment variables
