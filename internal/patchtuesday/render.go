@@ -203,8 +203,12 @@ func e(s string) string { return html.EscapeString(s) }
 // team's wording and one GitHub URL into the shipped renderer would undo that.
 // Unset means no attribution line at all, so a fresh install advertises
 // nobody.
+// The field is Line rather than Text because the render methods are HTML()
+// and Text(), mirroring Report.HTML() and Report.Text(), and Go does not
+// allow a field and a method to share a name on one type. The method pair is
+// worth more than the field name.
 type Attribution struct {
-	Text string // FLEET_ATTRIBUTION, or a default built from FLEET_ORG
+	Line string // FLEET_ATTRIBUTION, or a default built from FLEET_ORG
 	URL  string // FLEET_REPO_URL; empty renders as plain text
 }
 
@@ -232,7 +236,7 @@ func LoadAttribution(org string) Attribution {
 		text = fmt.Sprintf(
 			"Correlated and published by the %s Claude Code Agent Fleet", org)
 	}
-	return Attribution{Text: text, URL: url}
+	return Attribution{Line: text, URL: url}
 }
 
 // safeLinkURL returns the URL only if it is safe to put in an href, and ""
@@ -275,26 +279,26 @@ func (r *Report) creditText() string {
 
 // HTML renders the attribution as an escaped line, linked when there is a URL.
 func (a Attribution) HTML() string {
-	if a.Text == "" {
+	if a.Line == "" {
 		return ""
 	}
 	if a.URL == "" {
-		return e(a.Text)
+		return e(a.Line)
 	}
 	return fmt.Sprintf(`<a href="%s" style="color:#2c5282;text-decoration:underline">%s</a>`,
-		e(a.URL), e(a.Text))
+		e(a.URL), e(a.Line))
 }
 
 // Text renders the attribution for the plain-text alternative, with the URL on
-// the same line because a text-only reader cannot follow an anchor.
+// its own line because a text-only reader cannot follow an anchor.
 func (a Attribution) Text() string {
 	switch {
-	case a.Text == "":
+	case a.Line == "":
 		return ""
 	case a.URL == "":
-		return a.Text
+		return a.Line
 	}
-	return a.Text + "\n" + a.URL
+	return a.Line + "\n" + a.URL
 }
 
 // Subject matches what has gone out by hand for months, so the thread and any

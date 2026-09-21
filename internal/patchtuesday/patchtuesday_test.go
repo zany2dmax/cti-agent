@@ -1328,7 +1328,7 @@ func TestAttributionIsConfiguredNotHardcoded(t *testing.T) {
 	// advertises nobody.
 	t.Setenv("FLEET_ATTRIBUTION", "")
 	t.Setenv("FLEET_REPO_URL", "")
-	if a := LoadAttribution("CR"); a.Text != "" || a.URL != "" {
+	if a := LoadAttribution("CR"); a.Line != "" || a.URL != "" {
 		t.Errorf("unset should render nothing, got %+v", a)
 	}
 	r := &Report{Digest: parsed(t), Org: "Construction Resources"}
@@ -1339,8 +1339,8 @@ func TestAttributionIsConfiguredNotHardcoded(t *testing.T) {
 	// A URL alone is enough: somebody who sets a repo link wants the credit.
 	t.Setenv("FLEET_REPO_URL", "https://github.com/example/cti-agent")
 	a := LoadAttribution("Construction Resources")
-	if !strings.Contains(a.Text, "Construction Resources Claude Code Agent Fleet") {
-		t.Errorf("default text should name the org: %q", a.Text)
+	if !strings.Contains(a.Line, "Construction Resources Claude Code Agent Fleet") {
+		t.Errorf("default text should name the org: %q", a.Line)
 	}
 	if a.URL != "https://github.com/example/cti-agent" {
 		t.Errorf("URL = %q", a.URL)
@@ -1349,8 +1349,8 @@ func TestAttributionIsConfiguredNotHardcoded(t *testing.T) {
 	// Explicit text wins over the default.
 	t.Setenv("FLEET_ATTRIBUTION", "Correlated and published by the CR Claude Code Agent Fleet")
 	a = LoadAttribution("ignored")
-	if a.Text != "Correlated and published by the CR Claude Code Agent Fleet" {
-		t.Errorf("explicit text should win: %q", a.Text)
+	if a.Line != "Correlated and published by the CR Claude Code Agent Fleet" {
+		t.Errorf("explicit text should win: %q", a.Line)
 	}
 
 	// And it reaches both renderings, as a link in HTML and with the URL on
@@ -1404,8 +1404,8 @@ func TestOnlyHTTPLinksReachTheEmail(t *testing.T) {
 	if a.URL != "" {
 		t.Errorf("URL = %q, want empty", a.URL)
 	}
-	if a.Text != "Published by the CR fleet" {
-		t.Errorf("the text should survive a bad URL: %q", a.Text)
+	if a.Line != "Published by the CR fleet" {
+		t.Errorf("the text should survive a bad URL: %q", a.Line)
 	}
 	if strings.Contains(a.HTML(), "javascript") || strings.Contains(a.HTML(), "<a ") {
 		t.Errorf("rendered as a link anyway: %s", a.HTML())
@@ -1414,7 +1414,7 @@ func TestOnlyHTTPLinksReachTheEmail(t *testing.T) {
 
 func TestAttributionTextIsEscapedInHTML(t *testing.T) {
 	// It comes from a config file, and config files get pasted into.
-	a := Attribution{Text: `CR <script>alert(1)</script> & co`,
+	a := Attribution{Line: `CR <script>alert(1)</script> & co`,
 		URL: `https://example.com/?a=1&b="2"`}
 	h := a.HTML()
 	if strings.Contains(h, "<script>") {
