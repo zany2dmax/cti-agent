@@ -255,9 +255,21 @@ func loadEnvFile() {
 	if path == "" {
 		path = filepath.Join(envOr("FLEET_HOME", "/var/lib/cti-agent"), "fleet.env")
 	}
-	// #nosec G304 -- path is FLEET_ENV, or fleet.env under FLEET_HOME. Both
-	// are service configuration; the file itself holds the credentials this
-	// process needs, so reading it is the point.
+	// #nosec G304,G703 -- path is FLEET_ENV, or fleet.env under FLEET_HOME.
+	// Both are service configuration; the file itself holds the credentials
+	// this process needs, so reading it is the point.
+	//
+	// G703 is taint analysis: os.Getenv reaches os.ReadFile in this function,
+	// which is a real data flow but not a privilege boundary. Anyone who can
+	// set FLEET_ENV in this process's environment can already run code as this
+	// user - there is nothing to escalate to.
+	//
+	// Deliberately NOT "fixed" with filepath.Clean(). Clean normalises ".."
+	// and restricts nothing, so it would silence the rule while providing no
+	// control at all - a check that looks like a security measure and is not,
+	// which is the exact failure this repo keeps cataloguing. The control that
+	// would matter here is refusing a credentials file that is group- or
+	// world-readable, and the installer enforces that at 0600 instead.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return
