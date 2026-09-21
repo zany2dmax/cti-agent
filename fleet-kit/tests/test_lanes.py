@@ -9,6 +9,7 @@ offline and deterministically. What they cover is the logic that decides what a
 human sees - priority assignment, report parsing, digest rendering, and the
 mailer's autonomy gate.
 """
+import base64
 import contextlib
 import datetime
 import importlib.util
@@ -314,6 +315,111 @@ class BriefRendering(unittest.TestCase):
         text = brief.render_text(self.enriched(), "daily")
         self.assertIn("Sev5", text)
         self.assertIn("Presence determined solely", text)
+
+
+class GrantedRoles(unittest.TestCase):
+    """What the token can actually do, checked without touching Entra.
+
+    These run in `task test`, so they are inside `task ship`. The LIVE check -
+    `mailer.py --check`, which fetches a real token - stays in
+    `task dev:doctor` on purpose: coupling a pre-push gate to tenant state and
+    network would mean a consent problem in Entra blocks a code push, and the
+    gate would fail on any machine without credentials.
+    """
+
+    def token(self, roles):
+        """A JWT-shaped string carrying the roles claim; only the payload is read."""
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"tid": "t", "appid": "a", "roles": roles}).encode()
+        ).decode().rstrip("=")
+        return f"header.{payload}.signature"
+
+    def check(self, roles):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+            rc = mailer.check(self.token(roles), "cti@example.com")
+        return rc, buf.getvalue()
+
+    def test_the_two_required_capabilities_pass(self):
+        rc, out = self.check(["Mail.Read", "Mail.Send"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("read the CTI mailbox", out)
+        self.assertIn("send the digest", out)
+
+    def test_readwrite_satisfies_the_read_requirement(self):
+        """Mail.ReadWrite supersedes Mail.Read.
+
+        The previous check required the literal string "Mail.Read", so a tenant
+        that pruned it after granting Mail.ReadWrite - which is what least
+        privilege tells you to do - would have been reported as broken.
+        """
+        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("MISSING", out)
+
+    def test_a_missing_send_role_fails(self):
+        rc, out = self.check(["Mail.Read"])
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING", out)
+        self.assertIn("Mail.Send", out)
+
+    def test_readwrite_is_reported_but_never_fatal(self):
+        """The cleanup lane is opt-in, so its permission cannot fail the check."""
+        rc, out = self.check(["Mail.Read", "Mail.Send"])
+        self.assertEqual(rc, 0)
+        self.assertIn("absent", out)
+        self.assertIn("cti-mailbox", out)
+        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
+        self.assertEqual(rc, 0)
+        self.assertIn("cti-mailbox cleanup", out)
+        self.assertNotIn("absent", out)
+
+    def test_unused_permissions_are_named(self):
+        """The finding from the real app registration.
+
+        It had Directory.Read.All, User.Read.All and AuditLog.Read.All
+        consented and called by nothing - a far wider grant than the mail
+        access the code uses. Reported, not fatal: it is a judgement for the
+        operator, and a check that fails on it would be one people switch off.
+        """
+        rc, out = self.check(["Mail.Read", "Mail.Send", "Mail.ReadWrite",
+                              "Directory.Read.All", "User.Read.All",
+                              "AuditLog.Read.All"])
+        self.assertEqual(rc, 0, "unused roles must not fail the check")
+        self.assertIn("UNUSED", out)
+        for r in ("Directory.Read.All", "User.Read.All", "AuditLog.Read.All"):
+            self.assertIn(r, out)
+        # The three it does use must not be listed as unused.
+        unused_line = [l for l in out.split("\n") if "UNUSED" in l][0]
+        for r in ("Mail.Read", "Mail.Send", "Mail.ReadWrite"):
+            self.assertNotIn(r, unused_line)
+
+    def test_a_minimal_grant_reports_nothing_unused(self):
+        _, out = self.check(["Mail.ReadWrite", "Mail.Send"])
+        self.assertNotIn("UNUSED", out)
+
+    def test_no_roles_at_all_is_reported_not_crashed(self):
+        rc, out = self.check([])
+        self.assertEqual(rc, 1)
+        self.assertIn("(none)", out)
+
+    def test_the_used_set_matches_the_endpoints_the_code_calls(self):
+        """USED_ROLES is a claim about the codebase; verify it against the code.
+
+        If someone adds a Graph call needing a fourth permission, the unused
+        report would start naming a role that is genuinely required.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        graph = (root / "internal" / "graph" / "client.go").read_text()
+        # The three endpoints, and nothing else that would need another role.
+        self.assertIn("/mailFolders/%s/messages", graph)
+        self.assertIn("/sendMail", graph)
+        self.assertIn("/messages/%s/move", graph)
+        for forbidden in ("/auditLogs", "/directoryObjects", "/servicePrincipals"):
+            self.assertNotIn(forbidden, graph,
+                             f"{forbidden} needs a permission USED_ROLES omits")
+        self.assertEqual(mailer.USED_ROLES,
+                         frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send"}))
 
 
 class Attribution(unittest.TestCase):
