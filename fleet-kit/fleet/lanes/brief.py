@@ -666,8 +666,17 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     with open(args.out, "w") as f:
         f.write(render(data, kind))
+    # The `+` is load-bearing. Without it Python concatenates the two adjacent
+    # string literals FIRST - the f-string and the " " separator - and then
+    # calls .join() on the result, so the message itself becomes the separator
+    # between the five counts:
+    #
+    #   Sev5=3[brief] wrote ....html (daily)  Sev4=0[brief] wrote ....html ...
+    #
+    # Valid Python, no warning, and the operator's run log reads as though the
+    # lane wrote the file four times.
     print(f"[brief] wrote {args.out} ({kind}) "
-          " ".join(f"{p}={data['counts'].get(p, 0)}" for p in SEV_ORDER),
+          + " ".join(f"{p}={data['counts'].get(p, 0)}" for p in SEV_ORDER),
           file=sys.stderr)
     if args.text_out:
         with open(args.text_out, "w") as f:

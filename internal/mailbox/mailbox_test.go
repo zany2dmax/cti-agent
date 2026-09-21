@@ -67,17 +67,86 @@ func TestOnlyHeaderConfirmedAutoRepliesAreDeleted(t *testing.T) {
 	if byID["ooo"].Action != ActionDelete {
 		t.Errorf("header-confirmed auto-reply: %s", byID["ooo"].Action)
 	}
-	if byID["subject"].Action != ActionArchive {
-		t.Errorf("subject-only match should be archived, not deleted: %s",
+	// The point of this case is that subject text does not delete mail. It is
+	// now left rather than archived, but the property under test is the same:
+	// anything short of a header saying "automatic reply" must not be deleted.
+	if byID["subject"].Action == ActionDelete {
+		t.Errorf("subject-only match must not be deleted: %s",
+			byID["subject"].Action)
+	}
+	if byID["subject"].Action != ActionLeave {
+		t.Errorf("a processed non-CVE message should be left alone: %s",
 			byID["subject"].Action)
 	}
 }
 
-func TestProcessedNonCVEMailIsArchived(t *testing.T) {
-	proc := map[string]Processed{"m": {ID: "m"}}
-	got := Plan([]Candidate{{ID: "m", Subject: "vendor newsletter"}}, proc)
-	if got[0].Action != ActionArchive {
-		t.Errorf("action = %s, want archive", got[0].Action)
+// The first real dry run proposed archiving a message whose whole subject was
+// "suspicious", a forwarded invoice, and a Defender attack-path alert, all
+// because the agent had read them and found no CVE. This is a shared security
+// mailbox: "read looking for CVEs" is not "triaged", and filing a colleague's
+// phishing report before anyone looks at it is the quiet damage this lane was
+// written to avoid.
+func TestProcessedNonCVEMailIsLeftAloneNotArchived(t *testing.T) {
+	proc := map[string]Processed{
+		"phish":    {ID: "phish"},
+		"invoice":  {ID: "invoice"},
+		"defender": {ID: "defender"},
+		"advisory": {ID: "advisory", HasCVE: true},
+	}
+	plan := Plan([]Candidate{
+		{ID: "phish", Subject: "suspicious"},
+		{ID: "invoice", Subject: "FW: Office Technologies Inc Invoice"},
+		{ID: "defender", Subject: "Microsoft Defender found potential attack path"},
+		{ID: "advisory", Subject: "Daily CTI Roundup"},
+	}, proc)
+
+	byID := map[string]Decision{}
+	for _, d := range plan {
+		byID[d.ID] = d
+	}
+	for _, id := range []string{"phish", "invoice", "defender"} {
+		if byID[id].Action != ActionLeave {
+			t.Errorf("%s: action = %s, want leave - %q",
+				id, byID[id].Action, byID[id].Subject)
+		}
+		// Known, so it does not count towards the backlog alarm.
+		if !byID[id].Known {
+			t.Errorf("%s: should be marked Known; the agent did read it", id)
+		}
+	}
+	// The CTI advisory is still archived. That is the whole job.
+	if byID["advisory"].Action != ActionArchive {
+		t.Errorf("advisory: action = %s, want archive", byID["advisory"].Action)
+	}
+
+	c := Summarise(plan)
+	if c.Archive != 1 || c.Leave != 3 || c.Unread != 0 {
+		t.Errorf("counts = %+v; want archive 1, leave 3, unread 0", c)
+	}
+}
+
+// Leave has two causes that mean opposite things, and only one of them is a
+// fault. Counting them together made the backlog alarm fire on a healthy
+// mailbox, where ordinary team mail is left alone every day by design.
+func TestTheBacklogAlarmCountsOnlyMailTheAgentNeverRead(t *testing.T) {
+	plan := Plan([]Candidate{
+		{ID: "read-1"}, {ID: "read-2"}, {ID: "read-3"},
+		{ID: "never-read-1"}, {ID: "never-read-2"},
+	}, map[string]Processed{
+		"read-1": {ID: "read-1"}, "read-2": {ID: "read-2"}, "read-3": {ID: "read-3"},
+	})
+	c := Summarise(plan)
+	if c.Leave != 5 {
+		t.Errorf("Leave = %d, want 5", c.Leave)
+	}
+	if c.Unread != 2 {
+		t.Errorf("Unread = %d, want 2 - only the two with no record", c.Unread)
+	}
+	if n := BacklogNote(c, 3); n != "" {
+		t.Errorf("5 left but only 2 unread, threshold 3: should stay quiet, got %q", n)
+	}
+	if n := BacklogNote(c, 2); !strings.Contains(n, "2 message(s)") {
+		t.Errorf("at the threshold it should fire and name the unread count: %q", n)
 	}
 }
 
@@ -241,17 +310,17 @@ func TestLogPathIsEmptyWithoutAStateDirectory(t *testing.T) {
 // ---------------------------------------------------------------- reporting
 
 func TestTheBacklogNoteOnlyFiresAtTheThreshold(t *testing.T) {
-	if n := BacklogNote(Counts{Leave: 3}, 25); n != "" {
+	if n := BacklogNote(Counts{Leave: 3, Unread: 3}, 25); n != "" {
 		t.Errorf("below threshold should say nothing: %q", n)
 	}
-	n := BacklogNote(Counts{Leave: 25}, 25)
+	n := BacklogNote(Counts{Leave: 25, Unread: 25}, 25)
 	if !strings.Contains(n, "25 message(s)") {
 		t.Errorf("note = %q", n)
 	}
 	if !strings.Contains(n, "stopped reading the mailbox") {
 		t.Errorf("the note should name what a backlog usually means: %q", n)
 	}
-	if n := BacklogNote(Counts{Leave: 1000}, 0); n != "" {
+	if n := BacklogNote(Counts{Leave: 1000, Unread: 1000}, 0); n != "" {
 		t.Error("threshold 0 disables the note")
 	}
 }
@@ -265,11 +334,16 @@ func TestSummariseCountsEveryAction(t *testing.T) {
 		"c": {ID: "c"},
 	})
 	c := Summarise(plan)
-	if c.Archive != 2 || c.Delete != 1 || c.Leave != 1 {
-		t.Errorf("counts = %+v, want archive 2 delete 1 leave 1", c)
+	// "c" was read and carried no CVE, so it is left rather than archived;
+	// "d" has no record at all, so it is left AND counts as unread.
+	if c.Archive != 1 || c.Delete != 1 || c.Leave != 2 || c.Unread != 1 {
+		t.Errorf("counts = %+v, want archive 1 delete 1 leave 2 unread 1", c)
 	}
 	if c.Archive+c.Delete+c.Leave != len(plan) {
 		t.Error("every decision must be counted exactly once")
+	}
+	if c.Unread > c.Leave {
+		t.Error("Unread is a subset of Leave and cannot exceed it")
 	}
 }
 
@@ -285,5 +359,182 @@ func TestEveryDecisionCarriesAReason(t *testing.T) {
 		if strings.TrimSpace(d.Reason) == "" {
 			t.Errorf("%s (%s) has no reason", d.ID, d.Action)
 		}
+	}
+}
+
+// ------------------------------------------- what may move, and nothing else
+
+// THE INVARIANT THIS LANE EXISTS UNDER.
+//
+// cybersecurity@ is not a feed, it is the team's shared reporting mailbox:
+// everyone reads it, and its contents are how a new hire finds out what has
+// been happening and how work survives somebody leaving. Mail moved out of it
+// by a bot is institutional memory removed from the people who need it, and
+// nobody is watching when this lane runs.
+//
+// So exactly two kinds of message may ever move: a CTI advisory the agent
+// actually took a CVE from, and a message whose own headers declare it an
+// automatic reply. Everything else stays where a human can see it. This table
+// is the regression test for that, and it is written from the real subjects in
+// the first production dry run - three of which this lane proposed to archive.
+func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
+	cases := []struct {
+		subject string
+		rec     Processed
+		hdrAuto bool
+		want    Action
+		why     string
+	}{
+		// The two things that may move.
+		{"Daily Cyber Threat Intelligence Roundup - September 21, 2026",
+			Processed{HasCVE: true}, false, ActionArchive,
+			"a CTI advisory the agent took a CVE from - the lane's actual job"},
+		{"[Sev5] CTI Sep 21: 3 exploited vulns present in the environment",
+			Processed{HasCVE: true}, false, ActionArchive,
+			"the fleet's own digest, which carries CVEs"},
+		{"Automatic reply: CR Cyber Security Team - Important!",
+			Processed{}, true, ActionDelete,
+			"header-confirmed auto-reply"},
+
+		// Everything a shared security mailbox actually receives. Every one of
+		// these was archived by the first version of this rule.
+		{"suspicious", Processed{}, false, ActionLeave,
+			"a colleague reporting a phish, in one word, needing a human"},
+		{"FW: Atlanta Office Technologies Inc Invoice", Processed{}, false, ActionLeave,
+			"a forwarded invoice - almost certainly a reported phish"},
+		{"Microsoft Defender for Cloud found potential attack path",
+			Processed{}, false, ActionLeave, "an alert somebody has to action"},
+		{"Qualys: Scheduled Web Application Vulnerability Scan Notification",
+			Processed{}, false, ActionLeave, "scanner operations mail"},
+		{"pathway missing again", Processed{}, false, ActionLeave,
+			"a person writing to the team"},
+		{"Please add the new starter to the security distribution list",
+			Processed{}, false, ActionLeave, "onboarding - the exact thing a new hire needs to find"},
+		{"Re: incident 4471 - can someone confirm the containment steps",
+			Processed{}, false, ActionLeave, "an in-flight incident thread"},
+		{"Your Microsoft 365 subscription receipt", Processed{}, false, ActionLeave,
+			"billing, not ours to file"},
+	}
+
+	for _, c := range cases {
+		rec := c.rec
+		rec.ID = "id"
+		plan := Plan([]Candidate{{ID: "id", Subject: c.subject, AutoReply: c.hdrAuto}},
+			map[string]Processed{"id": rec})
+		if plan[0].Action != c.want {
+			t.Errorf("%-62q\n    got %s, want %s (%s)",
+				c.subject, plan[0].Action, c.want, c.why)
+		}
+	}
+}
+
+// The decision must not depend on the subject line at all. Reading intent out
+// of subject text is how a lane starts deleting a genuine advisory titled
+// "Automatic reply: ..." or archiving a phishing report because it looks like
+// a newsletter.
+func TestTheSubjectLineHasNoInfluenceOnTheDecision(t *testing.T) {
+	subjects := []string{
+		"", "newsletter", "Automatic reply: out of office",
+		"URGENT ACTION REQUIRED", "CVE-2026-1111 in Windows NTFS",
+		"re: re: re: fw:", "suspicious",
+	}
+	for _, s := range subjects {
+		// Same record every time: read, no CVE, no auto-reply header.
+		plan := Plan([]Candidate{{ID: "x", Subject: s}},
+			map[string]Processed{"x": {ID: "x"}})
+		if plan[0].Action != ActionLeave {
+			t.Errorf("subject %q changed the action to %s; only the "+
+				"processed-message record and the headers may decide",
+				s, plan[0].Action)
+		}
+	}
+	// And a CVE-bearing message is archived even when its subject looks like
+	// an out-of-office reply.
+	plan := Plan([]Candidate{{ID: "y", Subject: "Automatic reply: out of office"}},
+		map[string]Processed{"y": {ID: "y", HasCVE: true}})
+	if plan[0].Action != ActionArchive {
+		t.Errorf("a CVE-bearing message must be archived, not %s - deleting a "+
+			"genuine advisory is a loss, archiving an auto-reply is untidy",
+			plan[0].Action)
+	}
+}
+
+// Every input combination, enumerated. Plan has four rules whose ORDER carries
+// the safety properties, and a truth table is the only way a future edit to
+// that order shows up as a test failure rather than as mail going missing.
+func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
+	cases := []struct {
+		haveRecord bool
+		hasCVE     bool
+		recAuto    bool
+		hdrAuto    bool
+		want       Action
+		why        string
+	}{
+		// No record: leave, absolutely, whatever anything else says.
+		{false, false, false, false, ActionLeave, "never read"},
+		{false, false, false, true, ActionLeave,
+			"never read, and an auto-reply header cannot override that"},
+
+		// Carries a CVE: archive, whatever else it looks like.
+		{true, true, false, false, ActionArchive, "advisory"},
+		{true, true, false, true, ActionArchive,
+			"advisory whose headers also say auto-reply - archive wins over delete"},
+		{true, true, true, false, ActionArchive, "same, recorded as an auto-reply"},
+		{true, true, true, true, ActionArchive, "same, both flags set"},
+
+		// No CVE, declared an auto-reply: delete.
+		{true, false, true, false, ActionDelete, "recorded as an auto-reply"},
+		{true, false, false, true, ActionDelete, "header says auto-reply"},
+		{true, false, true, true, ActionDelete, "both say auto-reply"},
+
+		// Read, no CVE, not an auto-reply: leave. The case that was archive.
+		{true, false, false, false, ActionLeave, "read, and not this lane's mail"},
+	}
+
+	for _, c := range cases {
+		proc := map[string]Processed{}
+		if c.haveRecord {
+			proc["id"] = Processed{ID: "id", HasCVE: c.hasCVE, AutoReply: c.recAuto}
+		}
+		plan := Plan([]Candidate{{ID: "id", AutoReply: c.hdrAuto}}, proc)
+		if plan[0].Action != c.want {
+			t.Errorf("record=%v cve=%v recAuto=%v hdrAuto=%v -> %s, want %s (%s)",
+				c.haveRecord, c.hasCVE, c.recAuto, c.hdrAuto,
+				plan[0].Action, c.want, c.why)
+		}
+		if plan[0].Known != c.haveRecord {
+			t.Errorf("record=%v -> Known=%v", c.haveRecord, plan[0].Known)
+		}
+		if plan[0].Reason == "" {
+			t.Error("every decision needs a reason; this lane has to be " +
+				"explainable from the log alone")
+		}
+	}
+}
+
+// A plan is the input to something that moves other people's mail, so it may
+// only ever contain the three actions this package defines. An unrecognised
+// value would fall through the switch in cmd/cti-mailbox and do nothing, which
+// is safe - but it would also fall through Summarise and go uncounted, so the
+// printed plan would not add up to the number of messages.
+func TestAPlanContainsNothingButTheThreeKnownActions(t *testing.T) {
+	plan := Plan([]Candidate{
+		{ID: "a"}, {ID: "b", AutoReply: true}, {ID: "c"}, {ID: "d"},
+	}, map[string]Processed{
+		"a": {ID: "a", HasCVE: true},
+		"b": {ID: "b"},
+		"c": {ID: "c"},
+	})
+	for _, d := range plan {
+		switch d.Action {
+		case ActionArchive, ActionDelete, ActionLeave:
+		default:
+			t.Errorf("unknown action %q for %q", d.Action, d.ID)
+		}
+	}
+	c := Summarise(plan)
+	if c.Archive+c.Delete+c.Leave != len(plan) {
+		t.Errorf("counts %+v do not add up to %d decisions", c, len(plan))
 	}
 }
