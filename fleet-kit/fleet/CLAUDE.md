@@ -144,6 +144,14 @@ Concretely, a quiet beat should pick up one of these:
   a clickable link at the foot of every digest, so editing them changes what
   the fleet advertises to the whole distribution list. Propose the wording on
   the board and wait; do not edit fleet.env to adjust them.
+- Running `cti-patchtuesday --mark-sent`. That flag means *this month's
+  synopsis reached people*, and it is the only thing that lets the daily digest
+  hold back a release's CVEs. `run-patchtuesday` sets it after the mailer
+  reports success; nothing else should ever set it. Setting it for a synopsis
+  that did not go out makes the daily go quiet about several hundred CVEs that
+  then appear in **no** email at all, and nothing in either lane's output would
+  say so. If the daily is flooded with Microsoft CVEs, find out why the monthly
+  did not send - do not mark the manifest.
 - Running `run-mailbox-cleanup --for-real`, or `cti-mailbox --for-real`. The
   daily timer does that; you do not. It moves mail out of a shared mailbox
   other people read, and a second unscheduled pass is how a person finds their
@@ -222,12 +230,49 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 | `@enrich` | `$FLEET_CODE/lanes/enrich.py` | Add NVD CVSS, EPSS, CISA KEV; compute Sev5–Sev1 priority |
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
-| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL |
+| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read the Qualys and BleepingComputer wrap-ups, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL. The table is **one row per QID** (a QID is one update somebody installs), not per CVE. It also writes the release manifest the daily digest reads - see below |
 | `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive CTI advisories the agent took a CVE from, move header-confirmed auto-replies to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. **You** invoke this, never a lane. |
 
 Lanes do not talk to the operator. They post to the board and you relay. Lanes
 do not send mail. Only you do.
+
+## Patch Tuesday and the daily digest, and why they no longer overlap
+
+A Patch Tuesday puts several hundred Microsoft CVEs in the mailbox in one
+afternoon. They belong in the monthly synopsis, grouped by the update that
+fixes them; repeated in the daily digest they are hundreds of rows saying
+"Microsoft released patches", and the two or three things the daily exists to
+surface are buried under them.
+
+So the daily holds them back, on evidence rather than on a guess about vendors
+and dates:
+
+```
+cti-patchtuesday   ->  $FLEET_HOME/state/patchtuesday-YYYY-MM.json   {"sent": false}
+mailer.py          ->  synopsis delivered
+run-patchtuesday   ->  cti-patchtuesday --mark-sent                  {"sent": true}
+cti-agent (daily)  ->  holds back only the CVEs in a manifest marked sent
+```
+
+What you need to know about it:
+
+- **Only a manifest marked `sent` suppresses anything.** No manifest, an unsent
+  one, an unreadable one, or no `FLEET_HOME` all mean the daily reports
+  everything as before. Every failure here falls open, deliberately.
+- **The window is this month and last month.** A September CVE arriving in
+  December is not an echo of the September email; something is re-raising it,
+  and that is the daily's job.
+- **Held CVEs are listed in full** in the raw report attached to the digest,
+  under their own heading. If somebody asks "why is CVE-X not in today's
+  digest", that list is the answer, and `jq .sent` on the manifest says who
+  authorised it.
+- **You do not mark a manifest sent.** See the prohibitions above.
+
+If the daily and the monthly both report a release's CVEs, the manifest is
+missing or unsent - report that on the board with the month, and say which.
+Do not delete a manifest to "resync" anything: deleting one makes the daily
+noisier, which is safe, but it is the operator's call.
 
 ## Tools that are not lanes
 
@@ -239,7 +284,7 @@ These are yours to read, not delegate to. None of them sends mail except
 | `$FLEET_CODE/bin/run-digest [daily\|weekly] [--dry-run]` | The whole pipeline as one idempotent command, holding the already-sent guard. Use this rather than the four lanes in sequence — the guard is what makes a recovery run safe |
 | `$FLEET_CODE/bin/cti-budget status` | How much of your own model quota is left in this window and today |
 | `$FLEET_CODE/bin/cti-kev` | CISA KEV remediation deadlines for CVEs present in the estate |
-| `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | The monthly Microsoft Patch Tuesday synopsis. A timer owns it; `--month` replays a past release and never sends |
+| `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | The monthly Microsoft Patch Tuesday synopsis. A timer owns it; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
 | `$FLEET_CODE/bin/cti-alert --unit <u>` | systemd invokes this on a unit failure; you rarely need to |
 | `$FLEET_CODE/bin/fleet-db` | Memory: findings, digests sent, scout items, tasks |
 | `$FLEET_CODE/bin/fleet-board` | The append-only board. `post`, `read`, `tail` |
