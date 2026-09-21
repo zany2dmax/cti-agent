@@ -328,7 +328,7 @@ func writeKBCache(path string, cache KBCache) error {
 	// has to be predictable so an interrupted run leaves one stale file rather
 	// than accumulating them.
 	tmp := path + ".tmp"
-	// #nosec G304 -- path is QUALYS_KB_CACHE from the service configuration,
+	// path is QUALYS_KB_CACHE from the service configuration,
 	// and the mode is 0600 because this cache maps CVEs to our QIDs.
 	if err := os.WriteFile(tmp, b, 0600); err != nil {
 		return err

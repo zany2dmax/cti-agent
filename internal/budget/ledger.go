@@ -112,7 +112,7 @@ func (s *Store) now() time.Time {
 // A corrupt file is also an empty ledger, loudly - refusing to run because a
 // counter file got truncated would turn a cosmetic problem into an outage.
 func (s *Store) Load() (*Ledger, error) {
-	// #nosec G304 -- s.Path is the ledger location from the service
+	// s.Path is the ledger location from the service
 	// configuration, written only by this package.
 	b, err := os.ReadFile(s.Path)
 	if err != nil {
