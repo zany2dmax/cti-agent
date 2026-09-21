@@ -229,7 +229,7 @@ func (r *Report) HTML() string {
 		return fmt.Sprintf("<b>%d</b>", n)
 	}
 
-	b.WriteString(fmt.Sprintf(`<!DOCTYPE html>
+	fmt.Fprintf(&b, `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s</title></head>
@@ -247,7 +247,7 @@ func (r *Report) HTML() string {
     <div style="font:400 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#9fb0cc;margin-top:3px">Released %s</div></td></tr>
 `, e(r.Subject()), e(r.Org), e(MonthLabel(d.Year, d.Month)),
-		PatchTuesday(d.Year, d.Month).Format("Monday 2 January 2006")))
+		PatchTuesday(d.Year, d.Month).Format("Monday 2 January 2006"))
 
 	// Degraded banner first: a synopsis assembled from one source instead of
 	// two is still useful, but the reader has to know which.
@@ -260,32 +260,32 @@ func (r *Report) HTML() string {
 		if !r.Exposure.Attempted {
 			tail = "The exposure figures are missing too &mdash; see the line below."
 		}
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
   <tr><td style="padding:14px 20px 0 20px">
     <div style="background:#fffbe6;border:1px solid #d69e2e;border-radius:4px;
                 padding:10px 12px;font:400 13px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#744210">
       <b>Incomplete sources.</b> Could not read: %s. Counts below may be
       missing or low. %s
-    </div></td></tr>`, e(strings.Join(deg, "; ")), tail))
+    </div></td></tr>`, e(strings.Join(deg, "; ")), tail)
 	}
 
 	// The lead. Microsoft's numbers, then ours, then the query.
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
   <tr><td style="padding:16px 20px 0 20px">
     <div style="font:400 15px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a202c">
       This month's release addresses %s vulnerabilities, including %s critical
       and %s important-severity vulnerabilities.</div>`,
-		num(d.Total), num(d.Critical), num(d.Important)))
+		num(d.Total), num(d.Critical), num(d.Important))
 
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
     <div style="margin:12px 0 0 0;padding:12px 14px;background:#fdecee;
                 border-left:4px solid #b3001b;font:700 15px/1.55 -apple-system,
                 Segoe UI,Helvetica,Arial,sans-serif;color:#1a202c">%s</div>`,
-		e(r.Exposure.ExposureLine(r.Org))))
+		e(r.Exposure.ExposureLine(r.Org)))
 
 	if r.QQL != "" {
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
     <div style="font:400 14px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#1a202c;margin:12px 0 6px 0">
       You can use the following QQL to query for it yourself
@@ -293,7 +293,7 @@ func (r *Report) HTML() string {
     <div style="font:400 13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
                 background:#f4f5f7;border:1px solid #e2e8f0;border-radius:4px;
                 padding:10px 12px;color:#1a202c;word-break:break-word;
-                white-space:pre-wrap">%s</div>`, e(r.QQLSource), e(r.QQL)))
+                white-space:pre-wrap">%s</div>`, e(r.QQLSource), e(r.QQL))
 	}
 	b.WriteString("\n  </td></tr>\n")
 
@@ -314,7 +314,7 @@ func (r *Report) HTML() string {
 		if hidden > 0 {
 			caption += fmt.Sprintf(" &mdash; worst %d shown", len(shown))
 		}
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
   <tr><td style="padding:18px 20px 0 20px">
     <div style="font:700 13px -apple-system,Segoe UI,Arial,sans-serif;color:#b3001b;
                 letter-spacing:.6px;text-transform:uppercase;
@@ -329,7 +329,7 @@ func (r *Report) HTML() string {
         <th align="right" style="border-bottom:1px solid #e2e8f0">Hosts</th>
         <th align="left" style="border-bottom:1px solid #e2e8f0">QIDs</th>
         <th align="left" style="border-bottom:1px solid #e2e8f0">Why</th></tr>`,
-			caption, sevHead))
+			caption, sevHead)
 		for _, h := range shown {
 			flags := []string{}
 			if h.KEV {
@@ -372,7 +372,7 @@ func (r *Report) HTML() string {
 					`<span style="color:#718096;font-size:11px"> +%d more with `+
 						`the same QIDs</span>`, h.SharedWith)
 			}
-			b.WriteString(fmt.Sprintf(`
+			fmt.Fprintf(&b, `
       <tr><td style="border-bottom:1px solid #edf2f7">
             <a href="https://nvd.nist.gov/vuln/detail/%s" style="color:#1a202c">%s</a></td>
           %s
@@ -380,17 +380,17 @@ func (r *Report) HTML() string {
           <td style="border-bottom:1px solid #edf2f7;font:400 12px ui-monospace,
                      SFMono-Regular,Menlo,monospace">%s</td>
           <td style="border-bottom:1px solid #edf2f7;color:#4a5568">%s</td></tr>`,
-				e(h.CVE), cveCell, sevCell, hosts, qids, why))
+				e(h.CVE), cveCell, sevCell, hosts, qids, why)
 		}
 		b.WriteString("\n    </table>")
 		if hidden > 0 {
-			b.WriteString(fmt.Sprintf(`
+			fmt.Fprintf(&b, `
     <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#718096;margin-top:6px">
       and %d more CVE(s) on lower host counts. The %d detection(s) in the QQL
       above are the patching work; the CVE count is large because one
       cumulative update carries many CVEs. Full list in the JSON output.
-    </div>`, hidden, len(r.Exposure.DetectingQIDs)))
+    </div>`, hidden, len(r.Exposure.DetectingQIDs))
 		}
 		b.WriteString("</td></tr>\n")
 	}
@@ -398,11 +398,11 @@ func (r *Report) HTML() string {
 	// Coverage caveat. An unmapped CVE is not an absent one, and this email
 	// would otherwise imply the difference away.
 	if note := r.Exposure.CoverageNote(); note != "" {
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
   <tr><td style="padding:14px 20px 0 20px">
     <div style="background:#fffbe6;border-left:4px solid #d69e2e;padding:10px 12px;
                 font:400 13px/1.55 -apple-system,Segoe UI,Arial,sans-serif;color:#744210">
-      %s</div></td></tr>`, e(note)))
+      %s</div></td></tr>`, e(note))
 	}
 
 	// The narrative fields, each omitted when the sources did not carry it.
@@ -410,12 +410,12 @@ func (r *Report) HTML() string {
 		if strings.TrimSpace(body) == "" {
 			return
 		}
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
   <tr><td style="padding:16px 20px 0 20px">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;color:#4a5568;
                 letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px">%s</div>
     <div style="font:400 14px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#2d3748">%s</div></td></tr>`, e(title), body))
+                color:#2d3748">%s</div></td></tr>`, e(title), body)
 	}
 
 	sect("Zero-days", e(d.ZeroDayText))
@@ -431,13 +431,13 @@ func (r *Report) HTML() string {
 	if len(d.Categories) > 0 {
 		var rows strings.Builder
 		for _, c := range d.Categories {
-			rows.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&rows, 
 				`<tr><td style="border-bottom:1px solid #edf2f7;padding:5px 8px">%s</td>`+
 					`<td align="right" style="border-bottom:1px solid #edf2f7;padding:5px 8px">%d</td>`+
 					`<td style="border-bottom:1px solid #edf2f7;padding:5px 8px">%s</td></tr>`,
-				e(c.Name), c.Quantity, e(c.Severities)))
+				e(c.Name), c.Quantity, e(c.Severities))
 		}
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
   <tr><td style="padding:16px 20px 0 20px">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;color:#4a5568;
                 letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">
@@ -450,7 +450,7 @@ func (r *Report) HTML() string {
         <th align="right" style="padding:5px 8px;border-bottom:1px solid #e2e8f0">Qty</th>
         <th align="left" style="padding:5px 8px;border-bottom:1px solid #e2e8f0">Severities</th></tr>
       %s
-    </table></td></tr>`, e(MonthLabel(d.Year, d.Month)), rows.String()))
+    </table></td></tr>`, e(MonthLabel(d.Year, d.Month)), rows.String())
 	}
 
 	sect("Adobe", e(d.AdobeText))
@@ -463,15 +463,15 @@ func (r *Report) HTML() string {
 		if !s.Fetched {
 			state = fmt.Sprintf(" <span style='color:#b3001b'>(unavailable: %s)</span>", e(s.Err))
 		}
-		links.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&links, 
 			`<div style="margin:3px 0"><a href="%s" style="color:#2c5282">%s</a>%s</div>`,
-			e(s.URL), e(s.Name), state))
+			e(s.URL), e(s.Name), state)
 	}
 	countNote := ""
 	if n := d.CVECountNote(); n != "" {
 		countNote = e(n) + "<br>"
 	}
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
   <tr><td style="padding:16px 20px 18px 20px;border-top:1px solid #e2e8f0">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;color:#4a5568;
                 letter-spacing:.5px;text-transform:uppercase;margin:10px 0 6px 0">Sources</div>
@@ -486,7 +486,7 @@ func (r *Report) HTML() string {
     </div></td></tr>
 
 </table></td></tr></table></body></html>`,
-		links.String(), countNote, e(r.Org)))
+		links.String(), countNote, e(r.Org))
 
 	return b.String()
 }

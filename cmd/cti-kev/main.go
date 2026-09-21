@@ -69,6 +69,12 @@ func main() {
 		}
 	}
 
+	// --quiet suppresses a report with nothing in it, so a clean day produces
+	// no output and cron stays silent. Named rather than written inline as
+	// !(*quiet && r.Clean()): De Morgan's form reads worse than either, and
+	// the linter objects to the negated conjunction.
+	suppress := *quiet && r.Clean()
+
 	if *asJSON {
 		out := map[string]any{
 			"source":              path,
@@ -88,7 +94,7 @@ func main() {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
-	} else if !(*quiet && r.Clean()) {
+	} else if !suppress {
 		fmt.Print(r.Markdown(*showHosts))
 		fmt.Printf("\n_Source: %s (enriched %s)_\n", filepath.Base(path), e.Generated)
 	}

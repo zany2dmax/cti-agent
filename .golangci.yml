@@ -1,0 +1,60 @@
+# golangci-lint configuration.
+#
+# WHY THIS FILE EXISTS
+#
+# `task lint` gates `task ship`, and until now the ruleset came from whatever
+# golangci-lint happened to be installed on the machine doing the pushing. A
+# gate whose strictness depends on the operator's laptop is not a gate: the
+# same commit passes on one machine and fails on another, and CI would
+# disagree with both. The rules live in the repo now.
+#
+# HOW SUPPRESSION WORKS HERE
+#
+# There is no blanket exclusion list. A finding is either fixed, or annotated
+# at the line with the reason it is intentional (`#nosec RULE -- reason` for
+# gosec, `//nolint:linter // reason` for golangci-lint). A suppression whose
+# justification lives in a config file is one nobody re-examines - this repo
+# has spent a fortnight finding checks that ran and meant nothing, and a
+# silent exclusion list is the same failure in YAML.
+
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+settings:
+  staticcheck:
+    # The QF ("quickfix") category is off by default in golangci-lint. It is
+    # on here because it catches the things that make this codebase harder to
+    # read than it needs to be - WriteString(Sprintf(...)), negated
+    # conjunctions, untagged switches - and those accumulate quietly.
+    checks:
+      - all
+
+  errcheck:
+    # An error written to stdout or stderr that nobody can act on is noise;
+    # one on a file or network write is a bug. The distinction is made at the
+    # call site with an explicit `_, _ =`, which is a visible decision, rather
+    # than here, which would be an invisible one.
+    check-type-assertions: true
+    check-blank: false
+
+issues:
+  # THE DEFAULT HID WORK FROM US.
+  #
+  # golangci-lint truncates to 3 occurrences of the same issue and 50 per
+  # linter by default. A run reported 3 QF1012 findings when there were 26,
+  # and 6 errcheck findings when there were 20 - so "fix what it printed" left
+  # 37 failures and a second red gate. Report everything; a list that stops
+  # early is a list that lies about how much there is.
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+formatters:
+  enable:
+    - gofmt
