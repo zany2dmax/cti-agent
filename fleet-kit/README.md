@@ -10,6 +10,14 @@ persistent memory — comes from [Build Your Own Claude Code Agent
 Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet).
 This applies it to a CTI workload instead of a personal-assistant one.
 
+**Where to start.** This document is the fleet's complete reference: every
+command, every setting, the schedule, and the troubleshooting table. If you are
+setting the whole thing up for the first time, start with
+[../RUNBOOK.md](../RUNBOOK.md) instead — it covers the Entra app registration,
+the scanner credentials, the deploy order and which timer to enable when, and
+sends you here for the detail. [../README.md](../README.md) is the overview and
+the map of every other document.
+
 **Conventions in this document.** Replace these with your own values:
 
 | Placeholder | Meaning | Example |
