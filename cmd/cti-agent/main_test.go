@@ -45,7 +45,7 @@ func TestOneLineStripsEveryControlCharacterNotJustNewlines(t *testing.T) {
 		{"form feed", "a\fb"},
 		{"null", "a\x00b"},
 		{"ANSI escape", "a\x1b[2Kb"},
-		{"C1 control", "ab"},
+		{"C1 control", "a\u0085b"},
 	} {
 		got := oneLine(c.in)
 		for _, r := range got {
