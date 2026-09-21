@@ -346,10 +346,21 @@ Order is the point here. Nothing below enables a timer until a dry run has
 been read.
 
 ```bash
-# ── 1. get the code and rebuild ──────────────────────────────────────────────
-cd ~/cti-agent && git pull
-sudo ./fleet-kit/install-fedora.sh
+# ── 1. get the kit and rebuild ───────────────────────────────────────────────
+# No `cd ~/...`: the deploy runs under sudo, so ~ is whichever account you
+# happen to be logged in as, not where the checkout is. Find it once:
+sudo find / -xdev -name install-fedora.sh -path '*fleet-kit*' 2>/dev/null
+
+KIT=/root/cti-agent          # wherever the line above found it
+sudo git -C "$KIT" pull
+sudo "$KIT/fleet-kit/install-fedora.sh"
 ```
+
+Only the **kit** checkout matters here — `fleet-kit/`, the lanes, the units,
+the skills. The Go source is a separate clone at `/opt/cti-agent/agent` that
+the installer pulls itself (`git -C "$AGENT_SRC" pull --ff-only`), so you never
+update that one by hand. Do not run the installer *from* `/opt/cti-agent/agent`
+either: it would pull that clone while bash is still reading the script.
 
 The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
 rebuilds all six binaries, rewrites the units, runs `daemon-reload` and

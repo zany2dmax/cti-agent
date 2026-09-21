@@ -202,8 +202,9 @@ The short version:
 task test           # while changing one thing
 task ship           # fmt, build, test, lint, scan, gosec, govulncheck, push
 
-# on the Fedora box
-git pull && sudo ./fleet-kit/install-fedora.sh
+# on the Fedora box  (KIT = wherever the kit checkout lives; not ~, the
+# deploy runs under sudo)
+sudo git -C "$KIT" pull && sudo "$KIT/fleet-kit/install-fedora.sh"
 sudo vi /etc/cti-agent/fleet.env          # any new settings
 sudo cti-agent mailer.py --check          # token + granted roles
 sudo cti-agent run-digest daily --dry-run # read it before enabling anything
