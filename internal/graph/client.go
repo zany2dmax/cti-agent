@@ -440,7 +440,7 @@ func sendMailError(status int, body []byte, mailbox string) error {
 type Folder string
 
 const (
-	FolderArchive     Folder = "archive"
+	FolderArchive      Folder = "archive"
 	FolderDeletedItems Folder = "deleteditems"
 )
 
