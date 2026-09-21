@@ -345,22 +345,39 @@ touches the remote.
 Order is the point here. Nothing below enables a timer until a dry run has
 been read.
 
-```bash
-# ── 1. get the kit and rebuild ───────────────────────────────────────────────
-# No `cd ~/...`: the deploy runs under sudo, so ~ is whichever account you
-# happen to be logged in as, not where the checkout is. Find it once:
-sudo find / -xdev -name install-fedora.sh -path '*fleet-kit*' 2>/dev/null
+There are **two** clones on a deployed box and they have different jobs:
 
-KIT=/root/cti-agent          # wherever the line above found it
+| | Path | Who updates it |
+|---|---|---|
+| **The kit** | wherever you put it, e.g. `/root/cti-agent-kit` | you, by hand |
+| The Go source | `/opt/cti-agent/agent` | the installer, every run |
+
+The kit is what you pull: `fleet-kit/`, the lanes, the units, the skills. The
+installer copies out of its own directory (`SRC` comes from
+`dirname "${BASH_SOURCE[0]}"`), so it runs from anywhere.
+
+**Create the kit checkout once.** A box installed straight from a clone may
+have only the `/opt/cti-agent/agent` copy, and that is the one place not to run
+the installer from — it does `git -C /opt/cti-agent/agent pull --ff-only`
+partway through, so the second half of the run would install files from the new
+tree using logic from the old script. Nothing warns you.
+
+```bash
+# ── 0. once per box: a kit checkout outside the installed tree ───────────────
+sudo find / -xdev -name install-fedora.sh -path '*fleet-kit*' 2>/dev/null
+# If the only hit is /opt/cti-agent/agent/..., you have no kit checkout yet:
+sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit
+
+# ── 1. every deploy after that ───────────────────────────────────────────────
+# No `cd ~/...`: the deploy runs under sudo, so ~ is whichever account is
+# logged in, not where the checkout is.
+KIT=/root/cti-agent-kit
 sudo git -C "$KIT" pull
 sudo "$KIT/fleet-kit/install-fedora.sh"
 ```
 
-Only the **kit** checkout matters here — `fleet-kit/`, the lanes, the units,
-the skills. The Go source is a separate clone at `/opt/cti-agent/agent` that
-the installer pulls itself (`git -C "$AGENT_SRC" pull --ff-only`), so you never
-update that one by hand. Do not run the installer *from* `/opt/cti-agent/agent`
-either: it would pull that clone while bash is still reading the script.
+The repository is public and `AGENT_REPO` is plain HTTPS, so the clone needs no
+credentials on the box.
 
 The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
 rebuilds all six binaries, rewrites the units, runs `daemon-reload` and
