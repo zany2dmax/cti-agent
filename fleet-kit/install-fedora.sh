@@ -325,6 +325,14 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-patchtuesday" ./cmd/cti-patchtuesday )
   chmod 0755 "$CODE_DIR/bin/cti-patchtuesday"
   ok "built $CODE_DIR/bin/cti-patchtuesday"
+
+  # Mailbox cleanup. The ONLY binary here that modifies the mailbox, so it is
+  # also the only one whose app-registration requirement is Mail.ReadWrite
+  # rather than Mail.Read. It dry-runs unless given --for-real; the unit
+  # passes that flag explicitly so the decision is visible in the unit.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
+  chmod 0755 "$CODE_DIR/bin/cti-mailbox"
+  ok "built $CODE_DIR/bin/cti-mailbox"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -491,7 +499,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
@@ -517,6 +525,7 @@ FAIL=0
 for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
          "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
          "$CODE_DIR/bin/cti-patchtuesday" "$CODE_DIR/bin/run-patchtuesday" \
+         "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/run-mailbox-cleanup" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
