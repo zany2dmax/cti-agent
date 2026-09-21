@@ -224,6 +224,7 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `<fleet> cti-mailbox` | Dry run of mailbox cleanup: what it would archive, delete and leave |
 | `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Add `--for-real` to apply |
 | `task test:mailbox` | The processed-message gate, precedence, retention, backlog note |
+| `task test:patchtuesday` | Date maths, source parsing, exposure, QQL, the QID table and the release manifest the daily reads |
 | `task test:env` | `fleet.env` parsing and the per-command credential requirements. A lane that refuses to run over credentials it never uses, or over ones already in the file, has happened twice; this is the regression test for both |
 | `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck. **`scan` is staticcheck**, not a vulnerability scan — it predates the security tasks below |
 | `task gosec` | Insecure code patterns. Deliberate exceptions carry an inline `#nosec <RULE> -- reason` beside the code, never a blanket exclusion in config: a suppression whose justification lives elsewhere is one nobody re-examines |
@@ -1242,10 +1243,32 @@ In this order, matching the format the team already reads:
    across 777 hosts."* From Host Detection. Detections sum; **hosts are
    unioned**, because the same machine appears under many QIDs and summing
    them produces a host count larger than the estate.
-3. **The QQL** — the most-used line in the whole email.
-4. CVEs confirmed present, with QIDs and severity band.
+3. **The QQL** — the most-used line in the whole email. Two of them: the
+   query Qualys published for the release, verbatim, and then ours narrowed to
+   the QIDs with assets here.
+4. **The patches present here — one row per QID**, with host count, QDS and the
+   date it was last seen, and the CVEs each one fixes.
 5. Zero-days, Edge, products covered, the category table, Adobe.
 6. Both source links, with any that failed marked as such.
+
+#### Why the table is QIDs and not CVEs
+
+A QID is one thing somebody installs; a CVE is one thing Microsoft fixed, and
+a cumulative update carries hundreds of them. Keyed by CVE, the August replay
+produced 353 rows, nearly all of them the same two QIDs on the same 331 hosts
+— one fact stated hundreds of times, with the other eleven patches pushed
+below the cut. Keyed by QID it is a dozen rows that each mean *patch this*.
+
+The old **Sev5–Sev1 column is gone.** It could only be filled from the daily
+enrich lane's output file, and the daily has never seen a Patch Tuesday CVE —
+so a report about 353 CVEs printed *"severity bands for 0 of 353"*, a column
+that as deployed could not hold a value. **QDS** replaces it: the Qualys
+Detection Score, 1–100, which arrives in the same Host Detection response as
+the host count. It cannot go missing because another lane did not run.
+
+The number is printed without a severity word. Qualys does band QDS, but this
+lane has not verified the thresholds against Qualys' own documentation, and a
+band that is confidently one step wrong is worse than a bare number.
 
 ### The QQL is never paraphrased
 
@@ -1254,9 +1277,15 @@ a different set and they act on it. Preference order:
 
 | Source | When | Why first |
 |---|---|---|
-| QIDs with open detections here | normal case | Returns *our* machines, not every machine in the world |
-| Whatever Qualys published, verbatim | no detections mapped yet | It is their query; it is reproduced byte-for-byte |
+| Whatever Qualys published, verbatim | whenever the review carries a QQL | Run in the console it returns **every** QID in the release that has assets against it. It is their query for their release, reproduced byte-for-byte |
+| QIDs with open detections here | the review published no QQL | Ours is a *subset* of the release, and the source line says so |
 | A CVE filter | no QID mapping at all | Still usable on the morning it matters |
+
+The published query used to be *second*, behind one built from whatever QIDs
+this lane had managed to correlate. That put a subset in the headline whenever
+the KnowledgeBase mapping lagged a release — which is most of the first
+week — and said nothing about being one. Both now appear: theirs first, ours
+below it, labelled as the narrower one.
 
 The generated form is byte-compatible with what has gone out by hand for
 months: `vulnerabilities.vulnerability: ( qid: 110525 or qid: 110526 ... )`.
@@ -1316,6 +1345,54 @@ contains the other, and because the mapping is least complete on exactly the
 morning the email goes out. The stderr log reports how many QIDs came from
 each route, and the exposure line credits the published route when it found
 detections the mapping would have missed.
+
+### The daily digest leaves this release alone
+
+A Patch Tuesday drops hundreds of Microsoft CVEs into the mailbox in one
+afternoon. They belong here, organised by the update that fixes them —
+repeated in the daily digest they are several hundred rows saying "Microsoft
+released patches", which buries the two or three things the daily exists to
+surface.
+
+So the daily holds them back. Not by guessing:
+
+```
+cti-patchtuesday  ->  $FLEET_HOME/state/patchtuesday-2026-09.json   {"sent": false}
+mailer.py         ->  synopsis delivered
+run-patchtuesday  ->  cti-patchtuesday --mark-sent                  {"sent": true}
+cti-agent (daily) ->  reads the manifest, holds back only what is in it
+```
+
+**The `sent` flag is the whole safety property.** A manifest written by a run
+whose email never went out must not silence anything — otherwise a broken
+monthly lane takes the daily's Microsoft coverage down with it, and those CVEs
+appear in *no* email at all, from either lane, with nothing anywhere saying
+so. `--mark-sent` is called by the runner after the mailer reports success and
+nowhere else.
+
+Every other failure falls open. No manifest, an unsent one, an unreadable one,
+no `FLEET_HOME` — all mean the daily reports everything exactly as before. A
+noisy daily is a bad morning; a daily that silently drops security mail is the
+failure this whole codebase is built against.
+
+Two further limits:
+
+- **The window is this month and last month only.** A September CVE arriving
+  in December is not an echo of the September email — something is re-raising
+  it, and that is the daily's job. An unbounded window would mean the longer
+  the fleet runs, the more it silently declines to mention.
+- **Held CVEs are listed in full in the raw report** that goes out as the
+  digest's attachment, under their own heading, deliberately *not* in the
+  `| CVE-` table format the enrich lane parses. Suppression with no record is
+  indistinguishable from a parser that missed them.
+
+To check what is being held, or to stop it:
+
+```bash
+cat $FLEET_HOME/state/patchtuesday-*.json | grep -c CVE-   # what is on file
+jq .sent $FLEET_HOME/state/patchtuesday-2026-09.json       # is it authorised
+rm $FLEET_HOME/state/patchtuesday-2026-09.json             # daily reports them again
+```
 
 ### Two new outbound hosts
 
@@ -1633,6 +1710,9 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what Sev5s are open and unremedi
 | Holds emailed repeatedly for one outage | `AlertedFor` state lost with the ledger | Expected after deleting `budget.json`. One email per distinct cooldown otherwise |
 | `missing required environment variables: [...]` from a by-hand run, but the names are all in `fleet.env` | The wrapper passes the `FLEET_*` layout only; the command has to read `fleet.env` itself | Fixed — every Go command now calls `internal/fleetenv` at startup. If it recurs, `FLEET_ENV` is wrong or the service account cannot read the 0600 file: `sudo -u ctiagent head -1 /etc/cti-agent/fleet.env` |
 | A missing-variable list naming credentials the command never uses | Wrong config loader — `config.Load()` demands Graph *and* Qualys | `LoadGraphOnly()` for mailbox lanes, `LoadVulnLookup()` for scanner lanes. `task test:env` covers this |
+| Microsoft CVEs stopped appearing in the daily digest | Working as designed: a sent Patch Tuesday synopsis covers them | The raw report lists every held CVE under its own heading. `jq .sent $FLEET_HOME/state/patchtuesday-*.json`; delete the file to report them again |
+| Patch Tuesday CVEs are still flooding the daily | The manifest was never marked sent — the monthly mailer failed, or the runner did not reach `--mark-sent` | `journalctl -u cti-agent-patchtuesday`. This is the safe direction to fail in, so it is a nuisance, not an incident |
+| `no manifest at ... to mark sent` | `--mark-sent` ran without a synopsis run before it | Only `run-patchtuesday` should call it, after the mailer. Running it by hand for a month that was never generated is the error it is reporting |
 | `export KEY=value` in `fleet.env` had no effect | The old Go parser set a variable literally named `export KEY` | Fixed in `internal/fleetenv`. Both forms work now, in shell and in Go |
 
 

@@ -86,6 +86,16 @@ type DetectionLike struct {
 	QID int
 	// HostCount is the provider's own count for this QID.
 	HostCount int
+	// MaxQDS is the highest Qualys Detection Score seen for this QID across
+	// hosts, and LastSeen the newest LAST_FOUND_DATETIME. Both arrive in the
+	// same Host Detection response as the host list, which is what makes them
+	// usable here: a per-QID risk signal and a scan date that cost no extra
+	// call and cannot go missing because a different lane did not run. That
+	// was the flaw in the Sev5-Sev1 column - it could only be filled from the
+	// daily enrich lane's output, so the monthly report about 353 CVEs the
+	// daily had never seen printed "severity bands for 0 of 353".
+	MaxQDS   int
+	LastSeen string
 	// Hosts is every host with this detection - the set, not a sample. The
 	// client used to cap this at ten names, and this package unioned the caps
 	// and printed the result as a host count, which is why every row of the

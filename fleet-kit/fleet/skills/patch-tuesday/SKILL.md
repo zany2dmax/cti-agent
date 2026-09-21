@@ -45,8 +45,13 @@ In this order, because this is the shape the team already reads:
 2. **Our exposure** — "The Exposure for <org> is ~N new vulnerabilities across
    M hosts." From Qualys Host Detection, never from the articles.
 3. **The QQL.** The single most-used thing in the email. Someone pastes it into
-   the console to see the same set themselves.
-4. CVEs confirmed present here, with QIDs and severity band.
+   the console to see the same set themselves. Two blocks: the query Qualys
+   published for this release, verbatim, then ours narrowed to the QIDs with
+   assets here.
+4. **The patches present here, one row per QID** — host count, QDS, last-seen
+   date, and the CVEs each fixes. Not one row per CVE: a cumulative update
+   carries hundreds, and keyed by CVE the table states one fact hundreds of
+   times.
 5. Zero-days, Edge, products, the category table, Adobe.
 6. Both source links.
 
@@ -55,9 +60,18 @@ In this order, because this is the shape the team already reads:
 **The QQL is published verbatim or built from our own QIDs — never
 paraphrased.** A query someone pastes into a console has to be exactly right;
 a reworded one silently returns a different set and they will act on it. The
-lane prefers QIDs with live detections here, falls back to whatever Qualys
-published, and only then to a CVE filter. If you are asked to "tidy up" a QQL,
-do not.
+review's own QQL leads, because run in the console it returns every QID in the
+release with assets against it; a query built from the QIDs this lane
+correlated is a subset and is labelled as one. If you are asked to "tidy up" a
+QQL, do not.
+
+**There is no severity band in this email, and adding one back is a
+regression.** It could only be filled from the daily enrich lane's output, and
+the daily never sees Patch Tuesday CVEs — so the column printed "severity
+bands for 0 of 353". QDS, from the same Host Detection response as the host
+count, is the per-QID risk signal here. Do not print a severity *word* beside
+it unless you have checked Qualys' banding thresholds against their
+documentation.
 
 **The QQL Qualys publishes is also an input, not just output.** The review
 lists the release's QIDs in its own QQL, and the lane parses them back out and
@@ -122,6 +136,23 @@ It confirms rather than refuses, because re-sending a month whose original send
 failed is legitimate. Without the variable it exits 1 and posts a WARN to the
 board. **You never set this.** If a month needs re-sending, say so on the board
 and let the operator run it.
+
+## The manifest, and why you must not mark it sent yourself
+
+After the synopsis is written, the lane records the release's CVEs in
+`$FLEET_HOME/state/patchtuesday-YYYY-MM.json` with `"sent": false`. The daily
+digest reads that file and holds those CVEs back — but **only** once the flag
+is true, which `run-patchtuesday` sets by calling `cti-patchtuesday
+--mark-sent` after the mailer reports success.
+
+Do not run `--mark-sent` to "tidy up" a month, and do not set the flag by
+editing the JSON. The flag means *this email reached people*. Setting it for a
+synopsis that never went out makes the daily go quiet about hundreds of CVEs
+that then appear in no email at all — the exact failure mode this fleet is
+built to avoid, and one nothing in the output would report.
+
+If the daily is flooding with Microsoft CVEs, the answer is to find out why the
+monthly did not send, not to mark the manifest.
 
 ## If the sources move
 
