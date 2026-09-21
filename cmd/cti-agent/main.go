@@ -34,7 +34,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config error: %v", err)
+		log.Fatalf("config error: %s", oneLine(err.Error()))
 	}
 
 	since := time.Now().Add(-cfg.GraphLookback)
@@ -42,7 +42,7 @@ func main() {
 	graphClient := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
 	messages, err := graphClient.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
 	if err != nil {
-		log.Fatalf("graph read failed: %v", err)
+		log.Fatalf("graph read failed: %s", oneLine(err.Error()))
 	}
 
 	// Count messages that actually carried a CVE separately from the total.
@@ -105,15 +105,34 @@ func main() {
 		// Loud, and then carry on with everything. An unreadable manifest must
 		// not be able to decide anything.
 		//
-		// oneLine() because this message is the one here that really does carry
-		// outside text: the error embeds a path built from FLEET_HOME and a
-		// parse error from the file's own contents. A newline in either forges
-		// a second journal entry (CWE-117), and the journal is where an
-		// operator goes to find out why a lane misbehaved. gosec did not flag
-		// this line - it flagged the one below, which passes only integers -
-		// so the annotation and the fix belong to different lines, and putting
-		// the fix on the flagged line would have been a control in the wrong
-		// place.
+		// This is the message here that really does carry outside text: the
+		// error embeds a path built from FLEET_HOME and a parse failure from
+		// the manifest file's own contents. A newline in either forges a
+		// second journal record, which journalctl renders looking exactly like
+		// one this program wrote - in the journal an operator reads to find
+		// out why a lane misbehaved. Hence oneLine(), which replaces every
+		// control character and is tested in main_test.go.
+		//
+		// #nosec G706 -- the control is oneLine() on the line below. G706 is
+		// taint analysis and it does not model sanitisers: it tracks
+		// os.Getenv("FLEET_HOME") to this call and stops there, so it reports
+		// the flow whether or not anything scrubs the value in between. It
+		// also does not flag the three log.Printf calls further down this
+		// function, which carry a path and an error out of the same
+		// environment through mailbox.LogPath() - identical exposure,
+		// invisible to the rule because the os.Getenv sits behind a helper.
+		// Those are sanitised too, on their own merits rather than because
+		// anything demanded it: this finding marks where the os.Getenv call
+		// is written, not whether a log record can be forged.
+		//
+		// If this annotation outlives the oneLine() call, the suppression is
+		// wrong and nothing automated will say so.
+		// TestOneLineCannotBeUsedToForgeAJournalRecord proves the sanitiser
+		// works, so deleting the FUNCTION fails a test - but deleting the
+		// CALL on the line below, and leaving this comment, fails nothing.
+		// Said plainly rather than implied, because a comment claiming more
+		// coverage than exists is how a suppression outlives its
+		// justification.
 		log.Printf("WARNING: Patch Tuesday manifest unreadable (%s); reporting "+
 			"every CVE found, including any the monthly synopsis covers",
 			oneLine(err.Error()))
@@ -132,7 +151,7 @@ func main() {
 
 	provider, err := buildLookupProvider(cfg)
 	if err != nil {
-		log.Fatalf("lookup provider config error: %v", err)
+		log.Fatalf("lookup provider config error: %s", oneLine(err.Error()))
 	}
 
 	results := make([]vulnlookup.Result, 0, len(keep))
@@ -153,7 +172,7 @@ func main() {
 		Held:      held,
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
-		log.Fatalf("write report failed: %v", err)
+		log.Fatalf("write report failed: %s", oneLine(err.Error()))
 	}
 
 	// Record what was read, AFTER the report is on disk. The ordering is the
@@ -167,15 +186,28 @@ func main() {
 		store := mailbox.NewStore(path)
 		l, err := store.Load()
 		if err != nil {
-			log.Printf("WARNING: processed-message log unreadable (%v); mailbox "+
-				"cleanup will not move anything until this is fixed", err)
+			// oneLine() for the same reason as the manifest warning above:
+			// this error carries a path from FLEET_PROCESSED_LOG or FLEET_HOME
+			// and a parse failure from the file's contents. gosec does not
+			// flag these two calls - the os.Getenv is behind
+			// mailbox.LogPath(), where its taint analysis loses it - but the
+			// exposure is identical, and sanitising only the line a scanner
+			// happened to notice is how a codebase ends up with one defended
+			// path and three undefended ones beside it.
+			log.Printf("WARNING: processed-message log unreadable (%s); mailbox "+
+				"cleanup will not move anything until this is fixed",
+				oneLine(err.Error()))
 		} else {
 			store.Record(l, seen)
 			if err := store.Save(l); err != nil {
 				log.Printf("WARNING: could not write the processed-message log "+
-					"(%v); mailbox cleanup will not move today's mail", err)
+					"(%s); mailbox cleanup will not move today's mail",
+					oneLine(err.Error()))
 			} else {
-				log.Printf("recorded %d message(s) in %s", len(seen), path)
+				// The path, not an error, and it comes from the same
+				// environment. A forged record here would be a quiet success
+				// message, which is the most useful kind to forge.
+				log.Printf("recorded %d message(s) in %s", len(seen), oneLine(path))
 			}
 		}
 	}
