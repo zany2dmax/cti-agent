@@ -88,8 +88,14 @@ tasks:
           echo "  brew install gosec   # or: go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
           exit 1
         fi
+        report="$(mktemp -t gosec-nosec.XXXXXX.json)"
+        trap 'rm -f "$report"' EXIT
         echo "== findings with every #nosec annotation IGNORED =="
-        gosec -nosec=true -fmt=text ./... || true
+        gosec -quiet -nosec=true -fmt=text ./... || true
+        gosec -quiet -nosec=true -fmt=json -out "$report" ./... >/dev/null 2>&1 || true
+        echo
+        echo "== are the annotations earning their place? =="
+        python3 scripts/nosec-audit.py "$report" || true
 
   govulncheck:
     desc: Check stdlib and dependencies against the Go vulnerability database
