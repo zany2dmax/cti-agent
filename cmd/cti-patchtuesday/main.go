@@ -12,10 +12,25 @@
 //	cti-patchtuesday --subject-only       just the subject line
 //	cti-patchtuesday --url-qualys URL --url-bleeping URL
 //	cti-patchtuesday --provider none      skip Qualys (source parsing only)
+//	cti-patchtuesday --mark-sent          record that the synopsis was delivered
 //
 // Exit 0 when the synopsis was produced, even from one source: a partial
 // synopsis clearly labelled is more useful than silence. Exit 1 only when it
 // could not produce anything at all.
+//
+// # THE RELEASE MANIFEST
+//
+// A normal run also writes $FLEET_HOME/state/patchtuesday-YYYY-MM.json listing
+// the release's CVEs, with "sent": false. The daily digest reads it and holds
+// those CVEs back - but only once run-patchtuesday has called --mark-sent,
+// which it does after mailer.py reports success and at no other time. A
+// manifest from a run whose email never went out must not silence the daily,
+// or those CVEs appear in no email at all from either lane.
+//
+// A --month replay neither writes nor changes the manifest. Overwriting would
+// reset a sent month to unsent and the next daily would re-report a few
+// hundred CVEs from weeks ago, which is a surprise with no visible cause
+// produced by an operation documented as read-only.
 package main
 
 import (
@@ -257,24 +272,23 @@ func main() {
 	// that the daily keeps reporting Microsoft's CVEs - noisy, and the right
 	// direction to fail in. The consequence of treating it as fatal would be
 	// losing a synopsis that was otherwise ready to go.
-	if mpath := patchtuesday.ManifestPath(os.Getenv("FLEET_HOME"), year, mon); mpath != "" {
-		m := patchtuesday.Manifest{
-			Month:     patchtuesday.MonthKey(year, mon),
-			WrittenAt: time.Now(),
-			CVEs:      d.CVEs,
-			QIDs:      report.Exposure.DetectingQIDs,
-			Hosts:     report.Exposure.Hosts,
-		}
-		if err := patchtuesday.WriteManifest(mpath, m); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"cti-patchtuesday: WARNING could not write %s (%v); the daily digest "+
-					"will keep reporting this release's %d CVE(s)\n",
-				mpath, err, len(d.CVEs))
-		} else {
-			fmt.Fprintf(os.Stderr,
-				"cti-patchtuesday: wrote %s (%d CVEs, unsent until --mark-sent)\n",
-				filepath.Base(mpath), len(d.CVEs))
-		}
+	//
+	// NOT on a --month replay. The live monthly run never passes --month; the
+	// flag exists to re-render a past release and check this lane against an
+	// email already sent, which the orchestrator is pre-approved to do. Since
+	// WriteManifest overwrites, a replay of a month whose manifest was marked
+	// sent would reset it to unsent, and the next daily digest would start
+	// re-reporting a few hundred CVEs that went out weeks ago. Noisy rather
+	// than unsafe, but a surprise with no visible cause, produced by an
+	// operation documented as read-only. A replay now reports what it would
+	// have written and leaves the file alone.
+	if *month != "" {
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday: replay of %s - the release manifest was NOT written "+
+				"or changed, so this run cannot alter what the daily digest "+
+				"suppresses\n", patchtuesday.MonthKey(year, mon))
+	} else {
+		writeManifest(d, report, year, mon)
 	}
 	wrote := false
 	// 0600: this names vulnerable machines, same as every other report here.
@@ -298,6 +312,39 @@ func main() {
 	if !wrote {
 		fmt.Print(report.Text())
 	}
+}
+
+// writeManifest records the release so the daily digest can leave its CVEs
+// to the monthly email. Unsent: run-patchtuesday marks it sent after the
+// mailer succeeds, and only a sent manifest suppresses anything.
+func writeManifest(d *patchtuesday.Digest, report *patchtuesday.Report,
+	year int, mon time.Month) {
+
+	mpath := patchtuesday.ManifestPath(os.Getenv("FLEET_HOME"), year, mon)
+	if mpath == "" {
+		fmt.Fprintln(os.Stderr,
+			"cti-patchtuesday: NOTE FLEET_HOME is not set, so no release manifest "+
+				"was written. The synopsis is unaffected; the daily digest will "+
+				"keep reporting this release's CVEs alongside it.")
+		return
+	}
+	m := patchtuesday.Manifest{
+		Month:     patchtuesday.MonthKey(year, mon),
+		WrittenAt: time.Now(),
+		CVEs:      d.CVEs,
+		QIDs:      report.Exposure.DetectingQIDs,
+		Hosts:     report.Exposure.Hosts,
+	}
+	if err := patchtuesday.WriteManifest(mpath, m); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"cti-patchtuesday: WARNING could not write %s (%v); the daily digest "+
+				"will keep reporting this release's %d CVE(s)\n",
+			mpath, err, len(d.CVEs))
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"cti-patchtuesday: wrote %s (%d CVEs, unsent until --mark-sent)\n",
+		filepath.Base(mpath), len(d.CVEs))
 }
 
 // discoverBleeping finds the article URL. The slug embeds the flaw count
