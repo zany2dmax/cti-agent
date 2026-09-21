@@ -221,6 +221,9 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task run` | Run the Go agent directly from env vars |
 | `task install` | Copy the binary to `~/bin` |
 | `task fmt` / `task fmt:check` | Format / fail if unformatted |
+| `<fleet> cti-mailbox` | Dry run of mailbox cleanup: what it would archive, delete and leave |
+| `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Add `--for-real` to apply |
+| `task test:mailbox` | The processed-message gate, precedence, retention, backlog note |
 | `task vet` / `task lint` / `task scan` | `go vet` / golangci-lint / staticcheck. **`scan` is staticcheck**, not a vulnerability scan — it predates the security tasks below |
 | `task gosec` | Insecure code patterns. Deliberate exceptions carry an inline `#nosec <RULE> -- reason` beside the code, never a blanket exclusion in config: a suppression whose justification lives elsewhere is one nobody re-examines |
 | `task govulncheck` | stdlib and dependencies against the Go vulnerability database. `go.mod` has no third-party dependencies, so this is about the stdlib — and the agent parses untrusted HTML and XML off the public internet through `encoding/xml` and `net/http`, so an advisory in either is a live finding here |
@@ -800,6 +803,90 @@ should not be enabled by accident.
 mailing your findings somewhere else. Keep it as tight as the job allows.
 Mail to `FLEET_OPERATOR_EMAIL` is pre-approved and needs no gate — telling you
 something is broken is not an outward-facing send.
+
+### Mailbox cleanup
+
+Once a day, after the digest: processed advisories to **Archive**,
+header-confirmed out-of-office replies to **Deleted Items**, anything the agent
+has no record of reading left exactly where it is.
+
+| Variable | Notes |
+|---|---|
+| `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Default `$FLEET_HOME/state/processed-messages.json` |
+| `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record (default 25) |
+
+```bash
+sudo cti-agent cti-mailbox                       # dry run: what it would do
+sudo cti-agent run-mailbox-cleanup               # dry run via the runner
+sudo systemctl enable --now cti-agent-mailbox.timer
+```
+
+**It needs a new Graph permission.** `Mail.Read` cannot move a message; the app
+registration needs `Mail.ReadWrite` as an *application* permission with admin
+consent. Apply the `New-ApplicationAccessPolicy` restriction first if you have
+not already — without it, that role is tenant-wide, and a leaked client secret
+goes from "read this mailbox and send as it" to "move and delete mail in any
+mailbox". If you are not running this lane, do not grant it.
+
+**Nothing here can permanently delete mail.** `internal/graph` implements
+move-to-folder and nothing else. Graph's `DELETE /messages/{id}` and the purge
+endpoints are not in the codebase, so "delete" means Deleted Items —
+recoverable from there and then from Recoverable Items — and emptying that
+folder stays a person's job.
+
+#### Three refusals, and why each one is a refusal rather than a warning
+
+**No processing record, no move.** The operator's rule was "make sure a given
+email has been processed before deleting it", and that is a claim about the
+past, so something has to have written it down. `cti-agent` now records every
+message it reads — id, subject, whether it carried a CVE, and what the sending
+system declared about auto-replies — and cleanup will not touch an id that is
+not in that log. Inferring "processed" from something adjacent, like a report
+existing or a digest having been sent, is true in plenty of cases where the
+message was never read.
+
+**No CTI email processed today, no cleanup.** A day where the agent read
+nothing — it broke, a credential expired, the mailbox went quiet — is a day
+where the right thing to do with the inbox is nothing. A mailbox full of
+out-of-office replies and no advisories does not count either. The lane exits
+**0** in that case: a working refusal is not a failed unit, and a non-zero exit
+would have systemd mark it failed and `cti-alert` email about a lane that
+behaved correctly.
+
+**Dry run unless `--for-real`.** The systemd unit passes that flag explicitly,
+so the decision to modify mail is visible in the unit file rather than buried
+in a default. `task mailbox` and the runner without the flag both move nothing.
+
+#### Precedence, and why a CVE beats an auto-reply header
+
+The rules run in this order and the order is the safety property:
+
+1. No processing record → **leave**. Checked first so nothing below can
+   override it.
+2. Carries a CVE → **archive**, never delete. A message that contributed a
+   finding is evidence.
+3. Declared an auto-reply by its own headers → **Deleted Items**.
+4. Anything else that was processed → **archive**.
+
+Rule 2 sits above rule 3 because an out-of-office reply that quotes an advisory
+back matches both, and archiving something that should have been deleted is a
+tidiness failure while deleting a real advisory is a loss.
+
+Detection is **headers only** — `Auto-Submitted: auto-replied` or Exchange's
+`X-Auto-Response-Suppress`. Subject text does not delete mail: "Automatic
+reply:" in a subject is easy to fake and easy to hit by accident, and RFC 3834
+distinguishes `auto-replied` from `auto-generated`, which is what a vendor
+advisory from a mailing system sets. An auto-reply whose sender omits the
+headers stays in the inbox, which is the failure we want.
+
+#### The backlog count is an ingest monitor
+
+Cleanup reports how many inbox messages it left alone for want of a processing
+record, and escalates above the threshold. That number is not really about
+tidiness: **the digest succeeding every morning while silently reading nothing
+looks exactly like a quiet week.** A failed digest is loud; a digest that reads
+zero messages and cheerfully reports zero findings is not. A climbing backlog is
+the only outward sign, so it is worth an escalation.
 
 #### The footer credit, and what `FLEET_REPO_URL` actually publishes
 

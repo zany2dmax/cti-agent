@@ -1,0 +1,25 @@
+[Unit]
+Description=CTI mailbox cleanup (archive processed, delete auto-replies)
+# If this fails, tell the operator. Without this a failed digest is
+# silent, and no email looks exactly like a quiet day.
+OnFailure=cti-agent-alert@%n.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ctiagent
+Group=ctiagent
+WorkingDirectory=/home/ctiagent/fleet
+EnvironmentFile=/home/ctiagent/fleet/fleet.env
+ExecStart=/home/ctiagent/fleet/bin/run-mailbox-cleanup --for-real
+TimeoutStartSec=600
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ctiagent/fleet
+
+StandardOutput=append:/home/ctiagent/fleet/logs/digest.log
+StandardError=append:/home/ctiagent/fleet/logs/digest.log

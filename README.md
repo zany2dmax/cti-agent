@@ -34,12 +34,14 @@ cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
 cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
 cmd/cti-kev/                   CISA KEV remediation deadline report
 cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
+cmd/cti-mailbox/               daily mailbox cleanup (the only writer)
 internal/config/               environment/config loading
 internal/cti/                  CTI parsing and CVE extraction
 internal/graph/                Microsoft Graph mailbox reader and sendMail
 internal/budget/               rolling-window and daily ceilings, backoff
 internal/kev/                  deadline bands, present-only filtering
 internal/patchtuesday/         release-date maths, source parsing, exposure, QQL
+internal/mailbox/              processed-message log and the cleanup decision table
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for future CrowdStrike implementation
@@ -48,7 +50,7 @@ internal/report/               markdown report writer
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
-fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, fleet-board, fleet-db
+fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-mailbox-cleanup, fleet-board, fleet-db
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
 fleet-kit/fleet/systemd/       service + timer pairs, generic layout
@@ -59,7 +61,7 @@ fleet-kit/tests/               lane tests (stdlib unittest, no network)
 scripts/                       history scrub + exposure remediation notes
 ```
 
-### The five binaries
+### The six binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -68,17 +70,19 @@ scripts/                       history scrub + exposure remediation notes
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found in the estate |
 | `cti-patchtuesday` | `run-patchtuesday`, monthly | Reads the Qualys and BleepingComputer wrap-ups, correlates against Host Detection — using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL — and renders the synopsis with a pasteable QQL |
+| `cti-mailbox`      | `run-mailbox-cleanup`, daily    | The only binary that **modifies** the mailbox: processed advisories to Archive, header-confirmed auto-replies to Deleted Items, anything unread left alone. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
 
-All five are stdlib-only. `go.mod` has no dependencies, and adding one would
+All six are stdlib-only. `go.mod` has no dependencies, and adding one would
 make a C toolchain or a large generated tree a build-time requirement on the
 deployment host.
 
 ```bash
-task build        # all five into bin/
+task build        # all six into bin/
 task test         # Go tests + Python lane tests
 task test:kev     # deadline logic
 task test:budget  # quota ceilings and backoff
 task test:patchtuesday  # release dates, parsing, exposure, QQL
+task test:mailbox # the processed-message gate and cleanup precedence
 ```
 
 ## Lookup provider boundary
@@ -119,6 +123,21 @@ For daemon/service operation, use Microsoft Graph application permissions and gr
 
 - `Mail.Read` — required by the agent, to read the CTI mailbox.
 - `Mail.Send` — required only by the fleet, to send digests and escalations.
+- `Mail.ReadWrite` — required only by `cti-mailbox`, to move messages. Skip it
+  if you are not running the cleanup lane.
+
+**`Mail.ReadWrite` is the one to think about before granting.** It supersedes
+`Mail.Read`, and as an *application* permission it is tenant-wide by default —
+the same trap as `Mail.Send`. A leaked client secret goes from "read this
+mailbox and send as it" to "move and delete mail anywhere the policy allows".
+Apply the Application Access Policy below **first**; with it the new role is
+confined to the CTI mailbox like the other two. If you are not running mailbox
+cleanup, do not add it.
+
+Nothing in this codebase can permanently delete mail. `internal/graph` exposes
+move-to-folder and nothing else — Graph's `DELETE /messages/{id}` and the purge
+endpoints are deliberately not implemented, so "delete" means Deleted Items and
+emptying that folder stays a person's job.
 
 The app must be allowed to read the shared mailbox. In production, restrict it
 with an Exchange Application Access Policy: `Mail.Send` as an *application*
@@ -214,6 +233,8 @@ task run
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `FLEET_HOME` | Fleet state directory |
 | `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, or `count` |
+| `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. This file is mailbox cleanup's entire authority to move anything — no entry, no move |
+| `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record (default 25) |
 | `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
 
 ## Report sensitivity
