@@ -64,6 +64,33 @@ tasks:
         fi
         gosec ./...
 
+  gosec:audit:
+    desc: "Show what the #nosec annotations are hiding. Advisory - never gates."
+    # A suppression nobody re-examines is the failure this repo keeps finding,
+    # and #nosec is a suppression. This run ignores every annotation, so the
+    # findings they cover are visible and can be re-judged.
+    #
+    # It also answers a question the normal run cannot: whether an annotation
+    # suppresses anything. gosec reported "Nosec: 10, Issues: 1", which is
+    # consistent with ten real suppressions - and equally consistent with one
+    # real one and nine comments justifying a finding that never fires. An
+    # annotation in the second category is worse than none: it reads as a
+    # considered exception, and it names a rule ID that will not cover the rule
+    # that eventually does fire. That is exactly how G703 got through a
+    # "#nosec G304".
+    #
+    # Compare the two lists. Any annotated line that does NOT appear here is
+    # suppressing nothing: delete the #nosec and keep the prose.
+    cmds:
+      - |
+        if ! command -v gosec >/dev/null 2>&1; then
+          echo "gosec not installed:" >&2
+          echo "  brew install gosec   # or: go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
+          exit 1
+        fi
+        echo "== findings with every #nosec annotation IGNORED =="
+        gosec -nosec=true -fmt=text ./... || true
+
   govulncheck:
     desc: Check stdlib and dependencies against the Go vulnerability database
     # This matters more than the empty go.mod suggests. The agent parses

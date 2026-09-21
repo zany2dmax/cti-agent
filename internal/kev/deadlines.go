@@ -204,7 +204,7 @@ func (r *Report) Markdown(showHosts bool) string {
 	b.WriteString("## CISA KEV remediation deadlines\n\n")
 
 	if r.Clean() {
-		fmt.Fprintf(&b, 
+		fmt.Fprintf(&b,
 			"Nothing overdue and nothing due within %dd.\n\n", r.Horizon)
 	}
 
@@ -228,7 +228,7 @@ func (r *Report) Markdown(showHosts bool) string {
 	fmt.Fprintf(&b, "| KEV deadlines, coverage UNVERIFIED | %d |\n", r.Unverified)
 
 	if r.Unverified > 0 {
-		fmt.Fprintf(&b, 
+		fmt.Fprintf(&b,
 			"\n> %d KEV %s a published deadline could not be checked against the "+
 				"scanner. That is not a clean result — it means we did not look.\n",
 			r.Unverified, plural(r.Unverified, "vulnerability with", "vulnerabilities with"))

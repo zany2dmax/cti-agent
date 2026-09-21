@@ -431,7 +431,7 @@ func (r *Report) HTML() string {
 	if len(d.Categories) > 0 {
 		var rows strings.Builder
 		for _, c := range d.Categories {
-			fmt.Fprintf(&rows, 
+			fmt.Fprintf(&rows,
 				`<tr><td style="border-bottom:1px solid #edf2f7;padding:5px 8px">%s</td>`+
 					`<td align="right" style="border-bottom:1px solid #edf2f7;padding:5px 8px">%d</td>`+
 					`<td style="border-bottom:1px solid #edf2f7;padding:5px 8px">%s</td></tr>`,
@@ -463,7 +463,7 @@ func (r *Report) HTML() string {
 		if !s.Fetched {
 			state = fmt.Sprintf(" <span style='color:#b3001b'>(unavailable: %s)</span>", e(s.Err))
 		}
-		fmt.Fprintf(&links, 
+		fmt.Fprintf(&links,
 			`<div style="margin:3px 0"><a href="%s" style="color:#2c5282">%s</a>%s</div>`,
 			e(s.URL), e(s.Name), state)
 	}
