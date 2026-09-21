@@ -160,7 +160,8 @@ func main() {
 		}
 	}
 
-	report := &patchtuesday.Report{Digest: d, Org: org, MaxRows: *maxRows}
+	report := &patchtuesday.Report{Digest: d, Org: org, MaxRows: *maxRows,
+		Attribution: patchtuesday.LoadAttribution(org)}
 	var detections map[int]patchtuesday.DetectionLike
 
 	if strings.EqualFold(*provider, "none") {
