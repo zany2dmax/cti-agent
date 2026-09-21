@@ -1,0 +1,23 @@
+[Unit]
+Description=CTI mailbox cleanup, once a day after the digest
+
+[Timer]
+# 07:00, an hour after the 06:00 digest. Late enough that the digest has
+# written the processed-message log this lane checks against, and the lane
+# refuses to act on a day with no processed CTI email anyway - so a digest that
+# ran late or not at all makes this a no-op rather than a mistake.
+#
+# No timezone here: OnCalendar uses the SYSTEM timezone, and the installer
+# writes a drop-in setting it from FLEET_TIMEZONE. The first digest fired at
+# 2am because that was not understood.
+OnCalendar=*-*-* 07:00:00
+AccuracySec=5min
+# NOT Persistent. Unlike the digest, a missed cleanup is not a missed report -
+# there is nothing to catch up on, and firing a mailbox-modifying lane at boot
+# because the box was off at 07:00 is a surprise nobody asked for. It will run
+# tomorrow.
+Persistent=false
+Unit=cti-agent-mailbox.service
+
+[Install]
+WantedBy=timers.target
