@@ -46,19 +46,28 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # It is also the state a box lands in when it was only ever installed from the
 # agent clone and never had a separate kit checkout - which is easy to do,
 # because that clone does contain a working copy of this script.
-if [ "${SRC#/opt/cti-agent/agent}" != "$SRC" ] || \
-   [ "${SRC#/opt/cti-agent}" != "$SRC" ]; then
-  echo "REFUSING: this script is running from $SRC, inside the tree it pulls." >&2
-  echo "" >&2
-  echo "Clone the kit somewhere outside the installed layout and run it there:" >&2
-  echo "  sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit" >&2
-  echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh" >&2
-  echo "" >&2
-  echo "Why: this installer runs 'git -C /opt/cti-agent/agent pull' partway" >&2
-  echo "through, so from here it would install files from the new tree using" >&2
-  echo "logic from the old script." >&2
-  exit 2
-fi
+# case with a path-boundary glob, not a prefix strip. "${SRC#/opt/cti-agent}"
+# also matches /opt/cti-agent-kit and /opt/cti-agent-staging, which are
+# perfectly good staging directories, so the first version of this guard
+# refused them. A prefix is not a path.
+case "$SRC" in
+  /opt/cti-agent|/opt/cti-agent/*)
+    echo "REFUSING: this script is running from $SRC, inside the tree it pulls." >&2
+    echo "" >&2
+    echo "Clone the kit somewhere outside the installed layout and run it there:" >&2
+    echo "  sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit" >&2
+    echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh" >&2
+    echo "" >&2
+    echo "Why: this installer runs 'git -C /opt/cti-agent/agent pull' partway" >&2
+    echo "through, so from here it would install files from the new tree using" >&2
+    echo "logic from the old script." >&2
+    echo "" >&2
+    echo "Do NOT put the kit in a personal home directory. A checkout in" >&2
+    echo "/home/<you> is invisible to the next admin, and on a box with" >&2
+    echo "directory-based SSH logins the home may not survive a logout." >&2
+    exit 2
+    ;;
+esac
 
 MODE=install
 for arg in "$@"; do
