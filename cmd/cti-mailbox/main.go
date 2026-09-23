@@ -44,6 +44,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
+	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
 const (
@@ -75,8 +76,8 @@ func run() int {
 	// for settings it has no use for.
 	cfg, err := config.LoadGraphOnly()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cti-mailbox: config: %v\n", err)
-		fmt.Fprintf(os.Stderr, "cti-mailbox: read %s\n", fleetenv.Path())
+		fmt.Fprintf(os.Stderr, "cti-mailbox: config: %s\n", safelog.Line(err.Error()))
+		fmt.Fprintf(os.Stderr, "cti-mailbox: read %s\n", safelog.Line(fleetenv.Path()))
 		return exitFailure
 	}
 
@@ -94,7 +95,7 @@ func run() int {
 		// A corrupt log is a hard stop, not a warning. Continuing would mean
 		// acting on a partial set of message IDs, and the failure mode of
 		// "some of the log parsed" is silently moving the wrong things.
-		fmt.Fprintf(os.Stderr, "cti-mailbox: %v\n", err)
+		fmt.Fprintf(os.Stderr, "cti-mailbox: %s\n", safelog.Line(err.Error()))
 		fmt.Fprintln(os.Stderr,
 			"cti-mailbox: refusing to act on a processed-message log that does "+
 				"not parse. Delete it and let the next digest rebuild it; the "+
@@ -121,7 +122,8 @@ func run() int {
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
 	msgs, err := g.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cti-mailbox: reading %s: %v\n", cfg.GraphMailbox, err)
+		fmt.Fprintf(os.Stderr, "cti-mailbox: reading %s: %s\n",
+			safelog.Line(cfg.GraphMailbox), safelog.Line(err.Error()))
 		return exitFailure
 	}
 
@@ -151,7 +153,16 @@ func run() int {
 	var moved, failed int
 	for i := range plan {
 		d := &plan[i]
-		line := fmt.Sprintf("  %-7s %s  (%s)", d.Action, truncate(d.Subject, 60), d.Reason)
+		// safelog.LineMax, not a bare truncate. d.Subject is the subject line
+		// of somebody else's mail: attacker-controlled, because anyone can
+		// send to a published security address. This lane prints it to the
+		// journal on a timer with nobody watching, so a newline in a subject
+		// would forge a journal record in the log an operator reads to find
+		// out what this lane did with their mail - and this is the lane that
+		// MOVES mail. The ingest lane was defended against exactly this while
+		// this one was not; writing the threat model down is what found it.
+		line := fmt.Sprintf("  %-7s %s  (%s)",
+			d.Action, safelog.LineMax(d.Subject, 60), d.Reason)
 		if d.Action == mailbox.ActionLeave || !*forReal {
 			fmt.Println(line)
 			continue
@@ -163,11 +174,11 @@ func run() int {
 		newID, err := g.MoveMessage(ctx, cfg.GraphMailbox, d.ID, dest)
 		if err != nil {
 			failed++
-			fmt.Printf("%s -> FAILED: %v\n", line, err)
+			fmt.Printf("%s -> FAILED: %s\n", line, safelog.Line(err.Error()))
 			continue
 		}
 		moved++
-		fmt.Printf("%s -> moved (new id %s)\n", line, truncate(newID, 16))
+		fmt.Printf("%s -> moved (new id %s)\n", line, safelog.LineMax(newID, 16))
 	}
 
 	if note := mailbox.BacklogNote(counts, *backlog); note != "" {
@@ -207,7 +218,7 @@ func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts
 	// carries subject lines from a security mailbox.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cti-mailbox: %v\n", err)
+		fmt.Fprintf(os.Stderr, "cti-mailbox: %s\n", safelog.Line(err.Error()))
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -220,9 +231,3 @@ func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts
 	})
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-3] + "..."
-}
