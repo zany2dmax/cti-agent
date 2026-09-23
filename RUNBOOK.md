@@ -257,6 +257,7 @@ task test:budget        # quota ceilings, backoff growth, rate-limit classificat
 task test:patchtuesday  # release dates, source parsing, exposure, QQL, the QID table
 task test:mailbox       # the processed-message gate and the cleanup decision table
 task test:env           # fleet.env parsing, and which credentials each command needs
+task test:safelog       # the log sanitiser: control characters, rune-safe truncation
 task test:graph         # URL construction, sendMail, error diagnosis
 task test:report        # hostname redaction and file permissions
 ```

@@ -203,14 +203,12 @@ A generated report pairs exploitability with named machines. Treat it as such.
 - Mailed only to addresses on an allowlist.
 - Carries a "do not commit" banner when it contains real hostnames.
 
-**The Python lanes are the gap.** `brief.py` and `enrich.py` write the digest
-HTML, the digest text and `enriched-*.json` — which carries host names —
-with a bare `open(path, "w")`. There is no `umask` in the code and no `UMask=`
-in the systemd units, so under systemd's default these land `0644`, readable
-by anyone on the host. `StateDirectoryMode=0750` limits that to the service
-group rather than the world. Setting `UMask=0077` in the units is the one
-change that makes the blanket claim true; until then, only the Go-written
-files are 0600 by construction.
+**The Python lanes rely on the unit's umask.** `brief.py` and `enrich.py`
+write the digest HTML, the digest text and `enriched-*.json` — which carries
+host names — with a bare `open(path, "w")` and no `chmod`. Every service unit
+now sets `UMask=0077`, so those land `0600` too. Run a lane outside systemd
+and it inherits your shell's umask instead, which is worth remembering when
+replaying by hand.
 
 `REPORT_HOSTNAMES` controls disclosure:
 
@@ -395,7 +393,9 @@ if `fleet.env` does not match policy, because a config file staged in a home
 directory and moved into `/etc` keeps its original label — which presents as
 every timer failing while manual runs work, with an empty journal.
 
-What the units are missing is `UMask=0077`; see the report-sensitivity section.
+Every unit sets `UMask=0077`, so a lane that writes with a bare `open()` and
+no `chmod` — which both Python lanes do — cannot leave a group-readable file
+behind.
 
 ---
 
@@ -481,16 +481,18 @@ unusually clean, verify the component did work — not that it exited 0.**
 Stated rather than discovered. Everything here was found by fact-checking this
 document against the code; several are worth fixing and are not yet fixed.
 
+**Fixed since this document was written**
+
+- ~~The Python lanes write world-readable files.~~ `UMask=0077` is now set in
+  every service unit, so a lane writing with a bare `open()` cannot land a
+  group- or world-readable file. Existing files on a deployed host keep their
+  old mode until rewritten — `chmod 0600` the state directory once.
+- ~~`cti-mailbox` logs attacker-controlled subject lines unsanitised.~~ The
+  sanitiser moved to `internal/safelog` and both lanes use it; its truncation
+  is rune-safe rather than byte-slicing.
+
 **Worth fixing**
 
-- **The Python lanes write world-readable files.** `brief.py` and `enrich.py`
-  use a bare `open(path, "w")`, there is no `umask` in the code, and no
-  `UMask=` in any unit. The digest HTML and `enriched-*.json` — which carries
-  host names — land `0644`. `UMask=0077` in the units fixes it.
-- **`cti-mailbox` logs attacker-controlled subject lines unsanitised**
-  straight to the journal, which is the CWE-117 the ingest lane defends
-  against, in the one lane that moves other people's mail. Its `truncate()`
-  also slices bytes, so it can split a multi-byte character.
 - **The daily digest subject can contain a non-ASCII character** (an em dash
   from `brief.py`), unlike the Patch Tuesday subject, which is tested for
   ASCII. Inbox rules are keyed on subjects.
