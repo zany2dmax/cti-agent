@@ -28,7 +28,9 @@ config.local.yaml
 qualys_kb_cache.json
 
 # Generated CTI reports - these map exploitable CVEs to real hostnames and
-# must never be committed. internal/report redacts by default, but the safe
+# must never be committed. internal/report does NOT redact by default -
+# REPORT_HOSTNAMES defaults to `full`, so assume a stray report names real
+# machines. (This comment previously claimed the opposite.) The safe
 # state is for these files to be untrackable regardless of that setting.
 cti-vuln-report.md
 cti-qualys-report.md
@@ -45,3 +47,7 @@ scripts/scrub-patterns.txt
 # Local dev-run state: reports, digests, caches, sqlite. Generated, and
 # contains real findings - never commit it.
 .fleet-local/
+
+# Python build artifacts - a .pyc was committed once by a `git add -A`
+__pycache__/
+*.pyc
