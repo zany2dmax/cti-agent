@@ -75,10 +75,14 @@ func TestLineLeavesOrdinaryTextAlone(t *testing.T) {
 // manifest could put its whole contents into the journal.
 func TestLineTruncatesSomethingTheSizeOfAFile(t *testing.T) {
 	got := Line(strings.Repeat("A", 5000))
-	if len(got) > 400 {
-		t.Errorf("no cap: logged %d bytes", len(got))
+	if n := utf8.RuneCountInString(got); n != DefaultMax {
+		t.Errorf("capped at %d runes, want exactly %d", n, DefaultMax)
 	}
-	if !strings.HasSuffix(got, "(truncated)") {
+	// Visible, so a reader can tell the record was cut rather than the
+	// message having ended there. An ellipsis is the marker; it is short
+	// because LineMax is also used for a 60-character display column, and a
+	// wordier marker would eat a quarter of it.
+	if !strings.HasSuffix(got, "...") {
 		t.Errorf("truncation has to be visible, got %q", got[max(0, len(got)-40):])
 	}
 }
@@ -90,8 +94,13 @@ func TestLineTruncationDoesNotSplitACharacter(t *testing.T) {
 	if !utf8.ValidString(got) {
 		t.Errorf("truncation produced invalid UTF-8: %q", got[max(0, len(got)-20):])
 	}
-	if !strings.HasSuffix(got, "(truncated)") {
+	if !strings.HasSuffix(got, "...") {
 		t.Errorf("expected truncation, got %d bytes", len(got))
+	}
+	// 5000 runes in, DefaultMax out - counted in runes, not the 10000 bytes
+	// the old byte-slicing version would have measured.
+	if n := utf8.RuneCountInString(got); n != DefaultMax {
+		t.Errorf("got %d runes, want %d", n, DefaultMax)
 	}
 }
 
