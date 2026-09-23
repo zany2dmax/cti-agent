@@ -167,6 +167,13 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  test:safelog:
+    desc: The log sanitiser - control characters, rune-safe truncation
+    # It is a security control (CWE-117) used by the two lanes that print
+    # outside text, so it is tested rather than trusted.
+    cmds:
+      - go test ./internal/safelog/ -v
+
   test:env:
     desc: fleet.env parsing and which credentials each command may fail on
     # These two go together: one reads the file, the other decides which names
