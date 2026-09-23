@@ -1,5 +1,12 @@
 # secrets / local config
 .env
+# fleet.env is the PRODUCTION credentials filename - Graph client secret,
+# Qualys password - and the runbook tells operators to create one. Only
+# `.env` was ignored, so a fleet.env copied into a checkout for a local
+# replay was committable. Added on the prod box first, upstreamed here so
+# every clone gets it. `*.env.example` is unaffected: it does not end .env.
+*.env
+fleet.env
 config.local.yaml
 
 # build outputs
