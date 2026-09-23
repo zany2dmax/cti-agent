@@ -24,6 +24,7 @@ prevent exactly that.
 | the full fleet reference: every command, every setting, the schedule, troubleshooting | **[fleet-kit/README.md](fleet-kit/README.md)** |
 | know what the always-on orchestrator is allowed to do, and what it must never do | [fleet-kit/fleet/CLAUDE.md](fleet-kit/fleet/CLAUDE.md) |
 | the individual agent playbooks | [skills/](fleet-kit/fleet/skills/): [checkin](fleet-kit/fleet/skills/checkin/SKILL.md), [cti-digest](fleet-kit/fleet/skills/cti-digest/SKILL.md), [scout-sweep](fleet-kit/fleet/skills/scout-sweep/SKILL.md), [patch-tuesday](fleet-kit/fleet/skills/patch-tuesday/SKILL.md) |
+| the non-CVE triage agent's standing instructions, and the org profile it reads | [fleet-kit/fleet/agents/triage/](fleet-kit/fleet/agents/triage/): [CLAUDE.md](fleet-kit/fleet/agents/triage/CLAUDE.md), [ORG-PROFILE.md](fleet-kit/fleet/agents/triage/ORG-PROFILE.md) — **design, not yet built** |
 | **the threat model** — trust boundaries, why the AI triage agent is separate and has no tools, credential handling, the send gate, known gaps | **[SECURITY.md](SECURITY.md)** |
 | see what a report looks like before running anything | [examples/sample-report.md](examples/sample-report.md) |
 

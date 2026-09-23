@@ -90,7 +90,14 @@ decision downstream of the mailbox assumes the sender is hostile.
 > yet done, not as a description of a control that exists.
 
 This is the newest and sharpest boundary in the system, and the one most
-likely to be got wrong by a well-meaning change.
+likely to be got wrong by a well-meaning change. The agent's standing
+instructions are written and reviewable at
+[`fleet-kit/fleet/agents/triage/CLAUDE.md`](fleet-kit/fleet/agents/triage/CLAUDE.md);
+the organisation profile it reads to judge relevance is a hand-written
+template at
+[`ORG-PROFILE.md`](fleet-kit/fleet/agents/triage/ORG-PROFILE.md), and is
+deliberately categories rather than inventory, because the repository is
+public.
 
 ### The problem
 
