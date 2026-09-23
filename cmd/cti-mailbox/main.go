@@ -230,4 +230,3 @@ func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts
 		"counts": counts, "plan": plan,
 	})
 }
-
