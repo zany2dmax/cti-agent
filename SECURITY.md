@@ -245,6 +245,9 @@ is unset, but the pseudonyms in it are not meaningfully protective.
 
 - All credentials live in one file — `fleet.env` in production, `.env` in a
   checkout — never in code, never in systemd unit files, never in arguments.
+  Both names, and anything else ending `.env`, are gitignored. That gap was
+  real until recently: only `.env` was listed, so a `fleet.env` copied into a
+  checkout to replay a run locally could be committed.
 - `internal/fleetenv` is the single reader, so a run by hand gets the same
   configuration as a run by systemd, and there is one place to audit.
 - **No default mailbox and no default recipient.** An unconfigured install
@@ -497,6 +500,12 @@ document against the code; several are worth fixing and are not yet fixed.
 - ~~`cti-mailbox` logs attacker-controlled subject lines unsanitised.~~ The
   sanitiser moved to `internal/safelog` and both lanes use it; its truncation
   is rune-safe rather than byte-slicing.
+- ~~A comment in `.gitignore` claimed `internal/report` redacts by default.~~
+  It does not; the default is `full`. The comment now says so, because
+  somebody reading it would have drawn the wrong conclusion about what a
+  stray report contains.
+- ~~Only `.env` was gitignored.~~ `fleet.env` — the production credentials
+  filename — and anything else ending `.env` are ignored too.
 
 **Worth fixing**
 
@@ -511,9 +520,6 @@ document against the code; several are worth fixing and are not yet fixed.
   They reach the journal identically.
 - **`mailer.py --attach` has no path allowlist.** The send gate covers
   recipients, not payloads; any readable file up to 3 MB can be attached.
-- **A comment in `.gitignore` claims `internal/report` redacts by default.**
-  It does not — the default is `full`. Someone reading that comment will draw
-  the wrong conclusion about what a stray report contains.
 
 **Accepted, with reasons**
 
