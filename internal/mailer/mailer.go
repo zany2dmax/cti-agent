@@ -135,7 +135,18 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 
 	for _, r := range append(append([]string{}, to...), cc...) {
 		if !ValidAddress(r) {
-			return nil, nil, fmt.Errorf("%q is not a valid address", r)
+			// Single quotes, because mailer.py used f"{r!r}" and Python's
+			// repr() quotes a plain string with them. %q would print double
+			// quotes and the two messages would differ - which is the sort of
+			// drift that makes "behaviour identical" a claim nobody can rely
+			// on.
+			//
+			// repr() switches to double quotes for a value that itself
+			// contains a single quote. Not replicated: an address with an
+			// apostrophe in it is already being rejected, and matching
+			// Python's quoting heuristics exactly would be a worse trade than
+			// saying so here.
+			return nil, nil, fmt.Errorf("'%s' is not a valid address", r)
 		}
 	}
 
