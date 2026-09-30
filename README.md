@@ -65,7 +65,7 @@ quiet day — which only holds if a broken pipeline is loud.
 
 ---
 
-## The six binaries
+## The seven binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -74,14 +74,15 @@ quiet day — which only holds if a broken pipeline is loud.
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
 | `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
+| `cti-mailer` | every lane, and by hand | The **single outbound channel**. Holds the `FLEET_ALLOW_TO` recipient gate, which covers Cc as well as To. `--check` decodes the token and reports the roles the tenant actually consented to. A port of `mailer.py`; see [SECURITY.md](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision) |
 | `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
 
-All six are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All seven are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host.
 
 ```bash
-task build              # all six into bin/
+task build              # all seven into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
 task --list             # everything else

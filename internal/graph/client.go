@@ -3,6 +3,7 @@ package graph
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,6 +106,20 @@ func New(tenantID, clientID, clientSecret string) *Client {
 			"https://login.microsoftonline.com/%s/oauth2/v2.0/token", tenantID),
 		graphBase: "https://graph.microsoft.com/v1.0",
 	}
+}
+
+// AccessToken returns a client-credentials token for Graph.
+//
+// Exported for `cti-mailer --check`, which decodes the token's claims to
+// report which application roles the tenant actually consented to. That is the
+// one question no amount of local configuration can answer, and the step
+// people skip - a permission added in Entra without admin consent looks
+// identical to one that was never added.
+//
+// Callers must not log the token. It is a bearer credential for the whole
+// mailbox.
+func (c *Client) AccessToken(ctx context.Context) (string, error) {
+	return c.token(ctx)
 }
 
 func (c *Client) token(ctx context.Context) (string, error) {
@@ -301,11 +316,30 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 type SendMailRequest struct {
 	From    string   // the mailbox to send AS; needs Mail.Send on the app
 	To      []string // recipients
+	CC      []string // copied recipients; subject to the caller's allowlist too
 	Subject string
 	HTML    string // body, contentType HTML
 	// HighImportance flags the message. Reserved for genuine Sev5 alerts: a
 	// system that marks everything urgent has marked nothing urgent.
 	HighImportance bool
+
+	// Attachments are inlined into the sendMail payload as base64, which is
+	// what Graph accepts for anything under its size limit. The caller decides
+	// what is small enough; this package does not silently drop one.
+	Attachments []Attachment
+
+	// SaveToSentItems is a pointer so that nil means true - the behaviour
+	// every existing caller already relies on. A plain bool would make the
+	// zero value "do not save", silently changing what cti-alert does the
+	// moment this field was added.
+	SaveToSentItems *bool
+}
+
+// Attachment is one file inlined into a message.
+type Attachment struct {
+	Name        string
+	ContentType string
+	Bytes       []byte
 }
 
 type sendMailPayload struct {
@@ -315,10 +349,21 @@ type sendMailPayload struct {
 			ContentType string `json:"contentType"`
 			Content     string `json:"content"`
 		} `json:"body"`
-		ToRecipients []recipient `json:"toRecipients"`
-		Importance   string      `json:"importance"`
+		ToRecipients []recipient      `json:"toRecipients"`
+		CCRecipients []recipient      `json:"ccRecipients,omitempty"`
+		Importance   string           `json:"importance"`
+		Attachments  []fileAttachment `json:"attachments,omitempty"`
 	} `json:"message"`
 	SaveToSentItems bool `json:"saveToSentItems"`
+}
+
+// fileAttachment is Graph's inline attachment shape. The @odata.type is
+// required and the API rejects the message without it.
+type fileAttachment struct {
+	ODataType    string `json:"@odata.type"`
+	Name         string `json:"name"`
+	ContentType  string `json:"contentType"`
+	ContentBytes string `json:"contentBytes"`
 }
 
 type recipient struct {
@@ -367,7 +412,27 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (string, err
 		r.EmailAddress.Address = addr
 		p.Message.ToRecipients = append(p.Message.ToRecipients, r)
 	}
+	for _, addr := range req.CC {
+		var r recipient
+		r.EmailAddress.Address = addr
+		p.Message.CCRecipients = append(p.Message.CCRecipients, r)
+	}
+	for _, a := range req.Attachments {
+		ct := a.ContentType
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		p.Message.Attachments = append(p.Message.Attachments, fileAttachment{
+			ODataType:    "#microsoft.graph.fileAttachment",
+			Name:         a.Name,
+			ContentType:  ct,
+			ContentBytes: base64.StdEncoding.EncodeToString(a.Bytes),
+		})
+	}
 	p.SaveToSentItems = true
+	if req.SaveToSentItems != nil {
+		p.SaveToSentItems = *req.SaveToSentItems
+	}
 
 	body, err := json.Marshal(p)
 	if err != nil {
