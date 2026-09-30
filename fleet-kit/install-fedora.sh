@@ -365,6 +365,7 @@ if [ "$MODE" != dryrun ]; then
   # rather than Mail.Read. It dry-runs unless given --for-real; the unit
   # passes that flag explicitly so the decision is visible in the unit.
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
 else
@@ -560,6 +561,7 @@ for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
          "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
          "$CODE_DIR/bin/cti-patchtuesday" "$CODE_DIR/bin/run-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/run-mailbox-cleanup" \
+         "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

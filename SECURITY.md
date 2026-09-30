@@ -423,20 +423,31 @@ about where:
 | `scout.py` | yes | Python | yes |
 | `fleet-db` | yes | Python | yes |
 | `brief.py` | no | Python | **no** — historical |
-| `mailer.py` | no | Python | **no** — and this is the one that matters |
-| the six `cti-*` binaries | no | Go | yes |
+| `mailer.py` | no | Python | being retired — see below |
+| `cti-mailer` | no | Go | yes |
+| the other six `cti-*` binaries | no | Go | yes |
 
-`mailer.py` is the single outbound channel and holds the `FLEET_ALLOW_TO`
-recipient gate. It has no database dependency, so nothing about it requires
-Python — it is simply where it started. That makes it the strongest candidate
-for porting, because it is the most security-relevant code currently outside
-`gosec` and `govulncheck`. `brief.py` is 689 lines of email layout; the case
-for moving it is weaker and mostly about `html/template` being a better
-escaping story than string concatenation.
+`mailer.py` **has been ported to `cmd/cti-mailer`**, because it is the single
+outbound channel and holds the `FLEET_ALLOW_TO` recipient gate — the control
+deciding who receives a document that names exploitable machines. It had no
+database dependency; it was simply where the code started, and it was the most
+security-relevant code in the repository outside `gosec` and `govulncheck`.
 
-Neither is urgent. Both are listed here so that "Python is only for SQLite"
-is read as the intended direction rather than as a description of what is
-already true.
+The port is deliberately behaviour-identical. A port that also improves things
+cannot be verified by diffing old output against new, and this is the one
+component where a subtle change is discovered by somebody *not* receiving a
+security finding. The recipient policy now lives in `internal/mailer` as pure
+functions, so the allowlist is tested against a table of cases rather than by
+sending mail — in Python it could only be exercised by sending, which is why
+it never was.
+
+**The runners still call `mailer.py`.** Both exist until a side-by-side
+`--dry-run` comparison on real digests says they agree; see
+[RUNBOOK → Switching the mailer](RUNBOOK.md#11b-switching-the-mailer).
+
+`brief.py` is 689 lines of email layout. The case for moving it is weaker and
+mostly about `html/template` being a better escaping story than string
+concatenation. Not urgent.
 
 Shell is the third language, for the runners and installers only. It
 orchestrates; it does not parse untrusted input or hold credentials beyond
