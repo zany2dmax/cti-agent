@@ -98,6 +98,17 @@ type Scan struct {
 	// count invited the question "which fourteen?" and could not answer it.
 	Subjects []ScannedEmail
 
+	// CatchUp is set when --lookback widened the window for this run, and
+	// Lookback is the window actually used.
+	//
+	// Both go in the header because a report covering a week looks identical
+	// to one covering a day until you read the timestamps, and somebody
+	// comparing two of them needs to know which is which. A catch-up run also
+	// re-reports findings an earlier digest already carried, which reads as a
+	// sudden spike unless the report says why.
+	CatchUp  bool
+	Lookback time.Duration
+
 	// Held maps a CVE withheld from this report to the month whose Patch
 	// Tuesday synopsis already covered it.
 	//
@@ -132,6 +143,13 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 	b.WriteString("# CTI / CVE Daily Report\n\n")
 	fmt.Fprintf(&b, "- Mailbox: `%s`\n", mailbox)
 	fmt.Fprintf(&b, "- Lookback since: `%s`\n", since.Format(time.RFC3339))
+	if scan.CatchUp {
+		fmt.Fprintf(&b,
+			"- **CATCH-UP RUN**: window widened to `%s` with `--lookback`, not the "+
+				"configured default. Findings an earlier digest already reported "+
+				"appear here again; the enrich lane marks them as seen before.\n",
+			scan.Lookback)
+	}
 	// Label each number for what it is. "Emails inspected" alone invited the
 	// reading that all of them carried CVEs, and that every run saw fresh mail.
 	fmt.Fprintf(&b, "- Emails in window: `%d` (all mail received since the lookback time)\n",
