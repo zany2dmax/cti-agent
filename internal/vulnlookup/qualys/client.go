@@ -259,6 +259,14 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 			c.kbCache, c.kbAge, c.kbStale = existing, age, true
 			return existing, nil
 		}
+		if perr := checkPlausibleRebuild(existing, fresh); perr != nil {
+			// Keep the old cache and mark it stale, exactly as if the rebuild
+			// had failed outright - because it did, it just did so quietly.
+			log.Printf("Qualys KB rebuild REJECTED (%v) - keeping the %s-old cache; "+
+				"UNKNOWN results are unverified, not clean", perr, formatAge(age))
+			c.kbCache, c.kbAge, c.kbStale = existing, age, true
+			return existing, nil
+		}
 		if err := writeKBCache(cachePath, fresh); err != nil {
 			log.Printf("Qualys KB cache: could not write %s: %v", cachePath, err)
 		}
@@ -270,6 +278,11 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 			"download and takes a few minutes)", cachePath)
 		fresh, err := c.BuildKBCache(ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkPlausibleRebuild(nil, fresh); err != nil {
+			// No cache to fall back on, so this one is fatal: a first build
+			// that yields nothing must not be written and then trusted.
 			return nil, err
 		}
 		if err := writeKBCache(cachePath, fresh); err != nil {
@@ -289,7 +302,7 @@ func (c *Client) refreshKBCacheSince(ctx context.Context, cache KBCache, since t
 	params.Set("action", "list")
 	params.Set("details", "Basic")
 	params.Set("last_modified_after", since.UTC().Format("2006-01-02"))
-	endpoint := c.baseURL + "/api/2.0/fo/knowledge_base/vuln/?" + params.Encode()
+	endpoint := c.baseURL + "/api/4.0/fo/knowledge_base/vuln/?" + params.Encode()
 
 	body, err := c.doQualysGET(ctx, endpoint)
 	if err != nil {
@@ -313,6 +326,55 @@ func (c *Client) refreshKBCacheSince(ctx context.Context, cache KBCache, since t
 		cache[cve] = merged
 	}
 	return changed, nil
+}
+
+// minRetainedFraction is how much of the previous cache a rebuild must
+// reproduce before it is allowed to replace it.
+//
+// Half. The KnowledgeBase grows monotonically in practice - Qualys adds
+// signatures, it does not retire tens of thousands at once - so a rebuild
+// returning less than half of what we already had is far more likely to be a
+// parse that silently matched nothing than a real contraction.
+const minRetainedFraction = 0.5
+
+// checkPlausibleRebuild refuses a rebuilt cache that cannot be what it claims.
+//
+// # WHY THIS EXISTS
+//
+// parseKB binds to element names - RESPONSE>VULN_LIST>VULN, CVE_LIST>CVE>ID.
+// Go's XML decoder does NOT error on elements it cannot match: it returns an
+// empty struct and a nil error. So if Qualys renames anything, parseKB
+// succeeds, returns an empty KBCache, and writeKBCache atomically replaces a
+// 160,000-CVE cache with "{}".
+//
+// Every CVE afterwards reports "no Qualys KnowledgeBase mapping" - and
+// critically NOT "coverage unverified", because as far as the code is
+// concerned the refresh worked. A successful-looking rebuild that destroys
+// the data and then reads as a clean result is the exact failure this
+// codebase keeps finding, and an API version migration is when it is most
+// likely to happen.
+//
+// The v2.0 KnowledgeBase path reached End-of-Service in September 2026 with
+// EOL 91 days out, which is why the endpoints above are now /api/4.0/. The
+// operator checked the release notes and the response shape is unchanged.
+// This guard is here because "checked the release notes" and "verified
+// against 160,000 live records" are different statements, and the cost of
+// being wrong is silent.
+func checkPlausibleRebuild(existing, fresh KBCache) error {
+	if len(fresh) == 0 {
+		return fmt.Errorf("rebuild produced 0 CVE mappings: the response parsed "+
+			"but matched nothing, which usually means the XML element names "+
+			"changed (previous cache has %d)", len(existing))
+	}
+	if len(existing) == 0 {
+		return nil // nothing to compare against; a first build is what it is
+	}
+	if min := int(float64(len(existing)) * minRetainedFraction); len(fresh) < min {
+		return fmt.Errorf("rebuild produced %d CVE mappings, less than half the "+
+			"%d already cached: refusing to replace a good cache with what is "+
+			"probably a partial parse", len(fresh), len(existing))
+	}
+	return nil
 }
 
 func writeKBCache(path string, cache KBCache) error {
@@ -350,7 +412,7 @@ func (c *Client) BuildKBCache(ctx context.Context) (KBCache, error) {
 	params := url.Values{}
 	params.Set("action", "list")
 	params.Set("details", "Basic")
-	endpoint := c.baseURL + "/api/2.0/fo/knowledge_base/vuln/?" + params.Encode()
+	endpoint := c.baseURL + "/api/4.0/fo/knowledge_base/vuln/?" + params.Encode()
 
 	body, err := c.doQualysGET(ctx, endpoint)
 	if err != nil {

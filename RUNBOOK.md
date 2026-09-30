@@ -596,6 +596,36 @@ them.
 To force a rebuild, delete the cache file and rerun. The first build is a large
 download and takes a few minutes.
 
+### The API version, and the guard around it
+
+The KnowledgeBase calls use `/api/4.0/`. The `/api/2.0/` path reached
+End-of-Service in September 2026 with EOL 91 days out; Host Detection was
+already on 4.0. The response shape is unchanged, per the release notes.
+
+A rebuild is now refused if it returns no mappings, or fewer than half of
+what is already cached — the old cache is kept and marked stale instead.
+That guard exists because `parseKB` binds to XML element names and **Go's
+decoder returns an empty result and a nil error** for a document it cannot
+match. A renamed schema would therefore produce a successful-looking rebuild
+of nothing, overwrite a 160,000-CVE cache, and make every CVE report "no
+mapping" rather than "coverage unverified" — wrong, and reassuring.
+
+If you see `Qualys KB rebuild REJECTED`, the two counts in the message
+distinguish the two causes: a schema change gives 0, while a credential that
+lost entitlement to part of the KnowledgeBase gives a real but shrunken
+number.
+
+### `CODE 1960`: the concurrency limit
+
+```
+This API cannot be run again until 1 currently running instance has finished.
+```
+
+Qualys allows one KnowledgeBase call at a time per subscription. Another job —
+or an abandoned call from an earlier run — is holding the slot. It clears on
+its own; the lane falls back to the stale cache and says so. If it persists,
+something else in the estate is using the same API account.
+
 ---
 
 ## 15. When something breaks
