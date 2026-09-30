@@ -401,7 +401,7 @@ only the copy inside `/opt/cti-agent/agent`. Put it somewhere tied to the
 machine rather than to whoever happened to deploy last.
 
 The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
-rebuilds all six binaries, rewrites the units, runs `daemon-reload` and
+rebuilds all seven binaries, rewrites the units, runs `daemon-reload` and
 `restorecon`, and refuses to report success if a path or a timezone is wrong.
 
 ```bash

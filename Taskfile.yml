@@ -167,6 +167,14 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  test:mailer:
+    desc: The recipient gate, audience resolution, subjects and escalation HTML
+    # The allowlist decides who receives a document naming exploitable
+    # machines. In Python it could only be exercised by sending mail, which is
+    # why it never was.
+    cmds:
+      - go test ./internal/mailer/ -v
+
   test:safelog:
     desc: The log sanitiser - control characters, rune-safe truncation
     # It is a security control (CWE-117) used by the two lanes that print
