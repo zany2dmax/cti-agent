@@ -7,9 +7,29 @@
 # guaranteed work. Idempotent - it refuses to send twice for the same window.
 set -euo pipefail
 
-KIND="${1:-daily}"
+# Parsed in a loop rather than positionally. The old form was
+#   KIND="${1:-daily}"; [ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
+# which silently ignored --dry-run in any other position - so
+# `run-digest --dry-run daily` SENT MAIL while looking like a rehearsal.
+KIND=""
 DRY=""
-[ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
+LOOKBACK=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    daily|weekly)  KIND="$1"; shift ;;
+    --dry-run)     DRY="--dry-run"; shift ;;
+    # A catch-up window for the morning after the lane was off. Passed to the
+    # ingest binary; it cannot go through the environment because the
+    # cti-agent wrapper hops to the service account with a fixed
+    # --preserve-env list and strips everything else.
+    --lookback)    LOOKBACK="$2"; shift 2 ;;
+    --lookback=*)  LOOKBACK="${1#*=}"; shift ;;
+    *) echo "[run-digest] unknown argument: $1" >&2
+       echo "usage: run-digest [daily|weekly] [--dry-run] [--lookback 168h]" >&2
+       exit 2 ;;
+  esac
+done
+KIND="${KIND:-daily}"
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 
@@ -55,10 +75,10 @@ fi
 # ── 1. ingest ────────────────────────────────────────────────────────────────
 say "ingest: reading $GRAPH_MAILBOX"
 if [ -x "${CTI_AGENT_DIR:-}/cti-agent" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ) \
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
     || fail "cti-agent exited non-zero (check Graph auth and Qualys creds)"
 elif [ -d "${CTI_AGENT_DIR:-}" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-agent ) \
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
     || fail "go run failed"
 else
   fail "CTI_AGENT_DIR not set or not found"
