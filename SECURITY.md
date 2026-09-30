@@ -529,6 +529,18 @@ document against the code; several are worth fixing and are not yet fixed.
 - **No secret scanning in the build gate.** `task ship` does not run one.
   Prevention rests on `.gitignore` and review; `scripts/scrub-history.sh` is
   remediation, and remediation is late.
+- **The Python lanes have no static analysis.** Go passes through six tools;
+  `brief.py`, `enrich.py`, `mailer.py`, `scout.py` and `fleet-db` — about
+  2,200 lines, including the single outbound mail path and its recipient gate
+  — are covered only by unit tests and an `ast.parse` syntax check. One real
+  defect found this month (`f"..." " ".join(...)`, where a missing `+` made
+  the message the separator) is exactly what a linter catches. `ruff` would
+  cover linting, formatting and the bandit security rules in one dev-only
+  binary, with nothing added to the deployment host.
+- **The Qualys KnowledgeBase API version is a dependency with a clock.** The
+  calls use `/api/4.0/`; `/api/2.0/` reached End-of-Service in September 2026.
+  A future EOS is silent until it is not, so it is worth a calendar reminder
+  rather than discovering it in a digest.
 - **The Application Access Policy is the operator's job.** No code here can
   verify the app is confined to one mailbox. `mailer.py --check` reports
   granted roles, not tenant scoping.
