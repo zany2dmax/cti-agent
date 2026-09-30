@@ -167,6 +167,14 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  compare:mailers:
+    desc: "Prove cti-mailer behaves exactly like mailer.py. Sends nothing."
+    # The refusal cases matter more than the successes: a port that sends the
+    # same mail but has quietly loosened the recipient gate looks like success
+    # from the happy path.
+    cmds:
+      - ./scripts/compare-mailers.sh
+
   test:mailer:
     desc: The recipient gate, audience resolution, subjects and escalation HTML
     # The allowlist decides who receives a document naming exploitable
