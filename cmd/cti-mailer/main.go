@@ -87,10 +87,10 @@ func run() int {
 			"FLEET_ALLOW_TO gate as --to")
 	toOperator := flag.Bool("to-operator", false,
 		"send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the operator "+
-			"something is not an outward-facing send")
+			"something is not an outward-facing send.")
 	fromMailbox := flag.String("from-mailbox", "", "sending mailbox; defaults to GRAPH_MAILBOX")
 	boardID := flag.String("board-id", "",
-		"board line id, so a reply can be matched back to the question")
+		"board line id, so your reply can be matched back to the question")
 	dryRun := flag.Bool("dry-run", false, "render and validate, send nothing")
 	requireApproval := flag.Bool("require-approval", false,
 		"refuse unless --approve is also passed (off-cycle sends)")
@@ -215,7 +215,7 @@ func run() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	reqID, err := g.SendMail(ctx, graph.SendMailRequest{
+	res, err := g.SendMail(ctx, graph.SendMailRequest{
 		From:            mailbox,
 		To:              recipients,
 		CC:              copies,
@@ -228,15 +228,19 @@ func run() int {
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
+	reqID := res.RequestID
 	if reqID == "" {
 		reqID = "unknown"
 	}
 
 	// sendMail returns 202 with no body, so there is no message id to capture.
 	// request-id is what you give Microsoft support when a mail goes missing.
-	logf("sent - HTTP 202, request-id %s", safelog.Line(reqID))
+	// The status is the one Graph actually returned, not the one expected:
+	// reporting 202 unconditionally would describe the code rather than the
+	// call.
+	logf("sent - HTTP %d, request-id %s", res.Status, safelog.Line(reqID))
 	emit(map[string]any{
-		"sent": true, "status": 202, "request_id": reqID,
+		"sent": true, "status": res.Status, "request_id": reqID,
 		"subject": subj, "to": recipients, "cc": orEmpty(copies),
 		"ts": time.Now().UTC().Format(time.RFC3339),
 	})
