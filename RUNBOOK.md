@@ -19,6 +19,7 @@ document assumes you have decided to run it.
 - [10. Rolling out mailbox cleanup](#10-rolling-out-mailbox-cleanup)
 - [11. The monthly Patch Tuesday lane](#11-the-monthly-patch-tuesday-lane)
 - [11a. Catching up after the lane was off](#11a-catching-up-after-the-lane-was-off)
+- [11b. Switching the mailer](#11b-switching-the-mailer)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -30,7 +31,7 @@ document assumes you have decided to run it.
 
 | You need | Why | Notes |
 |---|---|---|
-| Go 1.23+ | builds the six binaries | stdlib only; `go.mod` has no dependencies |
+| Go 1.23+ | builds the seven binaries | stdlib only; `go.mod` has no dependencies |
 | [Task](https://taskfile.dev) | every build, test and gate target | `task --list` shows all of them |
 | Python 3.9+ | the enrich, scout, brief and mailer lanes | stdlib only |
 | A shared M365 mailbox | where the CTI advisories arrive | the agent reads it; it never replies |
@@ -226,7 +227,7 @@ go run ./cmd/cti-agent
 Or with Task:
 
 ```bash
-task build               # all six binaries into bin/
+task build               # all seven binaries into bin/
 task run
 ```
 
@@ -307,7 +308,7 @@ Two installers, two layouts:
 | `fleet-kit/install.sh` | everything under one directory | a VM you own, simple paths |
 | `fleet-kit/install-fedora.sh` | FHS: `/opt`, `/etc`, `/var/lib` | Fedora/RHEL, SELinux, a service account |
 
-The Fedora installer builds all six binaries, installs 13 systemd units, writes
+The Fedora installer builds all seven binaries, installs 13 systemd units, writes
 the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux, and then verifies
 the paths it just created. It refuses to install from inside the tree it
 deploys into.
@@ -516,6 +517,65 @@ working, and the daily digest is the one that carries KEV deadlines.
 Read the `LAST` column in that listing, not just `NEXT`. A timer that has
 never fired shows an empty `LAST`, and a lane that has never run once is a
 lane whose output nobody is missing yet.
+
+---
+
+## 11b. Switching the mailer
+
+`mailer.py` has been ported to `cmd/cti-mailer`. **Both exist**, and the
+runners still call the Python one, because this is the component where a
+subtle difference is discovered by somebody not receiving a security finding.
+
+Switch it when, and only when, the two agree on real digests.
+
+### Compare them
+
+`--dry-run` renders, validates recipients, applies the allowlist and prints a
+JSON summary without sending. Run both against the same file and diff:
+
+```bash
+D=/var/lib/cti-agent/reports/digest-daily-$(date +%F).html
+S='[Sev5] CTI test comparison'
+
+sudo cti-agent mailer.py    --html "$D" --subject "$S" --dry-run > /tmp/py.json
+sudo cti-agent cti-mailer   --html "$D" --subject "$S" --dry-run > /tmp/go.json
+diff <(python3 -m json.tool /tmp/py.json) <(python3 -m json.tool /tmp/go.json)
+```
+
+They should differ in nothing. Repeat for the cases that matter:
+
+| Case | Command |
+|---|---|
+| the real digest, with its attachment | add `--attach /var/lib/cti-agent/reports/raw-$(date +%F).md` |
+| an escalation | `--to-operator --message "test" --board-id q1 --subject "test"` |
+| a recipient outside the allowlist | `--to stranger@example.com` — **both must refuse, with the same message** |
+| `--require-approval` without `--approve` | both must refuse |
+| the role report | `--check` on both |
+
+The refusals matter more than the successes. A port that sends the same mail
+but has quietly loosened the gate is the failure mode worth looking for.
+
+### Then switch
+
+One line in each runner — `run-digest`, `run-patchtuesday`,
+`run-mailbox-cleanup`, `run-checkin` — changing `python3 $FLEET_CODE/lanes/mailer.py`
+to `$FLEET_CODE/bin/cti-mailer`. Keep `mailer.py` on disk for a couple of
+weeks; deleting it is a separate, reversible decision.
+
+### What the port changed on purpose
+
+Nothing about who receives mail. Two things are better by accident of the
+language:
+
+- `fleet.env` is read through `internal/fleetenv`, which also handles
+  `export KEY=value`. `mailer.py`'s own parser turned that into a variable
+  named `export KEY`.
+- Everything reaching the journal goes through `internal/safelog`, so a
+  subject line cannot forge a log record.
+
+And one thing is explicit rather than silent: `--text` is accepted and logged
+as *not transmitted*. Graph sends one body, so `mailer.py` had always ignored
+it — it just never said so.
 
 ---
 

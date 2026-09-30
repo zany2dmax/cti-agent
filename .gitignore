@@ -58,3 +58,12 @@ scripts/scrub-patterns.txt
 # Python build artifacts - a .pyc was committed once by a `git add -A`
 __pycache__/
 *.pyc
+
+# Editor scratch. A .swp was swept into a commit by `git add -A`,
+# the same way a .pyc was - and a swap file can contain unsaved text
+# from whatever was being edited.
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
