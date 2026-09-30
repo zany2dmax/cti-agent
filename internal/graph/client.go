@@ -381,22 +381,33 @@ type recipient struct {
 // It returns the Graph request-id on success. sendMail answers 202 with an
 // empty body, so there is no message id to report - request-id is what
 // Microsoft support asks for when a message goes missing.
-func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (string, error) {
+// SendMailResult is what the send actually returned.
+//
+// The status code is here because the caller logs it and mailer.py logged the
+// real one. Hardcoding 202 - the code Graph returns today - would be a report
+// of what we expected rather than what happened, which is the distinction this
+// codebase keeps having to relearn.
+type SendMailResult struct {
+	RequestID string
+	Status    int
+}
+
+func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailResult, error) {
 	if req.From == "" {
-		return "", fmt.Errorf("SendMail: From is required (the sending mailbox)")
+		return SendMailResult{}, fmt.Errorf("SendMail: From is required (the sending mailbox)")
 	}
 	if len(req.To) == 0 {
 		// No default recipient, deliberately. A hardcoded address is a
 		// mis-send waiting to happen on someone else's tenant.
-		return "", fmt.Errorf("SendMail: at least one recipient is required")
+		return SendMailResult{}, fmt.Errorf("SendMail: at least one recipient is required")
 	}
 	if req.Subject == "" {
-		return "", fmt.Errorf("SendMail: Subject is required")
+		return SendMailResult{}, fmt.Errorf("SendMail: Subject is required")
 	}
 
 	tok, err := c.token(ctx)
 	if err != nil {
-		return "", err
+		return SendMailResult{}, err
 	}
 
 	var p sendMailPayload
@@ -436,7 +447,7 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (string, err
 
 	body, err := json.Marshal(p)
 	if err != nil {
-		return "", err
+		return SendMailResult{}, err
 	}
 
 	endpoint := fmt.Sprintf("%s/users/%s/sendMail",
@@ -444,29 +455,29 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (string, err
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
 		strings.NewReader(string(body)))
 	if err != nil {
-		return "", err
+		return SendMailResult{}, err
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+tok)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", err
+		return SendMailResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read sendMail response: %w", err)
+		return SendMailResult{}, fmt.Errorf("failed to read sendMail response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", sendMailError(resp.StatusCode, respBody, req.From)
+		return SendMailResult{}, sendMailError(resp.StatusCode, respBody, req.From)
 	}
 
 	reqID := resp.Header.Get("request-id")
 	if reqID == "" {
 		reqID = resp.Header.Get("client-request-id")
 	}
-	return reqID, nil
+	return SendMailResult{RequestID: reqID, Status: resp.StatusCode}, nil
 }
 
 // sendMailError annotates the failures that actually happen in practice,
