@@ -234,7 +234,9 @@ func sendEmail(subject, htmlBody string, f failure) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	c := graph.New(tenant, clientID, secret)
-	return c.SendMail(ctx, graph.SendMailRequest{
+	// SendMail returns the status too now; this alerter only ever wanted the
+	// request-id, which is what you give Microsoft support for a missing mail.
+	res, err := c.SendMail(ctx, graph.SendMailRequest{
 		From:    from,
 		To:      splitList(to),
 		Subject: subject,
@@ -246,6 +248,10 @@ func sendEmail(subject, htmlBody string, f failure) (string, error) {
 		// digest failure stand out.
 		HighImportance: f.IsDigest && !f.notFailure(),
 	})
+	if err != nil {
+		return "", err
+	}
+	return res.RequestID, nil
 }
 
 // loadEnvFile delegates to internal/fleetenv.
