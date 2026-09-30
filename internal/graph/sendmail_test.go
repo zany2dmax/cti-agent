@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -48,12 +49,17 @@ func TestSendMailPostsTheExpectedPayload(t *testing.T) {
 	})
 	defer srv.Close()
 
-	reqID, err := c.SendMail(context.Background(), validReq())
+	res, err := c.SendMail(context.Background(), validReq())
 	if err != nil {
 		t.Fatalf("SendMail: %v", err)
 	}
-	if reqID != "abc-123" {
-		t.Errorf("request-id = %q, wanted the header value back", reqID)
+	if res.RequestID != "abc-123" {
+		t.Errorf("request-id = %q, wanted the header value back", res.RequestID)
+	}
+	// The status is reported rather than assumed. A caller that logs a
+	// hardcoded 202 is describing the code, not the call.
+	if res.Status != http.StatusAccepted {
+		t.Errorf("status = %d, want %d", res.Status, http.StatusAccepted)
 	}
 	if want := "/users/security@example.com/sendMail"; gotPath != want {
 		t.Errorf("path = %q, want %q", gotPath, want)
@@ -216,5 +222,72 @@ func TestSendMailSurfacesTokenFailures(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "token") {
 		t.Errorf("error should identify the token step, got: %v", err)
+	}
+}
+
+// CC, attachments and saveToSentItems were added for the mailer port. The
+// recipient gate lives in internal/mailer; this only checks that what the
+// caller asked for is what reaches the wire.
+func TestSendMailCarriesCcAttachmentsAndSaveToSentItems(t *testing.T) {
+	var payload map[string]any
+	c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		w.Header().Set("request-id", "x")
+		w.WriteHeader(http.StatusAccepted)
+	})
+	defer srv.Close()
+
+	no := false
+	req := validReq()
+	req.CC = []string{"cc1@example.com", "cc2@example.com"}
+	req.Attachments = []Attachment{{
+		Name: "raw.md", ContentType: "text/markdown", Bytes: []byte("hello"),
+	}}
+	req.SaveToSentItems = &no
+	if _, err := c.SendMail(context.Background(), req); err != nil {
+		t.Fatalf("SendMail: %v", err)
+	}
+
+	msg, _ := payload["message"].(map[string]any)
+	cc, _ := msg["ccRecipients"].([]any)
+	if len(cc) != 2 {
+		t.Errorf("ccRecipients = %d, want 2", len(cc))
+	}
+	atts, _ := msg["attachments"].([]any)
+	if len(atts) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(atts))
+	}
+	a, _ := atts[0].(map[string]any)
+	// Graph rejects the message without the @odata.type discriminator, and
+	// the failure is a 400 that does not say which field is wrong.
+	if a["@odata.type"] != "#microsoft.graph.fileAttachment" {
+		t.Errorf("@odata.type = %v", a["@odata.type"])
+	}
+	if a["contentBytes"] != base64.StdEncoding.EncodeToString([]byte("hello")) {
+		t.Errorf("contentBytes = %v, want base64 of the file", a["contentBytes"])
+	}
+	// A plain bool field would have made the zero value "do not save" and
+	// silently changed what cti-alert does; the pointer keeps nil meaning true.
+	if payload["saveToSentItems"] != false {
+		t.Errorf("saveToSentItems = %v, want false when explicitly set",
+			payload["saveToSentItems"])
+	}
+}
+
+// nil means true - what every caller relied on before the field existed.
+func TestSaveToSentItemsDefaultsToTrue(t *testing.T) {
+	var payload map[string]any
+	c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		w.WriteHeader(http.StatusAccepted)
+	})
+	defer srv.Close()
+
+	if _, err := c.SendMail(context.Background(), validReq()); err != nil {
+		t.Fatalf("SendMail: %v", err)
+	}
+	if payload["saveToSentItems"] != true {
+		t.Errorf("saveToSentItems = %v, want true when unset",
+			payload["saveToSentItems"])
 	}
 }

@@ -104,7 +104,7 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 	if len(to) == 0 {
 		return nil, nil, fmt.Errorf("no recipients - set DIGEST_TO in fleet.env or " +
 			"pass --to. There is no default; the fleet will not guess who " +
-			"receives security findings")
+			"receives security findings.")
 	}
 
 	// Escalations are never CC'd: a question addressed to one person should
@@ -193,7 +193,7 @@ func CheckAllowed(to, cc []string, allowRaw, digestTo, operator string, approved
 		return fmt.Errorf("recipients outside FLEET_ALLOW_TO: %s. Add them to "+
 			"FLEET_ALLOW_TO in fleet.env for a standing recipient, or post the "+
 			"draft to the board tagged [APPROVE] and re-run with --approve for "+
-			"a one-off", strings.Join(outside, ", "))
+			"a one-off.", strings.Join(outside, ", "))
 	}
 	return nil
 }
