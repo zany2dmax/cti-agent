@@ -112,7 +112,15 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 		// case forever, which teaches somebody to ignore the harness.
 		//
 		// REMOVE THIS, AND THE PERIOD, WHEN mailer.py IS RETIRED.
-		return nil, nil, fmt.Errorf( //nolint:staticcheck // matches mailer.py verbatim until it is retired
+		//
+		// Two directives, deliberately. `task scan` runs staticcheck
+		// standalone, which reads //lint:ignore; `task lint` runs it inside
+		// golangci-lint, which reads //nolint. Neither honours the other's
+		// syntax, and `task ship` runs both. Delete either one and half the
+		// gate goes red.
+		//
+		//lint:ignore ST1005 matches mailer.py verbatim until it is retired
+		return nil, nil, fmt.Errorf( //nolint:staticcheck // see above
 			"no recipients - set DIGEST_TO in fleet.env or " +
 				"pass --to. There is no default; the fleet will not guess who " +
 				"receives security findings.")
@@ -214,7 +222,11 @@ func CheckAllowed(to, cc []string, allowRaw, digestTo, operator string, approved
 	if len(outside) > 0 && !approved {
 		// Trailing period deliberate; see the note in Resolve above.
 		// REMOVE THIS, AND THE PERIOD, WHEN mailer.py IS RETIRED.
-		return fmt.Errorf( //nolint:staticcheck // matches mailer.py verbatim until it is retired
+		//
+		// Both directive syntaxes; see the note in Resolve above.
+		//
+		//lint:ignore ST1005 matches mailer.py verbatim until it is retired
+		return fmt.Errorf( //nolint:staticcheck // see Resolve
 			"recipients outside FLEET_ALLOW_TO: %s. Add them to "+
 				"FLEET_ALLOW_TO in fleet.env for a standing recipient, or post the "+
 				"draft to the board tagged [APPROVE] and re-run with --approve for "+
