@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -25,6 +26,22 @@ import (
 func main() {
 	ctx := context.Background()
 
+	// A catch-up window, for the morning after the lane was off.
+	//
+	// GRAPH_LOOKBACK_HOURS is the standing setting and stays that. This flag
+	// exists because the alternative was editing the production credentials
+	// file for a one-off run and remembering to put it back - and a forgotten
+	// revert means every daily run silently re-reports a week of mail. It
+	// also cannot be passed through the environment: the cti-agent wrapper
+	// hops to the service account with a fixed --preserve-env list, so
+	// `GRAPH_LOOKBACK_HOURS=168 sudo cti-agent ...` is stripped at the sudo
+	// boundary and runs a 24-hour window while looking like it worked.
+	lookback := flag.Duration("lookback", 0,
+		"override GRAPH_LOOKBACK_HOURS for this run only, e.g. 168h to catch up "+
+			"after the timer was off. The window used is always printed and "+
+			"appears in the report header")
+	flag.Parse()
+
 	// fleet.env. run-digest sources it in shell before calling this, so under
 	// systemd this is a no-op; `sudo cti-agent cti-agent` does not, and the
 	// wrapper passes only the FLEET_* layout. Existing environment always
@@ -34,6 +51,20 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config error: %s", safelog.Line(err.Error()))
+	}
+
+	// Validated, not clamped. Silently reducing a window the operator asked
+	// for would produce a report that covers less than its header claims.
+	catchUp := *lookback > 0
+	if catchUp {
+		if err := config.ValidateLookback(*lookback); err != nil {
+			log.Fatalf("--lookback: %s", safelog.Line(err.Error()))
+		}
+		log.Printf("CATCH-UP RUN: looking back %s instead of the configured %s. "+
+			"Findings already reported in an earlier digest will appear again; "+
+			"the enrich lane marks them as seen before.",
+			*lookback, cfg.GraphLookback)
+		cfg.GraphLookback = *lookback
 	}
 
 	since := time.Now().Add(-cfg.GraphLookback)
@@ -168,6 +199,8 @@ func main() {
 		CVEsFound: len(cves),
 		Subjects:  subjects,
 		Held:      held,
+		CatchUp:   catchUp,
+		Lookback:  cfg.GraphLookback,
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		// #nosec G706 -- sanitised by safelog.Line(), as at the manifest warning

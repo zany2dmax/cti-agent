@@ -61,6 +61,35 @@ func LoadVulnLookup() (Config, error) { return load(false, true) }
 // the reader looking in the wrong file.
 func LoadGraphOnly() (Config, error) { return load(true, false) }
 
+// MaxLookback is the largest window a catch-up run may ask for.
+//
+// Ninety days. Not a performance limit - a typo limit. The failure this
+// guards against is `--lookback 168000h` meaning "168000 hours" when the
+// operator meant 168: nineteen years of mailbox, one Graph page at a time,
+// and an enrich pass against NVD for every CVE in it. A window nobody
+// intended is indistinguishable from a hung lane while it runs.
+const MaxLookback = 90 * 24 * time.Hour
+
+// ValidateLookback checks an operator-supplied catch-up window.
+//
+// Separate from the flag parsing so it can be tested without a process. Zero
+// is rejected rather than treated as "use the default": a flag that was
+// passed and then ignored is the kind of silence this codebase keeps finding,
+// and `--lookback 0` almost certainly means the value came from an empty
+// shell variable.
+func ValidateLookback(d time.Duration) error {
+	switch {
+	case d <= 0:
+		return fmt.Errorf("lookback must be positive, got %s "+
+			"(an empty shell variable expands to this)", d)
+	case d > MaxLookback:
+		return fmt.Errorf("lookback %s is longer than the %s maximum; "+
+			"if that was deliberate, raise config.MaxLookback deliberately too",
+			d, MaxLookback)
+	}
+	return nil
+}
+
 func load(needGraph, needQualys bool) (Config, error) {
 	lookbackHours, err := strconv.Atoi(getenvDefault("GRAPH_LOOKBACK_HOURS", "24"))
 	if err != nil || lookbackHours <= 0 {

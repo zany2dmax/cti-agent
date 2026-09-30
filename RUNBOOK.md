@@ -18,6 +18,7 @@ document assumes you have decided to run it.
 - [9. Enabling the timers, in order](#9-enabling-the-timers-in-order)
 - [10. Rolling out mailbox cleanup](#10-rolling-out-mailbox-cleanup)
 - [11. The monthly Patch Tuesday lane](#11-the-monthly-patch-tuesday-lane)
+- [11a. Catching up after the lane was off](#11a-catching-up-after-the-lane-was-off)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -464,6 +465,57 @@ list is the answer.
 The suppression window is **this month and last month only**. A September CVE
 arriving in December is not an echo of the September email; something is
 re-raising it, and that is the daily's job.
+
+---
+
+## 11a. Catching up after the lane was off
+
+The digest is idempotent per `(day, kind)`, so a lane that was off for a week
+does not backfill itself. One run with a wider window does the job:
+
+```bash
+sudo cti-agent run-digest daily --lookback 168h --dry-run   # read it first
+sudo cti-agent run-digest daily --lookback 168h             # one consolidated email
+```
+
+`--lookback` overrides `GRAPH_LOOKBACK_HOURS` **for that run only**. Three
+things worth knowing:
+
+- **It cannot be done through the environment.** The `cti-agent` wrapper hops
+  to the service account with a fixed `--preserve-env` list, so
+  `GRAPH_LOOKBACK_HOURS=168 sudo cti-agent run-digest` is stripped at the sudo
+  boundary and runs a 24-hour window while looking like it worked. That is why
+  the flag exists rather than a documented environment variable.
+- **It sends one email, not one per missed day.** The already-sent guard is
+  per `(day, kind)` and today's slot is the only free one. Findings an earlier
+  digest already reported appear again; the enrich lane marks them "seen
+  before" and the report header says it was a catch-up run.
+- **The maximum is 90 days**, and zero or negative is refused. `--lookback
+  168000h` is nineteen years of mailbox — a window nobody intended is
+  indistinguishable from a hung lane while it runs.
+
+Expect enrich to take a few minutes: a week of mail means a lot of CVEs that
+are not in the NVD cache yet.
+
+### Restarting the timers after a deliberate stop
+
+If the timers were stopped on purpose — a quota problem, a maintenance window
+— restart the ones that need no model first. **Only the heartbeat spends
+tokens:**
+
+```bash
+sudo systemctl enable --now cti-agent-digest.timer cti-agent-weekly.timer \
+                            cti-agent-scout.timer cti-agent-mailbox.timer
+systemctl list-timers 'cti-agent-*' --all
+```
+
+`cti-agent-checkin.timer` is the only one that calls Claude Code. Leaving the
+other four off because the heartbeat is failing takes out the lanes that were
+working, and the daily digest is the one that carries KEV deadlines.
+
+Read the `LAST` column in that listing, not just `NEXT`. A timer that has
+never fired shows an empty `LAST`, and a lane that has never run once is a
+lane whose output nobody is missing yet.
 
 ---
 

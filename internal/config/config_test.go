@@ -204,3 +204,60 @@ func TestGraphMailboxHasNoDefault(t *testing.T) {
 	assertSameSet(t, missingNames(t, err), []string{"GRAPH_MAILBOX"},
 		"with everything but GRAPH_MAILBOX set:")
 }
+
+// ValidateLookback guards a catch-up window an operator types by hand, which
+// is the only place in this system where a single mistyped number turns a
+// two-minute run into one that reads years of mailbox.
+func TestValidateLookbackRejectsNonsenseAndAcceptsARealCatchUp(t *testing.T) {
+	cases := []struct {
+		name string
+		d    time.Duration
+		ok   bool
+		why  string
+	}{
+		{"a week, the actual use case", 168 * time.Hour, true,
+			"the lane was off for six days"},
+		{"a day", 24 * time.Hour, true, "same as the usual default"},
+		{"a minute", time.Minute, true,
+			"short is odd but not wrong - it is a real window"},
+		{"exactly the maximum", MaxLookback, true, "the boundary is inclusive"},
+
+		{"zero", 0, false,
+			"an unset shell variable expands to this, and a flag that was " +
+				"passed and then ignored is the silence this repo keeps finding"},
+		{"negative", -time.Hour, false, "a window into the future reads nothing"},
+		{"one over the maximum", MaxLookback + time.Nanosecond, false,
+			"the boundary has to actually bite"},
+		{"the typo case", 168000 * time.Hour, false,
+			"168000h is 19 years; the operator meant 168h"},
+	}
+	for _, c := range cases {
+		err := ValidateLookback(c.d)
+		if c.ok && err != nil {
+			t.Errorf("%s: ValidateLookback(%s) = %v, want nil (%s)",
+				c.name, c.d, err, c.why)
+		}
+		if !c.ok && err == nil {
+			t.Errorf("%s: ValidateLookback(%s) accepted it, want an error (%s)",
+				c.name, c.d, c.why)
+		}
+	}
+}
+
+// The error has to name the value and the limit. An operator who mistyped a
+// duration needs to see what was read, not just that it was refused.
+func TestTheLookbackErrorNamesTheValueAndTheLimit(t *testing.T) {
+	err := ValidateLookback(168000 * time.Hour)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{"168000h", MaxLookback.String()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if err := ValidateLookback(0); err == nil ||
+		!strings.Contains(err.Error(), "positive") {
+		t.Errorf("zero should be refused for being non-positive, got %v", err)
+	}
+}
