@@ -365,9 +365,21 @@ if [ "$MODE" != dryrun ]; then
   # rather than Mail.Read. It dry-runs unless given --for-real; the unit
   # passes that flag explicitly so the decision is visible in the unit.
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
+
+  # The Go port of mailer.py. Built and installed, but nothing calls it yet -
+  # the runners still use the Python one until RUNBOOK 11b says otherwise.
+  #
+  # The chmod is not decorative. This script runs as root, the wrapper runs
+  # the binary as $FLEET_USER, and root's umask decides whether that is
+  # possible. Built without it under a restrictive umask the file lands 0700
+  # root-owned, and the failure surfaces as "permission denied" from
+  # `sudo cti-agent cti-mailer --check` - which reads like a sudo or Graph
+  # problem rather than a file mode.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
+  chmod 0755 "$CODE_DIR/bin/cti-mailer"
+  ok "built $CODE_DIR/bin/cti-mailer"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -534,7 +546,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
