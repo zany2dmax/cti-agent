@@ -530,8 +530,25 @@ Switch it when, and only when, the two agree on real digests.
 
 ### Compare them
 
-`--dry-run` renders, validates recipients, applies the allowlist and prints a
-JSON summary without sending. Run both against the same file and diff:
+One command runs both mailers across nineteen cases and prints a verdict:
+
+```bash
+task compare:mailers
+```
+
+Nothing is sent. Every case passes `--dry-run`, and the harness overrides
+every routing variable with `example.com` addresses, so it cannot reference a
+real distribution list even if a case escaped the dry run. It compares stdout
+(the JSON the runners parse), stderr (the text an operator reads) and the exit
+code, and fails the whole run if any case differs.
+
+Nine of the nineteen are refusals — a recipient nobody approved, a stranger on
+Cc, `--require-approval` without `--approve`, a malformed address, and the
+mutually exclusive flag combinations. **Those are the cases worth reading.** A
+port that sends identical mail but has quietly loosened the gate looks like
+success from the happy path.
+
+To compare a single case by hand:
 
 ```bash
 D=/var/lib/cti-agent/reports/digest-daily-$(date +%F).html
