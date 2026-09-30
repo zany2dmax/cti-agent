@@ -387,6 +387,61 @@ small and comprehensible surface — which matters, because this system parses
 untrusted HTML and XML from the public internet through `encoding/xml` and
 `net/http`. An advisory in either is a live finding for this repository.
 
+### Why two languages, and why that is the security decision
+
+**Go is the default. Python is used for exactly one reason: it has a SQL
+driver in its standard library and Go does not.**
+
+`memory.db` is SQLite. It holds the findings table with `first_seen` (which is
+what makes "new since last run" a fact rather than a guess), the digests table
+(which is what stops a duplicate send), and the scout backlog. Three
+components need it: `enrich.py`, `scout.py` and `fleet-db`.
+
+Go's standard library has `database/sql` but **no driver**. Writing those
+three in Go would mean adding one of:
+
+| Option | What it costs |
+|---|---|
+| `mattn/go-sqlite3` | cgo — a C toolchain becomes a build requirement on the deployment host |
+| `modernc.org/sqlite` | pure Go, but roughly a million lines of machine-translated C to audit and update |
+| Replace SQLite with flat files | losing queryable history, and a data migration on a live system |
+
+Each of those trades away the property this section is about. A single-language
+codebase would be tidier; it would also mean `go.mod` is no longer empty, and
+"no transitive dependency tree to audit" would stop being true — for the sake
+of consistency rather than for any security benefit.
+
+So the rule going forward is: **anything that needs SQLite is Python;
+everything else is Go**, because Go is the language the gates cover.
+
+The current code does not fully match that rule, and it is worth being exact
+about where:
+
+| Component | SQLite? | Language | Matches the rule |
+|---|---|---|---|
+| `enrich.py` | yes | Python | yes |
+| `scout.py` | yes | Python | yes |
+| `fleet-db` | yes | Python | yes |
+| `brief.py` | no | Python | **no** — historical |
+| `mailer.py` | no | Python | **no** — and this is the one that matters |
+| the six `cti-*` binaries | no | Go | yes |
+
+`mailer.py` is the single outbound channel and holds the `FLEET_ALLOW_TO`
+recipient gate. It has no database dependency, so nothing about it requires
+Python — it is simply where it started. That makes it the strongest candidate
+for porting, because it is the most security-relevant code currently outside
+`gosec` and `govulncheck`. `brief.py` is 689 lines of email layout; the case
+for moving it is weaker and mostly about `html/template` being a better
+escaping story than string concatenation.
+
+Neither is urgent. Both are listed here so that "Python is only for SQLite"
+is read as the intended direction rather than as a description of what is
+already true.
+
+Shell is the third language, for the runners and installers only. It
+orchestrates; it does not parse untrusted input or hold credentials beyond
+sourcing `fleet.env`.
+
 ---
 
 ## Host hardening
@@ -529,7 +584,9 @@ document against the code; several are worth fixing and are not yet fixed.
 - **No secret scanning in the build gate.** `task ship` does not run one.
   Prevention rests on `.gitignore` and review; `scripts/scrub-history.sh` is
   remediation, and remediation is late.
-- **The Python lanes have no static analysis.** Go passes through six tools;
+- **The Python lanes have no static analysis.** Python is used only where a
+  stdlib SQL driver is needed (see Supply chain above), but that still leaves
+  the mailer outside the gates. Go passes through six tools;
   `brief.py`, `enrich.py`, `mailer.py`, `scout.py` and `fleet-db` — about
   2,200 lines, including the single outbound mail path and its recipient gate
   — are covered only by unit tests and an `ast.parse` syntax check. One real

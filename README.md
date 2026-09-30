@@ -1,9 +1,12 @@
 # CTI CVE Agent
 
-A threat-intel agent fleet in Go and Python. It reads CTI advisories from a
-shared Microsoft 365 mailbox, extracts CVEs, asks a vulnerability scanner which
-of them are *actually present in the estate*, and mails a prioritised digest
-every morning — plus a monthly Microsoft Patch Tuesday synopsis, CISA KEV
+A threat-intel agent fleet in Go, with Python only where a standard-library
+SQL driver is needed — [why that split is a security
+decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
+
+It reads CTI advisories from a shared Microsoft 365 mailbox, extracts CVEs,
+asks a vulnerability scanner which of them are *actually present in the
+estate*, and mails a prioritised digest every morning — plus a monthly Microsoft Patch Tuesday synopsis, CISA KEV
 deadline tracking, and a cleanup lane that keeps the mailbox tidy without
 touching anything a human still needs to see.
 
