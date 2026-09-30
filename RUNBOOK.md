@@ -574,10 +574,29 @@ but has quietly loosened the gate is the failure mode worth looking for.
 
 ### Then switch
 
-One line in each runner — `run-digest`, `run-patchtuesday`,
-`run-mailbox-cleanup`, `run-checkin` — changing `python3 $FLEET_CODE/lanes/mailer.py`
-to `$FLEET_CODE/bin/cti-mailer`. Keep `mailer.py` on disk for a couple of
-weeks; deleting it is a separate, reversible decision.
+**Two runners send mail, not four.** `run-digest` and `run-patchtuesday`
+each have one line to change:
+
+```bash
+grep -n 'lanes/mailer\.py' $FLEET_CODE/bin/run-*
+#   run-digest:102
+#   run-patchtuesday:135
+```
+
+Change `python3 "$FLEET_CODE/lanes/mailer.py"` to `"$FLEET_CODE/bin/cti-mailer"`
+in each. The flags and the parsed JSON are identical, so nothing else in
+either runner moves.
+
+`run-checkin` and `run-mailbox-cleanup` do **not** call `mailer.py` — they
+escalate through `cti-alert`, which talks to `internal/graph` directly and has
+its own recipient handling. Switching the mailer does not touch them, and
+looking for a line there that does not exist is how somebody concludes they
+missed a step. (`cti-alert` bypassing `FLEET_ALLOW_TO` is a separate known gap,
+recorded in SECURITY.md.)
+
+Keep `mailer.py` on disk for a couple of weeks; deleting it is a separate,
+reversible decision. Until it goes, `task compare:mailers` still works and the
+two ST1005 suppressions in `internal/mailer` still earn their place.
 
 ### What the port changed on purpose
 
