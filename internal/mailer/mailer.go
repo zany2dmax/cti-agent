@@ -102,9 +102,20 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 		to = SplitList(raw)
 	}
 	if len(to) == 0 {
-		return nil, nil, fmt.Errorf("no recipients - set DIGEST_TO in fleet.env or " +
-			"pass --to. There is no default; the fleet will not guess who " +
-			"receives security findings.")
+		// The trailing period is deliberate and staticcheck is right in
+		// general: ST1005 exists because Go errors compose, and
+		// fmt.Errorf("sending: %w", err) would read "sending: no
+		// recipients." This one does not compose - it is a terminal
+		// operator message printed by die() and never wrapped - and the
+		// period is the fidelity contract with mailer.py, which is still
+		// the reference implementation. Dropping it fails a comparison
+		// case forever, which teaches somebody to ignore the harness.
+		//
+		// REMOVE THIS, AND THE PERIOD, WHEN mailer.py IS RETIRED.
+		return nil, nil, fmt.Errorf( //nolint:staticcheck // matches mailer.py verbatim until it is retired
+			"no recipients - set DIGEST_TO in fleet.env or " +
+				"pass --to. There is no default; the fleet will not guess who " +
+				"receives security findings.")
 	}
 
 	// Escalations are never CC'd: a question addressed to one person should
@@ -201,10 +212,13 @@ func CheckAllowed(to, cc []string, allowRaw, digestTo, operator string, approved
 		}
 	}
 	if len(outside) > 0 && !approved {
-		return fmt.Errorf("recipients outside FLEET_ALLOW_TO: %s. Add them to "+
-			"FLEET_ALLOW_TO in fleet.env for a standing recipient, or post the "+
-			"draft to the board tagged [APPROVE] and re-run with --approve for "+
-			"a one-off.", strings.Join(outside, ", "))
+		// Trailing period deliberate; see the note in Resolve above.
+		// REMOVE THIS, AND THE PERIOD, WHEN mailer.py IS RETIRED.
+		return fmt.Errorf( //nolint:staticcheck // matches mailer.py verbatim until it is retired
+			"recipients outside FLEET_ALLOW_TO: %s. Add them to "+
+				"FLEET_ALLOW_TO in fleet.env for a standing recipient, or post the "+
+				"draft to the board tagged [APPROVE] and re-run with --approve for "+
+				"a one-off.", strings.Join(outside, ", "))
 	}
 	return nil
 }
