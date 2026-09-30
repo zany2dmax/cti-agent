@@ -3,6 +3,7 @@ package qualys
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -327,4 +328,107 @@ func TestUnreadableCacheTriggersRebuild(t *testing.T) {
 	if _, ok := cache["CVE-2026-83549"]; !ok {
 		t.Error("a corrupt cache should have been rebuilt from Qualys")
 	}
+}
+
+// The guard that makes an API version migration survivable.
+//
+// Go's XML decoder returns an empty struct and a NIL ERROR for a document
+// whose element names it cannot match, so a renamed schema produces a
+// successful-looking rebuild of nothing. Without this check that empty result
+// is written over a good cache, and every CVE afterwards reports "no mapping"
+// rather than "coverage unverified" - wrong, and reassuring.
+func TestARebuildThatMatchedNothingCannotReplaceAGoodCache(t *testing.T) {
+	existing := KBCache{}
+	for i := 0; i < 1000; i++ {
+		existing[fmt.Sprintf("CVE-2026-%05d", i)] = []int{i}
+	}
+
+	cases := []struct {
+		name    string
+		fresh   KBCache
+		wantErr bool
+		because string
+	}{
+		{"empty - the renamed-schema case", KBCache{}, true,
+			"parseKB matched nothing and returned no error"},
+		{"nil", nil, true, "same thing by another route"},
+		{"a tenth of the previous", subset(existing, 100), true,
+			"a partial parse, not a real contraction"},
+		{"just under half", subset(existing, 499), true,
+			"the boundary has to bite"},
+		{"exactly half", subset(existing, 500), false,
+			"at the threshold, allowed"},
+		{"the same size", subset(existing, 1000), false, "a normal rebuild"},
+		{"larger, as the KB usually is", grow(existing, 1200), false,
+			"Qualys adds signatures; growth is the normal case"},
+	}
+	for _, c := range cases {
+		err := checkPlausibleRebuild(existing, c.fresh)
+		if c.wantErr && err == nil {
+			t.Errorf("%s: accepted %d mappings over %d, want refusal (%s)",
+				c.name, len(c.fresh), len(existing), c.because)
+		}
+		if !c.wantErr && err != nil {
+			t.Errorf("%s: refused %d mappings over %d: %v (%s)",
+				c.name, len(c.fresh), len(existing), err, c.because)
+		}
+	}
+}
+
+// A first build has nothing to compare against, but zero is still zero.
+func TestAFirstBuildOfNothingIsStillRefused(t *testing.T) {
+	if err := checkPlausibleRebuild(nil, KBCache{}); err == nil {
+		t.Error("an empty first build must be refused - there is no cache to " +
+			"fall back on, so writing it would make every CVE unmappable")
+	}
+	if err := checkPlausibleRebuild(nil, KBCache{"CVE-2026-1": {1}}); err != nil {
+		t.Errorf("a small but real first build is legitimate: %v", err)
+	}
+}
+
+// The refusal has to say what it saw. An operator mid-migration needs the two
+// numbers to tell "Qualys changed the schema" from "our credentials lost
+// entitlement to half the KnowledgeBase".
+func TestTheRefusalNamesBothCounts(t *testing.T) {
+	existing := KBCache{}
+	for i := 0; i < 200; i++ {
+		existing[fmt.Sprintf("CVE-2026-%05d", i)] = []int{i}
+	}
+	err := checkPlausibleRebuild(existing, subset(existing, 10))
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	for _, want := range []string{"10", "200"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %q", err, want)
+		}
+	}
+	empty := checkPlausibleRebuild(existing, KBCache{})
+	if empty == nil || !strings.Contains(empty.Error(), "element names") {
+		t.Errorf("an empty parse should name the likely cause, got %v", empty)
+	}
+}
+
+func subset(src KBCache, n int) KBCache {
+	out := KBCache{}
+	i := 0
+	for k, v := range src {
+		if i >= n {
+			break
+		}
+		out[k] = v
+		i++
+	}
+	return out
+}
+
+func grow(src KBCache, n int) KBCache {
+	out := KBCache{}
+	for k, v := range src {
+		out[k] = v
+	}
+	for i := len(out); i < n; i++ {
+		out[fmt.Sprintf("CVE-2027-%05d", i)] = []int{i}
+	}
+	return out
 }
