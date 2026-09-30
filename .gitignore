@@ -67,3 +67,9 @@ __pycache__/
 *~
 .*.swp
 .*.swo
+
+# `task log -- ship` output. Build and test verdicts, written to a file so
+# they can be read without copy-pasting a terminal. Gitignored because the
+# same target will happily capture whatever it is pointed at, and the cost of
+# being wrong once is a real recipient list in a public repo.
+.logs/

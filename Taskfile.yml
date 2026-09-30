@@ -167,6 +167,32 @@ tasks:
     cmds:
       - go test ./internal/patchtuesday/ -v
 
+  log:
+    # Claude's shell is a separate sandbox and cannot see this terminal, so a
+    # pass/fail verdict has to be copy-pasted into the chat. This writes it to
+    # a file in the repo, which Claude CAN read.
+    #
+    #   task log -- ship
+    #   task log -- compare:mailers
+    #
+    # ONLY FOR BUILD AND TEST OUTPUT. Do not tee a lane through this:
+    # run-digest and run-patchtuesday print real recipients and real findings,
+    # and .logs/ being gitignored protects the repo, not the disk. Reports are
+    # 0600 for the same reason, so the log gets the same mode.
+    #
+    # pipefail matters: without it the exit status is tee's, so a failing
+    # `task ship` would report success and still not push.
+    desc: 'Run a task and tee its output to .logs/last-run.log (task log -- ship)'
+    cmds:
+      # Mode is set BEFORE anything is written. Doing it afterwards means a
+      # failing run - the long, interesting one - skips the chmod and leaves
+      # the log world-readable. tee truncates but does not change the mode.
+      - mkdir -p .logs && chmod 0700 .logs
+      - ':> .logs/last-run.log && chmod 0600 .logs/last-run.log'
+      - |
+        set -o pipefail
+        task {{.CLI_ARGS}} 2>&1 | tee .logs/last-run.log
+
   compare:mailers:
     desc: "Prove cti-mailer behaves exactly like mailer.py. Sends nothing."
     # The refusal cases matter more than the successes: a port that sends the
