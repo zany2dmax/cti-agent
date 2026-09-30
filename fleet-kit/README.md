@@ -247,6 +247,7 @@ Via the `cti-agent` wrapper the installer writes:
 | Command | Does |
 |---|---|
 | `sudo cti-agent run-digest daily --dry-run` | Full pipeline, sends nothing |
+| `sudo cti-agent run-digest daily --lookback 168h --dry-run` | Catch-up after the lane was off. Overrides `GRAPH_LOOKBACK_HOURS` for one run; max 90 days. Cannot be done through the environment - the wrapper's `--preserve-env` list strips it |
 | `sudo cti-agent run-digest daily` | Full pipeline, **sends** |
 | `sudo cti-agent run-checkin` | One orchestrator heartbeat |
 | `sudo cti-agent mailer.py --check` | Decode the token, list granted app roles |
@@ -260,7 +261,8 @@ Via the `cti-agent` wrapper the installer writes:
 | Command | Does |
 |---|---|
 | `bin/run-digest daily` | Deterministic ingest → enrich → brief → **send** |
-| `bin/run-digest daily --dry-run` | Same, sends nothing |
+| `bin/run-digest daily --dry-run` | Same, sends nothing. Arguments are order-independent; an unknown one exits 2 |
+| `bin/run-digest daily --lookback 168h` | Catch-up window for one run |
 | `bin/run-digest weekly` | Weekly rollup, includes Sev1 |
 | `bin/run-checkin` | One orchestrator heartbeat |
 | `bin/fleet-board tail 30` | Recent board lines |

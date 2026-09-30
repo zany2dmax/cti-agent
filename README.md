@@ -84,6 +84,12 @@ task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then
 task --list             # everything else
 ```
 
+Go is gated by `gofmt`, `go vet`, `staticcheck`, `golangci-lint`, `gosec` and
+`govulncheck`. The Python lanes are gated by their own unit tests and a syntax
+check — **no linter, formatter, type checker or security scanner**. That
+asymmetry is known and tracked in
+[SECURITY.md → known gaps](SECURITY.md#known-gaps-and-accepted-risks).
+
 ---
 
 ## Design decisions worth knowing
