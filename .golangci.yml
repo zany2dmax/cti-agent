@@ -16,6 +16,19 @@
 # justification lives in a config file is one nobody re-examines - this repo
 # has spent a fortnight finding checks that ran and meant nothing, and a
 # silent exclusion list is the same failure in YAML.
+#
+# STATICCHECK NEEDS A SECOND DIRECTIVE, AND THE FIRST ONE LOOKS LIKE IT WORKED.
+#
+# `task ship` runs staticcheck twice: once inside golangci-lint (`task lint`)
+# and once standalone (`task scan`). They do not read the same suppression
+# syntax. golangci-lint reads `//nolint:staticcheck`; standalone staticcheck
+# reads its own `//lint:ignore CHECK reason` on the immediately preceding
+# line, and ignores //nolint entirely.
+#
+# The failure mode is that `task lint` goes green and `task scan` still
+# fails on the same line - which reads like a flaky gate rather than a
+# missing directive. A staticcheck finding that is genuinely intentional
+# needs BOTH forms. internal/mailer/mailer.go has the worked example.
 
 version: "2"
 
