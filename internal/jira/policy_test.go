@@ -183,19 +183,30 @@ func TestHostCSVSurvivesAHostnameWithAComma(t *testing.T) {
 	}
 }
 
-func TestHostFloorIsStatedNotHidden(t *testing.T) {
-	// The detection API pages. A count built from one page is a floor, and
-	// reporting it as exact is a claim the data does not support.
+func TestSizeAloneDoesNotMakeItAFloor(t *testing.T) {
+	// This replaces a test that asserted 1000+ hosts WAS a floor, back when
+	// HostFloor() guessed from a magic number. The provider knows whether it
+	// truncated, so it is asked - and a complete 1000-host list is a
+	// measurement, not a lower bound. Reporting "at least 1000" for a count
+	// the scanner is sure about understates nothing but erodes trust in the
+	// cases where "at least" is doing real work.
 	f := kev85880()
 	f.Hosts = make([]string, 1000)
-	if !f.HostFloor() {
-		t.Fatal("1000 hosts should be treated as a floor")
+	f.HostCount = 1000
+	if f.HostFloor() {
+		t.Error("a complete 1000-host list was reported as a floor")
 	}
-	if s := Summary(f, now); !strings.Contains(s, "at least") {
-		t.Errorf("summary does not say the count is a floor: %q", s)
+	if s := Summary(f, now); strings.Contains(s, "at least") {
+		t.Errorf("summary hedged a known count: %q", s)
+	}
+
+	// ...and the same list IS a floor once the scanner says it truncated.
+	f.CountIsFloor = true
+	if !f.HostFloor() {
+		t.Error("a truncated scan was not reported as a floor")
 	}
 	if d := Description(f, now, ""); !strings.Contains(d, "floor") {
-		t.Error("description does not say the count is a floor")
+		t.Error("description does not state the floor")
 	}
 }
 
@@ -331,5 +342,34 @@ func TestCountFallsBackToTheListWhenUnset(t *testing.T) {
 	}
 	if f.HostFloor() {
 		t.Error("a complete list was reported as a floor")
+	}
+}
+
+func TestATableCellSurvivesAHostileDescription(t *testing.T) {
+	// Titles come from NVD. In Jira wiki markup "|" ends the cell and a
+	// newline ends the row, so a description containing either mangles the
+	// table in the ticket IT actually reads - and plenty of CVE descriptions
+	// contain both.
+	f := kev85880()
+	f.Title = "Heap overflow in foo|bar\nsecond line\r\nthird"
+	f.CVSS = "9.8|injected"
+
+	d := Description(f, now, "x.csv")
+	for _, line := range strings.Split(d, "\n") {
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		// Count only UNescaped pipes: a well-formed two-column row has
+		// exactly three.
+		bare := strings.Count(strings.ReplaceAll(line, `\|`, ""), "|")
+		if bare != 3 {
+			t.Errorf("row has %d unescaped pipes, want 3: %q", bare, line)
+		}
+	}
+	if !strings.Contains(d, `foo\|bar`) {
+		t.Error("the pipe was stripped rather than escaped - the text should survive")
+	}
+	if strings.Contains(d, "Heap overflow in foo\\|bar\nsecond") {
+		t.Error("a newline survived into a table row")
 	}
 }

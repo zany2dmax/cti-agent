@@ -24,18 +24,18 @@ import (
 // a failed run - the daily security email must not depend on this lane being
 // happy with the data.
 type enrichedRow struct {
-	CVE        string `json:"cve"`
-	CVSS       any    `json:"cvss"` // number in the JSON, printed as text
-	KEV        any    `json:"kev"`  // 1/0, sometimes true/false
-	KEVDue     string `json:"kev_due"`
-	KEVName    string `json:"kev_name"`
-	Priority   string `json:"priority"` // "Sev5".."Sev1"
-	QIDs       string `json:"qids"`     // comma-separated
-	HostCount  int    `json:"host_count"`
-	Status     string `json:"status"`
-	Published  string `json:"published"`
-	LastSeen   string `json:"last_seen"`
-	Desc       string `json:"description"`
+	CVE       string `json:"cve"`
+	CVSS      any    `json:"cvss"` // number in the JSON, printed as text
+	KEV       any    `json:"kev"`  // 1/0, sometimes true/false
+	KEVDue    string `json:"kev_due"`
+	KEVName   string `json:"kev_name"`
+	Priority  string `json:"priority"` // "Sev5".."Sev1"
+	QIDs      string `json:"qids"`     // comma-separated
+	HostCount int    `json:"host_count"`
+	Status    string `json:"status"`
+	Published string `json:"published"`
+	LastSeen  string `json:"last_seen"`
+	Desc      string `json:"description"`
 }
 
 type enrichedFile struct {
@@ -88,6 +88,13 @@ func truthy(v any) bool {
 	case bool:
 		return t
 	case float64:
+		return t != 0
+	case int:
+		// encoding/json never produces this - every JSON number arrives as a
+		// float64 - but truthy takes `any`, and a caller constructing a row
+		// in Go writes 1, not 1.0. Silently reading that as false made two
+		// tests select the wrong findings, which is a small taste of what it
+		// would do to a KEV flag in production.
 		return t != 0
 	case string:
 		s := strings.ToLower(strings.TrimSpace(t))
