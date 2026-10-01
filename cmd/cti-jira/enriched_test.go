@@ -31,11 +31,11 @@ func stubFill(hosts []string, count int, floor bool) hostFiller {
 
 func TestOnlyPresentKEVOrSev5IsTicketed(t *testing.T) {
 	rows := []enrichedRow{
-		row("CVE-1", "Sev5", "PRESENT", 0, 5),      // Sev5, present
-		row("CVE-2", "Sev1", "PRESENT", 1, 2),      // KEV outranks the band
-		row("CVE-3", "Sev4", "PRESENT", 0, 99),     // below the bar
-		row("CVE-4", "Sev5", "NOT_PRESENT", 1, 0),  // KEV, but not in the estate
-		row("CVE-5", "Sev5", "UNKNOWN", 1, 0),      // no detections to act on
+		row("CVE-1", "Sev5", "PRESENT", 0, 5),     // Sev5, present
+		row("CVE-2", "Sev1", "PRESENT", 1, 2),     // KEV outranks the band
+		row("CVE-3", "Sev4", "PRESENT", 0, 99),    // below the bar
+		row("CVE-4", "Sev5", "NOT_PRESENT", 1, 0), // KEV, but not in the estate
+		row("CVE-5", "Sev5", "UNKNOWN", 1, 0),     // no detections to act on
 	}
 	got := selectForTicketing(context.Background(), rows,
 		stubFill([]string{"a.example.com"}, 1, false), quiet)
@@ -148,12 +148,15 @@ func TestSeverityUnderstandsBothScales(t *testing.T) {
 }
 
 func TestTheKEVFlagSurvivesEveryShapeItHasHad(t *testing.T) {
-	for _, v := range []any{1.0, "1", "true", true} {
+	// 1.0 is what encoding/json actually produces; 1 is what a Go caller
+	// writes. Both must work - the int case was missing, and two tests in
+	// this file silently selected the wrong findings because of it.
+	for _, v := range []any{1.0, 1, "1", "true", true} {
 		if !truthy(v) {
 			t.Errorf("truthy(%#v) = false", v)
 		}
 	}
-	for _, v := range []any{0.0, "0", "", nil, false} {
+	for _, v := range []any{0.0, 0, "0", "", nil, false} {
 		if truthy(v) {
 			t.Errorf("truthy(%#v) = true", v)
 		}

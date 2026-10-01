@@ -37,15 +37,15 @@ const MaxSummary = 255
 // dependency on the report format, or changing a column in the email becomes a
 // change to the ticketing contract.
 type Finding struct {
-	CVE      string
-	QIDs     []string
-	Hosts    []string
-	KEV      bool
-	KEVDueOn time.Time // zero when not a KEV entry
-	Severity int       // 5..1, 5 highest
-	CVSS     string
-	Title    string
-	QQL      string // the Qualys query that reproduces the host list
+	CVE       string
+	QIDs      []string
+	Hosts     []string
+	KEV       bool
+	KEVDueOn  time.Time // zero when not a KEV entry
+	Severity  int       // 5..1, 5 highest
+	CVSS      string
+	Title     string
+	QQL       string // the Qualys query that reproduces the host list
 	FirstSeen time.Time
 
 	// HostCount is the authoritative number of affected machines, which is
@@ -199,9 +199,11 @@ func Description(f Finding, now time.Time, csvName string) string {
 
 	hostCount := fmt.Sprintf("%d", f.Count())
 	if f.HostFloor() {
+		// No newline: this lands inside a |table cell| in Jira wiki markup,
+		// and a line break there ends the row early.
 		hostCount = "at least " + hostCount +
-			" (the scanner truncated its host lists; this is a floor, and the\n"+
-			" attached CSV names the ones it did return)"
+			" (the scanner truncated its host lists, so this is a floor; " +
+			"the attached CSV names the ones it did return)"
 	}
 	b.WriteString(row("Affected hosts", hostCount))
 
@@ -247,7 +249,25 @@ func Description(f Finding, now time.Time, csvName string) string {
 	return b.String()
 }
 
-func row(k, v string) string { return "|" + k + "|" + v + "|\n" }
+// row emits one wiki-markup table row, and sanitises the value because the
+// value is not ours.
+//
+// Titles and descriptions come from NVD. In Jira wiki markup a "|" ENDS the
+// cell and a newline ENDS the row, so a CVE description containing either -
+// and plenty do - silently mangles the table in the ticket IT reads. Escaped
+// rather than stripped, so the text still says what the advisory said.
+func row(k, v string) string {
+	return "|" + cell(k) + "|" + cell(v) + "|\n"
+}
+
+func cell(v string) string {
+	v = strings.ReplaceAll(v, "\r\n", " ")
+	v = strings.ReplaceAll(v, "\n", " ")
+	v = strings.ReplaceAll(v, "\r", " ")
+	// \| is the wiki-markup escape for a literal pipe.
+	v = strings.ReplaceAll(v, "|", "\\|")
+	return strings.TrimSpace(v)
+}
 
 func sortedCopy(in []string) []string {
 	out := append([]string(nil), in...)
