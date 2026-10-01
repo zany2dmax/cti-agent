@@ -36,6 +36,29 @@ const (
 	OutcomeError     Outcome = "error"
 )
 
+// Charges reports whether a beat consumed model quota, and therefore whether
+// it counts against the ceilings.
+//
+// OK spent a request. So did a rate limit - being refused is evidence the
+// request reached the service. An error did not: the lane broke, usually
+// before it ever called the model.
+//
+// WHY THIS MATTERS MORE THAN IT LOOKS
+//
+// Charging errors inverts the fleet's own diagnosis. A crash-looping
+// orchestrator burns the daily ceiling on failures, the gate then holds, and
+// the fleet reports a BUDGET problem while the actual problem is code. That is
+// precisely the confusion classify.go exists to prevent, reintroduced one
+// level down. Thirty-one failed beats from 21 September onward were each
+// charged for a model call they never made.
+//
+// There is no retry-storm risk in letting errors go uncharged: the pace is set
+// by a two-hourly systemd timer, not by retries, so a broken lane cannot beat
+// faster than a working one.
+func (o Outcome) Charges() bool {
+	return o == OutcomeOK || o == OutcomeRateLimit
+}
+
 // Beat is one recorded attempt.
 type Beat struct {
 	At      time.Time `json:"at"`
@@ -258,20 +281,34 @@ func consecutiveRateLimits(beats []Beat) int {
 	return n
 }
 
+// countSince counts the beats after cutoff that actually spent quota. The
+// name is deliberately not countAllSince: every caller is a ceiling check,
+// and a ceiling that counts failures is the bug this replaced.
 func countSince(beats []Beat, cutoff time.Time) int {
 	n := 0
 	for _, b := range beats {
-		if b.At.After(cutoff) {
+		if b.At.After(cutoff) && b.Outcome.Charges() {
 			n++
 		}
 	}
 	return n
 }
 
+// CountCharged exposes the same count for reporting, so `cti-budget status`
+// can show recorded and charged side by side. "24 recorded, 0 charged" is the
+// line that makes a silently broken lane obvious.
+func CountCharged(beats []Beat, cutoff time.Time) int {
+	return countSince(beats, cutoff)
+}
+
+// oldestInWindow finds the earliest CHARGING beat in the window. RetryAfter is
+// "when does a slot free up", and only a charging beat occupies one; deriving
+// it from an error would tell the operator to wait for quota nothing spent.
 func oldestInWindow(beats []Beat, cutoff time.Time) time.Time {
 	var oldest time.Time
 	for _, b := range beats {
-		if b.At.After(cutoff) && (oldest.IsZero() || b.At.Before(oldest)) {
+		if b.At.After(cutoff) && b.Outcome.Charges() &&
+			(oldest.IsZero() || b.At.Before(oldest)) {
 			oldest = b.At
 		}
 	}
