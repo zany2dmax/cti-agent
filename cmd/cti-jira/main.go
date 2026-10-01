@@ -244,15 +244,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		return die("searching for an existing ticket: %s", safelog.Line(err.Error()))
 	}
 	if len(existing) > 0 {
-		logf("a ticket for %s already exists: %s (%s)",
-			f.CVE, existing[0].Key, c.BrowseURL(existing[0].Key))
-		logf("nothing created. Close and delete it to run this again.")
-		out, _ := json.Marshal(map[string]any{
-			"mode": "for-real", "created": false,
-			"reason": "duplicate", "key": existing[0].Key,
-		})
-		fmt.Println(string(out))
-		return exitOK
+		return updateExisting(ctx, c, existing[0], f, csvBody, now)
 	}
 
 	res, err := c.CreateIssue(ctx, jira.IssueRequest{
@@ -281,10 +273,23 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		logf("attached %s", csvName)
 	}
 
+	// Write the exposure state AFTER the ticket exists. A state record for a
+	// ticket that was never created would make the next run think it had
+	// already reported hosts nobody has seen.
+	st := jira.StateFrom(f, res.Key, now)
+	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
+		// Not fatal. The ticket is filed and that was the point; a missing
+		// state record costs one skipped drift comparison next run, which
+		// then rewrites it.
+		logf("WARNING: could not record exposure state on %s: %s",
+			res.Key, safelog.Line(err.Error()))
+	}
+
 	out, _ := json.Marshal(map[string]any{
 		"mode": "for-real", "created": true,
 		"key": res.Key, "url": c.BrowseURL(res.Key),
 		"attached": attached, "attachment": csvName,
+		"hosts": len(f.Hosts), "hosts_hash": st.HostsHash,
 	})
 	fmt.Println(string(out))
 
@@ -292,4 +297,123 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 	logf("A Service Management project can accept an issue over the plain API")
 	logf("and leave it out of the agent queues, which is invisible from here.")
 	return exitOK
+}
+
+// updateExisting is what happens on every run after the first: the ticket is
+// already there, and the question is whether anything changed enough to say.
+//
+// The old behaviour was to print "already exists" and stop, which meant a CVE
+// spreading from 441 hosts to 500 looked exactly like one that had not moved.
+// A ticket that snapshots a single morning and never updates is worse than no
+// ticket, because it looks current.
+func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
+	f jira.Finding, csvBody []byte, now time.Time) int {
+
+	key := issue.Key
+	logf("ticket for %s already exists: %s (%s)", f.CVE, key, c.BrowseURL(key))
+
+	var prev jira.ExposureState
+	found, err := c.GetProperty(ctx, key, jira.PropertyKey, &prev)
+	if err != nil {
+		// A malformed or unreadable property is reported and treated as
+		// absent. It costs one comparison; it must not kill the run.
+		logf("WARNING: %s", safelog.Line(err.Error()))
+	}
+	var prevPtr *jira.ExposureState
+	if found {
+		prevPtr = &prev
+	}
+
+	// A CLOSED ticket with live detections is a human question, not an
+	// automation one. Somebody closed it deliberately - exception,
+	// compensating control, a replacement ticket - and software that reverses
+	// that every night is software that gets switched off. Say it once.
+	if issue.IsDone() && len(f.Hosts) > 0 {
+		if found && !prev.ClosedButDetectedAt.IsZero() {
+			logf("closed, still detected on %d host(s) - already noted on %s, saying nothing",
+				len(f.Hosts), prev.ClosedButDetectedAt.Format("2006-01-02"))
+			emit(map[string]any{"mode": "for-real", "created": false,
+				"reason": "closed-but-detected-already-noted", "key": key})
+			return exitOK
+		}
+		if err := c.AddComment(ctx, key, jira.ClosedButDetectedComment(f, now)); err != nil {
+			return die("commenting on %s: %s", key, safelog.Line(err.Error()))
+		}
+		st := jira.StateFrom(f, key, now)
+		st.ClosedButDetectedAt = now
+		if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
+			logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
+		}
+		logf("closed ticket still has detections - noted once, not reopened")
+		emit(map[string]any{"mode": "for-real", "created": false,
+			"reason": "closed-but-detected", "key": key, "commented": true})
+		return exitOK
+	}
+
+	d := jira.DiffExposure(prevPtr, f, now)
+	if !d.Material() {
+		// Still record state, so a shrink today is visible in the comparison
+		// that a growth tomorrow produces. Quiet is not the same as lost.
+		st := jira.StateFrom(f, key, now)
+		if found {
+			st.ClosedButDetectedAt = prev.ClosedButDetectedAt
+		}
+		if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
+			logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
+		}
+		switch {
+		case d.FirstLook:
+			logf("no stored state - recorded %d host(s), no comment (this is not a discovery)",
+				len(f.Hosts))
+		default:
+			logf("no material change (%d -> %d hosts) - state updated, no comment",
+				d.CountBefore, d.CountAfter)
+		}
+		emit(map[string]any{"mode": "for-real", "created": false,
+			"reason": "no-material-change", "key": key,
+			"hosts": len(f.Hosts), "commented": false})
+		return exitOK
+	}
+
+	csvName := jira.CSVName(f.CVE, now)
+	if err := c.AddComment(ctx, key, jira.DriftComment(d, f, csvName, now)); err != nil {
+		return die("commenting on %s: %s", key, safelog.Line(err.Error()))
+	}
+	logf("commented on %s: %d -> %d hosts, +%d new, +%d new QID(s)",
+		key, d.CountBefore, d.CountAfter, len(d.NewHosts), len(d.NewQIDs))
+
+	attached := true
+	if len(f.Hosts) > 0 {
+		if err := c.Attach(ctx, key, csvName, csvBody); err != nil {
+			attached = false
+			logf("WARNING: comment posted but the CSV did not attach: %s",
+				safelog.Line(err.Error()))
+		}
+	}
+
+	// State last. If this fails the comment has still gone out, and the next
+	// run re-reports the same drift - noisy, but never silent. The opposite
+	// ordering would record hosts as reported that nobody was told about.
+	st := jira.StateFrom(f, key, now)
+	if found {
+		st.ClosedButDetectedAt = prev.ClosedButDetectedAt
+	}
+	if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
+		logf("WARNING: could not record state on %s - the next run will "+
+			"repeat this comment: %s", key, safelog.Line(err.Error()))
+	}
+
+	emit(map[string]any{"mode": "for-real", "created": false,
+		"reason": "updated", "key": key, "url": c.BrowseURL(key),
+		"commented": true, "attached": attached,
+		"hosts_before": d.CountBefore, "hosts_after": d.CountAfter,
+		"new_hosts": len(d.NewHosts), "new_qids": len(d.NewQIDs),
+		"resolved": d.Resolved,
+	})
+	return exitOK
+}
+
+func emit(v map[string]any) {
+	out, _ := json.Marshal(v)
+	fmt.Println(string(out))
 }

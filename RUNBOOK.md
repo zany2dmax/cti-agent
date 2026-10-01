@@ -683,6 +683,35 @@ the queue your team actually works from? A JSM project can accept an issue over
 the plain issue API and leave it out of the agent queues, and that is invisible
 from the command's point of view. Close and delete the ticket when done.
 
+### What happens on the runs after the first
+
+The ticket is found by its `cti-<cve>` label and **updated in place** — the
+fleet never files a second ticket for a CVE it has already reported.
+
+What it says, and when:
+
+| Since last run | Comment? |
+|---|---|
+| Nothing changed | No. A daily "still 441 hosts" is the storm in a different costume |
+| Hosts only went away | No — but it is recorded, so it shows up next time something else prompts a comment |
+| New hosts, or a new QID | **Yes**, naming up to 20 new hosts with a fresh dated CSV attached |
+| No detections left anywhere | **Yes** — "this ticket can be closed", the one piece of good news this lane produces |
+| Ticket is closed, detections persist | **Once, ever.** It is not reopened |
+
+That last row is deliberate. Somebody closed the ticket on purpose — an
+exception, a compensating control, a replacement ticket — and software that
+reverses a human decision every night is software that gets switched off.
+
+The previous host and QID set is stored as a property **on the ticket**, not in
+a file on this box, for the same reason the duplicate key is a label: a ticket
+can be closed, cloned, moved or bulk-edited in the UI, and any local record
+goes stale the moment somebody does. It also means a rebuilt fleet box does not
+re-announce every host it has ever seen as newly discovered.
+
+Above 800 hosts the list is dropped and only the count and a hash are kept, to
+stay inside Jira's 32KB property limit. Drift is then reported as a change in
+totals, and the comment says outright that it cannot name the hosts.
+
 Note the flag direction. There is no `--dry-run`; the dangerous mode is the
 one you have to ask for, because forgetting a `--dry-run` flag is how the
 digest sent a real email to the whole distribution list in September.
