@@ -339,6 +339,11 @@ The orchestrator runs unattended. Its standing instructions
 Auto-sending is limited to scheduled reports on an established schedule to an
 allowlisted list. Everything else is proposed on the message board and waits.
 
+Only beats that reached the model count against those ceilings. A beat that
+errored before calling it is recorded but not charged, so a failing lane
+cannot ration the fleet into a hold and present a code fault as a budget
+decision. `cti-budget status` prints both counts for that reason.
+
 Model usage is rationed by `cti-budget` — window and daily ceilings with
 exponential backoff — so an agent loop cannot consume a shared subscription.
 

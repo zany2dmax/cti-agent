@@ -228,7 +228,8 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 			"allow":        d.Allow,
 			"reason":       d.Reason,
 			"retry_after":  d.RetryAfter,
-			"beats_stored": len(l.Beats),
+			"beats_stored":  len(l.Beats),
+			"beats_charged": budget.CountCharged(l.Beats, s.Now().Add(-48*time.Hour)),
 			"limits": map[string]any{
 				"window_hours": s.Limits.Window.Hours(),
 				"window_beats": s.Limits.WindowBeats,
@@ -241,7 +242,15 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 	_, _ = fmt.Fprintf(stdout, "ledger:  %s\n", s.Path)
 	_, _ = fmt.Fprintf(stdout, "limits:  %d beats per %s, %d per day\n",
 		s.Limits.WindowBeats, s.Limits.Window, s.Limits.DailyBeats)
-	_, _ = fmt.Fprintf(stdout, "beats:   %d recorded in the last 48h\n", len(l.Beats))
+	// Recorded AND charged. They differ exactly when lanes are failing, which
+	// is when somebody is reading this output.
+	charged := budget.CountCharged(l.Beats, s.Now().Add(-48*time.Hour))
+	_, _ = fmt.Fprintf(stdout, "beats:   %d recorded in the last 48h, %d charged\n",
+		len(l.Beats), charged)
+	if n := len(l.Beats) - charged; n > 0 {
+		_, _ = fmt.Fprintf(stdout,
+			"         %d errored without spending quota - check the lanes, not the budget\n", n)
+	}
 	if d.Allow {
 		_, _ = fmt.Fprintf(stdout, "state:   ready (%s)\n", d.Reason)
 	} else {
