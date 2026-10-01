@@ -247,6 +247,14 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox)"
+# cti-alert is the escalation channel, and the ONLY mail capability granted.
+# It is narrow by construction rather than by trust: it has no --to flag, so
+# the recipient is FLEET_OPERATOR_EMAIL from the environment and the agent
+# cannot choose who it reaches. The caller-supplied --reason is HTML-escaped
+# before it becomes mail. So the worst an injected advisory achieves is one
+# message to an address the operator already configured, from the fleet's own
+# mailbox - not a send to an attacker's address.
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-alert:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(journalctl:*)"
 
 echo "[run-checkin $(date '+%F %H:%M:%S')] allowed tools: $ALLOWED_TOOLS"
