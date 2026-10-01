@@ -628,8 +628,14 @@ sudo cti-agent cti-jira --check
 ```
 
 Reports the account the API token belongs to, whether the write gate is open,
-whether `JIRA_ISSUE_TYPE` exists in the project, and which fields the create
-screen marks required.
+whether `JIRA_ISSUE_TYPE` exists in the project, which fields the create screen
+marks required, and whether the duplicate-detection search works.
+
+That last one is not padding. A duplicate check runs before every create, so a
+broken search breaks the whole lane — and it broke once already: Atlassian
+removed `/rest/api/2/search` outright, and the first anyone knew was an HTTP
+410 part-way through `--test-ticket --for-real`. A preflight that skips a path
+the real run depends on is a preflight that lies.
 
 Read two lines carefully:
 

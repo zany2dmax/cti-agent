@@ -102,9 +102,38 @@ func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, 
 
 // Search runs a JQL query and returns the matching issues.
 //
-// Used for duplicate detection, so the fields requested are deliberately
-// minimal: a search that pulls full issue bodies to answer "does this exist"
-// is slow for no reason, and on a busy project it is a lot of data to hold.
+// # /rest/api/3/search/jql, NOT /rest/api/2/search
+//
+// The old endpoint is GONE - not deprecated, removed. It answers HTTP 410:
+//
+//	The requested API has been removed. Please migrate to the
+//	/rest/api/3/search/jql API.
+//
+// Found by running it against the live tenant, which is the only way this
+// class of fault is ever found: it cannot fail in a stub, and the code was
+// correct on the day it was written.
+//
+// THIS IS WHY THE REST OF THE CLIENT IS ON v2 AND THIS CALL IS NOT. Mixing
+// versions looks like an oversight, so to be explicit: creating an issue on
+// v3 requires the description as an Atlassian Document Format tree, which is
+// a pile of nested JSON whose only job is a table and a list. Search has no
+// description, so it costs nothing to move and everything to leave broken.
+// Each call uses the oldest version that still works and does not force ADF.
+//
+// The new endpoint differs in three ways that matter:
+//
+//   - Fields must be requested EXPLICITLY. It returns only the issue id by
+//     default, so a caller that worked by accident on the old endpoint gets
+//     empty summaries and an empty status here - which would make IsDone
+//     report every ticket as not-done, and the duplicate check would still
+//     work while the status logic quietly stopped.
+//   - Pagination is by nextPageToken, not startAt. There is no total.
+//   - isLast says whether more pages exist.
+//
+// Only the first page is read. Duplicate detection asks "does one exist", and
+// the answer does not change on page two - but the paging fields are parsed
+// rather than ignored so that a future caller that does need them finds them
+// already there.
 func (c *Client) Search(ctx context.Context, jql string, max int) ([]Issue, error) {
 	if max <= 0 {
 		max = 5
@@ -112,15 +141,21 @@ func (c *Client) Search(ctx context.Context, jql string, max int) ([]Issue, erro
 	body := map[string]any{
 		"jql":        jql,
 		"maxResults": max,
-		"fields":     []string{"summary", "status", "labels", "created"},
+		// Named explicitly. The new endpoint does NOT default to a useful set.
+		"fields": []string{"summary", "status", "labels", "created"},
 	}
-	var out struct {
-		Issues []Issue `json:"issues"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/rest/api/2/search", body, &out); err != nil {
+	var out SearchPage
+	if err := c.do(ctx, http.MethodPost, "/rest/api/3/search/jql", body, &out); err != nil {
 		return nil, err
 	}
 	return out.Issues, nil
+}
+
+// SearchPage is one page of the token-paginated search response.
+type SearchPage struct {
+	Issues        []Issue `json:"issues"`
+	NextPageToken string  `json:"nextPageToken,omitempty"`
+	IsLast        bool    `json:"isLast"`
 }
 
 // Issue is the subset of an issue this package reads.
@@ -251,6 +286,18 @@ func checkStatus(resp *http.Response, what string) error {
 		return nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+
+	// 410 means Atlassian retired the endpoint, which is a different problem
+	// from a bad request and needs a different person: nobody can fix it in
+	// fleet.env. Qualys did exactly this to the 2.0 KnowledgeBase, and the
+	// lesson was that an EOL reads like a transient failure until something
+	// says the word. Jira puts the replacement path in the body, so the body
+	// is preserved verbatim below.
+	if resp.StatusCode == http.StatusGone {
+		return fmt.Errorf("%s failed: THIS ENDPOINT HAS BEEN REMOVED by Atlassian "+
+			"(HTTP 410) - this needs a code change, not a config change: %s",
+			what, strings.TrimSpace(string(raw)))
+	}
 
 	var parsed struct {
 		ErrorMessages []string          `json:"errorMessages"`
