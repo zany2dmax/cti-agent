@@ -183,3 +183,17 @@ func TestATitleIsOneClauseNotAWholeAdvisory(t *testing.T) {
 		t.Errorf("Title = %q", f.Title)
 	}
 }
+
+func TestTicketMapPathIsDerivedNotGuessed(t *testing.T) {
+	// The digest reads this exact path. If the two ever disagree the email
+	// renders with no tickets and nothing reports an error.
+	for in, want := range map[string]string{
+		"/s/enriched-2026-10-01.json": "/s/enriched-2026-10-01-tickets.json",
+		"enriched-2026-10-01.json":    "enriched-2026-10-01-tickets.json",
+		"/s/noext":                    "/s/noext-tickets.json",
+	} {
+		if got := TicketMapPath(in); got != want {
+			t.Errorf("TicketMapPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
