@@ -18,6 +18,8 @@ import json
 import os
 import pathlib
 import sys
+import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -1082,3 +1084,66 @@ class KevInTheDigest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class DigestSendLedger(unittest.TestCase):
+    """`was-sent` is the duplicate-send guard, and it never once fired.
+
+    `fleet-db sent` read kind from args[6], the same index as the message id,
+    so every row was stored with the Graph request id as its kind. was-sent
+    queries by kind, so it always answered "no" - and UNIQUE(kind, day) never
+    collided either, because each request id was unique.
+
+    Exercised through the CLI rather than the function, because the bug was in
+    positional argument parsing: a test that called the handler with keywords
+    would have passed against the broken code.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.home, "state"), exist_ok=True)
+        self.env = dict(os.environ, FLEET_HOME=self.home)
+        self.db = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "fleet", "bin", "fleet-db")
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def run_db(self, *args):
+        return subprocess.run([sys.executable, self.db, *args],
+                              env=self.env, capture_output=True, text=True)
+
+    def test_a_sent_digest_is_remembered_as_its_kind(self):
+        self.run_db("init")
+        # Exactly how run-digest calls it: day, five counts, message id, kind.
+        self.run_db("sent", "2026-10-01", "3", "2", "1", "0", "5",
+                    "req-abc-123", "daily")
+        r = self.run_db("was-sent", "2026-10-01", "daily")
+        self.assertEqual(r.stdout.strip(), "yes",
+                         "was-sent did not find a digest that was just logged")
+        self.assertEqual(r.returncode, 0)
+
+    def test_the_message_id_is_not_mistaken_for_the_kind(self):
+        # The bug itself: the request id ended up in the kind column.
+        self.run_db("init")
+        self.run_db("sent", "2026-10-01", "0", "0", "0", "0", "0",
+                    "req-abc-123", "daily")
+        r = self.run_db("was-sent", "2026-10-01", "req-abc-123")
+        self.assertEqual(r.stdout.strip(), "no",
+                         "the message id is being stored as the kind")
+
+    def test_weekly_and_daily_do_not_shadow_each_other(self):
+        # UNIQUE(kind, day) only separates them if kind is real. With the bug
+        # both landed under different request ids and neither was findable.
+        self.run_db("init")
+        self.run_db("sent", "2026-10-01", "1", "0", "0", "0", "0", "mid-1", "daily")
+        self.assertEqual(self.run_db("was-sent", "2026-10-01", "daily").stdout.strip(), "yes")
+        self.assertEqual(self.run_db("was-sent", "2026-10-01", "weekly").stdout.strip(), "no")
+        self.run_db("sent", "2026-10-01", "1", "0", "0", "0", "0", "mid-2", "weekly")
+        self.assertEqual(self.run_db("was-sent", "2026-10-01", "weekly").stdout.strip(), "yes")
+
+    def test_an_unsent_day_is_still_no(self):
+        self.run_db("init")
+        r = self.run_db("was-sent", "2026-09-30", "daily")
+        self.assertEqual(r.stdout.strip(), "no")
+        self.assertNotEqual(r.returncode, 0, "a miss must exit non-zero for the shell guard")
