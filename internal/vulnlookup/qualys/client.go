@@ -173,6 +173,15 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 		}
 		res.SampleHosts = appendCapped(res.SampleHosts, d.SampleHosts, sampleHostsPer)
 	}
+	// Materialise the union. Sorted so the same estate produces the same list
+	// on every run - a ticket that reorders its CSV every morning looks like
+	// it changed when it did not.
+	res.Hosts = make([]string, 0, len(hostUnion))
+	for h := range hostUnion {
+		res.Hosts = append(res.Hosts, h)
+	}
+	sort.Strings(res.Hosts)
+
 	res.HostCount = len(hostUnion)
 	// A union built from truncated lists can come out smaller than a single
 	// QID's own count, which would understate exposure. One QID's count is a
