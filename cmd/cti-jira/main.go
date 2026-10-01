@@ -483,6 +483,19 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 
 	out := TicketMapPath(path)
+
+	// A DRY RUN MUST NOT TOUCH THE MAP.
+	//
+	// It used to write it unconditionally, so a dry run after a real one
+	// replaced a map full of ticket keys with an empty one - and the digest,
+	// which reads that file, would then render with no tickets at all. A
+	// preview that destroys the thing it is previewing is worse than no
+	// preview: the damage is silent and shows up in an email.
+	if !forReal {
+		logf("DRY RUN - %s left untouched", out)
+		return exitOK
+	}
+
 	if err := writeTicketMap(out, tm); err != nil {
 		logf("WARNING: %s - the digest will render without ticket keys",
 			safelog.Line(err.Error()))
