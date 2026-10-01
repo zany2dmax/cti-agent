@@ -713,6 +713,34 @@ a normal day is a handful of Host Detection calls rather than one per finding.
 The daily then quotes the key and links the ticket under each CVE, in both the
 HTML and text parts, until the scanner stops finding it.
 
+### Filing tickets for findings that are already outstanding
+
+To ticket today's findings without waiting for tomorrow's digest, point the
+lane at the enriched file the last run wrote:
+
+```bash
+ls -1 /var/lib/cti-agent/state/enriched-*.json | tail -1     # today's
+sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json
+```
+
+That is a dry run — it reports what it would file and writes nothing. Add
+`--for-real` once the list looks right.
+
+**KEV findings file automatically; a Sev5 that is not on KEV is held.** The
+reason is that a KEV entry carries an external deadline, so delay is the
+larger risk, whereas a Sev5 the fleet scored itself is a judgement call and
+the larger risk is a scoring bug becoming a pile of tickets IT has to close.
+To file the held ones deliberately:
+
+```bash
+sudo cti-agent cti-jira --from-enriched <file> --for-real --approve
+```
+
+`--approve` is a command-line flag and not a `fleet.env` setting on purpose:
+`run-digest` never passes it, so the scheduled 10:00 run can only ever file
+KEV entries. Making it configuration would turn "the fleet decided to file
+this" into something that happens overnight with nobody watching.
+
 ### What happens on the runs after the first
 
 The ticket is found by its `cti-<cve>` label and **updated in place** — the

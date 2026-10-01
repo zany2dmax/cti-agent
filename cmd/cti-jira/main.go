@@ -60,6 +60,9 @@ func run() int {
 		"actually create it; without this, nothing is written")
 	fromEnriched := flag.String("from-enriched", "",
 		"file tickets for the KEV and Sev5 findings in this enriched JSON")
+	approve := flag.Bool("approve", false,
+		"also file the findings that would otherwise wait for a human: "+
+			"Sev5 findings that are not on CISA KEV")
 	flag.Parse()
 
 	if !*check && !*testTicket && *fromEnriched == "" {
@@ -92,7 +95,7 @@ func run() int {
 		return doTestTicket(ctx, c, cfg, *forReal)
 	}
 	if *fromEnriched != "" {
-		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal)
+		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal, *approve)
 	}
 	return exitOK
 }
@@ -437,7 +440,7 @@ func emit(v map[string]any) {
 // daily security email, so every failure path below returns exitOK. A Jira
 // outage must cost tickets, never the digest.
 func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
-	path string, forReal bool) int {
+	path string, forReal, approve bool) int {
 
 	now := time.Now().UTC()
 
@@ -467,7 +470,7 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 	tm := TicketMap{Generated: now.Format(time.RFC3339), Tickets: map[string]TicketRef{}}
 
 	for _, f := range findings {
-		ref, err := fileOrUpdate(ctx, c, cfg, f, now, forReal)
+		ref, err := fileOrUpdate(ctx, c, cfg, f, now, forReal, approve)
 		if err != nil {
 			// One bad ticket must not stop the rest, and must not stop the
 			// digest. Named, counted, carried on.
@@ -491,7 +494,7 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 
 // fileOrUpdate creates a ticket, or updates the one that already exists.
 func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
-	f jira.Finding, now time.Time, forReal bool) (TicketRef, error) {
+	f jira.Finding, now time.Time, forReal, approve bool) (TicketRef, error) {
 
 	existing, err := c.Search(ctx, jira.FindJQL(cfg.JiraProjectKey, f.CVE), 5)
 	if err != nil {
@@ -519,9 +522,16 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 
 	// A non-KEV Sev5 is the fleet's own judgement rather than an external
-	// deadline, so it waits for a person. Recorded on the board, not filed.
-	if jira.NeedsApproval(f) {
-		logf("%s is Sev5 but not KEV - needs approval, not filing", f.CVE)
+	// deadline, so it waits for a person - unless a person said so.
+	//
+	// --approve is the person saying so, and it is a FLAG rather than a
+	// config setting on purpose: the scheduled run in run-digest does not
+	// pass it, so the automatic path can only ever file KEV entries. Putting
+	// this in fleet.env would make "the fleet decided to file this" a thing
+	// that happens at 10:00 with nobody watching.
+	if jira.NeedsApproval(f) && !approve {
+		logf("%s is Sev5 but not on KEV - held for approval "+
+			"(re-run with --approve to file it)", f.CVE)
 		return TicketRef{}, nil
 	}
 
