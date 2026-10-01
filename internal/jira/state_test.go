@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func stateWith(hosts []string, qids []string, kept bool) *ExposureState {
@@ -251,8 +250,11 @@ func TestStateFromRoundTripsThroughTheHash(t *testing.T) {
 	if st.TicketKey != "CR-1" {
 		t.Errorf("TicketKey = %q", st.TicketKey)
 	}
-	var zero time.Time
-	if st.UpdatedAt == zero {
+	// IsZero(), not == or Equal(). time.Time carries a monotonic reading and
+	// a location alongside the instant, so == compares more than the moment
+	// and can call two identical instants different - which is what QF1009
+	// is warning about. IsZero is the question actually being asked.
+	if st.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt was not set")
 	}
 }
