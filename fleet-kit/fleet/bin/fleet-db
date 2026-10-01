@@ -236,8 +236,15 @@ def main(argv):
         print(json.dumps([dict(r) for r in c.execute(q, p)], indent=2))
 
     elif cmd == "sent":
+        # kind is args[7], NOT args[6]. args[6] is the message id, and reading
+        # kind from the same index stored the Graph request id as the kind on
+        # every row - so `was-sent <day> daily` never matched, the duplicate
+        # guard in run-digest never fired, and UNIQUE(kind,day) never
+        # collided because each request id was unique. Silent since the table
+        # was written; found by the orchestrator noticing that was-sent said
+        # "no" for digests the board confirmed had gone out.
         day, s5, s4, s3, s2, s1, mid = args[0], *map(int, args[1:6]), args[6]
-        kind = args[6] if len(args) > 6 else "daily"
+        kind = args[7] if len(args) > 7 else "daily"
         c.execute("INSERT OR REPLACE INTO digests(kind,day,sev5,sev4,sev3,sev2,sev1,"
                   "message_id,ts) VALUES(?,?,?,?,?,?,?,?,?)",
                   (kind, day, s5, s4, s3, s2, s1, mid, now()))
