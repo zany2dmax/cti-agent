@@ -168,6 +168,56 @@ func TestAttachSendsTheXSRFOptOutAndTheFieldNamedFile(t *testing.T) {
 	}
 }
 
+func TestSearchUsesTheEndpointThatStillExists(t *testing.T) {
+	// /rest/api/2/search answers HTTP 410 - removed, not deprecated. This
+	// test exists because the original code was correct when written and
+	// broke without any change to it, and nothing in a stub would have caught
+	// that. Pinning the path means a future "tidy up to one API version"
+	// cannot silently put it back.
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"issues":[],"isLast":true}`))
+	}))
+	defer srv.Close()
+
+	if _, err := New(srv.URL, "a@b.c", "t").Search(context.Background(), "project = CR", 5); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if gotPath != "/rest/api/3/search/jql" {
+		t.Errorf("path = %q, want /rest/api/3/search/jql", gotPath)
+	}
+}
+
+func TestARemovedEndpointSaysSoInWords(t *testing.T) {
+	// An EOL reads like a transient failure until something says the word.
+	// Qualys retired the 2.0 KnowledgeBase the same way, and the cost there
+	// was time spent looking for a credential problem.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"errorMessages":["The requested API has been removed. ` +
+			`Please migrate to the /rest/api/3/search/jql API."]}`))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "a@b.c", "t").Search(context.Background(), "project = CR", 5)
+	if err == nil {
+		t.Fatal("a 410 was reported as success")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "REMOVED") {
+		t.Errorf("a 410 does not name itself as a removal: %v", msg)
+	}
+	if !strings.Contains(msg, "code change, not a config change") {
+		t.Errorf("a 410 does not say who can fix it: %v", msg)
+	}
+	// The replacement path is in Atlassian's body. Losing it means the next
+	// person has to go and find the changelog entry.
+	if !strings.Contains(msg, "/rest/api/3/search/jql") {
+		t.Errorf("the replacement path was dropped from the error: %v", msg)
+	}
+}
+
 func TestSearchAsksForTheMinimumAndParsesStatusCategory(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -197,8 +247,26 @@ func TestSearchAsksForTheMinimumAndParsesStatusCategory(t *testing.T) {
 	if body["jql"] == "" {
 		t.Error("no JQL was sent")
 	}
-	if f, _ := body["fields"].([]any); len(f) == 0 {
-		t.Error("search did not restrict fields - a duplicate check should not pull whole issues")
+	// Not hygiene any more. /rest/api/3/search/jql returns ONLY the issue id
+	// unless fields are named, so an unasked-for status field comes back
+	// empty - IsDone would then report every ticket as not-done while the
+	// duplicate check carried on working, which is the quiet kind of wrong.
+	f, _ := body["fields"].([]any)
+	if len(f) == 0 {
+		t.Fatal("search named no fields - the new endpoint returns only the id")
+	}
+	want := map[string]bool{"status": false, "labels": false, "summary": false}
+	for _, v := range f {
+		if name, ok := v.(string); ok {
+			if _, tracked := want[name]; tracked {
+				want[name] = true
+			}
+		}
+	}
+	for name, asked := range want {
+		if !asked {
+			t.Errorf("search did not ask for %q, so it will come back empty", name)
+		}
 	}
 }
 
