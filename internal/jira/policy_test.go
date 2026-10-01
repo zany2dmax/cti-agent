@@ -75,13 +75,34 @@ func TestTheSummaryDoesNotCryWolfBeforeTheDeadline(t *testing.T) {
 	}
 }
 
-func TestASingleHostIsNotPluralised(t *testing.T) {
-	// CVE-2026-53266 is one host. "1 hosts" in a ticket title that IT reads
-	// every day is the kind of sloppiness that makes automation look
+func TestTheHostCountIsPluralisedCorrectly(t *testing.T) {
+	// CVE-2026-53266 is a single host. "1 hosts" in a ticket title IT reads
+	// every morning is the kind of sloppiness that makes automation look
 	// untrustworthy.
-	f := Finding{CVE: "CVE-2026-53266", Hosts: []string{"crs1.cr-365.com"}, Severity: 5}
-	if s := Summary(f, now); !strings.Contains(s, "1 host -") && !strings.Contains(s, "1 host,") {
-		t.Errorf("expected singular host, got %q", s)
+	//
+	// The first version of this test asserted on the punctuation AROUND the
+	// count - "1 host -" or "1 host," - and failed against correct output,
+	// because with no title and no KEV marker the summary ends at the count.
+	// It was checking the shape of one example rather than the rule. Asserting
+	// the rule means the negative case has to be explicit, since "1 host" is a
+	// substring of "1 hosts".
+	for _, tc := range []struct {
+		hosts int
+		want  string
+	}{
+		{0, "0 hosts"},
+		{1, "1 host"},
+		{2, "2 hosts"},
+		{441, "441 hosts"},
+	} {
+		f := Finding{CVE: "CVE-2026-53266", Hosts: make([]string, tc.hosts), Severity: 5}
+		s := Summary(f, now)
+		if !strings.Contains(s, tc.want) {
+			t.Errorf("%d hosts: summary %q does not contain %q", tc.hosts, s, tc.want)
+		}
+		if tc.hosts == 1 && strings.Contains(s, "1 hosts") {
+			t.Errorf("a single host was pluralised: %q", s)
+		}
 	}
 }
 
