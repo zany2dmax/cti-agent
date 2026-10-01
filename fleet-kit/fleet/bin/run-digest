@@ -91,6 +91,31 @@ say "enrich: NVD + EPSS + KEV"
 python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
   || fail "enrich lane failed"
 
+# ── 2b. ticket ───────────────────────────────────────────────────────────────
+# Files or updates one Jira ticket per confirmed KEV or Sev5 CVE, and writes a
+# cve -> ticket map that brief.py reads in the next step. Hence the position:
+# after enrich because it needs the findings, before brief because the keys
+# must exist by the time the email is rendered.
+#
+# EVERY FAILURE HERE IS NON-FATAL, and that is the whole design constraint of
+# putting it in this pipeline. This lane now sits between the fleet and its
+# daily security email, so a Jira outage, an expired API token or a project
+# permission change must cost tickets and nothing else. cti-jira exits 0 on
+# its own internal failures; `|| true` covers the ones it cannot catch, like
+# the binary being absent on an older install.
+#
+# It is skipped entirely on a dry run. A --dry-run that silently files real
+# tickets would be the same class of mistake as the dropped --dry-run that
+# sent a real digest in September, with a longer cleanup.
+JIRA="$FLEET_CODE/bin/cti-jira"
+if [ -z "$DRY" ] && [ -x "$JIRA" ]; then
+  say "ticket: filing KEV and Sev5 findings"
+  "$JIRA" --from-enriched "$ENRICHED" --for-real || true
+elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
+  say "ticket: dry run, nothing will be filed"
+  "$JIRA" --from-enriched "$ENRICHED" || true
+fi
+
 # ── 3. brief ─────────────────────────────────────────────────────────────────
 say "brief: rendering $KIND"
 python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" \

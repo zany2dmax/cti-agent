@@ -250,7 +250,9 @@ def qids_cell(f):
             f"Menlo,monospace'>{shown}</span>{extra}</div>")
 
 
-def finding_block(f):
+def finding_block(f, tickets=None):
+    # tickets defaults to empty so every existing caller and test keeps
+    # working, and a finding with no ticket renders exactly as it did before.
     color, bg, _ = PRI[f["priority"]]
     cve = esc(f["cve"])
     link = f"https://nvd.nist.gov/vuln/detail/{cve}"
@@ -306,6 +308,7 @@ def finding_block(f):
                         color:#2d3748;margin:6px 0">
               {esc((f.get('description') or 'No NVD description available.')[:320])}
             </div>
+            {ticket_cell_html(f, tickets or {})}
             {qids_cell(f)}
             <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                         color:#4a5568;margin-top:4px">
@@ -504,7 +507,7 @@ def render(data, kind):
                     color:{PRI[p][0]};letter-spacing:.6px;text-transform:uppercase;
                     border-bottom:2px solid {PRI[p][0]};padding-bottom:5px">
           {p} &mdash; {PRI[p][2]} ({len(group)})
-        </div></td></tr>{note}{''.join(finding_block(f) for f in shown)}{more}""")
+        </div></td></tr>{note}{''.join(finding_block(f, data.get('_tickets')) for f in shown)}{more}""")
 
     # "N emails inspected" was read as "N emails brought new CVE information".
     # It meant neither: it counted every message in the window, and the window
@@ -579,6 +582,57 @@ def render(data, kind):
 </table></td></tr></table></body></html>"""
 
 
+def load_tickets(enriched_path):
+    """Read the cve -> Jira ticket map cti-jira wrote beside the enriched file.
+
+    A FILE, deliberately. This renderer is stdlib Python with no Jira
+    credentials and no business having any: the lane that can already talk to
+    Jira does the talking and leaves a flat map behind.
+
+    Missing or unreadable is normal and silent. Ticketing is optional, runs
+    before this, and is allowed to fail - a digest that refused to render
+    because Jira was down would turn an optional feature into an outage of
+    the security email.
+    """
+    if enriched_path.endswith(".json"):
+        path = enriched_path[:-5] + "-tickets.json"
+    else:
+        path = enriched_path + "-tickets.json"
+    try:
+        with open(path) as fh:
+            return (json.load(fh) or {}).get("tickets") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ticket_cell_html(f, tickets):
+    """The ticket line for one finding, or nothing at all."""
+    t = tickets.get(f.get("cve") or "")
+    if not t or not t.get("key"):
+        return ""
+    key = esc(t["key"])
+    url = t.get("url") or ""
+    # Only http(s) becomes a link. The map is generated locally, but this ends
+    # up in an email, and the URL-scheme rule the attribution line already
+    # follows applies to every link this renderer emits.
+    if url.startswith(("http://", "https://")):
+        label = f'<a href="{esc(url)}" style="color:#12203a">{key}</a>'
+    else:
+        label = key
+    status = f" &middot; {esc(t['status'])}" if t.get("status") else ""
+    return ('<div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,'
+            'Arial,sans-serif;color:#4a5568;margin-top:4px">'
+            f'<b>Ticket:</b> {label}{status}</div>')
+
+
+def ticket_cell_text(f, tickets):
+    t = tickets.get(f.get("cve") or "")
+    if not t or not t.get("key"):
+        return None
+    status = f" ({t['status']})" if t.get("status") else ""
+    return f"    Ticket: {t['key']}{status}  {t.get('url') or ''}".rstrip()
+
+
 def render_text(data, kind):
     c = data["counts"]
     lines = [subject(data, kind), "=" * 68, ""]
@@ -615,6 +669,9 @@ def render_text(data, kind):
             lines.append(f"  {f['cve']}  {f.get('status')}  "
                          f"{f.get('host_count') or 0} host(s)")
             lines.append(f"    {f.get('rationale')}")
+            tl = ticket_cell_text(f, data.get("_tickets") or {})
+            if tl:
+                lines.append(tl)
         # Truncation is stated, as it is in the HTML. A list that silently
         # stops is one the reader believes is complete.
         if len(group) > limits[p]:
@@ -655,6 +712,9 @@ def main():
     data.setdefault("findings", [])
     data.setdefault("total", len(data["findings"]))
     data.setdefault("generated", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    # Underscore-prefixed: renderer state, not part of the enriched
+    # contract that enrich.py owns.
+    data["_tickets"] = load_tickets(args.enriched)
 
     if args.subject_only:
         print(subject(data, kind))

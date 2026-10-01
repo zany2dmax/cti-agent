@@ -1144,6 +1144,78 @@ class DigestSendLedger(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0, "a miss must exit non-zero for the shell guard")
 
 
+class DigestTicketLinks(unittest.TestCase):
+    """The digest must quote the ticket, and must render without one.
+
+    Every ticket description promises "the CTI daily digest will keep listing
+    this CVE, with this ticket's key, until the scanner stops finding it".
+    Until now nothing kept that promise.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.enriched = os.path.join(self.dir, "enriched-2026-10-02.json")
+        self.tickets = os.path.join(self.dir, "enriched-2026-10-02-tickets.json")
+        with open(self.enriched, "w") as fh:
+            json.dump({"findings": [], "counts": {}}, fh)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write_map(self, obj):
+        with open(self.tickets, "w") as fh:
+            json.dump(obj, fh)
+
+    def test_the_map_is_found_beside_the_enriched_file(self):
+        self.write_map({"tickets": {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9"}}})
+        got = brief.load_tickets(self.enriched)
+        self.assertEqual(got["CVE-1"]["key"], "CR-9")
+
+    def test_a_missing_map_is_silent_not_an_error(self):
+        # Ticketing is optional and runs before the renderer. A digest that
+        # refused to render because Jira was down would turn an optional
+        # feature into an outage of the security email.
+        self.assertEqual(brief.load_tickets(self.enriched), {})
+
+    def test_a_corrupt_map_is_silent_too(self):
+        with open(self.tickets, "w") as fh:
+            fh.write("{not json")
+        self.assertEqual(brief.load_tickets(self.enriched), {})
+
+    def test_the_key_and_link_reach_the_html(self):
+        tickets = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9",
+                             "status": "In Progress"}}
+        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
+        self.assertIn("CR-9", html)
+        self.assertIn("https://x/browse/CR-9", html)
+        self.assertIn("In Progress", html)
+
+    def test_a_finding_with_no_ticket_renders_nothing(self):
+        self.assertEqual(brief.ticket_cell_html({"cve": "CVE-2"}, {}), "")
+        self.assertIsNone(brief.ticket_cell_text({"cve": "CVE-2"}, {}))
+
+    def test_only_http_urls_become_links(self):
+        # Same rule the attribution line follows. The map is generated
+        # locally, but this lands in an email.
+        tickets = {"CVE-1": {"key": "CR-9", "url": "javascript:alert(1)"}}
+        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
+        self.assertNotIn("javascript:", html)
+        self.assertIn("CR-9", html)
+
+    def test_the_ticket_key_is_escaped(self):
+        tickets = {"CVE-1": {"key": "<script>", "url": ""}}
+        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
+        self.assertNotIn("<script>", html)
+
+    def test_the_text_digest_carries_it_too(self):
+        # Some readers get the text part. A ticket quoted only in HTML is a
+        # ticket half the recipients never see.
+        tickets = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9"}}
+        line = brief.ticket_cell_text({"cve": "CVE-1"}, tickets)
+        self.assertIn("CR-9", line)
+        self.assertIn("https://x/browse/CR-9", line)
+
+
 class TestFileShape(unittest.TestCase):
     """Nothing may be defined after unittest.main().
 

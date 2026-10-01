@@ -31,6 +31,8 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/jira"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
 
 const (
@@ -56,11 +58,13 @@ func run() int {
 		"build a clearly-labelled test ticket")
 	forReal := flag.Bool("for-real", false,
 		"actually create it; without this, nothing is written")
+	fromEnriched := flag.String("from-enriched", "",
+		"file tickets for the KEV and Sev5 findings in this enriched JSON")
 	flag.Parse()
 
-	if !*check && !*testTicket {
+	if !*check && !*testTicket && *fromEnriched == "" {
 		flag.Usage()
-		return die("nothing to do - pass --check or --test-ticket")
+		return die("nothing to do - pass --check, --test-ticket or --from-enriched")
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A
@@ -86,6 +90,9 @@ func run() int {
 	}
 	if *testTicket {
 		return doTestTicket(ctx, c, cfg, *forReal)
+	}
+	if *fromEnriched != "" {
+		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal)
 	}
 	return exitOK
 }
@@ -244,7 +251,8 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		return die("searching for an existing ticket: %s", safelog.Line(err.Error()))
 	}
 	if len(existing) > 0 {
-		return updateExisting(ctx, c, existing[0], f, csvBody, now)
+		_, rc := updateExisting(ctx, c, existing[0], f, csvBody, now)
+		return rc
 	}
 
 	res, err := c.CreateIssue(ctx, jira.IssueRequest{
@@ -289,7 +297,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		"mode": "for-real", "created": true,
 		"key": res.Key, "url": c.BrowseURL(res.Key),
 		"attached": attached, "attachment": csvName,
-		"hosts": len(f.Hosts), "hosts_hash": st.HostsHash,
+		"hosts": f.Count(), "hosts_hash": st.HostsHash,
 	})
 	fmt.Println(string(out))
 
@@ -307,7 +315,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 // A ticket that snapshots a single morning and never updates is worse than no
 // ticket, because it looks current.
 func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
-	f jira.Finding, csvBody []byte, now time.Time) int {
+	f jira.Finding, csvBody []byte, now time.Time) (string, int) {
 
 	key := issue.Key
 	logf("ticket for %s already exists: %s (%s)", f.CVE, key, c.BrowseURL(key))
@@ -328,16 +336,16 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 	// automation one. Somebody closed it deliberately - exception,
 	// compensating control, a replacement ticket - and software that reverses
 	// that every night is software that gets switched off. Say it once.
-	if issue.IsDone() && len(f.Hosts) > 0 {
+	if issue.IsDone() && f.Count() > 0 {
 		if found && !prev.ClosedButDetectedAt.IsZero() {
 			logf("closed, still detected on %d host(s) - already noted on %s, saying nothing",
-				len(f.Hosts), prev.ClosedButDetectedAt.Format("2006-01-02"))
+				f.Count(), prev.ClosedButDetectedAt.Format("2006-01-02"))
 			emit(map[string]any{"mode": "for-real", "created": false,
 				"reason": "closed-but-detected-already-noted", "key": key})
-			return exitOK
+			return key, exitOK
 		}
 		if err := c.AddComment(ctx, key, jira.ClosedButDetectedComment(f, now)); err != nil {
-			return die("commenting on %s: %s", key, safelog.Line(err.Error()))
+			return key, die("commenting on %s: %s", key, safelog.Line(err.Error()))
 		}
 		st := jira.StateFrom(f, key, now)
 		st.ClosedButDetectedAt = now
@@ -347,7 +355,7 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		logf("closed ticket still has detections - noted once, not reopened")
 		emit(map[string]any{"mode": "for-real", "created": false,
 			"reason": "closed-but-detected", "key": key, "commented": true})
-		return exitOK
+		return key, exitOK
 	}
 
 	d := jira.DiffExposure(prevPtr, f, now)
@@ -364,25 +372,27 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		switch {
 		case d.FirstLook:
 			logf("no stored state - recorded %d host(s), no comment (this is not a discovery)",
-				len(f.Hosts))
+				f.Count())
 		default:
 			logf("no material change (%d -> %d hosts) - state updated, no comment",
 				d.CountBefore, d.CountAfter)
 		}
 		emit(map[string]any{"mode": "for-real", "created": false,
 			"reason": "no-material-change", "key": key,
-			"hosts": len(f.Hosts), "commented": false})
-		return exitOK
+			"hosts": f.Count(), "commented": false})
+		return key, exitOK
 	}
 
 	csvName := jira.CSVName(f.CVE, now)
 	if err := c.AddComment(ctx, key, jira.DriftComment(d, f, csvName, now)); err != nil {
-		return die("commenting on %s: %s", key, safelog.Line(err.Error()))
+		return key, die("commenting on %s: %s", key, safelog.Line(err.Error()))
 	}
 	logf("commented on %s: %d -> %d hosts, +%d new, +%d new QID(s)",
 		key, d.CountBefore, d.CountAfter, len(d.NewHosts), len(d.NewQIDs))
 
 	attached := true
+	// len(Hosts), not Count(): this asks "is there a CSV worth uploading",
+	// and a truncated scan can report a nonzero count with no names.
 	if len(f.Hosts) > 0 {
 		if err := c.Attach(ctx, key, csvName, csvBody); err != nil {
 			attached = false
@@ -410,10 +420,144 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		"new_hosts": len(d.NewHosts), "new_qids": len(d.NewQIDs),
 		"resolved": d.Resolved,
 	})
-	return exitOK
+	return key, exitOK
 }
 
 func emit(v map[string]any) {
 	out, _ := json.Marshal(v)
 	fmt.Println(string(out))
+}
+
+// doFromEnriched is the production path: file and update tickets for the KEV
+// and Sev5 findings in the digest's own output.
+//
+// Ordering inside run-digest matters and is deliberate - this runs AFTER
+// enrich and BEFORE brief, so the ticket keys exist by the time the email is
+// rendered. The consequence is that this lane sits between the fleet and its
+// daily security email, so every failure path below returns exitOK. A Jira
+// outage must cost tickets, never the digest.
+func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
+	path string, forReal bool) int {
+
+	now := time.Now().UTC()
+
+	ef, err := loadEnriched(path)
+	if err != nil {
+		logf("WARNING: %s - no tickets this run", safelog.Line(err.Error()))
+		return exitOK
+	}
+
+	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
+		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
+	if _, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath); err != nil {
+		logf("WARNING: scanner KB cache unavailable (%s) - no tickets this run",
+			safelog.Line(err.Error()))
+		return exitOK
+	}
+
+	fill := func(ctx context.Context, cve string) (vulnlookup.Result, error) {
+		return q.LookupCVE(ctx, cve)
+	}
+	findings := selectForTicketing(ctx, ef.Findings, fill,
+		func(format string, a ...any) { logf("WARNING: "+format, a...) })
+
+	logf("%d of %d findings qualify for a ticket (KEV or Sev5, and present)",
+		len(findings), len(ef.Findings))
+
+	tm := TicketMap{Generated: now.Format(time.RFC3339), Tickets: map[string]TicketRef{}}
+
+	for _, f := range findings {
+		ref, err := fileOrUpdate(ctx, c, cfg, f, now, forReal)
+		if err != nil {
+			// One bad ticket must not stop the rest, and must not stop the
+			// digest. Named, counted, carried on.
+			logf("WARNING: %s: %s", f.CVE, safelog.Line(err.Error()))
+			continue
+		}
+		if ref.Key != "" {
+			tm.Tickets[f.CVE] = ref
+		}
+	}
+
+	out := TicketMapPath(path)
+	if err := writeTicketMap(out, tm); err != nil {
+		logf("WARNING: %s - the digest will render without ticket keys",
+			safelog.Line(err.Error()))
+		return exitOK
+	}
+	logf("wrote %d ticket reference(s) to %s", len(tm.Tickets), out)
+	return exitOK
+}
+
+// fileOrUpdate creates a ticket, or updates the one that already exists.
+func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
+	f jira.Finding, now time.Time, forReal bool) (TicketRef, error) {
+
+	existing, err := c.Search(ctx, jira.FindJQL(cfg.JiraProjectKey, f.CVE), 5)
+	if err != nil {
+		return TicketRef{}, fmt.Errorf("searching for an existing ticket: %w", err)
+	}
+
+	csvBody, err := jira.HostCSV(f)
+	if err != nil {
+		return TicketRef{}, fmt.Errorf("building the host CSV: %w", err)
+	}
+
+	if len(existing) > 0 {
+		issue := existing[0]
+		if !forReal {
+			logf("DRY RUN %s: would update %s (%d hosts)", f.CVE, issue.Key, f.Count())
+			return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
+				Status: issue.Fields.Status.Name}, nil
+		}
+		key, rc := updateExisting(ctx, c, issue, f, csvBody, now)
+		if rc != exitOK {
+			return TicketRef{}, fmt.Errorf("updating %s", key)
+		}
+		return TicketRef{Key: key, URL: c.BrowseURL(key),
+			Status: issue.Fields.Status.Name}, nil
+	}
+
+	// A non-KEV Sev5 is the fleet's own judgement rather than an external
+	// deadline, so it waits for a person. Recorded on the board, not filed.
+	if jira.NeedsApproval(f) {
+		logf("%s is Sev5 but not KEV - needs approval, not filing", f.CVE)
+		return TicketRef{}, nil
+	}
+
+	if !forReal {
+		logf("DRY RUN %s: would file a new ticket (%d hosts, %d QIDs)",
+			f.CVE, f.Count(), len(f.QIDs))
+		return TicketRef{}, nil
+	}
+
+	if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
+		return TicketRef{}, err
+	}
+
+	csvName := jira.CSVName(f.CVE, now)
+	res, err := c.CreateIssue(ctx, jira.IssueRequest{
+		ProjectKey:  cfg.JiraProjectKey,
+		IssueType:   cfg.JiraIssueType,
+		Summary:     jira.Summary(f, now),
+		Description: jira.Description(f, now, csvName),
+		Labels:      jira.Labels(f),
+	})
+	if err != nil {
+		return TicketRef{}, fmt.Errorf("creating the ticket: %w", err)
+	}
+	logf("filed %s for %s (%d hosts) - %s", res.Key, f.CVE, f.Count(), c.BrowseURL(res.Key))
+
+	if len(f.Hosts) > 0 {
+		if err := c.Attach(ctx, res.Key, csvName, csvBody); err != nil {
+			logf("WARNING: %s was created but the CSV did not attach: %s",
+				res.Key, safelog.Line(err.Error()))
+		}
+	}
+	st := jira.StateFrom(f, res.Key, now)
+	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
+		logf("WARNING: could not record exposure state on %s: %s",
+			res.Key, safelog.Line(err.Error()))
+	}
+	return TicketRef{Key: res.Key, URL: c.BrowseURL(res.Key), Created: true}, nil
 }

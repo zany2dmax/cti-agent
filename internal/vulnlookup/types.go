@@ -38,6 +38,23 @@ type Result struct {
 	LastSeen    string
 	SampleHosts []string
 	Reason      string
+
+	// Hosts is every affected machine, not a sample.
+	//
+	// Separate from SampleHosts, which exists for display and is capped at
+	// ten. A remediation ticket needs the whole list - a ticket with no
+	// hostnames to work on is useless - and the Qualys client already builds
+	// this union internally; it simply was not carried across the interface.
+	//
+	// MAY BE SHORTER THAN HostCount. When the provider truncates its per-QID
+	// host lists, HostCountIsFloor is set and HostCount can exceed len(Hosts).
+	// Anything presenting these must take the COUNT from HostCount and the
+	// NAMES from Hosts, and say the names are partial - deriving a count from
+	// len(Hosts) silently understates the estate.
+	//
+	// Providers that cannot enumerate hosts leave this nil. That is not the
+	// same as zero hosts; check Status.
+	Hosts []string
 }
 
 // LookupProvider defines the swappable VM/EDR/backend boundary.

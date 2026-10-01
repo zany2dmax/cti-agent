@@ -280,3 +280,56 @@ func TestLabelsCarryTheFiltersAHumanWants(t *testing.T) {
 		}
 	}
 }
+
+func TestATruncatedScanReportsTheCountNotTheNamesItGot(t *testing.T) {
+	// Qualys truncates its per-QID host lists on a large estate, so the union
+	// of NAMES can be shorter than the number of MACHINES. Deriving the count
+	// from the names understates exposure - and understating exposure in a
+	// remediation ticket is the one direction that gets somebody hurt.
+	f := Finding{
+		CVE:          "CVE-2026-85880",
+		Hosts:        make([]string, 120), // all the scanner would name
+		HostCount:    361,                 // what it actually counted
+		CountIsFloor: true,
+		Severity:     5,
+		KEV:          true,
+	}
+	if f.Count() != 361 {
+		t.Errorf("Count() = %d, want 361", f.Count())
+	}
+	if !f.HostFloor() {
+		t.Error("a truncated scan was not reported as a floor")
+	}
+	s := Summary(f, now)
+	if !strings.Contains(s, "361") {
+		t.Errorf("summary reports the names it got, not the machines: %q", s)
+	}
+	if !strings.Contains(s, "at least") {
+		t.Errorf("summary states a floor as a measurement: %q", s)
+	}
+	d := Description(f, now, "x.csv")
+	if !strings.Contains(d, "361") || !strings.Contains(d, "floor") {
+		t.Errorf("description does not state the floor: %q", d)
+	}
+}
+
+func TestAShortNameListAloneMakesItAFloor(t *testing.T) {
+	// Even without CountIsFloor set, fewer names than machines means the CSV
+	// is incomplete and the ticket must say so.
+	f := Finding{CVE: "CVE-1", Hosts: make([]string, 5), HostCount: 50, Severity: 5}
+	if !f.HostFloor() {
+		t.Error("5 names for 50 machines was not treated as a floor")
+	}
+}
+
+func TestCountFallsBackToTheListWhenUnset(t *testing.T) {
+	// Callers that only have a list - including every existing test - keep
+	// working rather than silently reporting zero.
+	f := Finding{CVE: "CVE-1", Hosts: []string{"a", "b", "c"}, Severity: 5}
+	if f.Count() != 3 {
+		t.Errorf("Count() = %d, want 3", f.Count())
+	}
+	if f.HostFloor() {
+		t.Error("a complete list was reported as a floor")
+	}
+}
