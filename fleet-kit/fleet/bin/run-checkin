@@ -210,7 +210,49 @@ cd "$FLEET_HOME"
 beat_log="$(mktemp "${TMPDIR:-/tmp}/cti-checkin.XXXXXX")"
 trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 
-"$CLAUDE" -p "/checkin" --permission-mode acceptEdits < /dev/null 2>&1 | tee "$beat_log"
+# WHAT THE ORCHESTRATOR MAY RUN, AND WHY IT IS A FLAG NOT A SETTINGS FILE.
+#
+# --permission-mode acceptEdits auto-approves FILE EDITS ONLY. Every Bash call
+# still asks for approval, and with -p and stdin closed there is nobody to ask,
+# so every command is denied. That is the whole "sandbox block" the heartbeat
+# reported for ten days: it could edit board.md by hand but could not run
+# fleet-board, fleet-db, cti-budget or journalctl. Not SELinux, not sudo - a
+# missing allowlist.
+#
+# The list lives HERE, on the command line, rather than in a settings.json
+# under the agent's own HOME. The reason is acceptEdits itself: the agent can
+# write files, so a permissions file inside its home directory is a
+# permissions file it can edit. run-checkin is root-owned 0755 in $CODE_DIR
+# and the service account cannot modify it, which makes this the one place the
+# list cannot be widened by the thing it constrains.
+#
+# Absolute paths, so a binary of the same name earlier in PATH does not
+# inherit the grant.
+#
+# NOT GRANTED, deliberately:
+#   cti-mailer / mailer.py  - the orchestrator must not be able to send mail
+#                             on its own. Escalation goes through cti-alert,
+#                             which the alert units invoke, not the agent.
+#   cti-mailbox --for-real  - listed WITHOUT :* so only the bare command
+#                             matches, which is the dry run. Moving mail is a
+#                             scheduled decision, not a beat-time one.
+#   anything outside this list - including a plain shell.
+#
+# journalctl is read-only in practice here: its destructive flags
+# (--vacuum-*, --rotate) act on the system journal and need privileges this
+# unprivileged service account does not have.
+ALLOWED_TOOLS="Bash($FLEET_CODE/bin/fleet-board:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/fleet-db:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(journalctl:*)"
+
+echo "[run-checkin $(date '+%F %H:%M:%S')] allowed tools: $ALLOWED_TOOLS"
+
+"$CLAUDE" -p "/checkin" --permission-mode acceptEdits \
+  --allowedTools "$ALLOWED_TOOLS" < /dev/null 2>&1 | tee "$beat_log"
 rc="${PIPESTATUS[0]}"
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
 

@@ -339,6 +339,36 @@ The orchestrator runs unattended. Its standing instructions
 Auto-sending is limited to scheduled reports on an established schedule to an
 allowlisted list. Everything else is proposed on the message board and waits.
 
+### What the orchestrator may run
+
+The heartbeat runs `claude -p` unattended, with `--permission-mode acceptEdits`
+and an explicit `--allowedTools` list: the fleet's own binaries and
+`journalctl`, by absolute path, and nothing else.
+
+**The list is a command-line flag in `run-checkin`, not a settings file.**
+`acceptEdits` means the agent can write files, so a permissions file inside its
+own home directory is a permissions file it can edit. `run-checkin` is
+root-owned `0755` under `$CODE_DIR` and the service account cannot modify it,
+which makes it the one place the list cannot be widened by the thing it
+constrains.
+
+Deliberately absent from the grant:
+
+- **`cti-mailer` and `mailer.py`.** The orchestrator cannot send mail. It reads
+  attacker-supplied threat intel, so an injection that reached a send capability
+  would have the fleet's whole recipient allowlist behind it. Escalation runs
+  through `cti-alert`, invoked by the alert units rather than by the agent.
+- **`cti-mailbox --for-real`.** Granted without `:*`, so only the bare command
+  matches — the dry run. Moving mail is a scheduled decision, not a beat-time
+  one.
+- **A general shell.** There is no `Bash(*)` entry.
+
+Until this list existed the agent had no Bash capability at all: `acceptEdits`
+approves edits only, so every command was denied with nobody present to
+approve. It worked around that by editing `board.md` directly for ten days.
+That was a missing allowlist, not a sandbox — but it is worth noting that the
+failure was in the safe direction.
+
 `cti-budget` rations this fleet's share of a subscription; it cannot see
 account-level exhaustion, so an empty balance is detected from the CLI's own
 output and classified as `exhausted` — held and escalated, never reported as a
