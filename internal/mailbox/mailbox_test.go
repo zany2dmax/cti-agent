@@ -25,7 +25,7 @@ func TestNothingIsTouchedWithoutAProcessingRecord(t *testing.T) {
 		{ID: "unread-2", Subject: "Daily CTI digest"},
 		{ID: "unread-3", Subject: "anything at all"},
 	}
-	for _, d := range Plan(cands, map[string]Processed{}) {
+	for _, d := range planNoGrace(cands, map[string]Processed{}) {
 		if d.Action != ActionLeave {
 			t.Errorf("%s: action %s - an unread message must never move", d.ID, d.Action)
 		}
@@ -43,7 +43,7 @@ func TestACVEBearingMessageIsArchivedNeverDeleted(t *testing.T) {
 	proc := map[string]Processed{
 		"m1": {ID: "m1", HasCVE: true, AutoReply: true},
 	}
-	got := Plan([]Candidate{{ID: "m1", Subject: "Automatic reply: re CVE-2026-1", AutoReply: true}}, proc)
+	got := planNoGrace([]Candidate{{ID: "m1", Subject: "Automatic reply: re CVE-2026-1", AutoReply: true}}, proc)
 	if got[0].Action != ActionArchive {
 		t.Errorf("action = %s, want archive: a CVE outranks an auto-reply header", got[0].Action)
 	}
@@ -54,7 +54,7 @@ func TestOnlyHeaderConfirmedAutoRepliesAreDeleted(t *testing.T) {
 		"ooo":     {ID: "ooo", AutoReply: true},
 		"subject": {ID: "subject", AutoReply: false},
 	}
-	plan := Plan([]Candidate{
+	plan := planNoGrace([]Candidate{
 		{ID: "ooo", Subject: "Automatic reply: Out of Office", AutoReply: true},
 		// Looks exactly like an auto-reply and is not one, as far as the
 		// headers are concerned. Subject text does not delete mail.
@@ -93,7 +93,7 @@ func TestProcessedNonCVEMailIsLeftAloneNotArchived(t *testing.T) {
 		"defender": {ID: "defender"},
 		"advisory": {ID: "advisory", HasCVE: true},
 	}
-	plan := Plan([]Candidate{
+	plan := planNoGrace([]Candidate{
 		{ID: "phish", Subject: "suspicious"},
 		{ID: "invoice", Subject: "FW: Office Technologies Inc Invoice"},
 		{ID: "defender", Subject: "Microsoft Defender found potential attack path"},
@@ -129,7 +129,7 @@ func TestProcessedNonCVEMailIsLeftAloneNotArchived(t *testing.T) {
 // fault. Counting them together made the backlog alarm fire on a healthy
 // mailbox, where ordinary team mail is left alone every day by design.
 func TestTheBacklogAlarmCountsOnlyMailTheAgentNeverRead(t *testing.T) {
-	plan := Plan([]Candidate{
+	plan := planNoGrace([]Candidate{
 		{ID: "read-1"}, {ID: "read-2"}, {ID: "read-3"},
 		{ID: "never-read-1"}, {ID: "never-read-2"},
 	}, map[string]Processed{
@@ -326,7 +326,7 @@ func TestTheBacklogNoteOnlyFiresAtTheThreshold(t *testing.T) {
 }
 
 func TestSummariseCountsEveryAction(t *testing.T) {
-	plan := Plan([]Candidate{
+	plan := planNoGrace([]Candidate{
 		{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"},
 	}, map[string]Processed{
 		"a": {ID: "a", HasCVE: true},
@@ -350,7 +350,7 @@ func TestSummariseCountsEveryAction(t *testing.T) {
 func TestEveryDecisionCarriesAReason(t *testing.T) {
 	// This lane moves other people's mail unattended. "Why is this in Deleted
 	// Items" has to be answerable from the log alone.
-	plan := Plan([]Candidate{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+	plan := planNoGrace([]Candidate{{ID: "a"}, {ID: "b"}, {ID: "c"}},
 		map[string]Processed{
 			"a": {ID: "a", HasCVE: true},
 			"b": {ID: "b", AutoReply: true},
@@ -419,7 +419,7 @@ func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
 	for _, c := range cases {
 		rec := c.rec
 		rec.ID = "id"
-		plan := Plan([]Candidate{{ID: "id", Subject: c.subject, AutoReply: c.hdrAuto}},
+		plan := planNoGrace([]Candidate{{ID: "id", Subject: c.subject, AutoReply: c.hdrAuto}},
 			map[string]Processed{"id": rec})
 		if plan[0].Action != c.want {
 			t.Errorf("%-62q\n    got %s, want %s (%s)",
@@ -440,7 +440,7 @@ func TestTheSubjectLineHasNoInfluenceOnTheDecision(t *testing.T) {
 	}
 	for _, s := range subjects {
 		// Same record every time: read, no CVE, no auto-reply header.
-		plan := Plan([]Candidate{{ID: "x", Subject: s}},
+		plan := planNoGrace([]Candidate{{ID: "x", Subject: s}},
 			map[string]Processed{"x": {ID: "x"}})
 		if plan[0].Action != ActionLeave {
 			t.Errorf("subject %q changed the action to %s; only the "+
@@ -450,7 +450,7 @@ func TestTheSubjectLineHasNoInfluenceOnTheDecision(t *testing.T) {
 	}
 	// And a CVE-bearing message is archived even when its subject looks like
 	// an out-of-office reply.
-	plan := Plan([]Candidate{{ID: "y", Subject: "Automatic reply: out of office"}},
+	plan := planNoGrace([]Candidate{{ID: "y", Subject: "Automatic reply: out of office"}},
 		map[string]Processed{"y": {ID: "y", HasCVE: true}})
 	if plan[0].Action != ActionArchive {
 		t.Errorf("a CVE-bearing message must be archived, not %s - deleting a "+
@@ -497,7 +497,7 @@ func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
 		if c.haveRecord {
 			proc["id"] = Processed{ID: "id", HasCVE: c.hasCVE, AutoReply: c.recAuto}
 		}
-		plan := Plan([]Candidate{{ID: "id", AutoReply: c.hdrAuto}}, proc)
+		plan := planNoGrace([]Candidate{{ID: "id", AutoReply: c.hdrAuto}}, proc)
 		if plan[0].Action != c.want {
 			t.Errorf("record=%v cve=%v recAuto=%v hdrAuto=%v -> %s, want %s (%s)",
 				c.haveRecord, c.hasCVE, c.recAuto, c.hdrAuto,
@@ -519,7 +519,7 @@ func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
 // is safe - but it would also fall through Summarise and go uncounted, so the
 // printed plan would not add up to the number of messages.
 func TestAPlanContainsNothingButTheThreeKnownActions(t *testing.T) {
-	plan := Plan([]Candidate{
+	plan := planNoGrace([]Candidate{
 		{ID: "a"}, {ID: "b", AutoReply: true}, {ID: "c"}, {ID: "d"},
 	}, map[string]Processed{
 		"a": {ID: "a", HasCVE: true},
@@ -536,5 +536,104 @@ func TestAPlanContainsNothingButTheThreeKnownActions(t *testing.T) {
 	c := Summarise(plan)
 	if c.Archive+c.Delete+c.Leave != len(plan) {
 		t.Errorf("counts %+v do not add up to %d decisions", c, len(plan))
+	}
+}
+
+// planNoGrace is Plan with the minimum-age grace disabled.
+//
+// Every test above predates minAge and asserts the classification rules -
+// processed, CVE, auto-reply, unknown - none of which the grace changes.
+// Passing 0 keeps them asserting exactly what they were written to assert,
+// rather than quietly becoming age tests. The grace has its own tests.
+func planNoGrace(c []Candidate, p map[string]Processed) []Decision {
+	return Plan(c, p, time.Now(), 0)
+}
+
+// ─── the minimum-age grace ──────────────────────────────────────────────────
+
+func TestAJustArrivedAdvisoryIsLeftForTheTeamToRead(t *testing.T) {
+	// The behaviour that prompted this: a manual run after the morning digest
+	// archived two roundups that had arrived hours earlier, while the same
+	// lane on its timer - which fires BEFORE the digest - would have left
+	// them. Same code, same mailbox, different outcome by clock position.
+	now := time.Date(2026, 10, 1, 17, 0, 0, 0, time.UTC)
+	c := Candidate{ID: "m1", Subject: "Daily CTI Roundup",
+		Received: now.Add(-7 * time.Hour)}
+	proc := map[string]Processed{"m1": {HasCVE: true}}
+
+	got := Plan([]Candidate{c}, proc, now, 24*time.Hour)
+	if got[0].Action != ActionLeave {
+		t.Errorf("a 7-hour-old advisory was archived: %v", got[0].Action)
+	}
+	if !strings.Contains(got[0].Reason, "still read it there") {
+		t.Errorf("reason does not explain the wait: %q", got[0].Reason)
+	}
+}
+
+func TestOnceItIsOldEnoughItIsArchived(t *testing.T) {
+	now := time.Date(2026, 10, 2, 7, 0, 0, 0, time.UTC)
+	c := Candidate{ID: "m1", Received: now.Add(-25 * time.Hour)}
+	proc := map[string]Processed{"m1": {HasCVE: true}}
+
+	if got := Plan([]Candidate{c}, proc, now, 24*time.Hour); got[0].Action != ActionArchive {
+		t.Errorf("a 25-hour-old processed advisory was not archived: %v", got[0].Action)
+	}
+}
+
+func TestTheGraceBoundaryIsNotOffByOne(t *testing.T) {
+	// Exactly minAge old must archive. An advisory that is forever "not quite
+	// old enough" is the leak this was meant to close, reintroduced one hour
+	// later.
+	now := time.Date(2026, 10, 2, 7, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		age  time.Duration
+		want Action
+	}{
+		{23*time.Hour + 59*time.Minute, ActionLeave},
+		{24 * time.Hour, ActionArchive},
+		{24*time.Hour + time.Minute, ActionArchive},
+	} {
+		c := Candidate{ID: "m1", Received: now.Add(-tc.age)}
+		proc := map[string]Processed{"m1": {HasCVE: true}}
+		if got := Plan([]Candidate{c}, proc, now, 24*time.Hour)[0].Action; got != tc.want {
+			t.Errorf("age %s: got %v, want %v", tc.age, got, tc.want)
+		}
+	}
+}
+
+func TestTheGraceDoesNotDelayDeletingAutoReplies(t *testing.T) {
+	// The grace exists so a colleague can still read an advisory in the
+	// inbox. Nobody wants to read a bounce, so auto-replies go on sight.
+	now := time.Date(2026, 10, 1, 17, 0, 0, 0, time.UTC)
+	c := Candidate{ID: "m1", Received: now.Add(-1 * time.Minute), AutoReply: true}
+	proc := map[string]Processed{"m1": {HasCVE: false}}
+
+	if got := Plan([]Candidate{c}, proc, now, 24*time.Hour); got[0].Action != ActionDelete {
+		t.Errorf("a one-minute-old auto-reply was held by the grace: %v", got[0].Action)
+	}
+}
+
+func TestTheGraceNeverPromotesAMessageToArchive(t *testing.T) {
+	// An unprocessed message must stay LEAVE whatever its age. The grace can
+	// only ever delay an archive, never cause one - that rule is the
+	// operator's "make sure a given email has been processed", and age must
+	// not become a back door around it.
+	now := time.Date(2026, 10, 5, 7, 0, 0, 0, time.UTC)
+	c := Candidate{ID: "ancient", Received: now.Add(-100 * 24 * time.Hour)}
+	got := Plan([]Candidate{c}, map[string]Processed{}, now, 24*time.Hour)
+	if got[0].Action != ActionLeave {
+		t.Errorf("an unprocessed message was acted on: %v", got[0].Action)
+	}
+	if got[0].Known {
+		t.Error("an unprocessed message was marked known")
+	}
+}
+
+func TestAZeroGraceKeepsTheOldBehaviour(t *testing.T) {
+	now := time.Date(2026, 10, 1, 17, 0, 0, 0, time.UTC)
+	c := Candidate{ID: "m1", Received: now.Add(-1 * time.Minute)}
+	proc := map[string]Processed{"m1": {HasCVE: true}}
+	if got := Plan([]Candidate{c}, proc, now, 0); got[0].Action != ActionArchive {
+		t.Errorf("minAge=0 should archive immediately: %v", got[0].Action)
 	}
 }
