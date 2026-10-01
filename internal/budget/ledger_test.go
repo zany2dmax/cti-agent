@@ -352,6 +352,7 @@ func TestChargesIsExplicitAboutEveryOutcome(t *testing.T) {
 		{OutcomeOK, true},
 		{OutcomeRateLimit, true},
 		{OutcomeError, false},
+		{OutcomeExhausted, false},
 	} {
 		if got := tc.o.Charges(); got != tc.want {
 			t.Errorf("%s.Charges() = %v, want %v", tc.o, got, tc.want)

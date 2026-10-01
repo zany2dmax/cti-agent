@@ -34,6 +34,10 @@ const (
 	exitOK      = 0
 	exitFailure = 1
 	exitDenied  = 3
+	// exitNeedsPerson means the beat failed for a reason no amount of waiting
+	// will clear - an exhausted balance. The caller should HOLD and escalate,
+	// not fail. Distinct from exitDenied, which is our own brake working.
+	exitNeedsPerson = 4
 )
 
 func main() {
@@ -169,7 +173,8 @@ func cmdCheck(args []string, stdout, stderr *os.File) int {
 
 func cmdRecord(args []string, stdout, stderr *os.File) int {
 	fs := flag.NewFlagSet("record", flag.ContinueOnError)
-	outcome := fs.String("outcome", "", "ok|ratelimit|error; omit to classify from --exit and --output")
+	outcome := fs.String("outcome", "",
+		"ok|ratelimit|error|exhausted; omit to classify from --exit and --output")
 	exitCode := fs.Int("exit", 0, "exit status of the claude invocation")
 	output := fs.String("output", "", "stderr/stdout of the invocation, used to classify")
 	note := fs.String("note", "", "short free-text note stored with the beat")
@@ -181,10 +186,12 @@ func cmdRecord(args []string, stdout, stderr *os.File) int {
 	switch *outcome {
 	case "":
 		o = budget.Classify(*exitCode, *output)
-	case string(budget.OutcomeOK), string(budget.OutcomeRateLimit), string(budget.OutcomeError):
+	case string(budget.OutcomeOK), string(budget.OutcomeRateLimit),
+		string(budget.OutcomeError), string(budget.OutcomeExhausted):
 		o = budget.Outcome(*outcome)
 	default:
-		_, _ = fmt.Fprintf(stderr, "cti-budget: --outcome must be ok, ratelimit or error\n")
+		_, _ = fmt.Fprintf(stderr,
+			"cti-budget: --outcome must be ok, ratelimit, error or exhausted\n")
 		return exitFailure
 	}
 
@@ -200,8 +207,17 @@ func cmdRecord(args []string, stdout, stderr *os.File) int {
 	}
 
 	_, _ = fmt.Fprintf(stdout, "recorded %s\n", o)
-	if o == budget.OutcomeRateLimit {
+	if !l.CooldownUntil.IsZero() {
 		_, _ = fmt.Fprintf(stdout, "cooling off until %s\n", l.CooldownUntil.Format(time.RFC3339))
+	}
+	if o.NeedsAPerson() {
+		// Said on stdout, because this is the sentence that has to reach a
+		// human. "Credit balance is too low" in a journal nobody can read is
+		// how this went unnoticed for six days.
+		_, _ = fmt.Fprintf(stdout,
+			"the account is out of credit - waiting will not fix this, "+
+				"add credit or repoint CLAUDE_CODE_OAUTH_TOKEN\n")
+		return exitNeedsPerson
 	}
 	return exitOK
 }

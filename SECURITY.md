@@ -339,6 +339,13 @@ The orchestrator runs unattended. Its standing instructions
 Auto-sending is limited to scheduled reports on an established schedule to an
 allowlisted list. Everything else is proposed on the message board and waits.
 
+`cti-budget` rations this fleet's share of a subscription; it cannot see
+account-level exhaustion, so an empty balance is detected from the CLI's own
+output and classified as `exhausted` — held and escalated, never reported as a
+lane failure. The distinction is operational, not cosmetic: a FAILED alert for
+an empty balance is what got the heartbeat timer disabled for six days in
+September, and a disabled timer raises no alarms at all.
+
 Only beats that reached the model count against those ceilings. A beat that
 errored before calling it is recorded but not charged, so a failing lane
 cannot ration the fleet into a hold and present a code fault as a budget
