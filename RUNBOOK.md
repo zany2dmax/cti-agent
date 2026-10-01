@@ -708,9 +708,28 @@ can be closed, cloned, moved or bulk-edited in the UI, and any local record
 goes stale the moment somebody does. It also means a rebuilt fleet box does not
 re-announce every host it has ever seen as newly discovered.
 
-Above 800 hosts the list is dropped and only the count and a hash are kept, to
-stay inside Jira's 32KB property limit. Drift is then reported as a change in
-totals, and the comment says outright that it cannot name the hosts.
+**The attached CSV always lists every affected host, at any scale.** A ticket
+with no hostnames to work on is useless, so the attachment is never truncated.
+Three different limits are at play and only one of them touches the host list
+anybody works from:
+
+| Limit | Value | What it affects |
+|---|---|---|
+| CSV attachment | **none** | the deliverable — every hostname, always |
+| Hosts named in comment prose | 20 | readability; the rest are "…and N more, in the attached CSV" |
+| Hosts remembered between runs | 800 | diff precision only, to stay inside Jira's 32KB property cap |
+
+So above 800 hosts the comment says the count moved from 900 to 950 without
+naming the 50, and states that it cannot name them — but the CSV attached to
+that same comment has all 950 rows.
+
+One consequence worth knowing: no new CSV is attached on a run with no material
+change, so the newest attachment on a long-lived ticket can lag. That is safe in
+one direction only, and deliberately so — growth is always material, so a fresh
+CSV is always attached when hosts appear. The only way an attachment goes stale
+is hosts going *away*, which makes the stale list a superset of reality. Working
+it means patching a machine that is already clean: wasted effort, never a missed
+host.
 
 Note the flag direction. There is no `--dry-run`; the dangerous mode is the
 one you have to ask for, because forgetting a `--dry-run` flag is how the

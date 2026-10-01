@@ -21,7 +21,19 @@ import (
 // comments untrustworthy on exactly the day they mattered.
 const PropertyKey = "cti-agent-exposure"
 
-// MaxPropertyHosts bounds the stored host list.
+// MaxPropertyHosts bounds the STORED host list - the diff bookkeeping only.
+//
+// IT DOES NOT BOUND THE CSV. Three limits exist in this package and they do
+// three different jobs:
+//
+//	CSV attachment      no limit   the deliverable: every hostname, always
+//	MaxListedInComment  20         how many a comment names in prose
+//	MaxPropertyHosts    800        how many are remembered for the next diff
+//
+// A ticket with no hostnames to work on is useless, so the attachment is
+// never truncated. Past this limit the fleet loses only the ability to say
+// WHICH hosts are new - the CSV on the ticket still lists all of them.
+
 //
 // Jira caps an issue property at 32KB. A 441-host list is roughly 11KB, so
 // the real estate is there - but "roughly" is not a guarantee, and a property
