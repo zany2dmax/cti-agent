@@ -88,7 +88,22 @@ type Decision struct {
 // deleted, everything else is somebody's job. The leave count feeds
 // BacklogNote, so mail accumulating here is reported rather than silently
 // tidied.
-func Plan(candidates []Candidate, processed map[string]Processed) []Decision {
+// Plan decides what to do with each message.
+//
+// now and minAge exist because archiving used to depend on WHEN the lane ran.
+// The rule was "processed and carried a CVE -> archive", with no age in it, so
+// a manual run after the morning digest filed away mail that had arrived hours
+// earlier - while the same lane on its timer, firing before the digest, would
+// have left it. Same code, same mailbox, different outcome by clock position.
+//
+// minAge removes that. An advisory stays in the inbox until it has been there
+// long enough that nobody is still reading it, whenever the lane runs.
+//
+// THE GRACE APPLIES TO ARCHIVING ONLY. Auto-replies are deleted on sight,
+// because the reason for the grace is "a colleague may still want to read
+// this in the inbox", and nobody wants to read a bounce.
+func Plan(candidates []Candidate, processed map[string]Processed,
+	now time.Time, minAge time.Duration) []Decision {
 	out := make([]Decision, 0, len(candidates))
 	for _, c := range candidates {
 		rec, ok := processed[c.ID]
@@ -96,6 +111,13 @@ func Plan(candidates []Candidate, processed map[string]Processed) []Decision {
 		case !ok:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "no record that a completed run has read this message"})
+		case rec.HasCVE && minAge > 0 && c.Received.After(now.Add(-minAge)):
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: fmt.Sprintf(
+					"processed and carried a CVE, but only %s old - it stays in "+
+						"the inbox until %s so the team can still read it there",
+					now.Sub(c.Received).Round(time.Minute), minAge),
+				Known: true})
 		case rec.HasCVE:
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: "processed and carried at least one CVE", Known: true})

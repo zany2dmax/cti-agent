@@ -23,6 +23,24 @@ type Config struct {
 	QualysKBMaxAge    time.Duration
 	ReportPath        string
 
+	// MailboxLookback is how far back the CLEANUP lane looks, and it is
+	// deliberately NOT GraphLookback.
+	//
+	// It used to share it, and 24h for both meant the window equalled the
+	// interval between runs: a message arriving in the hour before the
+	// cleanup fires is processed later that day, and by the next run it has
+	// already fallen out of a 24h window. Never archived, ever. Four
+	// advisories a day quietly accumulating in a shared inbox, looking like
+	// the lane "sometimes misses some".
+	//
+	// This must exceed the time between runs with room for a missed one.
+	MailboxLookback time.Duration
+	// MailboxMinAge is how long a processed advisory stays in the inbox
+	// before being filed away, so that behaviour does not depend on what time
+	// the lane happens to run and a colleague reading this morning's roundup
+	// still finds it where they left it.
+	MailboxMinAge time.Duration
+
 	JiraBaseURL    string
 	JiraEmail      string
 	JiraAPIToken   string
@@ -125,6 +143,25 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		return Config{}, fmt.Errorf("QUALYS_KB_MAX_AGE_HOURS must be a positive integer")
 	}
 
+	mailboxLookbackHours, err := strconv.Atoi(getenvDefault("MAILBOX_LOOKBACK_HOURS", "72"))
+	if err != nil || mailboxLookbackHours <= 0 {
+		return Config{}, fmt.Errorf("MAILBOX_LOOKBACK_HOURS must be a positive integer")
+	}
+	mailboxMinAgeHours, err := strconv.Atoi(getenvDefault("MAILBOX_MIN_AGE_HOURS", "24"))
+	if err != nil || mailboxMinAgeHours < 0 {
+		return Config{}, fmt.Errorf("MAILBOX_MIN_AGE_HOURS must be zero or a positive integer")
+	}
+	// The trap this guards: a grace period at least as long as the window
+	// means nothing is ever old enough AND still visible, so the lane
+	// silently archives nothing and reports a clean run forever.
+	if mailboxMinAgeHours >= mailboxLookbackHours {
+		return Config{}, fmt.Errorf(
+			"MAILBOX_MIN_AGE_HOURS (%d) must be less than MAILBOX_LOOKBACK_HOURS (%d); "+
+				"otherwise a message is never both old enough to archive and still "+
+				"inside the window, and the cleanup lane does nothing at all",
+			mailboxMinAgeHours, mailboxLookbackHours)
+	}
+
 	cfg := Config{
 		TenantID:     os.Getenv("TENANT_ID"),
 		ClientID:     os.Getenv("CLIENT_ID"),
@@ -144,6 +181,8 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		QualysKBCachePath: getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
 		QualysKBMaxAge:    time.Duration(kbMaxAgeHours) * time.Hour,
 		ReportPath:        getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
+		MailboxLookback:   time.Duration(mailboxLookbackHours) * time.Hour,
+		MailboxMinAge:     time.Duration(mailboxMinAgeHours) * time.Hour,
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),

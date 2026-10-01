@@ -261,3 +261,41 @@ func TestTheLookbackErrorNamesTheValueAndTheLimit(t *testing.T) {
 		t.Errorf("zero should be refused for being non-positive, got %v", err)
 	}
 }
+
+func TestTheMailboxWindowMustExceedTheGrace(t *testing.T) {
+	// The trap: a grace at least as long as the window means a message is
+	// never both old enough to archive AND still visible, so the cleanup lane
+	// silently does nothing and reports a clean run forever. Refused at
+	// startup rather than discovered from an inbox that never empties.
+	// LOOKUP_PROVIDER=none so the scanner-credential check does not fire and
+	// make every passing case look like a failure. This test is about the
+	// mailbox interlock, which is validated before that check.
+	t.Setenv("LOOKUP_PROVIDER", "none")
+
+	for _, tc := range []struct {
+		lookback, minAge string
+		wantErr          bool
+	}{
+		{"72", "24", false},
+		{"48", "24", false},
+		{"24", "24", true},  // equal - nothing ever qualifies
+		{"24", "48", true},  // grace longer than the window
+		{"72", "0", false},  // grace disabled is legitimate
+		{"0", "24", true},   // a zero window is not a window
+		{"72", "-1", true},  // negative grace
+		{"abc", "24", true}, // not a number
+	} {
+		t.Setenv("MAILBOX_LOOKBACK_HOURS", tc.lookback)
+		t.Setenv("MAILBOX_MIN_AGE_HOURS", tc.minAge)
+		_, err := LoadVulnLookup()
+		if (err != nil) != tc.wantErr {
+			t.Errorf("lookback=%s minAge=%s: err=%v, wantErr=%v",
+				tc.lookback, tc.minAge, err, tc.wantErr)
+		}
+		if tc.wantErr && err != nil && tc.lookback == "24" && tc.minAge == "24" {
+			if !strings.Contains(err.Error(), "does nothing at all") {
+				t.Errorf("the equal case does not explain the consequence: %v", err)
+			}
+		}
+	}
+}
