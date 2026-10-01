@@ -213,9 +213,20 @@ info "$CONF_DIR   config (root:$FLEET_GROUP 0750)"
 info "$STATE_DIR  state  ($FLEET_USER:$FLEET_GROUP 0750)"
 
 bold "Installing code"
-for f in fleet-board fleet-db run-digest run-checkin run-patchtuesday; do
-  run install -m 0755 -o root -g root "$SRC/fleet/bin/$f" "$CODE_DIR/bin/$f"
-  info "bin/$f"
+# Everything in fleet/bin, not a hand-written list.
+#
+# The list used to be explicit and run-mailbox-cleanup was never on it, so the
+# mailbox lane shipped a unit, a timer and a Go binary - and no runner. The
+# verification block below listed the runner, which looks like coverage until
+# you notice it was asserting a file the install step never copied. It failed
+# at 203/EXEC the first morning the timer fired.
+#
+# A directory cannot drift from itself. Adding a runner to fleet/bin is now
+# the whole change.
+for f in "$SRC"/fleet/bin/*; do
+  [ -f "$f" ] || continue
+  run install -m 0755 -o root -g root "$f" "$CODE_DIR/bin/$(basename "$f")"
+  info "bin/$(basename "$f")"
 done
 for f in enrich.py scout.py brief.py mailer.py; do
   run install -m 0755 -o root -g root "$SRC/fleet/lanes/$f" "$CODE_DIR/lanes/$f"
@@ -569,13 +580,37 @@ bold "Verification"
 FAIL=0
 [ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
-for p in "$CODE_DIR/bin/run-digest" "$CODE_DIR/bin/cti-alert" \
-         "$CODE_DIR/bin/cti-budget" "$CODE_DIR/bin/cti-kev" \
-         "$CODE_DIR/bin/cti-patchtuesday" "$CODE_DIR/bin/run-patchtuesday" \
-         "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/run-mailbox-cleanup" \
-         "$CODE_DIR/bin/cti-mailer" \
+for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
+         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
+         "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
+done
+
+# EVERY ExecStart IN EVERY INSTALLED UNIT MUST EXIST AND BE EXECUTABLE.
+#
+# This is the check that was missing. A hand-written list of paths is a claim
+# about the units, maintained separately from the units, and it was wrong:
+# cti-agent-mailbox.service pointed at a runner nothing installed, and the
+# first anyone knew was 203/EXEC in the journal at 07:04 - after OnFailure had
+# already mailed about it.
+#
+# systemd cannot tell you this in advance. It resolves ExecStart at start
+# time, so a unit with a missing binary installs, enables and arms without
+# complaint, and fails only when the timer fires. Deriving the check from the
+# units themselves means a new lane cannot be half-installed.
+for u in "$UNIT_DIR"/cti-agent-*.service; do
+  [ -f "$u" ] || continue
+  exe=$(awk -F= '/^ExecStart=/{print $2; exit}' "$u" | awk '{print $1}')
+  case "$exe" in
+    ""|-*) continue ;;        # no ExecStart, or a "-" prefixed optional one
+  esac
+  if [ -x "$exe" ] || [ "$MODE" = dryrun ]; then
+    ok "$(basename "$u") -> $exe"
+  else
+    bad "$(basename "$u") points at $exe which is missing or not executable"
+    FAIL=1
+  fi
 done
 if [ "$MODE" != dryrun ]; then
   # Prove the service account can actually write where systemd will point it.
