@@ -440,3 +440,63 @@ func ResolveIssueType(types []IssueTypeMeta, name string) (IssueTypeMeta, error)
 		"JIRA_ISSUE_TYPE=%q does not exist in this project; it offers: %s",
 		name, strings.Join(names, ", "))
 }
+
+// ─── issue properties ───────────────────────────────────────────────────────
+
+// GetProperty reads a JSON property off an issue into out.
+//
+// Returns found=false for a 404 rather than an error, because "this ticket has
+// no state yet" is the normal case on the first run and on every ticket filed
+// before state existed. Treating it as a failure would make the first update
+// after deploying this look like a broken integration.
+func (c *Client) GetProperty(ctx context.Context, issueKey, propKey string, out any) (bool, error) {
+	path := c.BaseURL + "/rest/api/2/issue/" + url.PathEscape(issueKey) +
+		"/properties/" + url.PathEscape(propKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return false, fmt.Errorf("building the property request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("reading property %s on %s: %w", propKey, issueKey, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if err := checkStatus(resp, "read property "+propKey+" on "+issueKey); err != nil {
+		return false, err
+	}
+	// The payload wraps the stored value: {"key":"...","value":{...}}.
+	var wrapper struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wrapper); err != nil {
+		return false, fmt.Errorf("decoding property %s on %s: %w", propKey, issueKey, err)
+	}
+	if len(wrapper.Value) == 0 {
+		return false, nil
+	}
+	if err := json.Unmarshal(wrapper.Value, out); err != nil {
+		// A property this fleet wrote in an older format is not a reason to
+		// fail the run. Report it as absent and let the caller rewrite it:
+		// the cost is one missed drift comparison, not a dead lane.
+		return false, fmt.Errorf("property %s on %s is not in the expected format "+
+			"(it will be rewritten): %w", propKey, issueKey, err)
+	}
+	return true, nil
+}
+
+// SetProperty writes a JSON property onto an issue.
+//
+// PUT replaces outright, which is what is wanted: the state is the whole
+// picture of what the fleet last believed, not an accumulation.
+func (c *Client) SetProperty(ctx context.Context, issueKey, propKey string, value any) error {
+	path := "/rest/api/2/issue/" + url.PathEscape(issueKey) +
+		"/properties/" + url.PathEscape(propKey)
+	return c.do(ctx, http.MethodPut, path, value, nil)
+}
