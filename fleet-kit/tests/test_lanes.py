@@ -1081,11 +1081,6 @@ class KevInTheDigest(unittest.TestCase):
         self.assertTrue(brief.render_text(d, "daily"))
         self.assertTrue(brief.subject(d, "daily"))
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class DigestSendLedger(unittest.TestCase):
     """`was-sent` is the duplicate-send guard, and it never once fired.
 
@@ -1147,3 +1142,32 @@ class DigestSendLedger(unittest.TestCase):
         r = self.run_db("was-sent", "2026-09-30", "daily")
         self.assertEqual(r.stdout.strip(), "no")
         self.assertNotEqual(r.returncode, 0, "a miss must exit non-zero for the shell guard")
+
+
+class TestFileShape(unittest.TestCase):
+    """Nothing may be defined after unittest.main().
+
+    Four tests were appended below the main block and silently never ran:
+    `python3 test_lanes.py` exits inside unittest.main() before the class is
+    defined, so the suite reported 84 passing while 88 existed. They passed
+    when run as `python3 -m unittest test_lanes.DigestSendLedger`, because
+    importing the module defines everything first - which is exactly why it
+    went unnoticed. Verifying with a different command than the gate uses
+    proves nothing about the gate.
+    """
+
+    def test_nothing_is_defined_after_the_main_block(self):
+        src = pathlib.Path(__file__).read_text(encoding="utf-8")
+        marker = 'if __name__ == "__main__":'
+        self.assertIn(marker, src)
+        after = src[src.index(marker):]
+        for kw in ("\nclass ", "\ndef "):
+            self.assertNotIn(
+                kw, after,
+                f"a top-level {kw.strip()} appears after unittest.main() - "
+                "it will never run under `python3 test_lanes.py`")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+

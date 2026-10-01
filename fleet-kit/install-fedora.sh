@@ -257,6 +257,12 @@ run install -m 0644 -o root -g root "$SRC/README.md" "$CODE_DIR/README.md"
 # cheerful ok that hides a stale file.
 CLAUDE_MD_HASH="$STATE_DIR/.claude/CLAUDE.md.installed-sha256"
 claude_md_unmodified() {
+  # Identical to what we ship counts as unmodified even with no hash on
+  # record. Without this, the FIRST run after this change always warns -
+  # including for an operator who just copied the shipped file across by hand,
+  # which is exactly what the warning would be telling them to do. A guard
+  # whose first act is to cry wolf is a guard people learn to scroll past.
+  cmp -s "$STATE_DIR/CLAUDE.md" "$SRC/fleet/CLAUDE.md" && return 0
   [ -f "$CLAUDE_MD_HASH" ] || return 1
   [ "$(sha256sum "$STATE_DIR/CLAUDE.md" | cut -d" " -f1)" = "$(cat "$CLAUDE_MD_HASH")" ]
 }
