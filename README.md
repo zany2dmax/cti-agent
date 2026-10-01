@@ -76,7 +76,7 @@ quiet day — which only holds if a broken pipeline is loud.
 | `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
 | `cti-mailer` | every lane, and by hand | The **single outbound channel**. Holds the `FLEET_ALLOW_TO` recipient gate, which covers Cc as well as To. `--check` decodes the token and reports the roles the tenant actually consented to. A port of `mailer.py`; see [SECURITY.md](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision) |
 | `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
-| `cti-jira` | by hand, for now | Files one Jira ticket per confirmed KEV or Sev5 CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. Creates nothing without `--for-real` and a project in `JIRA_ALLOW_CREATE` |
+| `cti-jira` | `run-digest`, between enrich and brief | Files one Jira ticket per confirmed KEV or Sev5 CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. Creates nothing without `--for-real` and a project in `JIRA_ALLOW_CREATE` |
 
 All seven are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
