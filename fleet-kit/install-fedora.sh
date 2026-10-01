@@ -391,6 +391,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
   chmod 0755 "$CODE_DIR/bin/cti-mailer"
   ok "built $CODE_DIR/bin/cti-mailer"
+
+  # Jira ticketing. Creates nothing without --for-real AND a project key in
+  # JIRA_ALLOW_CREATE, so installing it does not arm it. No timer either: it
+  # is driven by hand until the digest integration exists.
+  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-jira" ./cmd/cti-jira )
+  chmod 0755 "$CODE_DIR/bin/cti-jira"
+  ok "built $CODE_DIR/bin/cti-jira"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -557,7 +564,7 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
@@ -583,6 +590,7 @@ FAIL=0
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
+         "$CODE_DIR/bin/cti-jira" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

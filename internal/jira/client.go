@@ -282,3 +282,114 @@ func sortedKeys(m map[string]string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ─── preflight ──────────────────────────────────────────────────────────────
+//
+// Everything below is read-only, and exists so `cti-jira --check` can answer
+// "would a create succeed?" without creating anything. Finding out by filing a
+// ticket means the first answer is a ticket somebody has to delete.
+
+// Account is who the token belongs to.
+type Account struct {
+	AccountID   string `json:"accountId"`
+	Email       string `json:"emailAddress"`
+	DisplayName string `json:"displayName"`
+	Active      bool   `json:"active"`
+}
+
+// Myself verifies the credentials and reports the account they carry.
+//
+// Worth printing: an API token has every permission its account has, so
+// "which account is this" is the blast-radius question. A token quietly
+// belonging to a departed admin looks identical to a service account here
+// until you read the name.
+func (c *Client) Myself(ctx context.Context) (Account, error) {
+	var a Account
+	if err := c.do(ctx, http.MethodGet, "/rest/api/2/myself", nil, &a); err != nil {
+		return Account{}, err
+	}
+	return a, nil
+}
+
+// IssueTypeMeta is one creatable issue type in a project.
+type IssueTypeMeta struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Subtask bool   `json:"subtask"`
+}
+
+// IssueTypes lists what may be created in a project.
+//
+// The paged createmeta endpoints, not the old monolithic
+// /issue/createmeta?expand=... which Atlassian deprecated.
+func (c *Client) IssueTypes(ctx context.Context, projectKey string) ([]IssueTypeMeta, error) {
+	var out struct {
+		IssueTypes []IssueTypeMeta `json:"issueTypes"`
+	}
+	path := "/rest/api/2/issue/createmeta/" + url.PathEscape(projectKey) + "/issuetypes"
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.IssueTypes, nil
+}
+
+// FieldMeta is one field on a create screen.
+type FieldMeta struct {
+	FieldID  string `json:"fieldId"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	Schema   struct {
+		Type   string `json:"type"`
+		Custom string `json:"custom"`
+	} `json:"schema"`
+}
+
+// CreateFields lists the create-screen fields for an issue type.
+//
+// This is what settles the open question about the CR project: the issue
+// metadata reported 69 fields and none required, which is not credible for a
+// screen that includes Summary. Either the report is filtered oddly or this
+// project really does default everything - and the difference matters, because
+// a Service Management desk commonly requires a request type that the plain
+// issue API does not set.
+func (c *Client) CreateFields(ctx context.Context, projectKey, issueTypeID string) ([]FieldMeta, error) {
+	var out struct {
+		Fields []FieldMeta `json:"fields"`
+	}
+	path := "/rest/api/2/issue/createmeta/" + url.PathEscape(projectKey) +
+		"/issuetypes/" + url.PathEscape(issueTypeID)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Fields, nil
+}
+
+// ResolveIssueType maps a configured NAME to its id, and on failure says what
+// the project actually offers.
+//
+// The error text is the point. "issuetype: Task is not valid for project CR"
+// from a failed create tells you something is wrong; this tells you what to
+// put in fleet.env instead.
+func ResolveIssueType(types []IssueTypeMeta, name string) (IssueTypeMeta, error) {
+	want := strings.TrimSpace(name)
+	for _, t := range types {
+		if strings.EqualFold(t.Name, want) {
+			if t.Subtask {
+				return IssueTypeMeta{}, fmt.Errorf(
+					"issue type %q is a sub-task type and cannot be created on its own; "+
+						"pick a top-level type", t.Name)
+			}
+			return t, nil
+		}
+	}
+	var names []string
+	for _, t := range types {
+		if !t.Subtask {
+			names = append(names, t.Name)
+		}
+	}
+	sort.Strings(names)
+	return IssueTypeMeta{}, fmt.Errorf(
+		"JIRA_ISSUE_TYPE=%q does not exist in this project; it offers: %s",
+		name, strings.Join(names, ", "))
+}

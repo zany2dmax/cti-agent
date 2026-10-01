@@ -20,6 +20,7 @@ document assumes you have decided to run it.
 - [11. The monthly Patch Tuesday lane](#11-the-monthly-patch-tuesday-lane)
 - [11a. Catching up after the lane was off](#11a-catching-up-after-the-lane-was-off)
 - [11b. Switching the mailer](#11b-switching-the-mailer)
+- [11c. Verifying the Jira connection](#11c-verifying-the-jira-connection)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -612,6 +613,73 @@ language:
 And one thing is explicit rather than silent: `--text` is accepted and logged
 as *not transmitted*. Graph sends one body, so `mailer.py` had always ignored
 it — it just never said so.
+
+---
+
+## 11c. Verifying the Jira connection
+
+Three steps, each of which can fail for a different reason, so they are run
+separately rather than as one command.
+
+### 1. Credentials, project and required fields - reads only
+
+```bash
+sudo cti-agent cti-jira --check
+```
+
+Reports the account the API token belongs to, whether the write gate is open,
+whether `JIRA_ISSUE_TYPE` exists in the project, and which fields the create
+screen marks required.
+
+Read two lines carefully:
+
+- **the account name.** An API token carries every permission its account has.
+  A token belonging to a person rather than a service account means tickets are
+  attributed to somebody who did not file them, and the lane stops when they
+  leave.
+- **anything marked `<-`.** That is a required field `cti-jira` does not set,
+  and every create will 400 until it is handled. On a Service Management
+  project this is usually a request-type custom field.
+
+If the issue type is wrong, the error names the valid ones:
+
+```
+JIRA_ISSUE_TYPE="Task" does not exist in this project; it offers:
+  Ask a question, Emailed request, Hardware Return, Hardware / Software
+  purchase request, IT Support, New-Hire IT Request, Off-Boarding
+```
+
+`Task` is the obvious guess and it does not exist in a JSM desk.
+
+### 2. The ticket itself - still creates nothing
+
+```bash
+sudo cti-agent cti-jira --test-ticket
+```
+
+Prints the summary, description, labels, duplicate-search JQL and the CSV as
+one JSON object. Read the description as IT will read it. Nothing is written,
+and the last line says so.
+
+### 3. One real test ticket
+
+```bash
+sudo cti-agent cti-jira --test-ticket --for-real
+```
+
+Requires `JIRA_ALLOW_CREATE` to contain the project key. Files one obviously
+synthetic ticket — `CVE-1900-00000`, hosts under `.invalid` — titled so that
+nobody mistakes it for a finding. Running it twice does not file a second: the
+label-based duplicate check catches it.
+
+**Then check by hand what the API cannot tell you:** does the ticket appear in
+the queue your team actually works from? A JSM project can accept an issue over
+the plain issue API and leave it out of the agent queues, and that is invisible
+from the command's point of view. Close and delete the ticket when done.
+
+Note the flag direction. There is no `--dry-run`; the dangerous mode is the
+one you have to ask for, because forgetting a `--dry-run` flag is how the
+digest sent a real email to the whole distribution list in September.
 
 ---
 
