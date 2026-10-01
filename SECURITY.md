@@ -612,6 +612,49 @@ unusually clean, verify the component did work — not that it exited 0.**
 Stated rather than discovered. Everything here was found by fact-checking this
 document against the code; several are worth fixing and are not yet fixed.
 
+**OPEN, VERIFIED, ACCEPTED FOR NOW — the Graph app is not scoped to one
+mailbox.**
+
+Measured 2026-10-01 by requesting messages from two mailboxes with the app's
+own token. Both returned `200`:
+
+```
+cybersecurity@<org>    200     <- the mailbox the fleet is for
+<an unrelated user>    200     <- should have been 403
+```
+
+No Application Access Policy and no RBAC for Applications assignment is in
+effect, so the app's permissions apply tenant-wide. With `Mail.Read`,
+`Mail.ReadWrite` and `Mail.Send` consented, the client secret in
+`/etc/cti-agent/fleet.env` can read, move and soft-delete mail in **every**
+mailbox in the tenant, and send as any of them.
+
+This is a property of the credential, not of the code. No lane in this
+repository addresses a mailbox other than `GRAPH_MAILBOX`; the exposure is
+what an attacker holding that secret could do, which is why the fleet host's
+own hardening is doing more work than it appears to.
+
+The operator is aware and has accepted it for now. It is recorded here so the
+decision is visible rather than forgotten, and so that whoever reads this next
+knows the probe above is the way to re-check it.
+
+Remediation needs Exchange admin and PowerShell — there is no portal UI for
+either mechanism, and Microsoft is steering new deployments toward RBAC for
+Applications:
+
+```powershell
+New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
+  -PolicyScopeGroupId <group containing the CTI mailbox> `
+  -AccessRight RestrictAccess -Description "CTI agent: security mailbox only"
+
+Test-ApplicationAccessPolicy -Identity <any other mailbox> -AppId <CLIENT_ID>
+```
+
+Expect up to two hours for the change to take effect; the authorisation cache
+is not immediate. Re-run the two-mailbox probe afterwards — `200` then `403`
+is the pass condition, and the only one worth trusting, since neither Graph
+nor the portal reports the effective scope.
+
 **Fixed since this document was written**
 
 - ~~The Python lanes write world-readable files.~~ `UMask=0077` is now set in
