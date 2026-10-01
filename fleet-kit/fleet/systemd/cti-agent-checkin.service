@@ -16,6 +16,12 @@ Group=ctiagent
 # no chmod, no umask in the code, so under systemd's default 0022 the digest
 # HTML and enriched-*.json - which carries host names - were 0644. The Go
 # commands set 0600 explicitly and are unaffected; this closes the rest.
+# The orchestrator is allowed to run journalctl, and without this it
+# would be allowed to run a command that returns nothing: reading the
+# SYSTEM journal needs group membership, not just execute permission.
+# cti-agent-alert@.service already had this; the heartbeat did not, so
+# journalctl stayed "blocked" even after the tool allowlist landed.
+SupplementaryGroups=systemd-journal
 UMask=0077
 WorkingDirectory=/home/ctiagent/fleet
 EnvironmentFile=/home/ctiagent/fleet/fleet.env
