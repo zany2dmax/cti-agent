@@ -242,12 +242,41 @@ run install -m 0644 -o root -g root "$SRC/README.md" "$CODE_DIR/README.md"
 
 # CLAUDE.md must sit in the orchestrator's working directory so it loads on
 # every session. That is the state dir, since WorkingDirectory points there.
-if [ -f "$STATE_DIR/CLAUDE.md" ]; then
-  ok "CLAUDE.md exists, not overwriting your edits"
+#
+# "Not overwriting your edits" was protecting a file nobody had edited.
+#
+# The orchestrator's standing instructions were frozen at first install, so a
+# deploy could never change them. That is not a hypothetical: the allowlist
+# grant for cti-alert reached the box while the instruction telling the agent
+# to use it did not, and the agent went on reporting that it could not reach
+# a human while holding the capability to do so.
+#
+# So: remember the hash of what we install. Unmodified since last time means
+# it is ours to update. Modified means an operator changed it, and THAT is
+# worth preserving - but loudly, with the diff named, rather than with a
+# cheerful ok that hides a stale file.
+CLAUDE_MD_HASH="$STATE_DIR/.claude/CLAUDE.md.installed-sha256"
+claude_md_unmodified() {
+  [ -f "$CLAUDE_MD_HASH" ] || return 1
+  [ "$(sha256sum "$STATE_DIR/CLAUDE.md" | cut -d" " -f1)" = "$(cat "$CLAUDE_MD_HASH")" ]
+}
+
+if [ -f "$STATE_DIR/CLAUDE.md" ] && ! claude_md_unmodified; then
+  warn "CLAUDE.md differs from the shipped version and was NOT updated"
+  info "  yours:    $STATE_DIR/CLAUDE.md"
+  info "  shipped:  $SRC/fleet/CLAUDE.md"
+  info "  diff:     sudo diff -u $STATE_DIR/CLAUDE.md $SRC/fleet/CLAUDE.md"
+  info "  The agent follows YOUR copy. If the shipped one changed how it"
+  info "  escalates or what it may run, your copy will not know."
 else
   run install -m 0640 -o "$FLEET_USER" -g "$FLEET_GROUP" \
       "$SRC/fleet/CLAUDE.md" "$STATE_DIR/CLAUDE.md"
   info "CLAUDE.md -> $STATE_DIR (the orchestrator's standing instructions)"
+  if [ "$MODE" != dryrun ]; then
+    install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$STATE_DIR/.claude"
+    sha256sum "$STATE_DIR/CLAUDE.md" | cut -d" " -f1 > "$CLAUDE_MD_HASH"
+    chmod 0640 "$CLAUDE_MD_HASH"
+  fi
 fi
 
 bold "Skills"
