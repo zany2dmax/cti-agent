@@ -354,10 +354,23 @@ constrains.
 
 Deliberately absent from the grant:
 
-- **`cti-mailer` and `mailer.py`.** The orchestrator cannot send mail. It reads
-  attacker-supplied threat intel, so an injection that reached a send capability
-  would have the fleet's whole recipient allowlist behind it. Escalation runs
-  through `cti-alert`, invoked by the alert units rather than by the agent.
+- **`cti-mailer` and `mailer.py`.** The orchestrator cannot address mail. It
+  reads attacker-supplied threat intel, so an injection reaching either of
+  these would have the fleet's whole recipient allowlist behind it.
+
+  `cti-alert` **is** granted, as the single escalation channel, and it is safe
+  to grant for a structural reason rather than a hopeful one: it has **no
+  `--to` flag**. The recipient is `FLEET_OPERATOR_EMAIL` read from the
+  environment, so neither the agent nor anything it reads can redirect the
+  message, and the caller-supplied `--reason` is HTML-escaped before it becomes
+  mail. The worst an injected advisory achieves is one message to an address
+  the operator already configured, sent from the fleet's own mailbox.
+
+  This is why the earlier note that `cti-alert` bypasses `FLEET_ALLOW_TO`
+  matters less than it reads: the allowlist exists to stop the fleet mailing an
+  address nobody approved, and `cti-alert` cannot be pointed at an address at
+  all. It remains worth closing, because a future `--to` would silently turn a
+  safe grant into an unsafe one.
 - **`cti-mailbox --for-real`.** Granted without `:*`, so only the bare command
   matches — the dry run. Moving mail is a scheduled decision, not a beat-time
   one.
