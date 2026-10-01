@@ -37,23 +37,46 @@ const MaxSummary = 255
 // dependency on the report format, or changing a column in the email becomes a
 // change to the ticketing contract.
 type Finding struct {
-	CVE       string
-	QIDs      []string
-	Hosts     []string
-	KEV       bool
-	KEVDueOn  time.Time // zero when not a KEV entry
-	Severity  int       // 5..1, 5 highest
-	CVSS      string
-	Title     string
-	QQL       string // the Qualys query that reproduces the host list
+	CVE      string
+	QIDs     []string
+	Hosts    []string
+	KEV      bool
+	KEVDueOn time.Time // zero when not a KEV entry
+	Severity int       // 5..1, 5 highest
+	CVSS     string
+	Title    string
+	QQL      string // the Qualys query that reproduces the host list
 	FirstSeen time.Time
+
+	// HostCount is the authoritative number of affected machines, which is
+	// NOT always len(Hosts). When the scanner truncates its per-QID host
+	// lists the union is short, and deriving the count from the names it
+	// managed to return understates the estate. Zero means "use len(Hosts)",
+	// which keeps callers that only have a list working.
+	HostCount int
+	// CountIsFloor means the scanner truncated, so HostCount is a lower
+	// bound and the names in Hosts are incomplete.
+	CountIsFloor bool
 }
 
-// HostFloor reports whether the host list is a sample rather than the whole
-// set. The scanner's detection API pages, and a count built from one page is a
-// floor - saying "441 hosts" when it is "at least 441" is the kind of precision
+// Count is the number to print. Always this, never len(f.Hosts).
+func (f Finding) Count() int {
+	if f.HostCount > 0 {
+		return f.HostCount
+	}
+	return len(f.Hosts)
+}
+
+// HostFloor reports whether the count is a lower bound rather than a
+// measurement - either because the provider said so, or because it returned
+// fewer names than it counted.
+//
+// This used to guess from a magic 1000. The provider knows, so ask it: saying
+// "441 hosts" when the truth is "at least 441" is the kind of false precision
 // this codebase has been burned by before.
-func (f Finding) HostFloor() bool { return len(f.Hosts) >= 1000 }
+func (f Finding) HostFloor() bool {
+	return f.CountIsFloor || (f.HostCount > 0 && len(f.Hosts) < f.HostCount)
+}
 
 // IdempotencyLabel is how a ticket is recognised on a later run.
 //
@@ -108,8 +131,8 @@ func Summary(f Finding, now time.Time) string {
 	b.WriteString(f.CVE)
 	b.WriteString(" - ")
 
-	hosts := fmt.Sprintf("%d host", len(f.Hosts))
-	if len(f.Hosts) != 1 {
+	hosts := fmt.Sprintf("%d host", f.Count())
+	if f.Count() != 1 {
 		hosts += "s"
 	}
 	if f.HostFloor() {
@@ -174,9 +197,11 @@ func Description(f Finding, now time.Time, csvName string) string {
 		b.WriteString(row("CVSS", f.CVSS))
 	}
 
-	hostCount := fmt.Sprintf("%d", len(f.Hosts))
+	hostCount := fmt.Sprintf("%d", f.Count())
 	if f.HostFloor() {
-		hostCount = "at least " + hostCount + " (detection API paged; this is a floor)"
+		hostCount = "at least " + hostCount +
+			" (the scanner truncated its host lists; this is a floor, and the\n"+
+			" attached CSV names the ones it did return)"
 	}
 	b.WriteString(row("Affected hosts", hostCount))
 

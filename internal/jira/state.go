@@ -34,7 +34,6 @@ const PropertyKey = "cti-agent-exposure"
 // never truncated. Past this limit the fleet loses only the ability to say
 // WHICH hosts are new - the CSV on the ticket still lists all of them.
 
-//
 // Jira caps an issue property at 32KB. A 441-host list is roughly 11KB, so
 // the real estate is there - but "roughly" is not a guarantee, and a property
 // write that 400s partway through a run would leave the ticket commented and
@@ -83,12 +82,15 @@ func StateFrom(f Finding, ticketKey string, now time.Time) ExposureState {
 	s := ExposureState{
 		CVE:       f.CVE,
 		HostsHash: HostsHashOf(f.Hosts),
-		HostCount: len(f.Hosts),
+		// Count() not len(Hosts): when the scanner truncates, the number of
+		// NAMES it returned moves around independently of the estate, and a
+		// drift report built on that reads a short scan as remediation.
+		HostCount: f.Count(),
 		QIDs:      sortedCopy(f.QIDs),
 		UpdatedAt: now,
 		TicketKey: ticketKey,
 	}
-	if len(f.Hosts) <= MaxPropertyHosts {
+	if len(f.Hosts) > 0 && len(f.Hosts) <= MaxPropertyHosts {
 		s.Hosts = sortedCopy(f.Hosts)
 		s.HostsKept = true
 	}
@@ -124,15 +126,15 @@ type Drift struct {
 
 // DiffExposure compares stored state against what the scanner reports now.
 func DiffExposure(prev *ExposureState, f Finding, _ time.Time) Drift {
-	d := Drift{CountAfter: len(f.Hosts)}
+	d := Drift{CountAfter: f.Count()}
 
 	if prev == nil {
 		d.FirstLook = true
-		d.Resolved = len(f.Hosts) == 0
+		d.Resolved = f.Count() == 0
 		return d
 	}
 	d.CountBefore = prev.HostCount
-	d.Resolved = len(f.Hosts) == 0 && prev.HostCount > 0
+	d.Resolved = f.Count() == 0 && prev.HostCount > 0
 
 	d.NewQIDs, d.GoneQIDs = diffSets(prev.QIDs, f.QIDs)
 
@@ -298,7 +300,7 @@ func ClosedButDetectedComment(f Finding, now time.Time) string {
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b,
 		"*This ticket is closed, but %s is still detected on %d host(s).*\n\n",
-		f.CVE, len(f.Hosts))
+		f.CVE, f.Count())
 	b.WriteString("The CTI agent has not reopened it and will not comment again - ")
 	b.WriteString("closing it may well have been right. If it was closed in error, ")
 	b.WriteString("reopen it; if the exposure is accepted, no action is needed.\n\n")

@@ -683,6 +683,36 @@ the queue your team actually works from? A JSM project can accept an issue over
 the plain issue API and leave it out of the agent queues, and that is invisible
 from the command's point of view. Close and delete the ticket when done.
 
+### The automatic path
+
+Once configured, `run-digest` files tickets itself. The pipeline order is
+`enrich -> cti-jira -> brief -> send`, and that position is the whole design:
+after enrich because it needs the findings, before brief because the ticket
+keys have to exist by the time the email is rendered.
+
+**Every failure in that step is non-fatal.** This lane now sits between the
+fleet and its daily security email, so a Jira outage, an expired token or a
+project permission change costs tickets and nothing else. `cti-jira` exits 0
+on its own internal failures and the runner adds `|| true` for the ones it
+cannot catch.
+
+`run-digest --dry-run` passes the dry run through: it reports what it *would*
+file and writes nothing. A dry run that quietly filed real tickets would be
+the September dropped-`--dry-run` incident again, with a longer cleanup.
+
+What gets a ticket: a finding that is **KEV or Sev5** *and* **PRESENT** in the
+estate. Not-present and unknown-coverage findings are skipped — a ticket for a
+CVE the scanner cannot find carries no host list, which is the thing that makes
+a ticket useless. Non-KEV Sev5 findings are reported but held for approval
+rather than filed.
+
+Host names come from a fresh Qualys lookup, not from the enriched file — that
+file carries only a ten-host sample. Only the selected CVEs are looked up, so
+a normal day is a handful of Host Detection calls rather than one per finding.
+
+The daily then quotes the key and links the ticket under each CVE, in both the
+HTML and text parts, until the scanner stops finding it.
+
 ### What happens on the runs after the first
 
 The ticket is found by its `cti-<cve>` label and **updated in place** — the
