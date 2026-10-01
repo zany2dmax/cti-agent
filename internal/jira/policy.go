@@ -201,7 +201,11 @@ func Description(f Finding, now time.Time, csvName string) string {
 	b.WriteString("\n")
 
 	if csvName != "" {
-		b.WriteString(fmt.Sprintf("The full host list is attached as [^%s].\n\n", csvName))
+		// _, _ = because a strings.Builder write cannot fail - Builder.Write
+		// is documented to always return a nil error. Explicit at the call
+		// site rather than hidden in an errcheck exclusion, which is this
+		// repo's rule: the reader can see the decision was made.
+		_, _ = fmt.Fprintf(&b, "The full host list is attached as [^%s].\n\n", csvName)
 	}
 
 	if q := strings.TrimSpace(f.QQL); q != "" {
