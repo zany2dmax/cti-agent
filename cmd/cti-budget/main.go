@@ -220,16 +220,40 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 	}
 	d := s.Check(l)
 
+	// Computed once, above the branch: --json is what a monitor reads, and the
+	// text output is what a person reads. They must not be able to disagree
+	// about whether the fleet is beating.
+	now := s.Now()
+	cutoff := now.Add(-48 * time.Hour)
+	recent := budget.CountSinceAny(l.Beats, cutoff)
+	charged := budget.CountCharged(l.Beats, cutoff)
+	newest, haveBeats := budget.NewestBeat(l.Beats)
+	stale := haveBeats && now.Sub(newest.At) > 6*time.Hour
+
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(map[string]any{
-			"ledger":       s.Path,
-			"allow":        d.Allow,
-			"reason":       d.Reason,
-			"retry_after":  d.RetryAfter,
+			"ledger":        s.Path,
+			"allow":         d.Allow,
+			"reason":        d.Reason,
+			"retry_after":   d.RetryAfter,
 			"beats_stored":  len(l.Beats),
-			"beats_charged": budget.CountCharged(l.Beats, s.Now().Add(-48*time.Hour)),
+			"beats_recent":  recent,
+			"beats_charged": charged,
+			// not_beating is the field to alert on. allow=true says only that
+			// the fleet has quota left, which a stopped fleet always does.
+			"not_beating": stale || !haveBeats,
+			"last_beat": func() any {
+				if !haveBeats {
+					return nil
+				}
+				return map[string]any{
+					"at":      newest.At,
+					"outcome": newest.Outcome,
+					"age":     now.Sub(newest.At).Round(time.Minute).String(),
+				}
+			}(),
 			"limits": map[string]any{
 				"window_hours": s.Limits.Window.Hours(),
 				"window_beats": s.Limits.WindowBeats,
@@ -242,14 +266,36 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 	_, _ = fmt.Fprintf(stdout, "ledger:  %s\n", s.Path)
 	_, _ = fmt.Fprintf(stdout, "limits:  %d beats per %s, %d per day\n",
 		s.Limits.WindowBeats, s.Limits.Window, s.Limits.DailyBeats)
-	// Recorded AND charged. They differ exactly when lanes are failing, which
-	// is when somebody is reading this output.
-	charged := budget.CountCharged(l.Beats, s.Now().Add(-48*time.Hour))
-	_, _ = fmt.Fprintf(stdout, "beats:   %d recorded in the last 48h, %d charged\n",
-		len(l.Beats), charged)
-	if n := len(l.Beats) - charged; n > 0 {
+	// THE OLD LINE HERE WAS A LIE WHEN IT MATTERED MOST.
+	//
+	// It printed len(l.Beats) as "recorded in the last 48h". Pruning to 48h
+	// happens in Save, and Save only runs when a beat is recorded - so a
+	// fleet that STOPPED never prunes, and the line reported week-old beats
+	// as recent activity. That is the exact moment an operator is asking
+	// "is the heartbeat alive?", and it answered yes.
+	//
+	// Counted from timestamps now, and the age of the newest beat is printed
+	// outright, because "last beat 2d ago" is the answer to the question
+	// people are actually asking.
+	_, _ = fmt.Fprintf(stdout, "beats:   %d stored, %d in the last 48h, %d charged\n",
+		len(l.Beats), recent, charged)
+	if n := recent - charged; n > 0 {
 		_, _ = fmt.Fprintf(stdout,
 			"         %d errored without spending quota - check the lanes, not the budget\n", n)
+	}
+	if haveBeats {
+		_, _ = fmt.Fprintf(stdout, "last:    %s (%s ago), outcome %s\n",
+			newest.At.Format(time.RFC3339),
+			now.Sub(newest.At).Round(time.Minute), newest.Outcome)
+		// A heartbeat on a two-hourly timer that has not beaten in six hours
+		// is not rationing itself. Say so, rather than leaving it to be
+		// inferred from a timestamp next to the word "ready".
+		if stale {
+			_, _ = fmt.Fprintf(stdout,
+				"         NOT BEATING - the timer or the lane is broken, not the budget\n")
+		}
+	} else {
+		_, _ = fmt.Fprintf(stdout, "last:    never - no beat has ever been recorded\n")
 	}
 	if d.Allow {
 		_, _ = fmt.Fprintf(stdout, "state:   ready (%s)\n", d.Reason)
