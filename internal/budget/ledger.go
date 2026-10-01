@@ -34,6 +34,11 @@ const (
 	OutcomeOK        Outcome = "ok"
 	OutcomeRateLimit Outcome = "ratelimit"
 	OutcomeError     Outcome = "error"
+	// OutcomeExhausted is the account being out of credit or subscription,
+	// as distinct from being throttled. Waiting does not fix it, so it must
+	// not be reported as a transient backoff or as a code failure. See
+	// classify.go for what mistaking it cost.
+	OutcomeExhausted Outcome = "exhausted"
 )
 
 // Charges reports whether a beat consumed model quota, and therefore whether
@@ -55,9 +60,16 @@ const (
 // There is no retry-storm risk in letting errors go uncharged: the pace is set
 // by a two-hourly systemd timer, not by retries, so a broken lane cannot beat
 // faster than a working one.
+// Exhausted does not charge either. The ceilings exist to stop this fleet
+// crowding out its operator; rationing ourselves against a balance of zero
+// protects nobody from anything.
 func (o Outcome) Charges() bool {
 	return o == OutcomeOK || o == OutcomeRateLimit
 }
+
+// NeedsAPerson reports whether no amount of waiting will clear this. The
+// caller should hold and escalate rather than back off and retry.
+func (o Outcome) NeedsAPerson() bool { return o == OutcomeExhausted }
 
 // Beat is one recorded attempt.
 type Beat struct {
@@ -240,6 +252,12 @@ func (s *Store) Record(l *Ledger, o Outcome, note string) {
 	switch o {
 	case OutcomeRateLimit:
 		l.CooldownUntil = now.Add(s.backoffFor(l))
+	case OutcomeExhausted:
+		// Straight to the maximum, not up the exponential ramp. The ramp
+		// assumes waiting helps; here it does not, and starting at 30 minutes
+		// means 12 pointless retries before the backoff gets long enough to
+		// stop being noise.
+		l.CooldownUntil = now.Add(s.Limits.BackoffMax)
 	case OutcomeOK:
 		// Clear the cooldown only on a clean run. An error is not evidence
 		// that the throttle lifted.
