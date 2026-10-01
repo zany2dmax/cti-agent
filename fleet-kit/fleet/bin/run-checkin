@@ -177,10 +177,35 @@ echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
 
 if [ -x "$BUDGET" ]; then
   # Only beats that actually reached the model count against the ceilings.
-  # head -c bounds what a runaway transcript can push through argv.
-  "$BUDGET" record --exit "$rc" \
+  # tail -c bounds what a runaway transcript can push through argv.
+  record_out="$("$BUDGET" record --exit "$rc" \
     --output "$(tail -c 4000 "$beat_log" 2>/dev/null || true)" \
-    --note "checkin" >/dev/null 2>&1 || true
+    --note "checkin" 2>&1)" && record_rc=0 || record_rc=$?
+
+  # rc 4: the account is out of credit. That is a HOLD, not a FAILURE.
+  #
+  # This is the 24 September outage. "Credit balance is too low" was
+  # classified as a script error, systemd saw exit 1 and marked the unit
+  # failed, OnFailure mailed "FAILED", and the operator did the sensible
+  # thing with a broken lane - disabled the timer. Six days of silence
+  # followed, undetectable because a disabled timer cannot fail.
+  #
+  # Exiting 0 here is the same judgement as the budget brake above: a
+  # correctly-reported hold is not a failed unit. It is not silent either -
+  # it posts to the board and escalates once. cti-budget has already set a
+  # six-hour cooldown, so the next beats are stopped by the gate before they
+  # ever reach the CLI, and that path has its own alert dedupe.
+  if [ "$record_rc" -eq 4 ]; then
+    reason="$(echo "$record_out" | tr '\n' ' ')"
+    echo "[run-checkin $(date '+%F %H:%M:%S')] HOLD: $reason"
+    "$FLEET_CODE/bin/fleet-board" post @you @operator INFO \
+      "heartbeat held - $reason" 2>/dev/null || true
+    if [ -x "$FLEET_CODE/bin/cti-alert" ]; then
+      "$FLEET_CODE/bin/cti-alert" --unit cti-agent-checkin.service \
+        --kind HOLD --reason "$reason" || true
+    fi
+    exit 0
+  fi
 fi
 
 exit "$rc"
