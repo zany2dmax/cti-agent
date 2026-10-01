@@ -165,6 +165,20 @@ func doCheck(ctx context.Context, c *jira.Client, cfg config.Config) int {
 	if len(required) > 0 {
 		logf("  anything marked <- is NOT set by this command and will fail a create")
 	}
+
+	// Exercise SEARCH too, because --check is worthless if it only proves the
+	// read paths that happen to be on a different API version.
+	//
+	// This is how /rest/api/2/search being removed was found: at the moment of
+	// creating a ticket, as a 410 after the operator had already committed to
+	// --for-real. A duplicate check runs before every create, so a broken
+	// search breaks the whole lane - and a preflight that does not touch it is
+	// a preflight that lies. The query matches nothing on purpose.
+	hits, err := c.Search(ctx, jira.FindJQL(cfg.JiraProjectKey, "CVE-1900-00000"), 1)
+	if err != nil {
+		return die("the duplicate-detection search failed: %s", safelog.Line(err.Error()))
+	}
+	logf("  duplicate search works (%d matches for the test CVE)", len(hits))
 	return exitOK
 }
 
