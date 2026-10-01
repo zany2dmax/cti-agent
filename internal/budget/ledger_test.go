@@ -377,3 +377,56 @@ func TestRecordedAndChargedDifferWhenLanesFail(t *testing.T) {
 		t.Errorf("charged = %d, want 1", c)
 	}
 }
+
+func TestNewestBeatIgnoresFileOrder(t *testing.T) {
+	// "When did the fleet last beat" must not depend on the JSON being in
+	// order on disk. A hand-edit or a merge could reorder it.
+	early := base.Add(-10 * time.Hour)
+	late := base.Add(-1 * time.Hour)
+	beats := []Beat{
+		{At: late, Outcome: OutcomeError},
+		{At: early, Outcome: OutcomeOK},
+	}
+	got, ok := NewestBeat(beats)
+	if !ok {
+		t.Fatal("NewestBeat found nothing in a non-empty ledger")
+	}
+	if !got.At.Equal(late) {
+		t.Errorf("newest = %s, want %s", got.At, late)
+	}
+	if _, ok := NewestBeat(nil); ok {
+		t.Error("an empty ledger reported a newest beat")
+	}
+}
+
+func TestAStoppedFleetDoesNotReportStaleBeatsAsRecent(t *testing.T) {
+	// The misdiagnosis this prevents. Pruning to 48h happens in Save, and Save
+	// only runs when a beat is recorded - so a fleet that STOPPED keeps its old
+	// beats forever. Counting len(Beats) reported them as current activity and
+	// the operator concluded the heartbeat was alive.
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+	for i := 0; i < 24; i++ {
+		s.Record(l, OutcomeOK, "")
+		*now = now.Add(time.Minute)
+	}
+	*now = now.Add(5 * 24 * time.Hour) // five days of silence
+
+	if n := len(l.Beats); n != 24 {
+		t.Fatalf("stored %d beats, want 24 still on disk", n)
+	}
+	cutoff := now.Add(-48 * time.Hour)
+	if n := CountSinceAny(l.Beats, cutoff); n != 0 {
+		t.Errorf("%d beats counted as being in the last 48h, want 0", n)
+	}
+	if n := CountCharged(l.Beats, cutoff); n != 0 {
+		t.Errorf("%d beats counted as charged, want 0", n)
+	}
+	newest, ok := NewestBeat(l.Beats)
+	if !ok {
+		t.Fatal("no newest beat")
+	}
+	if age := now.Sub(newest.At); age < 5*24*time.Hour {
+		t.Errorf("newest beat age %s, want at least 5 days", age)
+	}
+}

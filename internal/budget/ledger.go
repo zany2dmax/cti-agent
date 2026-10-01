@@ -43,7 +43,7 @@ const (
 // request reached the service. An error did not: the lane broke, usually
 // before it ever called the model.
 //
-// WHY THIS MATTERS MORE THAN IT LOOKS
+// # WHY THIS MATTERS MORE THAN IT LOOKS
 //
 // Charging errors inverts the fleet's own diagnosis. A crash-looping
 // orchestrator burns the daily ceiling on failures, the gate then holds, and
@@ -295,10 +295,37 @@ func countSince(beats []Beat, cutoff time.Time) int {
 }
 
 // CountCharged exposes the same count for reporting, so `cti-budget status`
-// can show recorded and charged side by side. "24 recorded, 0 charged" is the
+// can show recorded and charged side by side. "24 stored, 0 charged" is the
 // line that makes a silently broken lane obvious.
 func CountCharged(beats []Beat, cutoff time.Time) int {
 	return countSince(beats, cutoff)
+}
+
+// CountSinceAny counts beats after cutoff whatever their outcome. Reporting
+// only: a ceiling must use countSince.
+func CountSinceAny(beats []Beat, cutoff time.Time) int {
+	n := 0
+	for _, b := range beats {
+		if b.At.After(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
+// NewestBeat returns the most recent beat. Beats are appended in order, but
+// this scans rather than taking the last element: the ledger is JSON on disk
+// and a hand-edit or a merge could reorder it, and "when did the fleet last
+// beat" is exactly the answer nobody should have to distrust.
+func NewestBeat(beats []Beat) (Beat, bool) {
+	var newest Beat
+	found := false
+	for _, b := range beats {
+		if !found || b.At.After(newest.At) {
+			newest, found = b, true
+		}
+	}
+	return newest, found
 }
 
 // oldestInWindow finds the earliest CHARGING beat in the window. RetryAfter is
