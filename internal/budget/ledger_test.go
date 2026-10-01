@@ -252,3 +252,128 @@ func TestCheckDoesNotConsumeBudget(t *testing.T) {
 		}
 	}
 }
+
+// ─── errors must not consume quota ──────────────────────────────────────────
+//
+// Record has always documented this. The code did not do it: countSince
+// counted every beat regardless of outcome, so a broken lane rationed the
+// fleet for model calls it never made. These tests fail against that code.
+
+func TestAnErrorBeatDoesNotFillTheWindow(t *testing.T) {
+	// The 21 September regression, in miniature: the orchestrator could not
+	// start, every beat errored, and the fleet reported a budget hold.
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+	for i := 0; i < s.Limits.WindowBeats*3; i++ {
+		s.Record(l, OutcomeError, "sandbox refused to start")
+		*now = now.Add(time.Minute)
+	}
+	if d := s.Check(l); !d.Allow {
+		t.Fatalf("%d failed beats closed the window: %s", s.Limits.WindowBeats*3, d.Reason)
+	}
+}
+
+func TestAnErrorBeatDoesNotFillTheDay(t *testing.T) {
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+	for i := 0; i < s.Limits.DailyBeats+5; i++ {
+		s.Record(l, OutcomeError, "lane broke")
+		*now = now.Add(time.Minute)
+	}
+	if d := s.Check(l); !d.Allow {
+		t.Fatalf("failed beats closed the day: %s", d.Reason)
+	}
+}
+
+func TestARateLimitStillCharges(t *testing.T) {
+	// Being refused is evidence the request reached the service, so it spends.
+	//
+	// The cooldown would mask this - a held fleet is held either way - so the
+	// clock is stepped past the backoff but NOT past the window. Four
+	// consecutive rate limits give 30m*2^3 = 4h of backoff against a 5h
+	// window, so 4h30m clears the cooldown while the beats are still inside
+	// the ceiling. If either limit changes, this test fails loudly rather
+	// than passing for the wrong reason.
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+
+	oldest := *now
+	for i := 0; i < s.Limits.WindowBeats; i++ {
+		s.Record(l, OutcomeRateLimit, "429")
+		*now = now.Add(time.Minute)
+	}
+
+	*now = oldest.Add(4*time.Hour + 30*time.Minute)
+	if now.Before(l.CooldownUntil) {
+		t.Fatalf("test setup: still inside the cooldown until %s", l.CooldownUntil)
+	}
+	if now.Sub(oldest) >= s.Limits.Window {
+		t.Fatalf("test setup: beats aged out of the %s window", s.Limits.Window)
+	}
+
+	if d := s.Check(l); d.Allow {
+		t.Error("rate-limited beats did not count against the ceiling")
+	}
+}
+
+func TestErrorsDoNotDilateRetryAfter(t *testing.T) {
+	// RetryAfter answers "when does a slot free up". A slot is occupied only
+	// by a charging beat, so an error must not be the one the clock runs from.
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+
+	s.Record(l, OutcomeError, "broke immediately") // oldest beat, charges nothing
+	*now = now.Add(30 * time.Minute)
+
+	firstCharged := *now
+	for i := 0; i < s.Limits.WindowBeats; i++ {
+		s.Record(l, OutcomeOK, "")
+		*now = now.Add(time.Minute)
+	}
+
+	d := s.Check(l)
+	if d.Allow {
+		t.Fatal("window should be full")
+	}
+	want := firstCharged.Add(s.Limits.Window)
+	if !d.RetryAfter.Equal(want) {
+		t.Errorf("RetryAfter = %s, want %s (derived from the oldest CHARGING beat)",
+			d.RetryAfter.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+func TestChargesIsExplicitAboutEveryOutcome(t *testing.T) {
+	// A new Outcome must make a deliberate choice here rather than defaulting
+	// into "free", which would silently widen the ceiling.
+	for _, tc := range []struct {
+		o    Outcome
+		want bool
+	}{
+		{OutcomeOK, true},
+		{OutcomeRateLimit, true},
+		{OutcomeError, false},
+	} {
+		if got := tc.o.Charges(); got != tc.want {
+			t.Errorf("%s.Charges() = %v, want %v", tc.o, got, tc.want)
+		}
+	}
+}
+
+func TestRecordedAndChargedDifferWhenLanesFail(t *testing.T) {
+	// The reporting case: "24 recorded, 0 charged" is what makes a silently
+	// broken lane visible in `cti-budget status`.
+	s, now := newTestStore(t)
+	l, _ := s.Load()
+	for i := 0; i < 6; i++ {
+		s.Record(l, OutcomeError, "")
+		*now = now.Add(time.Minute)
+	}
+	s.Record(l, OutcomeOK, "")
+
+	if len(l.Beats) != 7 {
+		t.Fatalf("recorded %d beats, want 7", len(l.Beats))
+	}
+	if c := CountCharged(l.Beats, now.Add(-48*time.Hour)); c != 1 {
+		t.Errorf("charged = %d, want 1", c)
+	}
+}
