@@ -356,7 +356,10 @@ func TestATableCellSurvivesAHostileDescription(t *testing.T) {
 
 	d := Description(f, now, "x.csv")
 	for _, line := range strings.Split(d, "\n") {
-		if !strings.HasPrefix(line, "|") {
+		// "||Field||Value||" is the HEADER, and double pipes are correct wiki
+		// markup for one. Only data rows - written by row() from values this
+		// package does not control - are being checked here.
+		if !strings.HasPrefix(line, "|") || strings.HasPrefix(line, "||") {
 			continue
 		}
 		// Count only UNescaped pipes: a well-formed two-column row has
