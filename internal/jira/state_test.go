@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"encoding/csv"
 	"strings"
 	"testing"
 	"time"
@@ -253,5 +254,65 @@ func TestStateFromRoundTripsThroughTheHash(t *testing.T) {
 	var zero time.Time
 	if st.UpdatedAt == zero {
 		t.Error("UpdatedAt was not set")
+	}
+}
+
+func TestTheCSVIsNeverTruncatedWhateverTheStateLimitIs(t *testing.T) {
+	// A ticket with no hostnames to work on is useless, so the attachment has
+	// NO cap. MaxPropertyHosts bounds only the diff bookkeeping stored on the
+	// issue, and MaxListedInComment bounds only the comment prose. Three
+	// limits, three jobs - and this test exists so that a future tidy-up
+	// cannot quietly reuse one of them for the deliverable.
+	const n = MaxPropertyHosts*2 + 500 // comfortably past the state limit
+	hosts := make([]string, n)
+	for i := range hosts {
+		hosts[i] = "host-" + itoa(i) + ".example.com"
+	}
+	f := finding(hosts, []string{"92101", "92145"})
+
+	raw, err := HostCSV(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(strings.NewReader(string(raw))).ReadAll()
+	if err != nil {
+		t.Fatalf("the CSV does not parse: %v", err)
+	}
+	if got := len(rows) - 1; got != n { // -1 for the header
+		t.Errorf("CSV has %d host rows, want %d - the deliverable was truncated", got, n)
+	}
+
+	// And the state for the same finding DOES drop its list, which is the
+	// contrast this test is pinning.
+	st := StateFrom(f, "CR-1", now)
+	if st.HostsKept {
+		t.Error("state kept a host list well past MaxPropertyHosts")
+	}
+	if st.HostCount != n {
+		t.Errorf("state lost the count too: %d, want %d", st.HostCount, n)
+	}
+}
+
+func TestAStaleAttachmentCanOnlyOverstateExposure(t *testing.T) {
+	// No new CSV is attached on a run with no material change, so the newest
+	// attachment on a long-lived ticket can lag reality. That is safe in one
+	// direction only, and this pins which:
+	//
+	// growth is always material -> a new CSV is always attached when hosts
+	// appear. So the only way an attachment goes stale is hosts going AWAY,
+	// which means the stale list is a SUPERSET of the real one. Somebody
+	// working it patches a machine that is already clean - wasted effort, not
+	// a missed host.
+	prev := stateWith([]string{"a.example.com", "b.example.com"}, []string{"1"}, true)
+
+	shrunk := DiffExposure(prev, finding([]string{"a.example.com"}, []string{"1"}), now)
+	if shrunk.Material() {
+		t.Fatal("setup: a shrink should not be material")
+	}
+
+	grown := DiffExposure(prev, finding(
+		[]string{"a.example.com", "b.example.com", "c.example.com"}, []string{"1"}), now)
+	if !grown.Material() {
+		t.Error("growth was not material - a new host could go without a fresh CSV")
 	}
 }
