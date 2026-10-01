@@ -92,10 +92,40 @@ has_stored_credentials() {
 # account has no browser and no TTY, so an unauthenticated claude blocks or
 # errors in a way that reads like a hang rather than a config problem. Check
 # for credentials up front and name the fix.
-if [ -z "${ANTHROPIC_API_KEY:-}" ] \
-   && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] \
-   && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
-   && ! has_stored_credentials; then
+# WHICH credential, not just whether one exists.
+#
+# This check used to ask only "is at least one set", while fleet.env.example
+# said "Set EXACTLY ONE of these". A documented invariant that nothing
+# enforces is not an invariant, and this one bills real money to the wrong
+# account: with both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN present,
+# claude uses the Console key, so a fleet configured against a subscription
+# seat quietly draws down an org credit balance instead. When that balance
+# hit zero the failure read "Credit balance is too low" on a box whose
+# operator had deliberately wired it to a subscription - and nothing in any
+# log had ever said which credential was in use.
+#
+# So: name the credential on every beat, and refuse when the answer is
+# ambiguous. Refusing is the right direction because the alternative is
+# silently charging somebody who did not agree to pay.
+AUTH_SET=""
+[ -n "${ANTHROPIC_API_KEY:-}" ]       && AUTH_SET="$AUTH_SET ANTHROPIC_API_KEY"
+[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]    && AUTH_SET="$AUTH_SET ANTHROPIC_AUTH_TOKEN"
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && AUTH_SET="$AUTH_SET CLAUDE_CODE_OAUTH_TOKEN"
+AUTH_SET="${AUTH_SET# }"
+AUTH_COUNT=$(printf '%s\n' $AUTH_SET | grep -c . || true)
+
+if [ "$AUTH_COUNT" -gt 1 ]; then
+  echo "run-checkin: MORE THAN ONE credential is set: $AUTH_SET" >&2
+  echo "  claude picks one, and the one it picks is probably not the one you" >&2
+  echo "  meant - ANTHROPIC_API_KEY bills a Console balance, while" >&2
+  echo "  CLAUDE_CODE_OAUTH_TOKEN draws on a subscription seat." >&2
+  echo "  Blank all but one in $FLEET_ENV." >&2
+  "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
+    "heartbeat refused: more than one Claude credential set ($AUTH_SET); blank all but one in fleet.env" 2>/dev/null || true
+  exit 1
+fi
+
+if [ "$AUTH_COUNT" -eq 0 ] && ! has_stored_credentials; then
   echo "run-checkin: claude is installed at $CLAUDE but not authenticated." >&2
   echo "  Set one of these in $FLEET_ENV:" >&2
   echo "    ANTHROPIC_API_KEY        Console key, billed per token" >&2
@@ -106,6 +136,15 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ] \
     "heartbeat cannot start: claude not authenticated; set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in fleet.env" 2>/dev/null || true
   exit 1
 fi
+
+# The NAME only. Never the value, and never a prefix of it - a few characters
+# of a live token in a journal is still a few characters of a live token.
+if [ "$AUTH_COUNT" -eq 1 ]; then
+  AUTH_VIA="$AUTH_SET"
+else
+  AUTH_VIA="stored credentials in ${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+fi
+echo "[run-checkin $(date '+%F %H:%M:%S')] auth: $AUTH_VIA"
 
 # A heartbeat that overlaps itself corrupts nothing (the board is lock-safe) but
 # wastes a slot and doubles token spend. Skip if the previous beat is still up.
