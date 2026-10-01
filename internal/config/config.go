@@ -22,11 +22,24 @@ type Config struct {
 	QualysKBCachePath string
 	QualysKBMaxAge    time.Duration
 	ReportPath        string
+
+	JiraBaseURL    string
+	JiraEmail      string
+	JiraAPIToken   string
+	JiraProjectKey string
+	JiraIssueType  string
+	// JiraAllowCreate is the project-key allowlist, and it is deliberately the
+	// same shape as FLEET_ALLOW_TO: a comma-separated list the fleet may write
+	// to, with no default. A ticket filed into the wrong project is the same
+	// class of mistake as mail sent to the wrong distribution list, and both
+	// are mistakes you cannot take back - a Jira issue, once created, has been
+	// seen by whatever automation watches that project.
+	JiraAllowCreate string
 }
 
 // Load returns the full configuration, Graph included. For commands that read
 // the mailbox or send mail.
-func Load() (Config, error) { return load(true, true) }
+func Load() (Config, error) { return load(true, true, false) }
 
 // LoadVulnLookup returns the configuration for a command that only queries the
 // vulnerability scanner.
@@ -43,7 +56,7 @@ func Load() (Config, error) { return load(true, true) }
 // rotation would take the monthly exposure figures down with it and report
 // them as "NOT MEASURED". A command should only be able to fail on the
 // credentials it actually needs.
-func LoadVulnLookup() (Config, error) { return load(false, true) }
+func LoadVulnLookup() (Config, error) { return load(false, true, false) }
 
 // LoadGraphOnly returns the configuration for a command that only talks to
 // the mailbox.
@@ -59,7 +72,7 @@ func LoadVulnLookup() (Config, error) { return load(false, true) }
 // opposite direction: a command should be able to fail on the credentials it
 // needs and no others, because a list that includes irrelevant names sends
 // the reader looking in the wrong file.
-func LoadGraphOnly() (Config, error) { return load(true, false) }
+func LoadGraphOnly() (Config, error) { return load(true, false, false) }
 
 // MaxLookback is the largest window a catch-up run may ask for.
 //
@@ -90,7 +103,15 @@ func ValidateLookback(d time.Duration) error {
 	return nil
 }
 
-func load(needGraph, needQualys bool) (Config, error) {
+// LoadJira returns the configuration for the ticketing lane: Jira plus the
+// scanner it reads host counts from, and no Graph.
+//
+// Split for the same reason LoadVulnLookup is: cti-jira does not send mail -
+// the digest runner does that - so demanding TENANT_ID to file a ticket would
+// make a replay on a workstation fail on credentials it never uses.
+func LoadJira() (Config, error) { return load(false, true, true) }
+
+func load(needGraph, needQualys, needJira bool) (Config, error) {
 	lookbackHours, err := strconv.Atoi(getenvDefault("GRAPH_LOOKBACK_HOURS", "24"))
 	if err != nil || lookbackHours <= 0 {
 		return Config{}, fmt.Errorf("GRAPH_LOOKBACK_HOURS must be a positive integer")
@@ -123,6 +144,19 @@ func load(needGraph, needQualys bool) (Config, error) {
 		QualysKBCachePath: getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
 		QualysKBMaxAge:    time.Duration(kbMaxAgeHours) * time.Hour,
 		ReportPath:        getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
+
+		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
+		JiraEmail:    os.Getenv("JIRA_EMAIL"),
+		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
+		// No defaults, on purpose. "Task" would have been the obvious one and
+		// it is WRONG here: the CR project is a Service Management desk whose
+		// issue types are IT Support, Off-Boarding, New-Hire IT Request and so
+		// on - there is no Task at all, so a default would have failed at the
+		// first create with a field error instead of at startup with a clear
+		// one. Destinations get named explicitly in this codebase.
+		JiraProjectKey:  os.Getenv("JIRA_PROJECT_KEY"),
+		JiraIssueType:   os.Getenv("JIRA_ISSUE_TYPE"),
+		JiraAllowCreate: os.Getenv("JIRA_ALLOW_CREATE"),
 	}
 
 	missing := []string{}
@@ -150,6 +184,24 @@ func load(needGraph, needQualys bool) (Config, error) {
 			}
 		}
 	}
+	if needJira {
+		for name, value := range map[string]string{
+			"JIRA_BASE_URL":    cfg.JiraBaseURL,
+			"JIRA_EMAIL":       cfg.JiraEmail,
+			"JIRA_API_TOKEN":   cfg.JiraAPIToken,
+			"JIRA_PROJECT_KEY": cfg.JiraProjectKey,
+			"JIRA_ISSUE_TYPE":  cfg.JiraIssueType,
+		} {
+			if value == "" {
+				missing = append(missing, name)
+			}
+		}
+		// JIRA_ALLOW_CREATE is NOT in that list, because an empty allowlist is
+		// a valid and meaningful state: it means "create nothing". Requiring
+		// it here would make the error "you forgot a variable" when the honest
+		// answer is "this install is configured to read Jira, not write it".
+	}
+
 	if len(missing) > 0 {
 		// Sorted because the names come out of a map: the same misconfiguration
 		// printed a differently-ordered list on each run, which makes two logs
