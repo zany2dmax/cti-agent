@@ -115,10 +115,17 @@ func run() int {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// Read the inbox over the same window the agent uses, so the two lanes
-	// see the same set of messages. Anything older has aged out of the
-	// processed log anyway and will be left alone.
-	since := time.Now().Add(-cfg.GraphLookback)
+	// A WIDER window than the agent uses, on purpose.
+	//
+	// These two used to share GRAPH_LOOKBACK_HOURS, and 24h for both made the
+	// window exactly the interval between runs. A message arriving in the hour
+	// before the cleanup fires is processed later that day, and by the next
+	// run it has already fallen out of a 24h window - so it is never archived,
+	// ever. The lane looked like it "sometimes missed some".
+	//
+	// MAILBOX_LOOKBACK_HOURS defaults to 72: two missed runs of slack.
+	now := time.Now()
+	since := now.Add(-cfg.MailboxLookback)
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
 	msgs, err := g.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
 	if err != nil {
@@ -134,9 +141,14 @@ func run() int {
 			Received: m.ReceivedDateTime, AutoReply: m.IsAutoReply(),
 		})
 	}
-	plan := mailbox.Plan(candidates, l.Index())
+	plan := mailbox.Plan(candidates, l.Index(), now, cfg.MailboxMinAge)
 	counts := mailbox.Summarise(plan)
 
+	// State the window and the grace. "Why was that not archived?" should be
+	// answerable from the output rather than from fleet.env, and the answer
+	// is almost always one of these two numbers.
+	fmt.Printf("  window %s, archive grace %s\n",
+		cfg.MailboxLookback, cfg.MailboxMinAge)
 	fmt.Printf("%s: %d message(s) in the window; %d CTI email(s) processed today\n",
 		cfg.GraphMailbox, len(candidates), todayCount)
 	// The leave count is split, because its two halves mean opposite things:
