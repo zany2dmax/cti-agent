@@ -22,6 +22,31 @@ tasks:
       - gofmt -w .
 
   fmt:check:
+    desc: Fail if anything is unformatted, rather than silently reformatting it
+    # WHY ship USES THIS AND NOT fmt
+    #
+    # `ship` was: gofmt -w . ... git push. So gofmt rewrote files and then the
+    # push went out WITHOUT them - the reformatting stayed in the working tree,
+    # uncommitted, and `ship` reported success. The tree was left dirty, and the
+    # installer stamps `-DIRTY` from a dirty tree, so production would have
+    # reported a version that cannot be reproduced from any commit.
+    #
+    # A gate may not modify the thing it is checking. Fix it yourself with
+    # `task fmt`, then commit.
+    cmds:
+      - |
+        unformatted="$(gofmt -l . || true)"
+        if [ -n "$unformatted" ]; then
+          echo "These files are not gofmt-clean:" >&2
+          echo "$unformatted" | sed 's/^/  /' >&2
+          echo "" >&2
+          echo "Run 'task fmt' and COMMIT the result - ship will not do it for" >&2
+          echo "you, because it would push without the change it just made." >&2
+          exit 1
+        fi
+        echo "  ok  gofmt clean"
+
+  fmt:check:
     desc: Fail if any Go file is unformatted
     cmds:
       - |
@@ -236,7 +261,7 @@ tasks:
     # informative, so a broken change should fail on behaviour rather than on
     # a lint rule.
     cmds:
-      - task: fmt
+      - task: fmt:check
       - go build ./...
       - task: test
       - task: lint
