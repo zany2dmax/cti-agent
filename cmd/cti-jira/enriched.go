@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -291,24 +292,73 @@ func writeTicketMap(path string, m TicketMap) error {
 // this runs; failing the lane because a note did not land would turn a
 // bookkeeping miss into a missing ticket.
 func recordRemediationNote(cve, note string, warn func(string, ...any)) {
-	db := filepath.Join(os.Getenv("FLEET_CODE"), "bin", "fleet-db")
-	if os.Getenv("FLEET_CODE") == "" {
-		return // not running inside the fleet layout; nothing to record to
-	}
-	if _, err := os.Stat(db); err != nil {
-		warn("fleet-db not found at %s - %s has a ticket but is still "+
-			"recorded as un-actioned", db, cve)
+	db, err := fleetDBPath()
+	if errors.Is(err, errNoFleetLayout) {
+		// Running off the fleet host - a workstation, a test. There is no
+		// findings database to note anything in, and warning about it on
+		// every run would teach the reader to skip the warnings that matter.
 		return
 	}
-	// #nosec G204 -- db is built from FLEET_CODE, which is set by the service
-	// unit and not by anything this lane reads. cve and note are passed as
-	// separate argv entries, so neither can inject a further argument.
+	if err != nil {
+		warn("%s has a ticket but is still recorded as un-actioned: %s", cve, err)
+		return
+	}
+	// #nosec G702 -- G702 is taint analysis and it is correct that this path
+	// derives from an environment variable. The control is fleetDBPath()
+	// above, which refuses a relative FLEET_CODE and requires the resolved
+	// path to be a regular file named exactly "fleet-db" - so the only thing
+	// that can run here is the tool that owns the schema. The analysis tracks
+	// os.Getenv to this call and stops; it does not model validators, the
+	// same way G706 does not model sanitisers.
+	//
+	// There is no shell. cve and note are separate argv entries, so neither
+	// can introduce a further argument however they are spelled.
 	out, err := exec.Command(db, "note", cve, note).CombinedOutput()
 	if err != nil {
 		warn("could not record the remediation note for %s: %s: %s",
 			cve, err, strings.TrimSpace(string(out)))
 	}
 }
+
+// fleetDBPath resolves and validates the path to fleet-db.
+//
+// Validation rather than a bare suppression. FLEET_CODE is set by the systemd
+// unit and anybody who can change it can already run code as this account, so
+// the taint finding is not an escalation - but "not an escalation" is a
+// weaker claim than "checked", and the check costs four lines.
+//
+// Absent FLEET_CODE is not an error: cti-jira runs on a workstation during
+// development, where there is no fleet layout and nothing to record to.
+func fleetDBPath() (string, error) {
+	code := strings.TrimSpace(os.Getenv("FLEET_CODE"))
+	if code == "" {
+		return "", errNoFleetLayout
+	}
+	if !filepath.IsAbs(code) {
+		return "", fmt.Errorf("FLEET_CODE is not an absolute path (%q)", code)
+	}
+	db := filepath.Join(code, "bin", "fleet-db")
+	// Join already cleans the path; this asserts what we ended up with rather
+	// than trusting that it did.
+	if filepath.Base(db) != "fleet-db" {
+		return "", fmt.Errorf("resolved to %q, which is not fleet-db", db)
+	}
+	// #nosec G703 -- same taint flow, same validator. The path is now known
+	// absolute and known to end in bin/fleet-db.
+	fi, err := os.Stat(db)
+	if err != nil {
+		return "", fmt.Errorf("fleet-db not found at %s", db)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", db)
+	}
+	return db, nil
+}
+
+// errNoFleetLayout means there is nothing to record to, which is normal off
+// the fleet host and must not be reported as a failure.
+var errNoFleetLayout = errors.New(
+	"FLEET_CODE is unset, so there is no findings database to note it in")
 
 // RemediationNote is what gets stored: the key, and a link somebody can click
 // out of a database row.
