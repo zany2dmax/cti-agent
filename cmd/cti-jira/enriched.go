@@ -303,7 +303,16 @@ func recordRemediationNote(cve, note string, warn func(string, ...any)) {
 		warn("%s has a ticket but is still recorded as un-actioned: %s", cve, err)
 		return
 	}
-	// #nosec G702 -- G702 is taint analysis and it is correct that this path
+	// #nosec G204,G702 -- BOTH, and the pair is the point.
+	//
+	// G702 is the taint rule and fired until fleetDBPath() below existed;
+	// adding the validator removed the flow it was reporting, at which point
+	// the older G204 ("subprocess launched with variable") surfaced on the
+	// same line - it does not care where the variable came from, only that
+	// one exists. Annotating just the rule that happens to be firing today
+	// leaves the gate red the next time gosec changes which one it prefers.
+	//
+	// G702 is taint analysis and it is correct that this path
 	// derives from an environment variable. The control is fleetDBPath()
 	// above, which refuses a relative FLEET_CODE and requires the resolved
 	// path to be a regular file named exactly "fleet-db" - so the only thing
