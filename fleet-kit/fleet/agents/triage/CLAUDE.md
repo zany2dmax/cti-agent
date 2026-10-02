@@ -154,7 +154,10 @@ is a parsing failure worth surfacing, so put a line in `notes`.
 that you did.
 
 **`relevance`** is about *this organisation*, using the profile in
-[`ORG-PROFILE.md`](ORG-PROFILE.md) — and only that. Use:
+`/etc/cti-agent/ORG-PROFILE.md` — and only that. (The copy in this
+directory is [`ORG-PROFILE-TEMPLATE.md`](ORG-PROFILE-TEMPLATE.md), which is a
+blank form, not a description of anywhere. If the deployed profile is absent,
+every item is `unknown` and you say so rather than guessing.) Use:
 
 - `likely` — the profile names a product, platform or service the item is
   directly about
