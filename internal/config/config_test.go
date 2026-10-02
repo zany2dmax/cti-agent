@@ -299,3 +299,44 @@ func TestTheMailboxWindowMustExceedTheGrace(t *testing.T) {
 		}
 	}
 }
+
+func TestTheCleanupCannotArchiveMailTheDigestStillNeeds(t *testing.T) {
+	// cti-agent ingests from the INBOX over GRAPH_LOOKBACK_HOURS and rebuilds
+	// its report every run. Archiving a message still inside that window
+	// removes it from the next ingest, so a CVE reported only by that message
+	// drops out of tomorrow's digest - not because exposure changed, but
+	// because the mail was filed.
+	//
+	// That happened on 1 October: a manual cleanup archived three advisories
+	// hours after they arrived, and the next digest was missing what only
+	// they had reported.
+	t.Setenv("LOOKUP_PROVIDER", "none")
+
+	for _, tc := range []struct {
+		graph, minAge, window string
+		wantErr               bool
+		why                   string
+	}{
+		{"24", "48", "72", false, "the shipped defaults"},
+		{"24", "24", "72", false, "equal is allowed, just tight"},
+		{"24", "12", "72", true, "grace shorter than the ingest window"},
+		{"48", "24", "72", true, "a longer ingest window makes a 24h grace too short"},
+		{"24", "0", "72", false, "grace disabled is an explicit choice, not a mistake"},
+		{"168", "48", "72", true, "catch-up lookback outruns the grace"},
+	} {
+		t.Setenv("GRAPH_LOOKBACK_HOURS", tc.graph)
+		t.Setenv("MAILBOX_MIN_AGE_HOURS", tc.minAge)
+		t.Setenv("MAILBOX_LOOKBACK_HOURS", tc.window)
+
+		_, err := LoadVulnLookup()
+		if (err != nil) != tc.wantErr {
+			t.Errorf("graph=%s minAge=%s window=%s (%s): err=%v, wantErr=%v",
+				tc.graph, tc.minAge, tc.window, tc.why, err, tc.wantErr)
+		}
+		if tc.wantErr && err != nil &&
+			!strings.Contains(err.Error(), "drop out") &&
+			!strings.Contains(err.Error(), "does nothing at all") {
+			t.Errorf("%s: the error does not explain the consequence: %v", tc.why, err)
+		}
+	}
+}
