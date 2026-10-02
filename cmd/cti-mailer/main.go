@@ -41,6 +41,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailer"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
+	"github.com/zany2dmax/cti-agent/internal/version"
 )
 
 const (
@@ -321,7 +322,41 @@ var optional = [][2]string{
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},
 }
 
+// versionManifest is written by install-fedora.sh beside fleet.env, so a
+// binary can be compared against what the last install believed it put there.
+const versionManifest = "/etc/cti-agent/version"
+
+// reportVersion prints what this binary is, and whether it matches the
+// install record.
+//
+// The question "what is production running?" has to be answerable by asking
+// production. It previously was not: the installer built from whatever the
+// checkout happened to be on and recorded nothing, so a stale checkout left
+// binaries predating a feature while the installer printed "Installed".
+func reportVersion() {
+	v := version.Get()
+	logf("version: %s", safelog.Line(v.String()))
+
+	// #nosec G304 -- a fixed path under /etc, not operator-supplied.
+	raw, err := os.ReadFile(versionManifest)
+	if err != nil {
+		// Normal on a workstation, and on a box installed before this
+		// existed. Not a warning: an absent manifest is unknown, not wrong.
+		return
+	}
+	recorded := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "commit=") {
+			recorded = strings.TrimPrefix(line, "commit=")
+		}
+	}
+	if msg := v.Mismatch(recorded); msg != "" {
+		logf("  WARNING: %s", safelog.Line(msg))
+	}
+}
+
 func preflight(mailbox string) int {
+	reportVersion()
 	logf("config: %s", safelog.Line(fleetenv.Path()))
 	missing := 0
 	for _, kv := range required {

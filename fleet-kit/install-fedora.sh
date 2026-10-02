@@ -399,15 +399,43 @@ if [ -d "$AGENT_SRC/.git" ]; then
 else
   run git clone --depth 1 "$AGENT_REPO" "$AGENT_SRC"
 fi
+# WHAT IS THIS BOX RUNNING?
+#
+# Until now the answer was "whatever the checkout happened to be on", recorded
+# nowhere. That is how a stale checkout installed binaries predating a feature
+# while this script printed "Installed" - success reported about code the box
+# did not have, discoverable only by noticing a command that should exist and
+# did not.
+#
+# Stamped into every binary AND written to $CONF_DIR/version, so the two can
+# be compared: a binary that disagrees with the manifest was not replaced by
+# the last install, which is exactly what a partial install leaves behind.
+VERSION_PKG="github.com/zany2dmax/cti-agent/internal/version"
 if [ "$MODE" != dryrun ]; then
-  ( cd "$AGENT_SRC" && go build -o "$AGENT_SRC/cti-agent" ./cmd/cti-agent )
+  BUILD_TAG="$( cd "$AGENT_SRC" && git describe --tags --always --dirty 2>/dev/null || echo unknown )"
+  BUILD_COMMIT="$( cd "$AGENT_SRC" && git rev-parse HEAD 2>/dev/null || echo unknown )"
+  BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  LDFLAGS="-X $VERSION_PKG.Tag=$BUILD_TAG -X $VERSION_PKG.Commit=$BUILD_COMMIT -X $VERSION_PKG.Built=$BUILD_TIME"
+  info "building $BUILD_TAG ($(printf '%.12s' "$BUILD_COMMIT"))"
+  case "$BUILD_TAG" in
+    *-dirty)
+      # Not fatal - this is how a fix gets tested on the box that has the
+      # problem. But a dirty build cannot be reproduced from its commit, so
+      # "prod matches the tag" stops meaning anything, and that must be said
+      # out loud rather than discovered later.
+      warn "building from a DIRTY working tree - this build is not reproducible" ;;
+  esac
+fi
+
+if [ "$MODE" != dryrun ]; then
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$AGENT_SRC/cti-agent" ./cmd/cti-agent )
   chmod 0755 "$AGENT_SRC/cti-agent"
   ok "built $AGENT_SRC/cti-agent"
   # The failure alerter. It lives in bin/ next to the shell helpers because
   # the alert units invoke it by absolute path, and it must exist before any
   # timer is enabled - an OnFailure pointing at a missing binary means the
   # failure is silent, which is the thing this is here to prevent.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-alert" ./cmd/cti-alert )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-alert" ./cmd/cti-alert )
   chmod 0755 "$CODE_DIR/bin/cti-alert"
   ok "built $CODE_DIR/bin/cti-alert"
 
@@ -415,20 +443,20 @@ if [ "$MODE" != dryrun ]; then
   # so the fleet rations itself rather than competing. run-checkin skips the
   # gate if this is missing, which keeps an older install beating - but then
   # nothing is stopping it, so build it here.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-budget" ./cmd/cti-budget )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-budget" ./cmd/cti-budget )
   chmod 0755 "$CODE_DIR/bin/cti-budget"
   ok "built $CODE_DIR/bin/cti-budget"
 
   # KEV deadline reporting. Reads the enrich lane's output; no credentials and
   # no network of its own, so it cannot fail in a way that affects the digest.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-kev" ./cmd/cti-kev )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-kev" ./cmd/cti-kev )
   chmod 0755 "$CODE_DIR/bin/cti-kev"
   ok "built $CODE_DIR/bin/cti-kev"
 
   # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
   # against Qualys, so it needs outbound 443 to two more hosts - checked in
   # the preflight above.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-patchtuesday" ./cmd/cti-patchtuesday )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-patchtuesday" ./cmd/cti-patchtuesday )
   chmod 0755 "$CODE_DIR/bin/cti-patchtuesday"
   ok "built $CODE_DIR/bin/cti-patchtuesday"
 
@@ -436,7 +464,7 @@ if [ "$MODE" != dryrun ]; then
   # also the only one whose app-registration requirement is Mail.ReadWrite
   # rather than Mail.Read. It dry-runs unless given --for-real; the unit
   # passes that flag explicitly so the decision is visible in the unit.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
 
@@ -449,14 +477,14 @@ if [ "$MODE" != dryrun ]; then
   # root-owned, and the failure surfaces as "permission denied" from
   # `sudo cti-agent cti-mailer --check` - which reads like a sudo or Graph
   # problem rather than a file mode.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-mailer" ./cmd/cti-mailer )
   chmod 0755 "$CODE_DIR/bin/cti-mailer"
   ok "built $CODE_DIR/bin/cti-mailer"
 
   # Jira ticketing. Creates nothing without --for-real AND a project key in
   # JIRA_ALLOW_CREATE, so installing it does not arm it. No timer either: it
   # is driven by hand until the digest integration exists.
-  ( cd "$AGENT_SRC" && go build -o "$CODE_DIR/bin/cti-jira" ./cmd/cti-jira )
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-jira" ./cmd/cti-jira )
   chmod 0755 "$CODE_DIR/bin/cti-jira"
   ok "built $CODE_DIR/bin/cti-jira"
 else
@@ -641,6 +669,24 @@ else
 fi
 
 # ────────────────────────────────────────────────────────── verification ─────
+# The manifest. Readable by the service account so cti-mailer --check can
+# compare itself against it; writable only by root, because a version record
+# the fleet can edit is a version record that cannot be trusted.
+if [ "$MODE" != dryrun ]; then
+  umask 0027
+  cat > "$CONF_DIR/version" <<VERSIONEOF
+tag=$BUILD_TAG
+commit=$BUILD_COMMIT
+built=$BUILD_TIME
+installed_by=$(id -un)
+installed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+source=$AGENT_SRC
+VERSIONEOF
+  chown root:"$FLEET_GROUP" "$CONF_DIR/version"
+  chmod 0640 "$CONF_DIR/version"
+  ok "recorded $CONF_DIR/version"
+fi
+
 bold "Verification"
 # A path that cannot work is not a warning. The previous run reported three
 # wrong paths, printed "Installed", and the next command failed on the first

@@ -21,6 +21,7 @@ document assumes you have decided to run it.
 - [11a. Catching up after the lane was off](#11a-catching-up-after-the-lane-was-off)
 - [11b. Switching the mailer](#11b-switching-the-mailer)
 - [11c. Verifying the Jira connection](#11c-verifying-the-jira-connection)
+- [11d. What version is this box running?](#11d-what-version-is-this-box-running)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -792,6 +793,30 @@ host.
 Note the flag direction. There is no `--dry-run`; the dangerous mode is the
 one you have to ask for, because forgetting a `--dry-run` flag is how the
 digest sent a real email to the whole distribution list in September.
+
+---
+
+## 11d. What version is this box running?
+
+```bash
+sudo cti-agent cti-mailer --check | head -2
+sudo cat /etc/cti-agent/version
+```
+
+The first is what the binary says about itself; the second is what the last
+install recorded. They should agree, and `--check` warns when they do not —
+that means the binary was not replaced by the last install and predates
+whatever else was, which is exactly what a partial install leaves behind.
+
+`-DIRTY` means it was built from a working tree with uncommitted changes. That
+is allowed, and sometimes the only way to test a fix on the box that has the
+problem, but the build cannot be reproduced from its commit until it is rebuilt
+from a clean tree.
+
+An absent `/etc/cti-agent/version` means the box was installed before version
+recording existed. Re-run the installer to create it.
+
+See [CHANGELOG.md](CHANGELOG.md) for what each version requires of you.
 
 ---
 

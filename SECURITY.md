@@ -95,7 +95,9 @@ instructions are written and reviewable at
 [`fleet-kit/fleet/agents/triage/CLAUDE.md`](fleet-kit/fleet/agents/triage/CLAUDE.md);
 the organisation profile it reads to judge relevance is a hand-written
 template at
-[`ORG-PROFILE.md`](fleet-kit/fleet/agents/triage/ORG-PROFILE.md), and is
+[`ORG-PROFILE.md`](fleet-kit/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md) — the
+template is in the repository, the filled-in copy lives only at
+`/etc/cti-agent/ORG-PROFILE.md` and is gitignored — and is
 deliberately categories rather than inventory, because the repository is
 public.
 

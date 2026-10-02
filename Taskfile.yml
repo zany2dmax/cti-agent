@@ -353,16 +353,38 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build all six binaries (agent, alerter, quota ledger, KEV, Patch Tuesday, mailbox)
+    desc: Build all eight binaries, stamped with the current tag and commit
     deps: [tidy]
+    # Stamped here as well as in install-fedora.sh, so a binary built on the
+    # workstation does not claim "unknown" while the one in production can
+    # name itself. A version report that only works in one place is one
+    # nobody develops the habit of reading.
+    vars:
+      VERSION_PKG: github.com/zany2dmax/cti-agent/internal/version
+      BUILD_TAG:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo unknown
+      BUILD_COMMIT:
+        sh: git rev-parse HEAD 2>/dev/null || echo unknown
+      BUILD_TIME:
+        sh: date -u +%Y-%m-%dT%H:%M:%SZ
+      LDFLAGS: >-
+        -X {{.VERSION_PKG}}.Tag={{.BUILD_TAG}}
+        -X {{.VERSION_PKG}}.Commit={{.BUILD_COMMIT}}
+        -X {{.VERSION_PKG}}.Built={{.BUILD_TIME}}
     cmds:
       - mkdir -p bin
-      - go build -o bin/{{.BINARY_NAME}} {{.SOURCE_NAME}}
-      - go build -o bin/cti-alert ./cmd/cti-alert
-      - go build -o bin/cti-budget ./cmd/cti-budget
-      - go build -o bin/cti-kev ./cmd/cti-kev
-      - go build -o bin/cti-patchtuesday ./cmd/cti-patchtuesday
-      - go build -o bin/cti-mailbox ./cmd/cti-mailbox
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/{{.BINARY_NAME}} {{.SOURCE_NAME}}
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-alert ./cmd/cti-alert
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-budget ./cmd/cti-budget
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-kev ./cmd/cti-kev
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-patchtuesday ./cmd/cti-patchtuesday
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailbox ./cmd/cti-mailbox
+      # cti-mailer and cti-jira were missing from this list while being built
+      # by the installer - the same hand-maintained-list drift that left
+      # run-mailbox-cleanup uninstalled. A `task build` that silently omits
+      # two binaries is a local test that cannot exercise them.
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailer ./cmd/cti-mailer
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-jira ./cmd/cti-jira
 
   run:
     desc: Run the agent locally using environment variables
