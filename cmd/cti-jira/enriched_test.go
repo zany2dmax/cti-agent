@@ -12,7 +12,6 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
-
 func quiet(string, ...any) {}
 
 func row(cve, priority, status string, kev any, hostCount int) enrichedRow {
