@@ -35,6 +35,57 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.0.1 — 2026-10-02
+
+### Fixed
+
+- **The installer could stop halfway and look like it had finished.** Reading
+  an optional `FLEET_*` key from `fleet.env` with a `grep` pipeline ends the
+  script when the key is absent: grep exits 1 on no match, `set -o pipefail`
+  carries that status to the end of the pipeline, the assignment inherits it
+  and `set -e` exits — with no message at all. A box whose `fleet.env` predated
+  the Patch Tuesday lane stopped four lines after printing `✓ daemon-reload`,
+  with 400 lines left to run. The wrapper, `/etc/cti-agent/version` and the
+  entire verification block never executed, and the visible output was
+  indistinguishable from a clean install. Config reads now go through a `sed`
+  helper that returns empty for an absent key.
+- **`check_path` could never report a missing path.** It read config the same
+  way, so a missing key killed the script one line before the `"$1 is unset"`
+  branch that exists to report missing keys.
+- **`scrub-history.sh` aborted its verification when the scrub had worked.**
+  `git grep -l` exits 1 on zero matches, and zero matches is the success case,
+  so a fully scrubbed history stopped the loop instead of printing "clean".
+- **`run-checkin` could die while explaining why it was holding.** `grep -v`
+  exits 1 when it filters everything out, which is reachable whenever
+  `cti-budget` prints a flag and no explanation.
+
+### Added
+
+- `internal/shellgate`: a test that fails the build on this pattern. It ran
+  clean against all 11 fleet scripts and is checked against the three real
+  lines that caused the bugs above, so a failure can be trusted.
+- The installer now has an EXIT trap. Any end other than reaching the
+  "Installed" banner prints the line number and says the box is partially
+  installed. Deliberate exits — `--help`, a dry run, a failed verification —
+  stay quiet.
+- `task test:syntax` derives its script list from the directories instead of a
+  hand-written one. It was checking 9 of 11 scripts; `run-mailbox-cleanup` and
+  `compare-mailers.sh` had never been checked.
+
+### Upgrade
+
+Nothing. Pull and reinstall.
+
+If an install ever stopped early on this box, re-running the installer is
+sufficient — it is idempotent. Confirm with:
+
+```bash
+sudo cat /etc/cti-agent/version      # must exist
+sudo cti-agent cti-mailer --check | head -2
+```
+
+---
+
 ## 1.0 — 2026-10-02
 
 First tagged release. Everything below was already running; this marks the

@@ -171,7 +171,12 @@ if [ -s /tmp/scrub-replacements.txt ]; then
   while IFS= read -r rule; do
     pat="${rule%%==>*}"
     pat="${pat#regex:}"
-    hits=$(git grep -l -E "$pat" $ALL_COMMITS -- 2>/dev/null | wc -l | tr -d ' ')
+    # `|| true` on the git grep, because it exits 1 when it finds nothing -
+    # and finding nothing is the SUCCESS case here. Under `set -o pipefail`
+    # that 1 propagated to the assignment and `set -e` ended the script, so a
+    # fully scrubbed history aborted this check instead of reporting "clean".
+    # The failure mode was invisible: the loop just stopped.
+    hits=$({ git grep -l -E "$pat" $ALL_COMMITS -- 2>/dev/null || true; } | wc -l | tr -d ' ')
     if [ "$hits" != "0" ]; then
       # This script itself will match its own rules if the pattern file was
       # ever committed. It is gitignored, so a hit here is a real finding.

@@ -305,15 +305,16 @@ tasks:
           python3 -c "import ast,sys; ast.parse(open('$f').read())"
           echo "  ok  $f"
         done
-        for f in fleet-kit/fleet/bin/fleet-board \
-                 fleet-kit/fleet/bin/run-digest \
-                 fleet-kit/fleet/bin/run-checkin \
-                 fleet-kit/fleet/bin/run-patchtuesday \
-                 fleet-kit/bin/dev-run \
-                 fleet-kit/install.sh \
-                 fleet-kit/install-fedora.sh \
-                 scripts/scrub-history.sh \
-                 scripts/run-local.sh; do
+        # Derived, not hand-written. The previous list named five runners and
+        # omitted run-mailbox-cleanup - the same file the installer's
+        # hand-written copy list omitted, which is how it shipped uninstalled
+        # while a verification step asserted it was present. A list that must be
+        # edited by hand whenever a file is added will be wrong eventually, and
+        # wrong silently: an unchecked script fails nothing.
+        for f in fleet-kit/fleet/bin/* fleet-kit/bin/* \
+                 fleet-kit/*.sh scripts/*.sh; do
+          [ -f "$f" ] || continue
+          head -1 "$f" | grep -qE 'sh$|bash' || continue   # skip the python ones
           bash -n "$f" && echo "  ok  $f"
         done
       - |
