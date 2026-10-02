@@ -1,3 +1,19 @@
+PROFILE-STATUS: TEMPLATE
+
+<!--
+  THE LINE ABOVE IS A SENTINEL. DELETE IT WHEN YOU HAVE FILLED THIS IN.
+
+  While it is present, the triage lane treats this profile as absent and
+  answers "unknown" for every item rather than reasoning from blank headings.
+
+  That matters because placeholder prose fails SILENTLY in a way placeholder
+  credentials do not. A fleet.env full of PLACEHOLDER secrets cannot
+  authenticate and stops; a profile full of empty headings reads perfectly
+  well to an agent, which then concludes "we do not appear to run anything
+  like that" and returns a confident "unlikely" for a campaign aimed straight
+  at you. Wrong and quiet is worse than missing and loud.
+-->
+
 # Organisation profile — TEMPLATE
 
 **This file is the template. It is NOT the one the agent reads.**
@@ -8,7 +24,8 @@ The real profile lives outside the repository, at:
 /etc/cti-agent/ORG-PROFILE.md          (root:ctiagent, 0640)
 ```
 
-Copy this file there, fill it in, and leave this one as it is.
+The installer puts a copy there for you. Fill that copy in and **delete its
+`PROFILE-STATUS: TEMPLATE` line**; leave this one as it is.
 
 The `@triage` agent reads the deployed copy to answer one question: **does this
 piece of threat intelligence plausibly matter to us?**
@@ -29,13 +46,11 @@ So `ORG-PROFILE.md` is gitignored. Committing one is the mistake this split
 exists to prevent, and it is not recoverable: a push publishes it, and deleting
 the file later does not remove it from the history.
 
-Install it by hand, the same way `fleet.env` is installed:
+`install-fedora.sh` creates it from this template if it is absent, and never
+overwrites one that exists. So the normal path is:
 
 ```bash
-sudo install -m 0640 -o root -g ctiagent \
-  fleet-kit/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md \
-  /etc/cti-agent/ORG-PROFILE.md
-sudo $EDITOR /etc/cti-agent/ORG-PROFILE.md
+sudo $EDITOR /etc/cti-agent/ORG-PROFILE.md    # fill in, DELETE the sentinel
 ```
 
 `0640 root:ctiagent` matches `fleet.env`: the service account reads it, and
