@@ -1216,6 +1216,131 @@ class DigestTicketLinks(unittest.TestCase):
         self.assertIn("https://x/browse/CR-9", line)
 
 
+class RemediationNote(unittest.TestCase):
+    """A ticketed finding must stop reporting as un-actioned.
+
+    `findings --stale-days N` uses "remediation_note IS NULL" to decide what
+    has been ignored, and nothing could write that column. So the orchestrator
+    escalated three KEV CVEs as having "no remediation_note on any" on the same
+    night their Jira tickets were filed.
+    """
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.home, "state"), exist_ok=True)
+        self.env = dict(os.environ, FLEET_HOME=self.home)
+        self.db = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "fleet", "bin", "fleet-db")
+        self.run_db("init")
+        self.run_db("finding", stdin=json.dumps({
+            "cve": "CVE-2026-85046", "status": "PRESENT", "priority": "Sev5",
+            "host_count": 227, "kev": 1,
+        }))
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def run_db(self, *args, stdin=""):
+        # stdin is explicit and ALWAYS supplied. `fleet-db finding` reads its
+        # payload from stdin when no extra argv is given, so a test that
+        # forgets this does not fail - it blocks forever waiting for input.
+        # The timeout turns that into a visible failure rather than a hung
+        # suite, which is how this was found.
+        return subprocess.run([sys.executable, self.db, *args],
+                              env=self.env, capture_output=True, text=True,
+                              input=stdin, timeout=30)
+
+    def findings(self, *extra):
+        r = self.run_db("findings", *extra)
+        return json.loads(r.stdout or "[]")
+
+    def backdate(self, cve, **delta):
+        """Age a row, writing the SAME string format the lane itself writes.
+
+        Two things this has to get right, and the first version got neither.
+
+        The timestamp must be ISO-8601 with a T and an offset, because that is
+        what fleet-db's now() produces. Writing sqlite's own "YYYY-MM-DD
+        HH:MM:SS" form instead cannot reproduce the off-by-a-day bug at all -
+        the bug exists precisely because the two formats differ.
+
+        And the age must not land exactly on the cutoff: --stale-days N asks
+        for rows strictly older than N days ago, so a row aged exactly N days
+        is correctly excluded. Testing on that boundary tests the comparison
+        operator, not the behaviour.
+        """
+        import sqlite3
+        stamp = (datetime.datetime.now(datetime.timezone.utc)
+                 - datetime.timedelta(**delta)).isoformat(timespec="seconds")
+        db = os.path.join(self.home, "state", "memory.db")
+        con = sqlite3.connect(db)
+        con.execute("UPDATE findings SET updated=? WHERE cve=?", (stamp, cve))
+        con.commit()
+        con.close()
+
+    def test_an_old_finding_is_stale_until_it_is_noted(self):
+        # The whole point: before, a ticketed finding stayed on this list
+        # forever, so the orchestrator kept reporting handed-off work as
+        # ignored.
+        self.backdate("CVE-2026-85046", days=5)
+        self.assertEqual(len(self.findings("--stale-days", "2")), 1,
+                         "a five-day-old un-noted finding should be stale")
+
+        self.run_db("note", "CVE-2026-85046", "CR-1234 https://x/browse/CR-1234")
+        self.assertEqual(len(self.findings("--stale-days", "2")), 0,
+                         "a ticketed finding is still reported as un-actioned")
+
+    def test_yesterdays_finding_is_not_missed_by_an_off_by_a_day_comparison(self):
+        # `updated` is stored ISO-8601 with a T and an offset; sqlite's
+        # datetime() yields "YYYY-MM-DD HH:MM:SS". Comparing them as raw
+        # strings sorts the stored form above whenever the date portion
+        # matches, because 'T' > ' ' - so --stale-days 1 silently skipped
+        # everything from yesterday.
+        # One second OLDER than the cutoff, so it falls on the same calendar
+        # day as the cutoff - which is the only situation where the raw string
+        # comparison goes wrong.
+        self.backdate("CVE-2026-85046", days=1, seconds=1)
+        self.assertEqual(len(self.findings("--stale-days", "1")), 1,
+                         "a finding from yesterday was not counted as stale")
+
+    def test_the_note_is_readable_not_just_a_flag(self):
+        # Somebody reading the database row should get the ticket key, not
+        # merely the knowledge that something happened.
+        self.run_db("note", "CVE-2026-85046", "CR-1234 https://x/browse/CR-1234")
+        row = self.findings()[0]
+        self.assertIn("CR-1234", row["remediation_note"])
+        self.assertIn("https://x/browse/CR-1234", row["remediation_note"])
+
+    def test_the_nightly_upsert_does_not_clobber_the_note(self):
+        # enrich.py re-upserts every finding each night. If that wiped the
+        # note, the orchestrator would resume nagging about ticketed work the
+        # following morning and nobody would know why.
+        self.run_db("note", "CVE-2026-85046", "CR-1234")
+        self.run_db("finding", stdin=json.dumps({
+            "cve": "CVE-2026-85046", "status": "PRESENT", "priority": "Sev5",
+            "host_count": 346, "kev": 1,
+        }))
+        row = self.findings()[0]
+        self.assertEqual(row["remediation_note"], "CR-1234",
+                         "the nightly upsert wiped the remediation note")
+        self.assertEqual(row["host_count"], 346, "the upsert did not apply")
+
+    def test_a_note_for_an_unknown_cve_is_not_an_error(self):
+        # cti-jira can file a ticket for a CVE the findings table has not seen
+        # yet. Failing here would make a filed ticket look unfiled.
+        r = self.run_db("note", "CVE-9999-1", "CR-1")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("no finding", r.stdout)
+
+    def test_a_note_can_be_cleared(self):
+        self.run_db("note", "CVE-2026-85046", "CR-1234")
+        self.run_db("note", "CVE-2026-85046")
+        self.assertIsNone(self.findings()[0]["remediation_note"])
+        self.backdate("CVE-2026-85046", days=5)
+        self.assertEqual(len(self.findings("--stale-days", "2")), 1,
+                         "clearing the note should make it stale again")
+
+
 class TestFileShape(unittest.TestCase):
     """Nothing may be defined after unittest.main().
 

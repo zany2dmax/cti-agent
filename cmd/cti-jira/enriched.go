@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -268,4 +270,55 @@ func writeTicketMap(path string, m TicketMap) error {
 		return fmt.Errorf("renaming %s: %w", tmp, err)
 	}
 	return nil
+}
+
+// ─── closing the loop back to the findings database ─────────────────────────
+
+// recordRemediationNote tells fleet-db that a CVE has been handed to somebody.
+//
+// WHY THIS MATTERS MORE THAN IT LOOKS. `fleet-db findings --stale-days N` uses
+// "remediation_note IS NULL" to decide what counts as un-actioned, and nothing
+// could write that column - so a CVE with an open ticket was reported as
+// ignored, forever. The orchestrator escalated three KEV CVEs as having "no
+// remediation_note on any" on the same night their tickets were filed.
+//
+// Shelling out to a Python script from Go looks like the wrong shape until you
+// remember why Python is still here: Go has no stdlib SQL driver, and adding a
+// dependency to write one column is a worse trade than exec'ing the tool that
+// already owns the schema.
+//
+// NEVER FATAL. The ticket is the deliverable and it already exists by the time
+// this runs; failing the lane because a note did not land would turn a
+// bookkeeping miss into a missing ticket.
+func recordRemediationNote(cve, note string, warn func(string, ...any)) {
+	db := filepath.Join(os.Getenv("FLEET_CODE"), "bin", "fleet-db")
+	if os.Getenv("FLEET_CODE") == "" {
+		return // not running inside the fleet layout; nothing to record to
+	}
+	if _, err := os.Stat(db); err != nil {
+		warn("fleet-db not found at %s - %s has a ticket but is still "+
+			"recorded as un-actioned", db, cve)
+		return
+	}
+	// #nosec G204 -- db is built from FLEET_CODE, which is set by the service
+	// unit and not by anything this lane reads. cve and note are passed as
+	// separate argv entries, so neither can inject a further argument.
+	out, err := exec.Command(db, "note", cve, note).CombinedOutput()
+	if err != nil {
+		warn("could not record the remediation note for %s: %s: %s",
+			cve, err, strings.TrimSpace(string(out)))
+	}
+}
+
+// RemediationNote is what gets stored: the key, and a link somebody can click
+// out of a database row.
+func RemediationNote(ref TicketRef, now time.Time) string {
+	if ref.Key == "" {
+		return ""
+	}
+	s := ref.Key
+	if ref.URL != "" {
+		s += " " + ref.URL
+	}
+	return s + " (filed " + now.Format("2006-01-02") + ")"
 }

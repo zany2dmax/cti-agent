@@ -479,6 +479,13 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 		if ref.Key != "" {
 			tm.Tickets[f.CVE] = ref
+			// Close the loop back to the findings table, so the orchestrator
+			// stops reporting a ticketed CVE as un-actioned. Only on a real
+			// run: a dry run must not write to the database either.
+			if forReal {
+				recordRemediationNote(f.CVE, RemediationNote(ref, now),
+					func(format string, a ...any) { logf("WARNING: "+format, a...) })
+			}
 		}
 	}
 
