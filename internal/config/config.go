@@ -147,9 +147,32 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 	if err != nil || mailboxLookbackHours <= 0 {
 		return Config{}, fmt.Errorf("MAILBOX_LOOKBACK_HOURS must be a positive integer")
 	}
-	mailboxMinAgeHours, err := strconv.Atoi(getenvDefault("MAILBOX_MIN_AGE_HOURS", "24"))
+	mailboxMinAgeHours, err := strconv.Atoi(getenvDefault("MAILBOX_MIN_AGE_HOURS", "48"))
 	if err != nil || mailboxMinAgeHours < 0 {
 		return Config{}, fmt.Errorf("MAILBOX_MIN_AGE_HOURS must be zero or a positive integer")
+	}
+	// THE CLEANUP MUST NOT ARCHIVE MAIL THE DIGEST STILL NEEDS.
+	//
+	// cti-agent ingests from the INBOX over GRAPH_LOOKBACK_HOURS and rebuilds
+	// its report from scratch every run. Archiving a message that is still
+	// inside that window removes it from the next ingest, so any CVE reported
+	// only by that message vanishes from tomorrow's digest - not because the
+	// exposure changed, but because the mail was filed. The digest becomes a
+	// function of mailbox tidiness rather than of the estate.
+	//
+	// This is not hypothetical. On 1 October a manual --for-real cleanup
+	// archived three advisories hours after they arrived, and the next
+	// morning's digest was missing what only they had reported.
+	//
+	// So the grace must be at least as long as the ingest window, with margin
+	// - the two lanes run on independent timers and nothing synchronises them.
+	if mailboxMinAgeHours > 0 && time.Duration(mailboxMinAgeHours)*time.Hour < cfg0GraphLookback(lookbackHours) {
+		return Config{}, fmt.Errorf(
+			"MAILBOX_MIN_AGE_HOURS (%d) must be at least GRAPH_LOOKBACK_HOURS (%d); "+
+				"otherwise the cleanup lane archives advisories the digest has not "+
+				"finished reading, and CVEs reported only by those messages drop out "+
+				"of the next digest",
+			mailboxMinAgeHours, lookbackHours)
 	}
 	// The trap this guards: a grace period at least as long as the window
 	// means nothing is ever old enough AND still visible, so the lane
@@ -250,6 +273,13 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// cfg0GraphLookback is the ingest window as a Duration, from the already
+// validated hour count. Named rather than inlined so the comparison above
+// reads as the question it is asking.
+func cfg0GraphLookback(hours int) time.Duration {
+	return time.Duration(hours) * time.Hour
 }
 
 func getenvDefault(key, fallback string) string {
