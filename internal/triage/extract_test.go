@@ -1,6 +1,8 @@
 package triage
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -350,3 +352,60 @@ func TestTheSourceLinkIsKept(t *testing.T) {
 }
 
 func join(v []string) string { return strings.Join(v, ", ") }
+
+// ─── the organisation profile ───────────────────────────────────────────────
+
+func TestTheShippedTemplateIsDetectedAsUnfilled(t *testing.T) {
+	// Read the ACTUAL template the installer copies, not a stand-in. If
+	// somebody edits the template and drops the sentinel, every fresh install
+	// would silently start reasoning from empty headings - and this test is
+	// the only thing that would notice.
+	raw, err := os.ReadFile(
+		filepath.Join("..", "..", "fleet-kit", "fleet", "agents", "triage",
+			"ORG-PROFILE-TEMPLATE.md"))
+	if err != nil {
+		t.Fatalf("cannot read the shipped template: %v", err)
+	}
+	if got := ClassifyProfile(string(raw), nil); got != ProfileTemplate {
+		t.Errorf("the shipped template classifies as %v, want template - a fresh "+
+			"install would reason from blank headings", got)
+	}
+}
+
+func TestAnUnfilledProfileIsTreatedExactlyLikeAMissingOne(t *testing.T) {
+	// Both must be unusable. The failure this prevents is confident and
+	// quiet: an agent reading empty headings concludes "we do not appear to
+	// run anything like that" and returns "unlikely" for a campaign aimed
+	// straight at the organisation.
+	for _, tc := range []struct {
+		name    string
+		content string
+		err     error
+		want    ProfileState
+	}{
+		{"missing file", "", os.ErrNotExist, ProfileMissing},
+		{"empty file", "", nil, ProfileMissing},
+		{"whitespace only", "   \n\n  ", nil, ProfileMissing},
+		{"sentinel at the top", ProfileSentinel + "\n\n# Profile\n", nil, ProfileTemplate},
+		{"sentinel indented", "  " + ProfileSentinel + "\n# Profile\n", nil, ProfileTemplate},
+		{"sentinel further down", "# Profile\n\n" + ProfileSentinel + "\n", nil, ProfileTemplate},
+		{"filled in", "# Profile\n\nIdentity: Entra ID, M365\n", nil, ProfileFilled},
+	} {
+		got := ClassifyProfile(tc.content, tc.err)
+		if got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+		if tc.want != ProfileFilled && got.Usable() {
+			t.Errorf("%s: reported usable", tc.name)
+		}
+	}
+}
+
+func TestOnlyAFilledProfileIsUsable(t *testing.T) {
+	if !ProfileFilled.Usable() {
+		t.Error("a filled profile should be usable")
+	}
+	if ProfileTemplate.Usable() || ProfileMissing.Usable() {
+		t.Error("an unfilled or absent profile must not be usable")
+	}
+}
