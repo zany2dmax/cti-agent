@@ -362,6 +362,22 @@ else
   fi
   warn "created $CONF_DIR/fleet.env with PLACEHOLDER secrets - edit it now"
 fi
+
+# The organisation profile is NOT installed from the repo, and not created
+# here either. It describes what this organisation runs, so the filled-in copy
+# is gitignored and lives only in $CONF_DIR.
+#
+# Reported rather than created, because an empty profile is worse than an
+# absent one: the triage agent would read it, find nothing, and return
+# "unlikely" for everything instead of the honest "unknown". A file that makes
+# an agent confidently wrong is not a safe default.
+if [ ! -f "$CONF_DIR/ORG-PROFILE.md" ]; then
+  info "no $CONF_DIR/ORG-PROFILE.md - the triage lane will answer 'unknown' for"
+  info "everything until one exists. To create it:"
+  info "  sudo install -m 0640 -o root -g $FLEET_GROUP \\"
+  info "    $SRC/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md \\"
+  info "    $CONF_DIR/ORG-PROFILE.md"
+fi
 info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
 
 # ────────────────────────────────────────────────────────── the Go agent ─────

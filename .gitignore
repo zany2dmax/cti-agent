@@ -73,3 +73,14 @@ __pycache__/
 # same target will happily capture whatever it is pointed at, and the cost of
 # being wrong once is a real recipient list in a public repo.
 .logs/
+
+# The FILLED-IN organisation profile. The template is committed; the real one
+# describes what this organisation runs, which is reconnaissance somebody
+# would otherwise have to do themselves. It lives at
+# /etc/cti-agent/ORG-PROFILE.md, 0640 root:ctiagent.
+#
+# Committing one is not recoverable by deleting it afterwards: a push
+# publishes it, and it stays in the history. Matched in any directory, since
+# the natural mistake is dropping a working copy beside the template.
+ORG-PROFILE.md
+**/ORG-PROFILE.md

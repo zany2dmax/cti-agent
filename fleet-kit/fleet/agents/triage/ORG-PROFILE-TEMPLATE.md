@@ -1,10 +1,51 @@
-# Organisation profile — TEMPLATE, fill this in
+# Organisation profile — TEMPLATE
 
-The `@triage` agent reads this to answer one question: **does this piece of
-threat intelligence plausibly matter to us?**
+**This file is the template. It is NOT the one the agent reads.**
+
+The real profile lives outside the repository, at:
+
+```
+/etc/cti-agent/ORG-PROFILE.md          (root:ctiagent, 0640)
+```
+
+Copy this file there, fill it in, and leave this one as it is.
+
+The `@triage` agent reads the deployed copy to answer one question: **does this
+piece of threat intelligence plausibly matter to us?**
 
 It is the highest-leverage input the agent gets. Without it, every item comes
 back `unknown`, which is honest but not useful.
+
+---
+
+## Why it lives in /etc and not here
+
+This repository is public. A filled-in profile describes what an organisation
+runs, which is reconnaissance somebody would otherwise have to do themselves —
+and the whole point of this lane is reading threat intel about people who do
+exactly that.
+
+So `ORG-PROFILE.md` is gitignored. Committing one is the mistake this split
+exists to prevent, and it is not recoverable: a push publishes it, and deleting
+the file later does not remove it from the history.
+
+Install it by hand, the same way `fleet.env` is installed:
+
+```bash
+sudo install -m 0640 -o root -g ctiagent \
+  fleet-kit/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md \
+  /etc/cti-agent/ORG-PROFILE.md
+sudo $EDITOR /etc/cti-agent/ORG-PROFILE.md
+```
+
+`0640 root:ctiagent` matches `fleet.env`: the service account reads it, and
+only root can change what the agent believes about the estate.
+
+Check before every push that you have not committed one:
+
+```bash
+git status --short | grep -i org-profile      # expect no output
+```
 
 ---
 
@@ -14,9 +55,10 @@ Do not generate it, and do not let an agent maintain it. It is short enough to
 write in twenty minutes and wrong answers here propagate into every triage
 decision for months.
 
-## Keep it non-sensitive
+## Keep it non-sensitive even in /etc
 
-This file sits in a repository. Write **categories, not inventory**:
+Being outside the repository is not a licence to put an asset inventory in it.
+Write **categories, not inventory**:
 
 - ✅ "Identity: Microsoft Entra ID, M365"
 - ✅ "Commerce: a customer portal; card payments are handled by a third party"
@@ -26,6 +68,12 @@ This file sits in a repository. Write **categories, not inventory**:
 The agent needs to know *what kind of organisation this is and what it runs*.
 It does not need — and must never be given — anything that would help someone
 attack it. Assume this file is public, because the repository is.
+
+Two reasons that hold even now it is not public. An inventory goes stale within
+a fortnight and then produces confidently wrong `unlikely` verdicts, which is
+worse than no profile at all. And the agent reads attacker-written text with
+this file in its context — the less it holds that would help an attacker, the
+less an injection can extract.
 
 If a category is genuinely sensitive, leave it out. A missing category yields
 `unknown`, which is a safe answer. A leaked one is not recoverable.
