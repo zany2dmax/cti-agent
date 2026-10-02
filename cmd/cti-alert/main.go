@@ -47,7 +47,7 @@ func main() {
 	// arrive titled FAILED and quoting a journal that shows the unit succeeded,
 	// which trains the reader to distrust the alerts that do matter.
 	kind := flag.String("kind", "FAILED",
-		"headline word: FAILED for a crash, HOLD for a deliberate stop. TEST is inferred when the named unit is healthy")
+		"headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator needs a human and nothing is broken. TEST is inferred when the named unit is healthy")
 	reason := flag.String("reason", "",
 		"one-line explanation shown above the systemd detail")
 	flag.Parse()
@@ -75,8 +75,7 @@ func main() {
 	// reads the board every beat, it would open an incident for a failure that
 	// never happened. Testing the alert path must not manufacture the thing it
 	// is testing for.
-	if f.Kind == "FAILED" && f.ExitCode == "0" &&
-		(f.Result == "success" || f.Result == "" || f.Result == "unknown") {
+	if f.Kind == "FAILED" && f.unitIsHealthy() {
 		f.Kind = "TEST"
 		if f.Reason == "" {
 			f.Reason = "manual test of the alert path - " + f.Unit +
@@ -123,7 +122,7 @@ type failure struct {
 	NRestarts string
 	Journal   string
 	IsDigest  bool   // the digest failing has a consequence the others do not
-	Kind      string // FAILED, HOLD or TEST - they must not look alike
+	Kind      string // FAILED, HOLD, TEST or ESCALATION - they must not look alike
 	Reason    string // set for HOLD and TEST; empty for a crash, where the journal is the story
 }
 
@@ -308,6 +307,12 @@ func renderText(f failure) string {
 		consequence = "Nothing is broken. The lane stopped itself and will resume " +
 			"on its own once the condition clears. No action is needed unless " +
 			"this repeats for longer than you expect."
+	} else if f.isEscalation() {
+		verb = "escalated"
+		consequence = "Nothing has failed. The orchestrator reached you deliberately " +
+			"because it found something it cannot act on alone. The reason above is " +
+			"the message; the systemd detail is included only to show the lane " +
+			"itself is healthy."
 	} else if f.IsDigest {
 		consequence = "NO THREAT-INTEL EMAIL WILL ARRIVE. An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained."
@@ -347,10 +352,38 @@ func (f failure) isHold() bool { return f.Kind == "HOLD" }
 // land on the board as an ERROR the orchestrator will act on.
 func (f failure) isTest() bool { return f.Kind == "TEST" }
 
+// isEscalation marks a message the ORCHESTRATOR sent because it needs a human,
+// with nothing broken.
+//
+// This kind exists because cti-alert stopped being only a failure alerter.
+// It is now the agent's single escalation channel - deliberately, because it
+// has no --to and cannot be pointed anywhere but the operator - and the first
+// real escalation it carried arrived titled "CTI fleet failure" with
+// "systemd result: success / exit status 0" underneath it. Three KEV CVEs
+// fourteen days overdue, dressed as a crash report that contradicted itself.
+//
+// An alert that has to be decoded is an alert people learn to skim, and this
+// is the one that must not be.
+func (f failure) isEscalation() bool { return f.Kind == "ESCALATION" }
+
 // notFailure covers every kind that should be reported calmly. Anything not
-// explicitly listed is treated as a real failure, so an unrecognised --kind
-// errs toward alarming rather than reassuring.
-func (f failure) notFailure() bool { return f.isHold() || f.isTest() }
+// explicitly listed is STILL treated as a real failure: that rule was right
+// when an unknown kind could only come from a broken call site, and it stays
+// right now one can also come from an agent inventing a word.
+func (f failure) notFailure() bool { return f.isHold() || f.isTest() || f.isEscalation() }
+
+// unitIsHealthy reports that systemd is not complaining about this unit, so
+// the failure detail below is noise rather than evidence.
+// An empty or "unknown" Result counts as healthy: systemctl show reports
+// those when the unit has never failed, and treating "I could not tell" as a
+// crash is how a test of the alert path manufactures the thing it is testing
+// for.
+func (f failure) unitIsHealthy() bool {
+	if f.ExitCode != "0" {
+		return false
+	}
+	return f.Result == "success" || f.Result == "" || f.Result == "unknown"
+}
 
 func renderHTML(f failure) string {
 	consequence := "Check what this unit is responsible for before assuming it is harmless."
@@ -370,6 +403,13 @@ func renderHTML(f failure) string {
 		consequence = "<b>Nothing is broken.</b> The lane stopped itself and will " +
 			"resume once the condition clears. No action is needed unless this " +
 			"repeats for longer than you expect."
+	} else if f.isEscalation() {
+		banner, accent, tint = "CTI fleet escalation", "#12203a", "#eef2f8"
+		verb = "escalated"
+		consequence = "<b>Nothing has failed.</b> The orchestrator reached you " +
+			"deliberately because it found something it cannot act on alone. " +
+			"The reason above is the message; the systemd detail below is " +
+			"included only to show the lane itself is healthy."
 	} else if f.IsDigest {
 		consequence = "<b>No threat-intel email will arrive.</b> An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained until you " +
