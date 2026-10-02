@@ -201,7 +201,7 @@ func TestPartialDefangingIsStillCaught(t *testing.T) {
 		"cdn.netlfjs[.]com",
 		"evil [.] example [.] com",
 	} {
-		if got := join(Extract("see " + tc + " here")); got == "" {
+		if got := join(Extract("see " + tc + " here").Indicators); got == "" {
 			t.Errorf("%q was not recognised as defanged", tc)
 		}
 	}
