@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
+
 
 func quiet(string, ...any) {}
 
@@ -195,5 +200,83 @@ func TestTicketMapPathIsDerivedNotGuessed(t *testing.T) {
 		if got := TicketMapPath(in); got != want {
 			t.Errorf("TicketMapPath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestFleetDBPathRefusesAnythingItCannotVouchFor(t *testing.T) {
+	// gosec flags this path as tainted because it derives from an environment
+	// variable, and it is right about the flow. The answer is a validator
+	// rather than a bare suppression: anybody who can set FLEET_CODE can
+	// already run code as this account, so the finding is not an escalation -
+	// but "not an escalation" is a weaker claim than "checked".
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("absent is silent, not an error to report", func(t *testing.T) {
+		t.Setenv("FLEET_CODE", "")
+		_, err := fleetDBPath()
+		if !errors.Is(err, errNoFleetLayout) {
+			t.Errorf("got %v, want errNoFleetLayout - a workstation has no fleet", err)
+		}
+	})
+
+	t.Run("a relative path is refused", func(t *testing.T) {
+		t.Setenv("FLEET_CODE", "../../etc")
+		if _, err := fleetDBPath(); err == nil {
+			t.Error("a relative FLEET_CODE was accepted")
+		} else if errors.Is(err, errNoFleetLayout) {
+			t.Error("a relative path should be a reported error, not silence")
+		}
+	})
+
+	t.Run("a missing binary is refused", func(t *testing.T) {
+		t.Setenv("FLEET_CODE", dir)
+		if _, err := fleetDBPath(); err == nil {
+			t.Error("a missing fleet-db was accepted")
+		}
+	})
+
+	t.Run("a directory named fleet-db is refused", func(t *testing.T) {
+		// The check is "regular file", not merely "exists".
+		d := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(d, "bin", "fleet-db"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FLEET_CODE", d)
+		if _, err := fleetDBPath(); err == nil {
+			t.Error("a directory was accepted as the fleet-db binary")
+		}
+	})
+
+	t.Run("a real file is accepted and lands on bin/fleet-db", func(t *testing.T) {
+		want := filepath.Join(dir, "bin", "fleet-db")
+		if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FLEET_CODE", dir)
+		got, err := fleetDBPath()
+		if err != nil {
+			t.Fatalf("a valid layout was refused: %v", err)
+		}
+		if got != want {
+			t.Errorf("resolved to %q, want %q", got, want)
+		}
+	})
+}
+
+func TestTheRemediationNoteNamesTheTicketAndLinksIt(t *testing.T) {
+	// Somebody reading a database row should get the key and a URL, not just
+	// the knowledge that something happened.
+	n := RemediationNote(TicketRef{Key: "CR-1234", URL: "https://x/browse/CR-1234"},
+		time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC))
+	for _, want := range []string{"CR-1234", "https://x/browse/CR-1234", "2026-10-02"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("note %q is missing %q", n, want)
+		}
+	}
+	if RemediationNote(TicketRef{}, time.Now()) != "" {
+		t.Error("a ref with no key produced a note")
 	}
 }
