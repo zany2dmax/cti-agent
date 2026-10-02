@@ -371,12 +371,22 @@ fi
 # absent one: the triage agent would read it, find nothing, and return
 # "unlikely" for everything instead of the honest "unknown". A file that makes
 # an agent confidently wrong is not a safe default.
-if [ ! -f "$CONF_DIR/ORG-PROFILE.md" ]; then
-  info "no $CONF_DIR/ORG-PROFILE.md - the triage lane will answer 'unknown' for"
-  info "everything until one exists. To create it:"
-  info "  sudo install -m 0640 -o root -g $FLEET_GROUP \\"
-  info "    $SRC/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md \\"
-  info "    $CONF_DIR/ORG-PROFILE.md"
+if [ -f "$CONF_DIR/ORG-PROFILE.md" ]; then
+  if grep -q '^PROFILE-STATUS: TEMPLATE' "$CONF_DIR/ORG-PROFILE.md" 2>/dev/null; then
+    warn "$CONF_DIR/ORG-PROFILE.md is still the unfilled template"
+    info "  The triage lane will answer 'unknown' for everything until the"
+    info "  PROFILE-STATUS line is removed. Edit it: sudo \$EDITOR $CONF_DIR/ORG-PROFILE.md"
+  else
+    ok "$CONF_DIR/ORG-PROFILE.md exists, not overwriting your edits"
+  fi
+else
+  run install -m 0640 -o root -g "$FLEET_GROUP" \
+      "$SRC/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md" "$CONF_DIR/ORG-PROFILE.md"
+  warn "created $CONF_DIR/ORG-PROFILE.md from the template - fill it in"
+  info "  It carries a PROFILE-STATUS: TEMPLATE line. While that line is there"
+  info "  the triage lane treats the profile as absent and says 'unknown'"
+  info "  rather than reasoning from empty headings - placeholder prose fails"
+  info "  silently in a way placeholder credentials do not."
 fi
 info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
 

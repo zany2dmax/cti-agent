@@ -367,3 +367,67 @@ func writeField(b *strings.Builder, name string, vals []string) {
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
+
+// ─── the organisation profile ───────────────────────────────────────────────
+
+// ProfileSentinel marks a profile that has not been filled in.
+//
+// The installer copies the template to /etc/cti-agent/ORG-PROFILE.md so the
+// operator has a file to edit rather than an install command to find. That
+// convenience needs a safety net: an unfilled profile reads perfectly well to
+// an agent, which then concludes "we do not appear to run anything like that"
+// and returns a confident "unlikely" for a campaign aimed straight at the
+// organisation.
+//
+// Placeholder CREDENTIALS fail loudly - they cannot authenticate, so the lane
+// stops. Placeholder PROSE fails silently and confidently, which is worse. The
+// sentinel is what makes the silent case detectable.
+const ProfileSentinel = "PROFILE-STATUS: TEMPLATE"
+
+// ProfileState is how usable the deployed profile is.
+type ProfileState int
+
+const (
+	// ProfileMissing means no file. Relevance must be "unknown".
+	ProfileMissing ProfileState = iota
+	// ProfileTemplate means the file exists but is the unfilled template.
+	// Treated exactly like missing - never as an empty description of a real
+	// organisation.
+	ProfileTemplate
+	// ProfileFilled means somebody wrote it and removed the sentinel.
+	ProfileFilled
+)
+
+func (p ProfileState) String() string {
+	switch p {
+	case ProfileFilled:
+		return "filled"
+	case ProfileTemplate:
+		return "template (unfilled)"
+	default:
+		return "missing"
+	}
+}
+
+// Usable reports whether the agent may reason about relevance at all.
+func (p ProfileState) Usable() bool { return p == ProfileFilled }
+
+// ClassifyProfile inspects profile text.
+//
+// Takes the CONTENT rather than a path, so the decision is testable without a
+// filesystem and the caller decides how to handle a read error - which for
+// this lane is the same as missing.
+func ClassifyProfile(content string, readErr error) ProfileState {
+	if readErr != nil {
+		return ProfileMissing
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), ProfileSentinel) {
+			return ProfileTemplate
+		}
+	}
+	if strings.TrimSpace(content) == "" {
+		return ProfileMissing
+	}
+	return ProfileFilled
+}

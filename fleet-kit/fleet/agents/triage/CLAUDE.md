@@ -156,8 +156,16 @@ that you did.
 **`relevance`** is about *this organisation*, using the profile in
 `/etc/cti-agent/ORG-PROFILE.md` — and only that. (The copy in this
 directory is [`ORG-PROFILE-TEMPLATE.md`](ORG-PROFILE-TEMPLATE.md), which is a
-blank form, not a description of anywhere. If the deployed profile is absent,
-every item is `unknown` and you say so rather than guessing.) Use:
+blank form, not a description of anywhere.)
+
+**If the deployed profile is absent, empty, or still carries a
+`PROFILE-STATUS: TEMPLATE` line, every item is `unknown`** and you say which of
+those it was. Do not reason from empty headings: a profile with nothing under
+"Commerce" does not mean the organisation has no commerce estate, it means
+nobody has written that section yet, and "unlikely" is then a confident answer
+to a question you were not given the information to answer.
+
+Use:
 
 - `likely` — the profile names a product, platform or service the item is
   directly about
