@@ -9,6 +9,7 @@
   fleet-db finding upsert <json>      persist an enriched finding
   fleet-db findings [--priority Sev5] [--stale-days N]
   fleet-db sent <date> <s5> <s4> <s3> <s2> <s1> <message_id>
+  fleet-db note <cve> <text>          record who is handling a finding
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
   fleet-db vacuum
 """
@@ -223,6 +224,28 @@ def main(argv):
         c.commit()
         print(f"upserted {len(rows)} findings")
 
+    elif cmd == "note":
+        # Record that a finding has been handed to somebody. Until now nothing
+        # could write remediation_note, while `findings --stale-days` used
+        # "remediation_note IS NULL" to decide what counts as un-actioned - so
+        # a CVE with a ticket open against it was reported as ignored forever.
+        #
+        # Deliberately NOT part of the `finding` upsert: that runs every night
+        # from enrich.py and would overwrite the note with null on each pass.
+        # The column is excluded from its SET list for the same reason.
+        cve = args[0]
+        text = " ".join(args[1:]) if len(args) > 1 else ""
+        cur = c.execute("UPDATE findings SET remediation_note=?, updated=? "
+                        "WHERE cve=?", (text or None, now(), cve))
+        c.commit()
+        if cur.rowcount == 0:
+            # Not an error: cti-jira can file a ticket for a CVE the findings
+            # table has not seen yet, and failing here would make a ticket
+            # look unfiled.
+            print(f"no finding for {cve} - note not recorded")
+            return 0
+        print(f"noted {cve}: {text or '(cleared)'}")
+
     elif cmd == "findings":
         q = "SELECT * FROM findings WHERE 1=1"
         p = []
@@ -230,7 +253,19 @@ def main(argv):
             q += " AND priority=?"
             p.append(args[args.index("--priority") + 1])
         if "--stale-days" in args:
-            q += " AND remediation_note IS NULL AND updated < datetime('now', ?)"
+            # datetime(updated), not updated.
+            #
+            # `updated` is stored as ISO-8601 with a T separator and a +00:00
+            # offset; datetime('now', ...) yields "YYYY-MM-DD HH:MM:SS". A raw
+            # string comparison therefore sorts the stored form ABOVE sqlite's
+            # whenever the date portion matches, because 'T' (84) > ' ' (32).
+            #
+            # The effect is a consistent off-by-up-to-one-day understatement:
+            # a row timestamped on the same calendar day as the cutoff is never
+            # counted as stale, so --stale-days 1 misses everything from
+            # yesterday. It is not a total failure, which is exactly why it
+            # survived - a differing date portion hides it most of the time.
+            q += " AND remediation_note IS NULL AND datetime(updated) < datetime('now', ?)"
             p.append(f"-{args[args.index('--stale-days') + 1]} days")
         q += " ORDER BY priority, host_count DESC"
         print(json.dumps([dict(r) for r in c.execute(q, p)], indent=2))
