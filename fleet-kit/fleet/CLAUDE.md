@@ -299,7 +299,7 @@ These are yours to read, not delegate to. None of them sends mail except
 | `$FLEET_CODE/bin/cti-kev` | CISA KEV remediation deadlines for CVEs present in the estate |
 | `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | The monthly Microsoft Patch Tuesday synopsis. A timer owns it; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail without sending |
-| `$FLEET_CODE/bin/fleet-db` | Memory: findings, digests sent, scout items, tasks |
+| `$FLEET_CODE/bin/fleet-db` | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | The append-only board. `post`, `read`, `tail` |
 
 ## Your quota is rationed — plan around it
