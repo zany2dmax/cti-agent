@@ -173,7 +173,13 @@ BUDGET="$FLEET_CODE/bin/cti-budget"
 if [ -x "$BUDGET" ]; then
   budget_out="$("$BUDGET" check --print-alert-flag 2>&1)" && budget_rc=0 || budget_rc=$?
   if [ "$budget_rc" -eq 3 ]; then
-    reason="$(echo "$budget_out" | grep -v '^\(alert\|silent\)$' | tr '\n' ' ')"
+    # `|| true` because grep -v exits 1 when it filters EVERYTHING out, and
+    # under `set -o pipefail` that 1 reaches the assignment and `set -e` ends
+    # the script. That case is reachable: a cti-budget that prints only the
+    # flag line and no explanation leaves nothing behind, and the beat would
+    # die at the exact moment it was trying to report why it was holding.
+    reason="$(echo "$budget_out" | { grep -v '^\(alert\|silent\)$' || true; } | tr '\n' ' ')"
+    reason="${reason:-no reason given by cti-budget}"
     echo "[run-checkin $(date '+%F %H:%M:%S')] skipping: $reason"
     "$FLEET_CODE/bin/fleet-board" post @you @operator INFO \
       "heartbeat skipped - $reason" 2>/dev/null || true
