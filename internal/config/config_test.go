@@ -1,11 +1,41 @@
 package config
 
 import (
+	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestMain clears every variable this package reads before any test runs.
+//
+// A config test that inherits the developer's shell is not testing the code,
+// it is testing the machine - and it fails on one laptop and passes on
+// another with no change to the repository. That is exactly what happened:
+// TestTheMailboxWindowMustExceedTheGrace pinned the two mailbox variables,
+// inherited GRAPH_LOOKBACK_HOURS, and broke the day a new constraint made the
+// result depend on it. The ambient value was 168, left exported in a shell
+// from a legitimate catch-up run.
+//
+// Clearing here rather than in each test means a variable added later cannot
+// quietly reintroduce the same hazard: a test that needs a value must say so.
+func TestMain(m *testing.M) {
+	for _, k := range []string{
+		"TENANT_ID", "CLIENT_ID", "CLIENT_SECRET",
+		"GRAPH_MAILBOX", "GRAPH_FOLDER", "GRAPH_LOOKBACK_HOURS",
+		"LOOKUP_PROVIDER",
+		"QUALYS_BASE_URL", "QUALYS_USERNAME", "QUALYS_PASSWORD",
+		"QUALYS_KB_CACHE", "QUALYS_KB_MAX_AGE_HOURS",
+		"REPORT_PATH",
+		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS",
+		"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
+		"JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_ALLOW_CREATE",
+	} {
+		_ = os.Unsetenv(k)
+	}
+	os.Exit(m.Run())
+}
 
 var (
 	graphVars  = []string{"TENANT_ID", "CLIENT_ID", "CLIENT_SECRET", "GRAPH_MAILBOX"}
@@ -267,10 +297,19 @@ func TestTheMailboxWindowMustExceedTheGrace(t *testing.T) {
 	// never both old enough to archive AND still visible, so the cleanup lane
 	// silently does nothing and reports a clean run forever. Refused at
 	// startup rather than discovered from an inbox that never empties.
-	// LOOKUP_PROVIDER=none so the scanner-credential check does not fire and
-	// make every passing case look like a failure. This test is about the
-	// mailbox interlock, which is validated before that check.
+	// Pin EVERY variable the result depends on, including the ones this test
+	// is not about.
+	//
+	// It previously set only the two mailbox variables and inherited
+	// GRAPH_LOOKBACK_HOURS from the environment. That was invisible until a
+	// constraint made the result depend on it, and then the test failed on a
+	// developer machine whose shell had GRAPH_LOOKBACK_HOURS=168 exported from
+	// a catch-up run - a real value, in a real .env, for a real reason.
+	//
+	// A test that reads ambient configuration is not testing the code; it is
+	// testing the machine.
 	t.Setenv("LOOKUP_PROVIDER", "none")
+	t.Setenv("GRAPH_LOOKBACK_HOURS", "24")
 
 	for _, tc := range []struct {
 		lookback, minAge string
