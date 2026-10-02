@@ -19,7 +19,7 @@ reach the operator with:
 
 ```
 $FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service \
-  --kind NEEDS-ATTENTION --reason "<what you need and why, in one or two lines>"
+  --kind ESCALATION --reason "<what you need and why, in one or two lines>"
 ```
 
 `cti-alert` is the only command you have that sends mail, and that is
