@@ -25,6 +25,49 @@
 # It does NOT enable any timer. Enabling is a separate, deliberate step; see the
 # staged rollout it prints at the end.
 set -euo pipefail
+set -E   # so the ERR trap below also fires inside functions and subshells
+
+# ───────────────────────────────────── this script may not end quietly ───────
+#
+# `set -e` is right for an installer - never continue past a broken step - but
+# the exit it performs is SILENT, and silent is what made it dangerous. A run
+# died four lines after printing "✓ daemon-reload" with 400 lines still to go.
+# It left a box with new units, no wrapper update, no version manifest and no
+# verification, and the tail of its output looked exactly like a healthy
+# install. The only evidence was a file that did not exist, noticed by chance
+# two commands later.
+#
+# Every other serious bug in this project has had the same shape: something
+# reported success while doing nothing. An installer is the worst place for
+# it, because the whole point of the Verification block at the end is to be
+# the thing that catches that - and a script that dies before reaching it
+# skips its own safety net.
+#
+# So the exit is made to announce itself. INSTALL_DONE is set at exactly one
+# place: immediately before the "Installed" banner. Any other way out, for any
+# reason, prints what line it happened on and that the box is half-done.
+# Deliberate exits go through bail, so the handler can tell "I decided to
+# stop and said why" apart from "I fell over". Both end the script; only the
+# second is a half-installed box.
+EXPECTED_EXIT=0
+bail() { EXPECTED_EXIT=1; exit "${1:-1}"; }
+
+_err_line=""; _err_rc=""
+_note_err() { _err_rc="$1"; _err_line="$2"; }
+trap '_note_err "$?" "$LINENO"' ERR
+_on_exit() {
+  local rc=$?
+  if [ "$EXPECTED_EXIT" = 1 ]; then return 0; fi
+  if [ "$rc" = 0 ] && [ -z "$_err_line" ]; then return 0; fi
+  printf '\n\033[31m✗ install-fedora.sh stopped at line %s (status %s)\033[0m\n' \
+    "${_err_line:-unknown}" "${_err_rc:-$rc}" >&2
+  printf '    This box is PARTIALLY installed. Do not enable timers.\n' >&2
+  printf '    Nothing after that line ran, which may include the wrapper,\n' >&2
+  printf '    %s/version and the whole verification block.\n' \
+    "${CONF_DIR:-/etc/cti-agent}" >&2
+  printf '    Fix the cause and re-run - this script is idempotent.\n' >&2
+}
+trap _on_exit EXIT
 
 CODE_DIR=/opt/cti-agent
 CONF_DIR=/etc/cti-agent
@@ -65,7 +108,7 @@ case "$SRC" in
     echo "Do NOT put the kit in a personal home directory. A checkout in" >&2
     echo "/home/<you> is invisible to the next admin, and on a box with" >&2
     echo "directory-based SSH logins the home may not survive a logout." >&2
-    exit 2
+    bail 2
     ;;
 esac
 
@@ -75,8 +118,8 @@ for arg in "$@"; do
     --dry-run)   MODE=dryrun ;;
     --uninstall) MODE=uninstall ;;
     --purge)     MODE=purge ;;
-    -h|--help)   sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+    -h|--help)   sed -n '2,30p' "${BASH_SOURCE[0]}"; bail 0 ;;
+    *) echo "unknown option: $arg" >&2; bail 2 ;;
   esac
 done
 
@@ -87,9 +130,34 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 run()  { if [ "$MODE" = dryrun ]; then info "would run: $*"; else "$@"; fi; }
 
+# cfgval KEY [FILE] - last value of KEY=... from fleet.env, or empty.
+#
+# WHY A HELPER AND NOT A grep PIPELINE
+#
+# `V="$(grep -E "^$1=" file | tail -1 | cut -d= -f2-)"` looks harmless and is a
+# loaded gun under `set -euo pipefail`, which this script sets on line 27. grep
+# exits 1 when it matches nothing; `pipefail` makes the pipeline carry that 1
+# even though tail and cut succeeded; the assignment therefore fails; and
+# `set -e` ends the script. No message, no non-zero visible to the operator who
+# ran it interactively, just a prompt.
+#
+# This is not hypothetical. It is how an install ended four lines after
+# printing "✓ daemon-reload" with 400 lines still to go: the wrapper, the
+# version manifest and the whole Verification block never ran, and the only
+# evidence was /etc/cti-agent/version not existing. It also made the "$1 is
+# unset" branch in check_path unreachable - the diagnostic for a missing key
+# could never fire, because a missing key killed the script before it.
+#
+# sed returns 0 when it substitutes nothing, so an absent key reads as empty,
+# which is what every caller here already handles.
+cfgval() {
+  sed -n "s/^$1=//p" "${2:-$CONF_DIR/fleet.env}" 2>/dev/null \
+    | tail -1 | tr -d '"'"'"' '
+}
+
 # ─────────────────────────────────────────────────────────── uninstall ────────
 if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
-  [ "$(id -u)" = 0 ] || { bad "run with sudo"; exit 1; }
+  [ "$(id -u)" = 0 ] || { bad "run with sudo"; bail 1; }
   bold "Stopping and disabling timers"
   for t in digest weekly checkin scout patchtuesday; do
     systemctl disable --now "cti-agent-$t.timer" 2>/dev/null || true
@@ -120,12 +188,12 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
     info "the $FLEET_USER account"
     info "--purge removes these too"
   fi
-  exit 0
+  bail 0
 fi
 
 # ──────────────────────────────────────────────────────────── preflight ───────
 bold "Preflight"
-[ "$(id -u)" = 0 ] || { bad "run with sudo"; exit 1; }
+[ "$(id -u)" = 0 ] || { bad "run with sudo"; bail 1; }
 
 if [ -r /etc/os-release ]; then
   . /etc/os-release
@@ -136,13 +204,13 @@ if [ -r /etc/os-release ]; then
       warn "${PRETTY_NAME:-unknown} is not Fedora/RHEL-family"
       info "install.sh is the Debian/Ubuntu-oriented variant"
       read -r -p "  Continue anyway? [y/N] " c
-      [ "${c:-n}" = y ] || exit 1 ;;
+      [ "${c:-n}" = y ] || bail 1 ;;
   esac
 else
   warn "no /etc/os-release; assuming RHEL family"
 fi
 
-command -v systemctl >/dev/null || { bad "systemd not found"; exit 1; }
+command -v systemctl >/dev/null || { bad "systemd not found"; bail 1; }
 ok "systemd $(systemctl --version | head -1 | awk '{print $2}')"
 
 # Dependencies. Python is the lanes; Go builds the agent. dnf is only used if
@@ -318,8 +386,7 @@ if [ -f "$CONF_DIR/fleet.env" ]; then
   if [ "$MODE" != dryrun ]; then
     PATHFAIL=0
     check_path() { # name expected
-      local cur; cur="$(grep -E "^$1=" "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2-)"
-      cur="${cur%\"}"; cur="${cur#\"}"
+      local cur; cur="$(cfgval "$1")"
       if [ -z "$cur" ]; then
         bad "$1 is unset - should be $2"; PATHFAIL=1
       elif [ "${cur#/}" = "$cur" ]; then
@@ -515,13 +582,13 @@ ok "daemon-reload"
 TZFAIL=0
 FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"
 if [ -r "$CONF_DIR/fleet.env" ]; then
-  FLEET_TZ="$(grep -E '^FLEET_TIMEZONE=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
-  _dt="$(grep -E '^FLEET_DIGEST_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
-  _wt="$(grep -E '^FLEET_WEEKLY_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
-  _pt="$(grep -E '^FLEET_PATCHTUESDAY_TIME=' "$CONF_DIR/fleet.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
-  [ -n "$_pt" ] && PATCHTUE_AT="$_pt"
-  [ -n "$_dt" ] && DIGEST_AT="$_dt"
-  [ -n "$_wt" ] && WEEKLY_AT="$_wt"
+  # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
+  # version did to a real install. An absent key must read as empty here: every
+  # one of these is optional and falls back to the default set just above.
+  FLEET_TZ="$(cfgval FLEET_TIMEZONE)"
+  PATCHTUE_AT="$(cfgval FLEET_PATCHTUESDAY_TIME)"; PATCHTUE_AT="${PATCHTUE_AT:-07:30:00}"
+  DIGEST_AT="$(cfgval FLEET_DIGEST_TIME)";         DIGEST_AT="${DIGEST_AT:-06:00:00}"
+  WEEKLY_AT="$(cfgval FLEET_WEEKLY_TIME)";         WEEKLY_AT="${WEEKLY_AT:-07:00:00}"
 fi
 
 if [ -n "$FLEET_TZ" ]; then
@@ -856,9 +923,14 @@ if [ "$FAIL" != 0 ]; then
   # discovering the tool is missing sends people hunting for a second bug.
   info "sudo cti-agent <cmd> works already - the wrapper is installed."
   info "Re-run this script after fixing; it is idempotent."
-  exit 1
+  bail 1
 fi
 # ──────────────────────────────────────────────────────────── next steps ─────
+# The one place this is set. Reaching it means the config checks, the binaries,
+# the units, the wrapper, the version manifest and the whole Verification block
+# all ran. Anything that ends the script before here is a partial install and
+# the EXIT trap will say so.
+EXPECTED_EXIT=1
 cat <<NEXT
 
 $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m')
