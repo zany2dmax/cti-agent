@@ -401,6 +401,7 @@ tasks:
       # two binaries is a local test that cannot exercise them.
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailer ./cmd/cti-mailer
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-jira ./cmd/cti-jira
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-appscan ./cmd/cti-appscan
 
   run:
     desc: Run the agent locally using environment variables

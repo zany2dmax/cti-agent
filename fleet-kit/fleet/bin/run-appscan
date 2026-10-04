@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+# run-appscan - weekly application-security report to the App Dev audience.
+#
+# Reads the Qualys WAS scan notifications that arrived in the CTI mailbox over
+# the last week, renders a report, and mails it through cti-mailer --lane was.
+#
+# WHY THIS IS A SEPARATE LANE AND NOT A SECTION OF THE DIGEST
+#
+#   Different audience. The daily digest goes to the people who patch servers;
+#   this goes to the people who own application code. Mixing them means each
+#   team skims past most of the mail, and a report people skim is a report that
+#   stops being read.
+#
+#   The recipient split is enforced in code: cti-mailer --lane was resolves
+#   WAS_TO against WAS_ALLOW_TO and REFUSES if either is unset. It does not
+#   fall back to the digest audience.
+#
+# USAGE
+#   run-appscan              render and send
+#   run-appscan --dry-run    render, print the subject, send nothing
+set -euo pipefail
+
+# Injected paths, same contract as the other runners.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+FLEET_HOME="${_inj_home:-$HOME}"
+FLEET_CODE="${_inj_code:-$FLEET_HOME}"
+STATE="$FLEET_HOME/state"
+
+fail() { echo "[run-appscan] error: $*" >&2; exit 1; }
+log()  { echo "[run-appscan] $*" >&2; }
+
+# An unrecognised argument is an error, not something to ignore.
+#
+# The unit file for this lane was first generated from the weekly one and
+# arrived with a stray "weekly" argument on its ExecStart. A runner that
+# shrugs at that runs in the wrong mode and reports success - and the service
+# file looks correct to anyone reading it.
+DRY=""
+case "${1:-}" in
+  "")         ;;
+  --dry-run)  DRY="--dry-run" ;;
+  *)          fail "unknown argument: $1 (only --dry-run is accepted)" ;;
+esac
+[ $# -le 1 ] || fail "too many arguments: $*"
+
+APPSCAN="$FLEET_CODE/bin/cti-appscan"
+MAILER="$FLEET_CODE/bin/cti-mailer"
+[ -x "$APPSCAN" ] || fail "cti-appscan not found at $APPSCAN - rerun the installer"
+[ -x "$MAILER" ]  || fail "cti-mailer not found at $MAILER - rerun the installer"
+
+mkdir -p "$STATE"
+chmod 0700 "$STATE" 2>/dev/null || true
+
+STAMP="$(date -u +%Y-%m-%d)"
+HTML="$STATE/appscan-$STAMP.html"
+TXT="$STATE/appscan-$STAMP.txt"
+
+# Mode set BEFORE anything is written. A report naming which applications have
+# open Urgent findings, and which are scanned without authentication, is a map
+# of where to look - the same handling the VM reports get.
+: > "$HTML"; chmod 0600 "$HTML"
+: > "$TXT";  chmod 0600 "$TXT"
+
+"$APPSCAN" --out "$HTML" --text-out "$TXT" \
+  || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
+
+SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line"
+[ -n "$SUBJECT" ] || fail "empty subject - refusing to send a report nobody can triage from the subject"
+
+log "subject: $SUBJECT"
+
+# shellcheck disable=SC2086
+"$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+  || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
+
+if [ -n "$DRY" ]; then
+  log "dry run - nothing was sent. The rendered report is at $HTML"
+fi
+log "done"

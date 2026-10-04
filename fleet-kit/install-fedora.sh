@@ -554,6 +554,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-jira" ./cmd/cti-jira )
   chmod 0755 "$CODE_DIR/bin/cti-jira"
   ok "built $CODE_DIR/bin/cti-jira"
+
+  # Weekly application-security report. Sends through cti-mailer --lane was,
+  # which refuses unless WAS_TO and WAS_ALLOW_TO are both set, so installing
+  # it does not arm it.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-appscan" ./cmd/cti-appscan )
+  chmod 0755 "$CODE_DIR/bin/cti-appscan"
+  ok "built $CODE_DIR/bin/cti-appscan"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -764,7 +771,7 @@ FAIL=0
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
-         "$CODE_DIR/bin/cti-jira" \
+         "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
