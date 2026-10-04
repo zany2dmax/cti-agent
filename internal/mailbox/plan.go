@@ -25,6 +25,18 @@ type Candidate struct {
 	Subject   string
 	Received  time.Time
 	AutoReply bool // as declared by the sending system's headers
+
+	// SelfSent means the fleet sent this message itself - a digest, a weekly,
+	// a Patch Tuesday synopsis - and it came back because the reports are
+	// delivered to the same mailbox they are read from.
+	//
+	// It has to be here, not inferred later. The digest lane now skips its own
+	// mail before recording anything, so these messages have no entry in the
+	// processed log. Rule 1 below would therefore leave them forever, the
+	// inbox would fill with our own reports, and at the backlog threshold the
+	// lane would escalate "the agent has stopped reading the mailbox" about a
+	// mailbox it was reading perfectly well.
+	SelfSent bool
 }
 
 // Decision pairs a candidate with what will happen to it and why.
@@ -53,6 +65,10 @@ type Decision struct {
 //
 // THE RULES, IN THIS ORDER, AND THE ORDER MATTERS
 //
+//  0. Sent by this fleet -> archive. The one rule that precedes rule 1, and
+//     only because our own reports can never satisfy it: the digest skips its
+//     own mail before recording anything, so they never get a processed-log
+//     entry and rule 1 would leave them in the inbox forever.
 //  1. No record of the agent having read it -> leave. Absolute. This is the
 //     operator's "make sure a given email has been processed" rule, and it is
 //     checked first so that no later rule can override it.
@@ -108,6 +124,20 @@ func Plan(candidates []Candidate, processed map[string]Processed,
 	for _, c := range candidates {
 		rec, ok := processed[c.ID]
 		switch {
+		case c.SelfSent:
+			// Before rule 1, and the only thing that is. Our own reports are
+			// deliberately never processed - the digest skips them so it does
+			// not re-report its own CVEs - so they can never acquire a
+			// processed-log entry and rule 1 would leave them in the inbox
+			// permanently.
+			//
+			// Archived rather than deleted, and archived rather than left:
+			// there is a copy in Sent Items, nobody reads the shared inbox to
+			// find yesterday's digest, and leaving them is what would make the
+			// backlog alarm cry wolf.
+			out = append(out, Decision{Candidate: c, Action: ActionArchive,
+				Reason: "sent by this fleet - our own report delivered back to " +
+					"the mailbox it is read from", Known: true})
 		case !ok:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "no record that a completed run has read this message"})
