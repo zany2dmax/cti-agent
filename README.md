@@ -37,7 +37,9 @@ registration](RUNBOOK.md#1-microsoft-entra-app-registration) ·
 [configuration](RUNBOOK.md#4-configuration) · [the two-box
 workflow](RUNBOOK.md#7-the-two-box-workflow-mac-to-fedora) · [enabling
 timers](RUNBOOK.md#9-enabling-the-timers-in-order) · [verifying a
-run](RUNBOOK.md#12-verifying-a-run) · [known gaps](SECURITY.md#known-gaps-and-accepted-risks)
+run](RUNBOOK.md#12-verifying-a-run) · [taking a host off the
+schedule](RUNBOOK.md#11e-taking-a-host-off-the-schedule) · [known
+gaps](SECURITY.md#known-gaps-and-accepted-risks)
 
 ---
 

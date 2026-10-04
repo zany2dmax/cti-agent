@@ -22,6 +22,7 @@ document assumes you have decided to run it.
 - [11b. Switching the mailer](#11b-switching-the-mailer)
 - [11c. Verifying the Jira connection](#11c-verifying-the-jira-connection)
 - [11d. What version is this box running?](#11d-what-version-is-this-box-running)
+- [11e. Taking a host off the schedule](#11e-taking-a-host-off-the-schedule)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -841,17 +842,42 @@ reports a quiet day it did not have. That collision has already cost three
 advisories here, with no error logged anywhere. It was caught only because a
 person recognised two senders that should have been in the digest.
 
-So when you stand up a production host, bring the old one off the schedule
-**first**:
+So the order is not negotiable. Cutting over from the test host to a new
+production host:
 
-```bash
-# on the outgoing host, BEFORE the new one is enabled
-sudo ./fleet-kit/stop-fedora.sh --decommission
-```
+1. **On the OUTGOING host**, before the new one is enabled:
 
-`--decommission` also masks the timers, so `systemctl enable --now` refuses
-until somebody deliberately unmasks them. That is the point: a test box should
-not quietly start sending again alongside production after a reboot or a
+   ```bash
+   sudo ./fleet-kit/stop-fedora.sh --decommission
+   ```
+
+   It waits for any lane mid-run, then stops, disables and masks every timer,
+   and exits non-zero if anything is still scheduled. Do not continue until it
+   exits 0.
+
+2. **Confirm it, from the outgoing host:**
+
+   ```bash
+   sudo ./fleet-kit/stop-fedora.sh --status
+   sudo crontab -l 2>/dev/null | grep -i cti || echo "no root crontab entries"
+   ```
+
+   The script only knows about systemd. A leftover cron entry would keep this
+   host live against the shared mailbox and is invisible to it.
+
+3. **Then** install and enable on the new host, following
+   [section 9](#9-enabling-the-timers-in-order) as if it were a first install.
+   The seen-CVE database and ticket map do not transfer; the new host will
+   re-discover state from the mailbox and from Jira labels, which is why
+   ticketing is keyed on a label rather than a local database.
+
+4. Leave the old host decommissioned for a week before uninstalling it. If the
+   new host has a problem, `--resume` is one command and the config is still
+   there.
+
+`--decommission` masks the timers, so `systemctl enable --now` refuses until
+somebody deliberately unmasks them. That is the point: a test box must not
+quietly start sending again alongside production after a reboot or a
 re-install.
 
 ### What it will not do
