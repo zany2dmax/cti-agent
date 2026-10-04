@@ -123,11 +123,11 @@ func TestARealAdvisoryIsNeverMarkedSelfSent(t *testing.T) {
 	// silently never reaches anyone - the exact class of bug the rest of this
 	// codebase is built to prevent.
 	for name, from := range map[string]string{
-		"a vendor":                  "CTI@vendor.example",
-		"an operator forwarding":    "jeff@example.com",
-		"a lookalike local part":    "cybersecurity@other.example",
-		"a lookalike domain":        "cybersecurity@example.com.evil.example",
-		"a longer local part":       "cybersecurity-reports@example.com",
+		"a vendor":                   "CTI@vendor.example",
+		"an operator forwarding":     "jeff@example.com",
+		"a lookalike local part":     "cybersecurity@other.example",
+		"a lookalike domain":         "cybersecurity@example.com.evil.example",
+		"a longer local part":        "cybersecurity-reports@example.com",
 		"the address as a substring": "notcybersecurity@example.com",
 	} {
 		msgs := fetch(t, `{
