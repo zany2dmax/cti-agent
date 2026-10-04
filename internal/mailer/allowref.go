@@ -54,8 +54,17 @@ func ExpandAllow(name, raw string, lookup func(string) (string, bool)) ([]string
 				name, MaxRefDepth)
 		}
 		for _, tok := range SplitList(value) {
-			ref, isRef := refName(tok)
-			if !isRef {
+			ref, kind := refName(tok)
+			if kind == refMalformed {
+				return fmt.Errorf(
+					"%s: %q is not a usable reference. A reference names ONE "+
+						"other list exactly - $VM_ALLOW_TO - and may not be a "+
+						"pattern, a wildcard or a glob. There is no way to say "+
+						"\"every allowlist\": an audience that grows because "+
+						"somebody added an unrelated list is an audience nobody "+
+						"chose", name, tok)
+			}
+			if kind == refNone {
 				if k := strings.ToLower(tok); !seen[k] {
 					seen[k] = true
 					out = append(out, tok)
@@ -91,15 +100,35 @@ func ExpandAllow(name, raw string, lookup func(string) (string, bool)) ([]string
 	return out, nil
 }
 
-// refName reports whether a token is a variable reference, and its name.
+type refKind int
+
+const (
+	refNone      refKind = iota // an ordinary address
+	refValid                    // $NAME or ${NAME}
+	refMalformed                // begins with $ but names nothing usable
+)
+
+// refName classifies a token.
 //
-// Accepts $NAME and ${NAME}. A bare "$" or an empty ${} is not a reference to
-// anything and is refused as a malformed address later, rather than being
-// quietly dropped.
-func refName(tok string) (string, bool) {
+// # NO WILDCARDS, BY CONSTRUCTION
+//
+// A reference must name exactly one other list. $VM_ALLOW_TO is a reference;
+// $*_ALLOW_TO, ${*}, $ALL and $ are not, and none of them is silently ignored
+// - each is refused by name.
+//
+// There is deliberately no way to say "every allowlist". The whole purpose of
+// splitting these lists is that each audience is chosen. A pattern would mean
+// that adding an unrelated lane's list later silently widens every audience
+// that matched it, and nobody would revisit the lists to notice.
+//
+// Anything beginning with "$" is therefore either a valid reference or an
+// error. It is never passed through as literal text, because
+// "$VM_ALLOW_TOO is not a valid address" sends a reader looking at their
+// address list rather than at their typo.
+func refName(tok string) (string, refKind) {
 	t := strings.TrimSpace(tok)
 	if !strings.HasPrefix(t, "$") {
-		return "", false
+		return "", refNone
 	}
 	t = strings.TrimPrefix(t, "$")
 	if strings.HasPrefix(t, "{") && strings.HasSuffix(t, "}") {
@@ -107,18 +136,16 @@ func refName(tok string) (string, bool) {
 	}
 	t = strings.TrimSpace(t)
 	if t == "" {
-		return "", false
+		return "", refMalformed
 	}
-	// A variable name, not an address. Anything else is somebody writing an
-	// address that begins with a dollar sign, which is not a thing.
 	for i := 0; i < len(t); i++ {
 		c := t[i]
 		ok := c == '_' ||
 			(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 			(c >= '0' && c <= '9' && i > 0)
 		if !ok {
-			return "", false
+			return "", refMalformed
 		}
 	}
-	return t, true
+	return t, refValid
 }

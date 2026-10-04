@@ -193,17 +193,37 @@ func TestReferencesResolveThroughLaneResolve(t *testing.T) {
 	}
 }
 
-func TestADollarSignThatIsNotAReferenceIsNotSilentlyDropped(t *testing.T) {
-	// "$" alone, or "${}", names nothing. It must survive to the address
-	// validator and be refused there, rather than vanishing and leaving a
-	// shorter list than the operator wrote.
-	lookup := env("X", "a@example.com")
-	got, err := ExpandAllow("L", "$,a@example.com", lookup)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestWildcardsAndPatternsAreRefusedByName(t *testing.T) {
+	// A reference names ONE other list. There is deliberately no way to say
+	// "every allowlist": a pattern would mean that adding an unrelated lane's
+	// list later silently widens every audience that matched it, and nobody
+	// would revisit those lists to notice.
+	lookup := env("VM_ALLOW_TO", "alice@example.com")
+	for _, bad := range []string{
+		"$*_ALLOW_TO,a@example.com",
+		"${*},a@example.com",
+		"$*,a@example.com",
+		"$VM_*,a@example.com",
+		"$ALLOW-TO,a@example.com",
+	} {
+		_, err := ExpandAllow("L_ALLOW_TO", bad, lookup)
+		if err == nil {
+			t.Errorf("%q was accepted", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "wildcard") {
+			t.Errorf("%q: error does not explain the rule: %v", bad, err)
+		}
 	}
-	if len(got) != 2 {
-		t.Errorf("got %v - a bare $ was dropped rather than kept for validation", got)
+}
+
+func TestABareDollarIsAnErrorNotSilentlyDropped(t *testing.T) {
+	// It must not vanish, leaving a shorter list than the operator wrote, and
+	// it must not be reported as a bad ADDRESS - that sends a reader to look
+	// at their address list rather than at their typo.
+	lookup := env("X", "a@example.com")
+	if _, err := ExpandAllow("L", "$,a@example.com", lookup); err == nil {
+		t.Error("a bare $ was accepted")
 	}
 }
 
