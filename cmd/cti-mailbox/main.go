@@ -139,6 +139,7 @@ func run() int {
 		candidates = append(candidates, mailbox.Candidate{
 			ID: m.ID, Subject: m.Subject,
 			Received: m.ReceivedDateTime, AutoReply: m.IsAutoReply(),
+			SelfSent: m.SelfSent,
 		})
 	}
 	plan := mailbox.Plan(candidates, l.Index(), now, cfg.MailboxMinAge)

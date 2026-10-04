@@ -26,12 +26,38 @@ type Client struct {
 	graphBase     string // scheme+host, no trailing slash
 }
 
+// sameAddress compares two mail addresses for identity.
+//
+// Case-insensitive on the whole address: the local part is technically
+// case-sensitive per RFC 5321, but no mail system anybody runs treats it that
+// way, and the cost of being pedantic here is failing to recognise our own
+// digest because Exchange capitalised it differently in one place.
+func sameAddress(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a != "" && strings.EqualFold(a, b)
+}
+
+// SelfHeader marks mail this fleet sent. Graph requires custom header names
+// to start with "X-".
+//
+// Its value is the sending mailbox, so a shared tenant running two fleets can
+// tell whose report it is looking at rather than discarding both.
+const SelfHeader = "X-CTI-Agent-Sent"
+
+// Graph returns header names in whatever case the sender used, so the match
+// is done lowercased. Precomputed rather than lowercased inside the loop.
+var selfHeaderLower = strings.ToLower(SelfHeader)
+
 type Message struct {
 	ID               string    `json:"id"`
 	Subject          string    `json:"subject"`
 	ReceivedDateTime time.Time `json:"receivedDateTime"`
 	From             string
 	BodyText         string
+
+	// SelfSent is true when this message carries SelfHeader - that is, when
+	// the fleet sent it. See the comment in SendMail for the loop this closes.
+	SelfSent bool
 
 	// AutoSubmitted and AutoResponseSuppress carry the RFC 3834 and Microsoft
 	// headers that mark a message as machine-generated.
@@ -301,7 +327,15 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 					msg.AutoSubmitted = h.Value
 				case "x-auto-response-suppress":
 					msg.AutoResponseSuppress = h.Value
+				case selfHeaderLower:
+					msg.SelfSent = true
 				}
+			}
+			// Mail we sent before SelfHeader existed carries no header, so the
+			// sender is the backstop. The fleet sends AS this mailbox, so mail
+			// from it to itself is our own report coming back round.
+			if !msg.SelfSent && sameAddress(m.From.EmailAddress.Address, mailbox) {
+				msg.SelfSent = true
 			}
 			all = append(all, msg)
 		}
@@ -353,8 +387,17 @@ type sendMailPayload struct {
 		CCRecipients []recipient      `json:"ccRecipients,omitempty"`
 		Importance   string           `json:"importance"`
 		Attachments  []fileAttachment `json:"attachments,omitempty"`
+
+		// Headers we set on our own outgoing mail. Graph requires custom
+		// header names to begin with "X-".
+		Headers []messageHeader `json:"internetMessageHeaders,omitempty"`
 	} `json:"message"`
 	SaveToSentItems bool `json:"saveToSentItems"`
+}
+
+type messageHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // fileAttachment is Graph's inline attachment shape. The @odata.type is
@@ -440,6 +483,31 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailRes
 			ContentBytes: base64.StdEncoding.EncodeToString(a.Bytes),
 		})
 	}
+	// Stamp our own mail so the ingest can recognise it later.
+	//
+	// THE LOOP THIS CLOSES
+	//
+	// The digest is sent TO the same mailbox the digest READS. So yesterday's
+	// digest arrives as today's input, the extractor pulls the CVEs out of our
+	// own report, and they are presented as newly mentioned - every day,
+	// forever. Observed 2026-10-04: "EMAILS READ THIS RUN - 2 total, 1
+	// mentioning a CVE", and the one mentioning a CVE was the previous day's
+	// own digest.
+	//
+	// It is self-sustaining. A CVE reported once stays in the mailbox as our
+	// own mail and re-enters every subsequent run, so the daily can never go
+	// quiet and the counts are fiction. Worse, nothing about it looks wrong:
+	// the email is well-formed, the CVE is real, and the pipeline is working
+	// exactly as written.
+	//
+	// A header rather than a sender check, because a header is something we
+	// control and can assert in a test. The sender check in RecentMessages is
+	// the backstop for mail already sitting in the mailbox from before this
+	// existed.
+	p.Message.Headers = append(p.Message.Headers, messageHeader{
+		Name: SelfHeader, Value: req.From,
+	})
+
 	p.SaveToSentItems = true
 	if req.SaveToSentItems != nil {
 		p.SaveToSentItems = *req.SaveToSentItems
