@@ -76,8 +76,8 @@ var (
 	guidRE = regexp.MustCompile(
 		`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 
-	tagRE       = regexp.MustCompile(`(?s)<[^>]*>`)
-	blockEndRE  = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li|ul)>`)
+	tagRE      = regexp.MustCompile(`(?s)<[^>]*>`)
+	blockEndRE = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li|ul)>`)
 	// Spelled out, because Go's regexp is RE2 and RE2 has no backreferences.
 	// The natural way to write this - `<(style|script|head)[^>]*>.*?</\1>` -
 	// compiles fine in Python and panics at init here:
