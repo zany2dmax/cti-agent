@@ -24,10 +24,20 @@ set -euo pipefail
 files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
 [ -n "$files" ] || exit 0
 
+# Missing gofmt WARNS; it does not block.
+#
+# The first version exited 1 here, which was over-reach. This hook is a
+# convenience - the authoritative gate is `task fmt:check` inside ship, which
+# cannot be bypassed and runs where gofmt exists. Refusing to let someone
+# COMMIT because a formatter is absent blocks work the gate would catch
+# anyway, and it blocked every commit made from an environment without a Go
+# toolchain within an hour of being written.
+#
+# Loud, so nobody mistakes the warning for success.
 if ! command -v gofmt >/dev/null 2>&1; then
-  echo "pre-commit: gofmt not found in PATH - staged Go files were NOT formatted" >&2
-  echo "            install Go, or run 'task fmt' yourself before pushing" >&2
-  exit 1
+  echo "pre-commit: gofmt not in PATH - staged Go files were NOT formatted." >&2
+  echo "            Committing anyway; 'task ship' will refuse until they are." >&2
+  exit 0
 fi
 
 formatted=""
