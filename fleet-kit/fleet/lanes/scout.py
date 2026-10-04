@@ -85,13 +85,50 @@ def parse_date(raw):
         return None
 
 
+def looks_like_html(raw):
+    """True when the body is an HTML document rather than a feed.
+
+    A feed URL that starts redirecting to a human-readable page is the normal
+    way a feed dies. It does not 404 and it does not time out: it returns 200
+    with a perfectly good HTML document, which an XML parser then rejects at
+    whatever byte first offends it.
+    """
+    head = raw[:1024].lstrip()
+    if head[:1] == b"\xef":                   # strip a UTF-8 BOM before looking
+        head = head[3:].lstrip()
+    low = head[:512].lower()
+    return low.startswith(b"<!doctype html") or low.startswith(b"<html") or (
+        b"<html" in low and b"<?xml" not in low)
+
+
 def parse_feed(raw, url):
     """Handle RSS 2.0 and Atom without a dependency."""
     items = []
+
+    # Say WHICH kind of broken this is.
+    #
+    # msrc.microsoft.com/blog/feed began 302-ing to an HTML page. Every run for
+    # four days logged the identical "mismatched tag: line 124, column 158",
+    # which is a true statement about a stable HTML document and a totally
+    # misleading one about the cause. It reads as "the feed has a bad byte in
+    # it", so the obvious next moves are to strip invalid characters or wait
+    # for the publisher to fix their XML - and neither can ever work, because
+    # the response was never XML. Twenty-four runs recorded it as "known,
+    # persists" without anyone re-reading the error.
+    #
+    # A line and column number is the most specific-looking thing in the log,
+    # which is exactly why it is dangerous when the real answer is "this is a
+    # web page".
+    if looks_like_html(raw):
+        log(f"NOT A FEED {url} :: returned an HTML page, not XML - "
+            f"the feed has probably moved or been retired. "
+            f"Check where the URL redirects to, and replace it in feeds.txt.")
+        return items
+
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as e:
-        log(f"PARSE FAIL {url} :: {e}")
+        log(f"PARSE FAIL {url} :: malformed XML :: {e}")
         return items
 
     entries = [e for e in root.iter() if strip_ns(e.tag) in ("item", "entry")]

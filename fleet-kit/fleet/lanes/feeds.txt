@@ -7,7 +7,12 @@ https://www.cisa.gov/cybersecurity-advisories/all.xml
 https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml
 
 # --- Vendors in the CR Home estate (trim to what you actually run) ---
-https://msrc.microsoft.com/blog/feed
+# msrc.microsoft.com/blog/feed was here. It now 302s to an HTML page and has
+# not returned XML since at least 2026-09-30. The Update Guide RSS below is a
+# better source anyway: one item per CVE, with the ID in the title and guid,
+# which is what this lane actually keys on. The blog was commentary.
+https://api.msrc.microsoft.com/update-guide/rss
+https://www.microsoft.com/en-us/security/blog/feed/
 https://blogs.oracle.com/security/rss
 https://www.vmware.com/security/advisories.xml
 https://feeds.fortinet.com/fortiguard/rss/ir.xml

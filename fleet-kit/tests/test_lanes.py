@@ -1341,6 +1341,81 @@ class RemediationNote(unittest.TestCase):
                          "clearing the note should make it stale again")
 
 
+class DeadFeedsAreNamedAsDead(unittest.TestCase):
+    """A feed that starts serving HTML must not be reported as malformed XML.
+
+    msrc.microsoft.com/blog/feed began 302-ing to a human-readable page. For
+    four days and twenty-four consecutive runs the lane logged the identical
+    "mismatched tag: line 124, column 158" - a true statement about a stable
+    HTML document and a thoroughly misleading one about the cause.
+
+    That wording sends you looking for a bad byte in somebody's XML. The
+    suggested fixes it invites - strip invalid characters, wait for the
+    publisher - could never have worked, because the response was never XML.
+    Every beat recorded it as "known, persists" and nobody re-read the error,
+    because a line and column number is the most specific-looking thing in a
+    log and reads as though the diagnosis is already done.
+
+    Microsoft advisory coverage was dark for four days as a result.
+    """
+
+    def setUp(self):
+        self.scout = load("scout")
+
+    def test_an_html_page_is_not_called_malformed_xml(self):
+        html = (b"<!DOCTYPE html>\n<html lang=\"en-us\"><head><title>Blog MSRC"
+                b"</title></head><body><h1>MSRC Blog</h1></body></html>")
+        self.assertTrue(self.scout.looks_like_html(html))
+
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            items = self.scout.parse_feed(html, "https://example.invalid/feed")
+        log = err.getvalue()
+
+        self.assertEqual(items, [])
+        self.assertIn("NOT A FEED", log)
+        self.assertIn("feeds.txt", log,
+                      "the message must say where to go and fix it")
+        self.assertNotIn("mismatched tag", log,
+                         "an XML parser error for an HTML page is the bug")
+
+    def test_a_byte_order_mark_does_not_make_a_feed_look_like_html(self):
+        # The MSRC Update Guide RSS is served with a UTF-8 BOM. A naive
+        # startswith check against the raw bytes sees the BOM first and can
+        # misfile a perfectly good feed, which would swap one silent blind
+        # spot for another.
+        feed = ("﻿<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                "<rss version=\"2.0\"><channel><item>"
+                "<title>Chromium: CVE-2026-1 Type Confusion</title>"
+                "<link>https://example.invalid/v/CVE-2026-1</link>"
+                "<pubDate>Sun, 04 Oct 2026 02:13:15 -0700</pubDate>"
+                "</item></channel></rss>").encode("utf-8")
+
+        self.assertFalse(self.scout.looks_like_html(feed))
+        with quiet():
+            items = self.scout.parse_feed(feed, "https://example.invalid/rss")
+        self.assertEqual(len(items), 1)
+        self.assertIn("CVE-2026-1", items[0]["title"])
+
+    def test_genuinely_malformed_xml_still_says_malformed(self):
+        # The new branch must not swallow the case it was built beside.
+        bad = b"<?xml version='1.0'?><rss><channel><item></channel></rss>"
+        self.assertFalse(self.scout.looks_like_html(bad))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.scout.parse_feed(bad, "https://example.invalid/f")
+        self.assertIn("malformed XML", err.getvalue())
+
+    def test_the_dead_msrc_blog_feed_is_no_longer_polled(self):
+        # Belt and braces: the URL is commented out in feeds.txt, and a future
+        # edit that reinstates it should fail here rather than go dark again.
+        feeds = (LANES / "feeds.txt").read_text(encoding="utf-8")
+        live = [ln.strip() for ln in feeds.splitlines()
+                if ln.strip() and not ln.lstrip().startswith("#")]
+        self.assertNotIn("https://msrc.microsoft.com/blog/feed", live)
+        self.assertTrue(
+            any("msrc.microsoft.com" in u or "microsoft.com" in u for u in live),
+            "something must still cover Microsoft advisories")
+
+
 class TestFileShape(unittest.TestCase):
     """Nothing may be defined after unittest.main().
 
