@@ -7,12 +7,22 @@ https://www.cisa.gov/cybersecurity-advisories/all.xml
 https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml
 
 # --- Vendors in the CR Home estate (trim to what you actually run) ---
-# msrc.microsoft.com/blog/feed was here. It now 302s to an HTML page and has
-# not returned XML since at least 2026-09-30. The Update Guide RSS below is a
-# better source anyway: one item per CVE, with the ID in the title and guid,
-# which is what this lane actually keys on. The blog was commentary.
+# Microsoft advisories. Two URLs were tried here and both are gone:
+#
+#   msrc.microsoft.com/blog/feed          302s to an HTML page; no XML since
+#                                         at least 2026-09-30
+#   microsoft.com/en-us/security/blog/    403 from Akamai to anything that is
+#                                         not a browser
+#
+# The Update Guide RSS is the better source regardless: one item per CVE with
+# the ID in the title and the guid, which is exactly what this lane keys on.
+# The blogs were commentary, and bleepingcomputer and thehackernews below
+# already carry the Microsoft stories that come with a CVE.
+#
+# Every line in this file is expected to work. A permanent FEED FAIL is noise,
+# and a failure line nobody reads is how the MSRC blog stayed dead for four
+# days while the log said so every single run.
 https://api.msrc.microsoft.com/update-guide/rss
-https://www.microsoft.com/en-us/security/blog/feed/
 https://blogs.oracle.com/security/rss
 https://www.vmware.com/security/advisories.xml
 https://feeds.fortinet.com/fortiguard/rss/ir.xml
