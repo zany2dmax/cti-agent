@@ -46,16 +46,6 @@ tasks:
         fi
         echo "  ok  gofmt clean"
 
-  fmt:check:
-    desc: Fail if any Go file is unformatted
-    cmds:
-      - |
-        unformatted=$(gofmt -l .)
-        if [ -n "$unformatted" ]; then
-          echo "unformatted files:"; echo "$unformatted"; exit 1
-        fi
-        echo "all Go files formatted"
-
   scan:
     # Named "scan" long before this repo had security tooling. It is
     # staticcheck - correctness and dead code, NOT a vulnerability scan. The

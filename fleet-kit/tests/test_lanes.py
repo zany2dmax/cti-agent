@@ -1441,6 +1441,36 @@ class TestFileShape(unittest.TestCase):
                 f"a top-level {kw.strip()} appears after unittest.main() - "
                 "it will never run under `python3 test_lanes.py`")
 
+    def test_the_taskfile_defines_no_task_twice(self):
+        """A duplicate YAML key is silently the last one.
+
+        `fmt:check` was defined twice. YAML keeps the later definition and says
+        nothing, so the gate that ran was not the gate in the commit - and the
+        guidance it was supposed to print ("run task fmt and COMMIT the
+        result") never appeared, because that version was dead text in a file
+        that parsed cleanly.
+
+        PyYAML will not help here: safe_load accepts duplicates and returns the
+        last. So this reads the lines.
+
+        The consequence is the project's recurring one. Two definitions of a
+        build gate look like one working gate, and the one being maintained may
+        not be the one being run.
+        """
+        path = pathlib.Path(__file__).resolve().parents[2] / "Taskfile.yml"
+        seen = {}
+        dupes = []
+        for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+            m = re.match(r"^  ([A-Za-z][\w:.-]*):\s*$", line)
+            if not m:
+                continue
+            name = m.group(1)
+            if name in seen:
+                dupes.append(f"{name} defined at line {seen[name]} and again at {n}")
+            else:
+                seen[name] = n
+        self.assertEqual(dupes, [], "\n" + "\n".join(dupes))
+
     def test_no_go_regex_uses_a_backreference_or_lookaround(self):
         """Go's regexp is RE2. Python's is not.
 
