@@ -36,20 +36,20 @@ type Result struct {
 
 // Item is one piece of intelligence inside an advisory.
 type Item struct {
-	Title           string   `json:"title"`
-	Source          string   `json:"source"`
-	Date            string   `json:"date"`
-	Link            *string  `json:"link"`
-	CVEs            []string `json:"cves"`
-	Techniques      []string `json:"techniques"`
-	Indicators      []string `json:"indicators"`
-	Products        []string `json:"products"`
-	Summary         string   `json:"summary"`
-	WhyItMightMatter *string `json:"why_it_might_matter"`
-	Relevance       string   `json:"relevance"`
-	RelevanceReason string   `json:"relevance_reason"`
-	SuggestedChecks []string `json:"suggested_checks"`
-	Evidence        []string `json:"evidence"`
+	Title            string   `json:"title"`
+	Source           string   `json:"source"`
+	Date             string   `json:"date"`
+	Link             *string  `json:"link"`
+	CVEs             []string `json:"cves"`
+	Techniques       []string `json:"techniques"`
+	Indicators       []string `json:"indicators"`
+	Products         []string `json:"products"`
+	Summary          string   `json:"summary"`
+	WhyItMightMatter *string  `json:"why_it_might_matter"`
+	Relevance        string   `json:"relevance"`
+	RelevanceReason  string   `json:"relevance_reason"`
+	SuggestedChecks  []string `json:"suggested_checks"`
+	Evidence         []string `json:"evidence"`
 }
 
 // Relevance values. Anything else is replaced with RelevanceUnknown, because a

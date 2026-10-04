@@ -159,7 +159,7 @@ func textLines(body string) []string {
 	s = html.UnescapeString(s)
 	// Microsoft's footer carries zero-width spaces; they would otherwise make
 	// an exact label comparison fail for reasons invisible in a diff.
-	s = strings.NewReplacer("​", "", " ", " ", "﻿", "").Replace(s)
+	s = strings.NewReplacer("\u200b", "", "\u00a0", " ", "\ufeff", "").Replace(s)
 
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
