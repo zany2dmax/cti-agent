@@ -241,6 +241,27 @@ The report lands at `REPORT_PATH`, mode `0600`, gitignored. Read
 
 ## 6. Local development loop
 
+Once per checkout:
+
+```bash
+./scripts/dev-setup.sh            # install the git hooks
+./scripts/dev-setup.sh --status   # check they are installed and current
+```
+
+That installs a `pre-commit` hook which runs `gofmt` over staged Go files and
+re-stages them, so `task ship` has nothing left to complain about. Git does not
+version `.git/hooks`, so a fresh clone silently has none — hence `--status`.
+
+The hook formats; `task ship` only *checks*. That asymmetry is deliberate:
+`ship` ends in `git push`, so reformatting there would rewrite files and then
+push without them, which is how `v1.0` got stamped `-DIRTY`. A commit hook is
+the opposite case — nothing is published yet, and the fix lands before the
+commit it would otherwise invalidate exists.
+
+It skips any file with unstaged changes rather than rewriting it, because
+`gofmt -w` rewrites the whole working-tree file and re-staging it would commit
+edits you had deliberately held back.
+
 `fleet-kit/bin/dev-run` executes the whole pipeline from a checkout with no
 root, no service account and no systemd. It sends nothing unless asked.
 

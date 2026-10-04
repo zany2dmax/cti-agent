@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#
+# pre-commit - format staged Go files before they become a commit.
+#
+# WHY THIS IS NOT THE SAME AS `task ship` DOING IT
+#
+#   ship must NOT reformat. ship ends in `git push`, so a gofmt there rewrites
+#   files and then pushes without them - which is how v1.0 got stamped -DIRTY.
+#   A gate may not modify the thing it is about to publish.
+#
+#   A commit hook is the opposite case. Nothing has been published yet, and the
+#   fix lands BEFORE the object it would otherwise invalidate exists. Formatting
+#   here means fmt:check in ship has nothing left to find, which is the point:
+#   the gate stays strict and stops firing.
+#
+# WHAT IT WILL NOT DO
+#
+#   It skips any file with unstaged changes. `gofmt -w` rewrites the whole
+#   working-tree file, so re-staging a partially staged file would quietly
+#   commit edits the author had deliberately held back. A loud skip is correct
+#   there; silently committing someone's unfinished work is not.
+set -euo pipefail
+
+files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+[ -n "$files" ] || exit 0
+
+if ! command -v gofmt >/dev/null 2>&1; then
+  echo "pre-commit: gofmt not found in PATH - staged Go files were NOT formatted" >&2
+  echo "            install Go, or run 'task fmt' yourself before pushing" >&2
+  exit 1
+fi
+
+formatted=""
+skipped=""
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$f" ] || continue
+
+  # Unstaged changes in the same file: rewriting it would stage them.
+  if [ -n "$(git diff --name-only -- "$f")" ]; then
+    skipped="$skipped $f"
+    continue
+  fi
+
+  before=$(git hash-object "$f")
+  gofmt -w "$f"
+  after=$(git hash-object "$f")
+  if [ "$before" != "$after" ]; then
+    git add "$f"
+    formatted="$formatted $f"
+  fi
+done <<EOF
+$files
+EOF
+
+[ -z "$formatted" ] || echo "pre-commit: gofmt applied and re-staged:$formatted"
+if [ -n "$skipped" ]; then
+  echo "pre-commit: NOT formatted, because they have unstaged changes:$skipped" >&2
+  echo "            stage or stash the rest, or run 'gofmt -w' on them yourself" >&2
+fi
+exit 0
