@@ -122,6 +122,23 @@ func unwrapProofpoint(s string) (string, bool) {
 	}
 	inner := rest[:end]
 
+	tokens := splitTokens(inner)
+	needsDict := false
+	for _, t := range tokens {
+		if strings.HasPrefix(t, "*") {
+			needsDict = true
+			break
+		}
+	}
+	// A wrapped URL containing no special characters has nothing to
+	// substitute, and its dictionary is irrelevant. Requiring one to decode
+	// anyway would refuse a perfectly good link for a reason that has no
+	// bearing on where it goes - the same class of wrong-reason refusal this
+	// decoder was just fixed for.
+	if !needsDict {
+		return inner, true
+	}
+
 	seg := rest[end+3:]
 	if i := strings.Index(seg, "!"); i >= 0 {
 		seg = seg[:i]
@@ -137,7 +154,7 @@ func unwrapProofpoint(s string) (string, bool) {
 
 	var b strings.Builder
 	ptr := 0
-	for _, loc := range splitTokens(inner) {
+	for _, loc := range tokens {
 		if !strings.HasPrefix(loc, "*") {
 			b.WriteString(loc)
 			continue
