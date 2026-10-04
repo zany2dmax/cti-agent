@@ -22,9 +22,11 @@
 package safelink
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -72,14 +74,39 @@ func Unwrap(raw string, allowed ...string) (string, error) {
 	return "", fmt.Errorf("%w: %s", ErrHostNotAllowed, host)
 }
 
+// b64Alphabet is urldefense's URL-safe base64 alphabet, used both to decode
+// the substitution dictionary and to read run lengths.
+const b64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+// runToken matches a substitution token: "*" alone, or "**" plus one
+// base64 character giving a run length.
+var runToken = regexp.MustCompile(`\*(\*.)?`)
+
 // unwrapProofpoint extracts the original URL from a urldefense v3 wrapper:
 //
-//	https://urldefense.com/v3/__<INNER>__;<MAP>!!<TOK>!<TOK>$
+//	https://urldefense.com/v3/__<INNER>__;<DICT>!!<TOK>!<TOK>$
 //
-// v3 rewrites '%' as '*'. It also has a base64 dictionary form for other
-// replaced characters, which this does not decode — a half-decoded URL is
-// still checked against the allowlist before it is used, whereas guessing at
-// the dictionary would produce a plausible-looking wrong URL.
+// # "*" DOES NOT MEAN "%"
+//
+// The first version of this assumed it did, and was wrong in a way that only
+// showed up on the second vendor. urldefense replaces special characters in
+// the URL with "*" and carries the characters themselves, in order, as
+// url-safe base64 in the segment after "__;".
+//
+// For the Azure notification that dictionary decodes to "%%%", so substituting
+// "%" produced the right answer by coincidence. For the Qualys notification it
+// decodes to "#", and substituting "%" produced ".../was/%/reports/" - an
+// invalid percent-escape that url.Parse then rejected. The link was dropped
+// and reported as unverifiable, which is the correct failure, but it was a
+// failure of this decoder rather than anything wrong with the mail.
+//
+// "**X" is a run: X is a base64 digit giving how many consecutive characters
+// to take from the dictionary.
+//
+// Anything inconsistent - a dictionary that does not decode, a run that
+// overruns it - returns false rather than a partial guess. A half-decoded URL
+// that happens to parse is exactly the kind of plausible wrong answer the
+// allowlist exists to catch, and it should never get that far.
 func unwrapProofpoint(s string) (string, bool) {
 	if !strings.Contains(s, "urldefense.com/") {
 		return "", false
@@ -93,7 +120,60 @@ func unwrapProofpoint(s string) (string, bool) {
 	if end < 0 {
 		return "", false
 	}
-	return strings.ReplaceAll(rest[:end], "*", "%"), true
+	inner := rest[:end]
+
+	seg := rest[end+3:]
+	if i := strings.Index(seg, "!"); i >= 0 {
+		seg = seg[:i]
+	}
+	if pad := len(seg) % 4; pad != 0 {
+		seg += strings.Repeat("=", 4-pad)
+	}
+	dictBytes, err := base64.URLEncoding.DecodeString(seg)
+	if err != nil {
+		return "", false
+	}
+	dict := string(dictBytes)
+
+	var b strings.Builder
+	ptr := 0
+	for _, loc := range splitTokens(inner) {
+		if !strings.HasPrefix(loc, "*") {
+			b.WriteString(loc)
+			continue
+		}
+		n := 1
+		if len(loc) == 3 { // "**X"
+			n = strings.IndexByte(b64Alphabet, loc[2])
+			if n < 0 {
+				return "", false
+			}
+		}
+		if ptr+n > len(dict) {
+			return "", false
+		}
+		b.WriteString(dict[ptr : ptr+n])
+		ptr += n
+	}
+	return b.String(), true
+}
+
+// splitTokens breaks the wrapped URL into substitution tokens and the literal
+// text between them, preserving order.
+func splitTokens(s string) []string {
+	var out []string
+	last := 0
+	for _, m := range runToken.FindAllStringIndex(s, -1) {
+		if m[0] > last {
+			out = append(out, s[last:m[0]])
+		}
+		out = append(out, s[m[0]:m[1]])
+		last = m[1]
+	}
+	if last < len(s) {
+		out = append(out, s[last:])
+	}
+	return out
 }
 
 // redirectors are vendor click-through hosts that carry the real destination
