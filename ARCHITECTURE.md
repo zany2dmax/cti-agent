@@ -34,7 +34,7 @@ opposite, deliberately:
 
 ```mermaid
 flowchart TB
-    subgraph G["DELIVERY PATH — guaranteed, no model involved"]
+    subgraph G["DELIVERY PATH &mdash; guaranteed, no model involved"]
         direction LR
         T["systemd timer<br/>06:00 every day"] --> ING["read the mailbox<br/>+ poll vendor feeds"]
         ING --> CONF["confirm against<br/>the vulnerability scanner"]
@@ -42,7 +42,7 @@ flowchart TB
         SCORE --> MAIL["email the<br/>security distribution list"]
     end
 
-    subgraph J["JUDGMENT PATH — where the model lives"]
+    subgraph J["JUDGMENT PATH &mdash; where the model lives"]
         direction LR
         HB["heartbeat<br/>every 2 hours"] --> ORCH["orchestrator<br/>a Claude session"]
         ORCH --> NOTE[("append-only board<br/>+ SQLite memory")]
@@ -52,10 +52,17 @@ flowchart TB
     CONF -. "writes state" .-> NOTE
     NOTE -. "chases what was<br/>left unresolved" .-> ORCH
 
-    classDef guaranteed fill:#e8f4ea,stroke:#2d6a4f,stroke-width:2px
-    classDef judgment fill:#fdf0e3,stroke:#b1560f,stroke-width:2px
+    %% Every node is styled, and every style sets a text colour.
+    %% Leaving it to the theme makes GitHub's dark mode draw white text
+    %% on these pale fills, which is unreadable.
+    classDef guaranteed fill:#cde9d5,stroke:#1b5e3f,stroke-width:2px,color:#10261b
+    classDef judgment   fill:#fadfc0,stroke:#9a4a08,stroke-width:2px,color:#3a1c02
+    classDef store      fill:#e7e1cf,stroke:#6f6134,stroke-width:2px,color:#2a2410
     class T,ING,CONF,SCORE,MAIL guaranteed
-    class HB,ORCH,NOTE,ALERT judgment
+    class HB,ORCH,ALERT judgment
+    class NOTE store
+    style G fill:#f2faf4,stroke:#1b5e3f,stroke-width:2px,color:#10261b
+    style J fill:#fff7ee,stroke:#9a4a08,stroke-width:2px,color:#3a1c02
 ```
 
 **The morning brief never passes through the model.** If the model is slow,
@@ -146,8 +153,23 @@ flowchart TB
     STATE <--> ORCH2
     ORCH2 -->|"escalate only"| EMAIL
 
-    classDef orch fill:#fdf0e3,stroke:#b1560f,stroke-width:2px
+    %% Same reasoning as the first diagram: no node is left to the theme.
+    classDef source fill:#d6e4f5,stroke:#1f4b7a,stroke-width:2px,color:#0d1f33
+    classDef lane   fill:#cde9d5,stroke:#1b5e3f,stroke-width:2px,color:#10261b
+    classDef pkg    fill:#e4e9ee,stroke:#44525e,stroke-width:1px,color:#161c22
+    classDef out    fill:#e0d6f2,stroke:#4e2f85,stroke-width:2px,color:#1d1133
+    classDef orch   fill:#fadfc0,stroke:#9a4a08,stroke-width:3px,color:#3a1c02
+    classDef store  fill:#e7e1cf,stroke:#6f6134,stroke-width:2px,color:#2a2410
+    class MBX,FEEDS,NVD,QUALYS source
+    class DIGEST,SCOUT,PT,CLEAN lane
+    class P1,P2,P3,P4,P5,P6 pkg
+    class EMAIL,TICKET out
     class ORCH2 orch
+    class STATE store
+    style SRC   fill:#f1f6fb,stroke:#1f4b7a,stroke-width:2px,color:#0d1f33
+    style LANES fill:#f2faf4,stroke:#1b5e3f,stroke-width:2px,color:#10261b
+    style GO    fill:#f6f8fa,stroke:#44525e,stroke-width:2px,color:#161c22
+    style OUT   fill:#f6f2fc,stroke:#4e2f85,stroke-width:2px,color:#1d1133
 ```
 
 ### The five primitives
