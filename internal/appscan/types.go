@@ -228,4 +228,3 @@ type DetailFetcher interface {
 	// Findings returns per-vulnerability detail for one application.
 	Findings(ctx context.Context, app string, since time.Time) ([]Finding, error)
 }
-

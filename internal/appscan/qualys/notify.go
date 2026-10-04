@@ -41,17 +41,17 @@ func (Provider) Recognises(sender, subject string) bool {
 }
 
 var (
-	tagRE      = regexp.MustCompile(`(?s)<[^>]*>`)
-	brRE       = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li)>`)
-	dropRE     = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>` +
+	tagRE  = regexp.MustCompile(`(?s)<[^>]*>`)
+	brRE   = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li)>`)
+	dropRE = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>` +
 		`|<script[^>]*>.*?</script>` +
 		`|<head[^>]*>.*?</head>`) // RE2: no backreferences, so spelled out
-	hiddenRE   = regexp.MustCompile(`(?is)<div[^>]*(?:display:none|visibility:hidden)[^>]*>.*?</div>`)
-	pfptRE     = regexp.MustCompile(`(?is)<div[^>]+id=["']?pfptBanner[^>]*>.*?</div>`)
-	reportRE   = regexp.MustCompile(`(?is)view these scan results[^<]*<a[^>]+href\s*=\s*["']([^"']+)["']`)
-	sevLineRE  = regexp.MustCompile(`^Severity\s+([1-5])\s+"[^"]*"\s*:\s*(-?\d+)(?:\s*\(\s*([-+=]?\s*\d*)\s*\))?(.*)$`)
-	lifeRE     = regexp.MustCompile(`(\d+)\s+(New|Reopened|Active|Fixed|Ignored)`)
-	crawledRE  = regexp.MustCompile(`^Links Crawled\s*:\s*(\d+)`)
+	hiddenRE    = regexp.MustCompile(`(?is)<div[^>]*(?:display:none|visibility:hidden)[^>]*>.*?</div>`)
+	pfptRE      = regexp.MustCompile(`(?is)<div[^>]+id=["']?pfptBanner[^>]*>.*?</div>`)
+	reportRE    = regexp.MustCompile(`(?is)view these scan results[^<]*<a[^>]+href\s*=\s*["']([^"']+)["']`)
+	sevLineRE   = regexp.MustCompile(`^Severity\s+([1-5])\s+"[^"]*"\s*:\s*(-?\d+)(?:\s*\(\s*([-+=]?\s*\d*)\s*\))?(.*)$`)
+	lifeRE      = regexp.MustCompile(`(\d+)\s+(New|Reopened|Active|Fixed|Ignored)`)
+	crawledRE   = regexp.MustCompile(`^Links Crawled\s*:\s*(\d+)`)
 	runSuffixRE = regexp.MustCompile(`\s+(?:Bimonthly\s+|Monthly\s+|Weekly\s+)?Run\s*#\s*\d+\s*$`)
 )
 
