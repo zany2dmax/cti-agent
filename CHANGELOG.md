@@ -35,6 +35,58 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.0.2 — 2026-10-04
+
+### Fixed
+
+- **The daily digest was reading its own output back in.** The digest is
+  delivered to the same mailbox it reads, so yesterday's digest arrived as
+  today's input, the extractor pulled the CVEs out of our own report, and they
+  were presented as newly mentioned. Self-sustaining: a CVE reported once
+  re-entered every subsequent run, so the daily could never go quiet and the
+  "emails mentioning a CVE" count was fiction. Observed on 2026-10-04, where
+  the single CVE-bearing email of the run was the previous day's own Sev5
+  digest. Outgoing mail now carries `X-CTI-Agent-Sent`, and the ingest skips
+  anything carrying it — with the sending address as a backstop for mail sent
+  before the header existed. The count of skipped messages is logged, because a
+  filter that silently removes input is how the next blind spot starts.
+- **The cleanup lane would have left those reports in the inbox forever.** Its
+  first rule is "no processing record → leave, absolute", and our own mail is
+  now deliberately never processed. Left alone it would have filled the inbox
+  and then escalated *"the agent has stopped reading the mailbox"* about a
+  mailbox it was reading perfectly well. Self-sent mail is archived — not
+  deleted; there is no case for a schedule quietly destroying our own audit
+  trail in a shared mailbox.
+- **A dead feed was reported as malformed XML for four days.**
+  `msrc.microsoft.com/blog/feed` now 302s to an HTML page. Every run logged an
+  identical `mismatched tag: line 124, column 158` — true about a stable HTML
+  document, thoroughly misleading about the cause, and it sent the diagnosis
+  looking for a bad byte in somebody's XML. Twenty-four consecutive beats
+  recorded it as "known, persists". Microsoft advisory coverage was dark
+  throughout. `scout` now distinguishes "this is not XML at all" from "this XML
+  is malformed" and says which, and the feed is replaced by the MSRC Update
+  Guide RSS — one item per CVE, which is what the lane keys on.
+
+### Changed
+
+- `task ship` ran `gofmt -w .` and then `git push`, so any reformatting it
+  performed was left uncommitted and never pushed. That is how `v1.0` got
+  stamped `-DIRTY`. It now fails instead: a gate may not modify the thing it is
+  checking. Run `task fmt` yourself and commit the result.
+- `task check` referenced a task named `fmt:check` that did not exist, so the
+  CI entry point would have errored on first use. It exists now.
+
+### Upgrade
+
+Nothing required. Pull, reinstall.
+
+On the first scout run after this, expect a large batch of first-seen CVE IDs:
+the Update Guide feed carries every revision, including a lot of republished
+Chromium entries, and none of them are in the seen-set yet. Worth watching that
+run rather than letting it land unattended.
+
+---
+
 ## 1.0.1 — 2026-10-02
 
 ### Fixed

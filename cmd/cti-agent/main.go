@@ -80,9 +80,31 @@ func main() {
 	// brought new CVE information", when it meant "14 emails arrived".
 	cves := map[string]bool{}
 	withCVEs := 0
+	selfSent := 0
 	subjects := make([]report.ScannedEmail, 0, len(messages))
 	seen := make([]mailbox.Processed, 0, len(messages))
 	for _, msg := range messages {
+		// Never read our own report back in.
+		//
+		// The digest is sent TO the mailbox the digest READS, so yesterday's
+		// digest arrives as today's input and its CVEs are extracted and
+		// presented as newly mentioned. That is self-sustaining: a CVE
+		// reported once re-enters every subsequent run, so the daily can never
+		// go quiet and "emails mentioning a CVE" is fiction.
+		//
+		// Nothing about it looked wrong. The email was well-formed, the CVE
+		// was real, and every stage did exactly what it was written to do.
+		// Observed 2026-10-04, where the single CVE-bearing email of the run
+		// was the previous day's own Sev5 digest.
+		//
+		// Skipped before anything else so it cannot reach the extractor, the
+		// counts, the subject list, or the processed ledger that decides what
+		// the cleanup lane may archive.
+		if msg.SelfSent {
+			selfSent++
+			continue
+		}
+
 		text := msg.Subject + "\n" + msg.BodyText
 		found := cti.ExtractCVEs(text)
 		if len(found) > 0 {
@@ -106,6 +128,16 @@ func main() {
 			HasCVE:    len(found) > 0,
 			AutoReply: msg.IsAutoReply(),
 		})
+	}
+
+	// Say it out loud. A filter that silently removes input is how the next
+	// four-day blind spot starts: if this number is ever larger than the
+	// number of reports the fleet sent in the window, something legitimate is
+	// being dropped and nobody would otherwise find out.
+	if selfSent > 0 {
+		log.Printf("skipped %d message(s) this fleet sent itself - "+
+			"the digest is delivered to the mailbox it reads, and reading it "+
+			"back would re-report its own CVEs every day", selfSent)
 	}
 
 	// Hold back what the monthly Patch Tuesday synopsis has already sent.

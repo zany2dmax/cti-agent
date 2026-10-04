@@ -549,6 +549,72 @@ func planNoGrace(c []Candidate, p map[string]Processed) []Decision {
 	return Plan(c, p, time.Now(), 0)
 }
 
+// ─── our own reports coming back round ──────────────────────────────────────
+//
+// The digest is sent TO the mailbox it READS, so every report arrives as
+// input. cti-agent now skips its own mail before recording anything - which
+// means these messages can never acquire a processed-log entry, and rule 1
+// ("no record -> leave, absolute") would keep them in the inbox forever.
+
+func TestOurOwnReportsAreArchivedNotLeftForever(t *testing.T) {
+	plan := planNoGrace([]Candidate{
+		{ID: "d1", Subject: "[Sev5] CTI Oct 03", Received: at(9), SelfSent: true},
+	}, map[string]Processed{}) // deliberately empty: they are never processed
+
+	if plan[0].Action != ActionArchive {
+		t.Fatalf("Action = %q, want archive - rule 1 would leave it forever",
+			plan[0].Action)
+	}
+	if !strings.Contains(plan[0].Reason, "sent by this fleet") {
+		t.Errorf("Reason = %q, must say why this bypassed the processed check",
+			plan[0].Reason)
+	}
+}
+
+func TestOurOwnReportsAreNeverDeleted(t *testing.T) {
+	// Archive, not delete. Deleting our own audit trail out of a shared
+	// mailbox on a schedule with nobody watching is not a tidiness decision.
+	plan := planNoGrace([]Candidate{
+		{ID: "d1", Subject: "CTI digest", Received: at(9),
+			SelfSent: true, AutoReply: true}, // even if it looks auto-generated
+	}, map[string]Processed{})
+
+	if plan[0].Action == ActionDelete {
+		t.Error("the fleet's own report was deleted")
+	}
+}
+
+func TestOurOwnReportsDoNotCountTowardsTheBacklogAlarm(t *testing.T) {
+	// The alarm means "the agent has stopped reading the mailbox". Our own
+	// reports accumulating would make it fire on a mailbox being read
+	// perfectly well - an alarm that cries wolf is an alarm that gets muted,
+	// and this one is the detector for the agent going dark.
+	cands := make([]Candidate, 0, 40)
+	for i := 0; i < 40; i++ {
+		cands = append(cands, Candidate{
+			ID: string(rune('a' + i%26)), Subject: "CTI digest",
+			Received: at(9), SelfSent: true,
+		})
+	}
+	counts := Summarise(planNoGrace(cands, map[string]Processed{}))
+
+	if note := BacklogNote(counts, 25); note != "" {
+		t.Errorf("40 of our own reports raised the backlog alarm:\n  %s", note)
+	}
+}
+
+func TestARealAdvisoryIsStillGovernedByTheProcessedRule(t *testing.T) {
+	// The new rule must not become a general bypass. Anything not self-sent
+	// still cannot be touched without a processing record.
+	plan := planNoGrace([]Candidate{
+		{ID: "v1", Subject: "Vendor advisory", Received: at(9), SelfSent: false},
+	}, map[string]Processed{})
+
+	if plan[0].Action != ActionLeave {
+		t.Errorf("Action = %q, want leave", plan[0].Action)
+	}
+}
+
 // ─── the minimum-age grace ──────────────────────────────────────────────────
 
 func TestAJustArrivedAdvisoryIsLeftForTheTeamToRead(t *testing.T) {
