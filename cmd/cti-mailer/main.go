@@ -85,8 +85,8 @@ func run() int {
 	to := flag.String("to", "", "comma-separated; defaults to DIGEST_TO")
 	lane := flag.String("lane", "",
 		"send as a named lane (e.g. was): uses <LANE>_TO and <LANE>_ALLOW_TO, "+
-		"and refuses if either is unset rather than falling back to the digest "+
-		"audience")
+			"and refuses if either is unset rather than falling back to the digest "+
+			"audience")
 	cc := flag.String("cc", "",
 		"comma-separated; defaults to DIGEST_CC. Subject to the same "+
 			"FLEET_ALLOW_TO gate as --to")
