@@ -1441,6 +1441,67 @@ class TestFileShape(unittest.TestCase):
                 f"a top-level {kw.strip()} appears after unittest.main() - "
                 "it will never run under `python3 test_lanes.py`")
 
+    def test_every_command_is_built_by_the_installer_and_the_taskfile(self):
+        """A command nobody builds is a command nobody has.
+
+        Both lists are hand-written. That is exactly how run-mailbox-cleanup
+        shipped uninstalled for weeks: one place named the files by hand and
+        another asserted they existed, and the two disagreed silently. The
+        same shape applies to cmd/ - a new binary that the installer never
+        builds produces "command not found" on the box, long after the commit
+        that added it looked complete.
+
+        This does not derive the lists, because restructuring the installer's
+        build section is a riskier change than checking it. It makes the drift
+        impossible to ship instead.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        cmds = sorted(p.name for p in (root / "cmd").iterdir()
+                      if p.is_dir() and not p.name.startswith("."))
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        taskfile = (root / "Taskfile.yml").read_text(encoding="utf-8")
+
+        missing = []
+        for c in cmds:
+            if f"./cmd/{c}" not in installer:
+                missing.append(f"cmd/{c} is never built by fleet-kit/install-fedora.sh")
+            if f"./cmd/{c}" not in taskfile:
+                missing.append(f"cmd/{c} is never built by the Taskfile build target")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
+    def test_every_systemd_timer_has_a_service_and_a_runner(self):
+        """A timer pointing at nothing fires and fails, or fires and does nothing.
+
+        Each .timer must name a .service that exists, and that service's
+        ExecStart must point at a runner that is actually in the kit.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        units = root / "fleet-kit" / "fleet" / "systemd-fedora"
+        problems = []
+        for timer in sorted(units.glob("*.timer")):
+            service = units / (timer.stem + ".service")
+            if not service.exists():
+                problems.append(f"{timer.name} has no matching .service")
+                continue
+            m = re.search(r"^ExecStart=(.+)$", service.read_text(encoding="utf-8"), re.M)
+            if not m:
+                problems.append(f"{service.name} has no ExecStart")
+                continue
+            # Every token, not just the first: cti-agent-scout runs
+            # "/usr/bin/python3 /opt/cti-agent/lanes/scout.py", where the
+            # thing that must exist is the argument, not the interpreter.
+            kit = root / "fleet-kit" / "fleet"
+            found = any(
+                (kit / sub / pathlib.Path(tok).name).exists()
+                for tok in m.group(1).split()
+                for sub in ("bin", "lanes")
+            )
+            if not found:
+                problems.append(
+                    f"{service.name} runs {m.group(1)!r}, none of which is in "
+                    f"fleet/bin/ or fleet/lanes/")
+        self.assertEqual(problems, [], "\n" + "\n".join(problems))
+
     def test_the_taskfile_defines_no_task_twice(self):
         """A duplicate YAML key is silently the last one.
 
