@@ -78,7 +78,17 @@ var (
 
 	tagRE       = regexp.MustCompile(`(?s)<[^>]*>`)
 	blockEndRE  = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li|ul)>`)
-	dropBlockRE = regexp.MustCompile(`(?is)<(style|script|head)[^>]*>.*?</\1>`)
+	// Spelled out, because Go's regexp is RE2 and RE2 has no backreferences.
+	// The natural way to write this - `<(style|script|head)[^>]*>.*?</\1>` -
+	// compiles fine in Python and panics at init here:
+	//
+	//   invalid escape sequence: `\1`
+	//
+	// It panicked rather than silently misbehaving, which is the good case;
+	// the cost was a full ship cycle to find out.
+	dropBlockRE = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>` +
+		`|<script[^>]*>.*?</script>` +
+		`|<head[^>]*>.*?</head>`)
 
 	// Proofpoint injects a banner div whose id carries a per-message suffix.
 	// Removing it keeps its wording out of the parsed text, where "Caution:
