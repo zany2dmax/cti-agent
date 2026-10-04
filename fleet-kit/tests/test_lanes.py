@@ -22,6 +22,7 @@ import sys
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import unittest
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
@@ -1494,15 +1495,19 @@ class TestFileShape(unittest.TestCase):
         zero-width space in a fixture here would sit undetected and the test
         built on it would be quietly testing the wrong string.
         """
+        # Detected by Unicode CATEGORY, not from a list of characters.
+        #
+        # The list version knew three: BOM, zero-width space, non-breaking
+        # space. It then waved through a SOFT HYPHEN pasted into a Go comment,
+        # because a list only ever contains the characters somebody already
+        # got caught by.
+        #
+        # Cf is Unicode's "format" category - the BOM, zero-width joiners, and
+        # the bidirectional overrides used by the Trojan Source class of attack
+        # to make source read one way to a human and another to a compiler. In
+        # a security codebase those have no business in a source file at all.
+        # Zs is every space character except the ordinary one.
         root = pathlib.Path(__file__).resolve().parents[2]
-        # chr(), not the characters themselves. Writing them literally
-        # here is the very mistake this test exists to catch, and it is
-        # how the first draft of this test failed against itself.
-        bad = {
-            chr(0xFEFF): "BOM (U+FEFF)",
-            chr(0x200B): "zero-width space (U+200B)",
-            chr(0x00A0): "non-breaking space (U+00A0)",
-        }
         found = []
         for pattern in ("**/*.py", "**/*.go", "**/*.sh", "**/*.yml"):
             for f in root.glob(pattern):
@@ -1512,12 +1517,17 @@ class TestFileShape(unittest.TestCase):
                     text = f.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
                     continue
-                for ch, name in bad.items():
-                    if ch in text:
-                        line = text[:text.index(ch)].count("\n") + 1
-                        found.append(
-                            f"{f.relative_to(root)}:{line} contains a literal "
-                            f"{name} - write the escape instead")
+                for i, ch in enumerate(text):
+                    if ch in " \t\n\r":
+                        continue
+                    if unicodedata.category(ch) not in ("Cf", "Zs"):
+                        continue
+                    found.append(
+                        f"{f.relative_to(root)}:{text[:i].count(chr(10)) + 1} "
+                        f"contains U+{ord(ch):04X} "
+                        f"{unicodedata.name(ch, 'unnamed')} - "
+                        f"write the escape instead")
+                    break  # one per file is enough to act on
         self.assertEqual(found, [], "\n" + "\n".join(found))
 
 
