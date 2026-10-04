@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly application-security report, Monday 07:30 local
+
+[Timer]
+# Half an hour after the weekly CTI rollup. Different audience, so they do not
+# need to be close together - but a gap means a Graph or Qualys problem shows
+# up in one lane's journal before the other runs into it.
+OnCalendar=Mon *-*-* 07:30:00
+AccuracySec=1min
+Persistent=true
+Unit=cti-agent-appscan.service
+
+[Install]
+WantedBy=timers.target
