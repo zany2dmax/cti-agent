@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/safelink"
 )
 
 // PortalHost is the only host an unwrapped link is allowed to resolve to.
@@ -60,66 +62,14 @@ var ErrNotPortal = errors.New("link does not resolve to the Azure portal")
 // error. The caller renders the attack path ID instead and says the link was
 // not what it claimed. Nothing here ever returns a URL it could not verify.
 func UnwrapPortalLink(raw string) (string, error) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return "", errors.New("no link")
-	}
-
-	if inner, ok := unwrapProofpoint(s); ok {
-		s = inner
-	}
-	if inner, ok := unwrapAzureSafelink(s); ok {
-		s = inner
-	}
-
-	u, err := url.Parse(s)
+	u, err := safelink.Unwrap(raw, PortalHost)
 	if err != nil {
-		return "", fmt.Errorf("unwrapped link does not parse: %w", err)
+		if errors.Is(err, safelink.ErrHostNotAllowed) {
+			return "", fmt.Errorf("%w: %s", ErrNotPortal, err)
+		}
+		return "", err
 	}
-	// Hostname() strips any :port and the brackets on an IPv6 literal, and
-	// comparing it whole - rather than with HasSuffix - is what stops
-	// portal.azure.com.evil.example and evilportal.azure.com.
-	if !strings.EqualFold(u.Hostname(), PortalHost) || u.Scheme != "https" {
-		return "", fmt.Errorf("%w: %s", ErrNotPortal, u.Hostname())
-	}
-	return u.String(), nil
-}
-
-// unwrapProofpoint extracts the original URL from a urldefense v3 wrapper.
-//
-// v3 puts the URL between `__` and `__;`, with `%` rewritten to `*`. It also
-// has a base64 dictionary form for other replaced characters; this handles the
-// percent case and leaves anything else alone, because a half-decoded URL is
-// still checked against the portal allowlist before it is used. Guessing at
-// the dictionary and getting it wrong would produce a plausible-looking wrong
-// URL, which is worse than not decoding.
-func unwrapProofpoint(s string) (string, bool) {
-	if !strings.Contains(s, "urldefense.com/") {
-		return "", false
-	}
-	start := strings.Index(s, "__")
-	if start < 0 {
-		return "", false
-	}
-	rest := s[start+2:]
-	end := strings.Index(rest, "__;")
-	if end < 0 {
-		return "", false
-	}
-	return strings.ReplaceAll(rest[:end], "*", "%"), true
-}
-
-// unwrapAzureSafelink pulls the destination out of Azure's own redirector.
-func unwrapAzureSafelink(s string) (string, bool) {
-	u, err := url.Parse(s)
-	if err != nil || !strings.HasSuffix(strings.ToLower(u.Hostname()), "safelink.emails.azure.net") {
-		return "", false
-	}
-	dest := u.Query().Get("destination")
-	if dest == "" {
-		return "", false
-	}
-	return dest, true
+	return u, nil
 }
 
 // SubscriptionFromTracker recovers the subscription GUID from the redirector's

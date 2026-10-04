@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import shutil
 import subprocess
@@ -1438,6 +1439,46 @@ class TestFileShape(unittest.TestCase):
                 kw, after,
                 f"a top-level {kw.strip()} appears after unittest.main() - "
                 "it will never run under `python3 test_lanes.py`")
+
+    def test_no_go_regex_uses_a_backreference_or_lookaround(self):
+        """Go's regexp is RE2. Python's is not.
+
+        Twice in one session a parser was prototyped in Python - where the
+        pattern was verified against the real input - and then ported to Go
+        unchanged, carrying a `\\1` backreference with it. Go panics at package
+        init:
+
+            regexp: Compile(`<(style|script|head)[^>]*>.*?</\\1>`):
+            invalid escape sequence: `\\1`
+
+        A panic is the good outcome and it still costs a full ship cycle to
+        find, because it only appears once the package is built. Prototyping
+        elsewhere is what makes these parsers verifiable without a toolchain,
+        so the handoff is where the defect enters and the handoff is what needs
+        the gate.
+
+        RE2 also has no lookahead or lookbehind, which fail the same way.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        call = re.compile(r'regexp\.(?:Must)?Compile\(\s*`([^`]*)`', re.S)
+        banned = (
+            (re.compile(r'\\[1-9]'), "backreference"),
+            (re.compile(r'\(\?[=!]'), "lookahead"),
+            (re.compile(r'\(\?<[=!]'), "lookbehind"),
+        )
+        found = []
+        for f in root.rglob("*.go"):
+            if ".git" in f.parts:
+                continue
+            text = f.read_text(encoding="utf-8", errors="replace")
+            for m in call.finditer(text):
+                for probe, what in banned:
+                    if probe.search(m.group(1)):
+                        line = text[:m.start()].count("\n") + 1
+                        found.append(
+                            f"{f.relative_to(root)}:{line} uses a {what}, which "
+                            f"RE2 does not support: {m.group(1)[:60]}")
+        self.assertEqual(found, [], "\n" + "\n".join(found))
 
     def test_no_source_file_contains_an_invisible_character(self):
         """Write \\ufeff, never the character itself.
