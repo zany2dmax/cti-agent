@@ -31,7 +31,7 @@ const notification = `
 <tr class="border-top"><th class="small-12 large-4">Attack story</th><th class="small-12 large-8">1- Attacker can exploit the vulnerabilities via the internet and gain control on the VM<br />2- Attacker can execute code on the Azure VM</th></tr>
 <tr class="border-top"><th class="small-12 large-4">Attack path ID</th><th class="small-12 large-8">99999999-dddd-eeee-ffff-222222222222</th></tr>
 </table>
-<a href="https://urldefense.com/v3/__https://eur.safelink.emails.azure.net/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view*2FMicrosoft_Azure_Security&amp;p=abc__;JSUl!!A!B$">View the attack path &gt;</a>
+<a href="https://urldefense.com/v3/__https://eur.safelink.emails.azure.net/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view*2FMicrosoft_Azure_Security&amp;p=abc__;JSUlJSUl!!A!B$">View the attack path &gt;</a>
 <div>Microsoft Corporation, One&#8203; Microsoft Way, &#8203;Redmond, WA 98052&#8203;</div>
 `
 
@@ -156,7 +156,7 @@ func TestALinkThatIsNotThePortalIsAFindingNotSilence(t *testing.T) {
 	// reads this digest. Dropping the link quietly would hide the one signal
 	// that the mail was not what it claimed.
 	body := strings.Replace(notification,
-		"https://urldefense.com/v3/__https://eur.safelink.emails.azure.net/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view*2FMicrosoft_Azure_Security&amp;p=abc__;JSUl!!A!B$",
+		"https://urldefense.com/v3/__https://eur.safelink.emails.azure.net/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view*2FMicrosoft_Azure_Security&amp;p=abc__;JSUlJSUl!!A!B$",
 		"https://portal.azure.com.evil.example/#view/x", 1)
 
 	a, problems := Parse(body)
