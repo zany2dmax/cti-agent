@@ -83,6 +83,10 @@ func run() int {
 			"this is not transmitted. Kept because the runners pass it")
 	subject := flag.String("subject", "", "subject line")
 	to := flag.String("to", "", "comma-separated; defaults to DIGEST_TO")
+	lane := flag.String("lane", "",
+		"send as a named lane (e.g. was): uses <LANE>_TO and <LANE>_ALLOW_TO, "+
+		"and refuses if either is unset rather than falling back to the digest "+
+		"audience")
 	cc := flag.String("cc", "",
 		"comma-separated; defaults to DIGEST_CC. Subject to the same "+
 			"FLEET_ALLOW_TO gate as --to")
@@ -137,24 +141,64 @@ func run() int {
 	}
 
 	operator := strings.TrimSpace(os.Getenv("FLEET_OPERATOR_EMAIL"))
-	recipients, copies, err := mailer.Audience{
-		ToOperator:  *toOperator,
-		ToFlag:      *to,
-		CCFlag:      *cc,
-		DigestTo:    os.Getenv("DIGEST_TO"),
-		DigestCC:    os.Getenv("DIGEST_CC"),
-		Operator:    operator,
-		AllowRaw:    os.Getenv("FLEET_ALLOW_TO"),
-		CCFromAllow: mailer.Truthy(os.Getenv("DIGEST_CC_FROM_ALLOW_TO")),
-	}.Resolve()
-	if err != nil {
-		return die("%s", safelog.Line(err.Error()))
-	}
 
-	if err := mailer.CheckAllowed(recipients, copies,
-		os.Getenv("FLEET_ALLOW_TO"), os.Getenv("DIGEST_TO"),
-		operator, *approve); err != nil {
-		return die("%s", safelog.Line(err.Error()))
+	var recipients, copies []string
+	if *lane != "" {
+		// A lane send uses its OWN recipient list and its OWN allowlist, and
+		// refuses if either is unset.
+		//
+		// It does NOT fall through to DIGEST_TO / FLEET_ALLOW_TO the way the
+		// default path does. That fallback is what makes a second audience
+		// dangerous: an unset WAS_ALLOW_TO would deliver the
+		// application-security report - which names which applications have
+		// open Urgent findings and which are scanned without authentication -
+		// to the infrastructure distribution list, as a successful send.
+		//
+		// No CC. A lane has one audience; a second list to get wrong is a
+		// second way to reach people nobody chose.
+		prefix := strings.ToUpper(strings.TrimSpace(*lane))
+		l := mailer.Lane{
+			Name:     strings.ToLower(prefix),
+			ToVar:    prefix + "_TO",
+			AllowVar: prefix + "_ALLOW_TO",
+			To:       pick(*to, os.Getenv(prefix+"_TO")),
+			Allow:    os.Getenv(prefix + "_ALLOW_TO"),
+			Operator: operator,
+			Lookup:   os.LookupEnv,
+		}
+		got, err := l.Resolve(*approve)
+		if err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+		recipients = got
+
+		// Advisory, not fatal. Two lanes legitimately share people, but a
+		// list that is ENTIRELY another lane's is the signature of one copied
+		// and never edited.
+		if note := l.CrossCheck("vm", os.Getenv("DIGEST_TO")); note != "" {
+			logf("note   : %s", safelog.Line(note))
+		}
+	} else {
+		var err error
+		recipients, copies, err = mailer.Audience{
+			ToOperator:  *toOperator,
+			ToFlag:      *to,
+			CCFlag:      *cc,
+			DigestTo:    os.Getenv("DIGEST_TO"),
+			DigestCC:    os.Getenv("DIGEST_CC"),
+			Operator:    operator,
+			AllowRaw:    os.Getenv("FLEET_ALLOW_TO"),
+			CCFromAllow: mailer.Truthy(os.Getenv("DIGEST_CC_FROM_ALLOW_TO")),
+		}.Resolve()
+		if err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+
+		if err := mailer.CheckAllowed(recipients, copies,
+			os.Getenv("FLEET_ALLOW_TO"), os.Getenv("DIGEST_TO"),
+			operator, *approve); err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
 	}
 	if *requireApproval && !*approve {
 		return die("this send is marked as requiring approval and --approve was not passed")
@@ -318,6 +362,8 @@ var optional = [][2]string{
 	{"DIGEST_CC", "extra recipients on CC; also gated by FLEET_ALLOW_TO"},
 	{"DIGEST_CC_FROM_ALLOW_TO", "true: also CC everyone on the allowlist"},
 	{"FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"},
+	{"WAS_TO", "--lane was recipients; app-security, a different audience"},
+	{"WAS_ALLOW_TO", "--lane was allowlist; NO fallback - unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},
 }
@@ -526,4 +572,18 @@ func claims(tok string) (tenant, appID string, roles []string, err error) {
 		return "", "", nil, fmt.Errorf("claims are not JSON: %w", err)
 	}
 	return c.TID, c.AppID, c.Roles, nil
+}
+
+// pick returns the first non-empty value.
+//
+// Used for the lane recipient list so that an explicit --to overrides
+// <LANE>_TO. The allowlist is NOT overridable this way: --to still has to
+// pass the lane's gate.
+func pick(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
