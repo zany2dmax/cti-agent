@@ -1383,7 +1383,7 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
         # startswith check against the raw bytes sees the BOM first and can
         # misfile a perfectly good feed, which would swap one silent blind
         # spot for another.
-        feed = ("﻿<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        feed = ("\ufeff<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                 "<rss version=\"2.0\"><channel><item>"
                 "<title>Chromium: CVE-2026-1 Type Confusion</title>"
                 "<link>https://example.invalid/v/CVE-2026-1</link>"
@@ -1438,6 +1438,46 @@ class TestFileShape(unittest.TestCase):
                 kw, after,
                 f"a top-level {kw.strip()} appears after unittest.main() - "
                 "it will never run under `python3 test_lanes.py`")
+
+    def test_no_source_file_contains_an_invisible_character(self):
+        """Write \\ufeff, never the character itself.
+
+        Both of these lanes parse text that legitimately contains byte-order
+        marks, zero-width spaces and non-breaking spaces, so the characters get
+        pasted into source while working on the parsers. The result is a string
+        literal that looks correct and is not, and that no amount of reading
+        the diff will reveal - the characters render as nothing.
+
+        gofmt rejects a BOM outright, which is how one was caught in
+        internal/defender/parse.go. Nothing does that for Python, so a literal
+        zero-width space in a fixture here would sit undetected and the test
+        built on it would be quietly testing the wrong string.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        # chr(), not the characters themselves. Writing them literally
+        # here is the very mistake this test exists to catch, and it is
+        # how the first draft of this test failed against itself.
+        bad = {
+            chr(0xFEFF): "BOM (U+FEFF)",
+            chr(0x200B): "zero-width space (U+200B)",
+            chr(0x00A0): "non-breaking space (U+00A0)",
+        }
+        found = []
+        for pattern in ("**/*.py", "**/*.go", "**/*.sh", "**/*.yml"):
+            for f in root.glob(pattern):
+                if ".git" in f.parts or "__pycache__" in f.parts:
+                    continue
+                try:
+                    text = f.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                for ch, name in bad.items():
+                    if ch in text:
+                        line = text[:text.index(ch)].count("\n") + 1
+                        found.append(
+                            f"{f.relative_to(root)}:{line} contains a literal "
+                            f"{name} - write the escape instead")
+        self.assertEqual(found, [], "\n" + "\n".join(found))
 
 
 if __name__ == "__main__":
