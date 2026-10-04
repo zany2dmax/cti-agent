@@ -820,6 +820,63 @@ See [CHANGELOG.md](CHANGELOG.md) for what each version requires of you.
 
 ---
 
+## 11e. Taking a host off the schedule
+
+```bash
+sudo ./fleet-kit/stop-fedora.sh --status        # what is scheduled, changes nothing
+sudo ./fleet-kit/stop-fedora.sh                 # stop and disable every timer
+sudo ./fleet-kit/stop-fedora.sh --resume        # put it back
+```
+
+Nothing is removed: config, state, the seen-CVE database and the Jira ticket
+map all survive, so a resume is a resume rather than a re-onboarding. Use
+`install-fedora.sh --uninstall` when you actually want the units gone.
+
+### Two hosts against one mailbox
+
+This is the case the script exists for, and it is worse than duplicate email.
+The cleanup lane archives advisories once a *completed run* has read them — so
+a run on host A archives mail that host B has not ingested yet, and B then
+reports a quiet day it did not have. That collision has already cost three
+advisories here, with no error logged anywhere. It was caught only because a
+person recognised two senders that should have been in the digest.
+
+So when you stand up a production host, bring the old one off the schedule
+**first**:
+
+```bash
+# on the outgoing host, BEFORE the new one is enabled
+sudo ./fleet-kit/stop-fedora.sh --decommission
+```
+
+`--decommission` also masks the timers, so `systemctl enable --now` refuses
+until somebody deliberately unmasks them. That is the point: a test box should
+not quietly start sending again alongside production after a reboot or a
+re-install.
+
+### What it will not do
+
+It waits up to two minutes for a lane that is mid-run rather than killing it. A
+digest interrupted between "Graph accepted the send" and "the ledger recorded
+it" leaves no record of a mail that went out, and the duplicate-send guard
+cannot then stop the next run sending it again. `--force` overrides the wait;
+if you use it, check what the ledger knows:
+
+```bash
+sudo cti-agent fleet-db recent
+```
+
+It also cannot see anything that is not a systemd timer. A leftover cron entry
+would keep the host live against the shared mailbox and is invisible to this
+script, so it prints the commands to check that yourself.
+
+Every run verifies the result rather than announcing it, and exits non-zero if
+any timer is still active or still enabled. A stop that quietly did nothing is
+the failure that matters here — you would believe the host was off while it
+kept archiving a mailbox the new host is reading.
+
+---
+
 ## 12. Verifying a run
 
 A lane that exits 0 is not the same as a lane that did something. These are the
