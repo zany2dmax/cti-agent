@@ -69,8 +69,10 @@ func TestAnInconsistentWrapperIsRefusedNotGuessedAt(t *testing.T) {
 	// exactly the plausible wrong answer the allowlist exists to catch, and it
 	// must not get that far.
 	for _, bad := range []string{
-		"https://urldefense.com/v3/__https://x.example/*/*/*__;Iw!!A!b$",   // one char, three slots
-		"https://urldefense.com/v3/__https://x.example/*__;a.b!!A$", // dictionary is not base64
+		// One character of dictionary, three substitution slots.
+		"https://urldefense.com/v3/__https://x.example/*/*/*__;Iw!!A!b$",
+		// A dictionary that is not base64 at all.
+		"https://urldefense.com/v3/__https://x.example/*__;a.b!!A$",
 	} {
 		if _, err := Unwrap(bad, "x.example"); err == nil {
 			t.Errorf("accepted an inconsistent wrapper: %q", bad)
