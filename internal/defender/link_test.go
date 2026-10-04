@@ -1,6 +1,7 @@
 package defender
 
 import (
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -14,19 +15,39 @@ const (
 		"attackPathTypeName/Internet%20exposed%20Azure%20VM/attackPathId/" +
 		"99999999-dddd-eeee-ffff-222222222222"
 
-	safelink = "https://eur.safelink.emails.azure.net/redirect/?destination=" +
+	azureRedirect = "https://eur.safelink.emails.azure.net/redirect/?destination=" +
 		"https%3A%2F%2Fportal.azure.com%2F%23view%2FMicrosoft_Azure_Security" +
 		"&p=bT0xMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUmcz1hYWFhYWFhYS1iYmJiLWNjY2MtZGRkZC1lZWVlZWVlZWVlZWUmdT1hZW8mbD1wb3J0YWwuYXp1cmUuY29t"
 )
 
+// proofpoint builds a urldefense v3 wrapper the way Proofpoint actually does:
+// each special character replaced by "*", and the characters themselves
+// carried in order as url-safe base64 after "__;".
+//
+// The dictionary has to be RIGHT. The first version of this helper hardcoded
+// "JSUl" - three percent signs - for a URL containing five, which the decoder
+// then quietly tolerated. Fixing the decoder to refuse an inconsistent
+// wrapper, which is what a security check should do, immediately broke this
+// test. A fixture that could not be produced by the system under test is not
+// a fixture.
 func proofpoint(inner string) string {
-	return "https://urldefense.com/v3/__" +
-		strings.ReplaceAll(inner, "%", "*") +
-		"__;JSUl!!ABcDeFg!HiJkLmNoPqRs$"
+	var wrapped strings.Builder
+	var dict []byte
+	for i := 0; i < len(inner); i++ {
+		if inner[i] == '%' {
+			wrapped.WriteByte('*')
+			dict = append(dict, '%')
+			continue
+		}
+		wrapped.WriteByte(inner[i])
+	}
+	return "https://urldefense.com/v3/__" + wrapped.String() + "__;" +
+		strings.TrimRight(base64.URLEncoding.EncodeToString(dict), "=") +
+		"!!ABcDeFg!HiJkLmNoPqRs$"
 }
 
 func TestARealPortalLinkSurvivesBothWrappers(t *testing.T) {
-	got, err := UnwrapPortalLink(proofpoint(safelink))
+	got, err := UnwrapPortalLink(proofpoint(azureRedirect))
 	if err != nil {
 		t.Fatalf("a legitimate link was rejected: %v", err)
 	}
@@ -104,7 +125,7 @@ func TestTheTrackerGivesASecondSourceForTheSubscription(t *testing.T) {
 	// independent sources mean a disagreement is detectable - and a
 	// disagreement means the email was not built the way this parser assumes,
 	// which is a reason to distrust the whole parse rather than to pick one.
-	got, ok := SubscriptionFromTracker(safelink)
+	got, ok := SubscriptionFromTracker(azureRedirect)
 	if !ok {
 		t.Fatal("the tracker parameter did not yield a subscription")
 	}
