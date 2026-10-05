@@ -55,7 +55,7 @@ func TestFindingsAreNormalisedFromTheWireFormat(t *testing.T) {
 			finding(1, 150085, "Cross-Site Scripting", "https://app.example/search", "ACTIVE", "5"))
 	})
 
-	got, err := api.Findings(context.Background(), "Example App", time.Time{})
+	got, err := api.Findings(context.Background(), appscan.ScanResult{App: "Example App"}, time.Time{})
 	if err != nil {
 		t.Fatalf("Findings: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestPaginationFollowsLastIdAndStops(t *testing.T) {
 		}
 	})
 
-	got, err := api.Findings(context.Background(), "App", time.Time{})
+	got, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err != nil {
 		t.Fatalf("Findings: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAServerClaimingMoreButSendingNoneDoesNotLoopForever(t *testing.T) {
 	api, _ := stub(t, func(string, int) (int, string) {
 		return 200, page(true)
 	})
-	if _, err := api.Findings(context.Background(), "App", time.Time{}); err == nil {
+	if _, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{}); err == nil {
 		t.Fatal("an empty page claiming more records was accepted")
 	} else if !strings.Contains(err.Error(), "returned none") {
 		t.Errorf("err = %v", err)
@@ -127,7 +127,7 @@ func TestRunawayPaginationIsBoundedAndSaysSo(t *testing.T) {
 		id++
 		return 200, page(true, finding(id, id, "x", "u", "ACTIVE", "1"))
 	})
-	_, err := api.Findings(context.Background(), "App", time.Time{})
+	_, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err == nil {
 		t.Fatal("pagination was unbounded")
 	}
@@ -145,7 +145,7 @@ func TestAWASLicenceFailureIsNotReportedAsABadPassword(t *testing.T) {
 		api, _ := stub(t, func(string, int) (int, string) {
 			return code, `<ServiceResponse><responseCode>UNAUTHORIZED</responseCode></ServiceResponse>`
 		})
-		_, err := api.Findings(context.Background(), "App", time.Time{})
+		_, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 		if err == nil {
 			t.Fatalf("HTTP %d was not an error", code)
 		}
@@ -164,7 +164,7 @@ func TestRateLimitingSaysWhatIsStillAvailable(t *testing.T) {
 	api, _ := stub(t, func(string, int) (int, string) {
 		return http.StatusTooManyRequests, "slow down"
 	})
-	_, err := api.Findings(context.Background(), "App", time.Time{})
+	_, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err == nil || !strings.Contains(err.Error(), "still has the counts") {
 		t.Errorf("err = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestAnApiErrorResponseIsReportedWithItsMessage(t *testing.T) {
 			<responseErrorDetails><errorMessage>bad field name</errorMessage></responseErrorDetails>
 			<data/></ServiceResponse>`
 	})
-	_, err := api.Findings(context.Background(), "App", time.Time{})
+	_, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err == nil {
 		t.Fatal("an INVALID_REQUEST response was treated as zero findings")
 	}
@@ -194,8 +194,8 @@ func TestTheApplicationNameIsEscapedIntoTheQuery(t *testing.T) {
 	// interpolation, in XML rather than SQL.
 	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
 
-	_, err := api.Findings(context.Background(),
-		`App</Criteria><Criteria field="x" operator="EQUALS">y`, time.Time{})
+	_, err := api.Findings(context.Background(), appscan.ScanResult{
+		App: `App</Criteria><Criteria field="x" operator="EQUALS">y`}, time.Time{})
 	if err != nil {
 		t.Fatalf("Findings: %v", err)
 	}
@@ -208,11 +208,31 @@ func TestTheApplicationNameIsEscapedIntoTheQuery(t *testing.T) {
 	}
 }
 
+func TestTheApplicationIdIsPreferredOverTheName(t *testing.T) {
+	// The name the email path supplies is derived from the scan title and on
+	// a real estate almost never equals the scanner's application name, so a
+	// name-keyed search quietly returned nothing. The id from the scan list is
+	// exact.
+	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
+	_, err := api.Findings(context.Background(),
+		appscan.ScanResult{App: "Example", AppID: "1000000001"}, time.Time{})
+	if err != nil {
+		t.Fatalf("Findings: %v", err)
+	}
+	body := (*bodies)[0]
+	if !strings.Contains(body, `<Criteria field="webApp.id" operator="EQUALS">1000000001</Criteria>`) {
+		t.Errorf("the search did not key on webApp.id:\n%s", body)
+	}
+	if strings.Contains(body, `field="webApp.name"`) {
+		t.Errorf("the search also filtered on a title-derived name:\n%s", body)
+	}
+}
+
 func TestSinceIsOmittedWhenZero(t *testing.T) {
 	// A zero time must mean "no lower bound", not "since year zero" - which
 	// Qualys may reject or silently treat as something else.
 	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
-	if _, err := api.Findings(context.Background(), "App", time.Time{}); err != nil {
+	if _, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains((*bodies)[0], "lastDetectedDate") {
@@ -221,7 +241,7 @@ func TestSinceIsOmittedWhenZero(t *testing.T) {
 
 	api2, bodies2 := stub(t, func(string, int) (int, string) { return 200, page(false) })
 	when := time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)
-	if _, err := api2.Findings(context.Background(), "App", when); err != nil {
+	if _, err := api2.Findings(context.Background(), appscan.ScanResult{App: "App"}, when); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains((*bodies2)[0], "2026-09-27T00:00:00Z") {
@@ -235,7 +255,7 @@ func TestAFindingWithNoQidFallsBackToItsUniqueId(t *testing.T) {
 	api, _ := stub(t, func(string, int) (int, string) {
 		return 200, page(false, finding(7, 0, "Information", "u", "ACTIVE", "1"))
 	})
-	got, err := api.Findings(context.Background(), "App", time.Time{})
+	got, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

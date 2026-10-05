@@ -88,7 +88,10 @@ func Render(week []ScanResult, weekEnding time.Time) Block {
 		if s.Fault() {
 			r.faults = append(r.faults, s)
 		}
-		if s.Complete {
+		switch {
+		case s.NoNotification && !s.Fault():
+			r.unnotified = append(r.unnotified, s)
+		case s.Complete && !s.NoNotification:
 			r.counted = append(r.counted, s)
 		}
 	}
@@ -101,6 +104,7 @@ type report struct {
 	scans      []ScanResult
 	faults     []ScanResult // authentication failed, or the scan did not finish
 	counted    []ScanResult // ran to completion, so its numbers mean something
+	unnotified []ScanResult // the scanner ran it, no email arrived: no counts at all
 	weekEnding time.Time
 	org        string
 }
@@ -320,6 +324,16 @@ func faultLine(s ScanResult) (head, detail string) {
 		if s.Auth.Record != "" {
 			which = fmt.Sprintf("Credential %q", s.Auth.Record)
 		}
+		if s.NoNotification {
+			// No email, so no counts to put a number on. "0 Urgent" here would
+			// be the zero this report exists not to print.
+			return fmt.Sprintf("%s - authentication failed (%s)", s.App, status),
+				fmt.Sprintf("%s did not work, so this scan covered only the pages a "+
+					"visitor can reach. No completion email for it reached the "+
+					"mailbox, so this report has no counts for it at all. This is a "+
+					"scanner problem rather than an application one - the fleet "+
+					"operator has been alerted.", which)
+		}
 		return fmt.Sprintf("%s - authentication failed (%s)", s.App, status),
 			fmt.Sprintf("%s did not work, so this scan covered only the pages a "+
 				"visitor can reach while still appearing configured in Qualys. Its "+
@@ -332,6 +346,30 @@ func faultLine(s ScanResult) (head, detail string) {
 	return fmt.Sprintf("%s - scan did not complete (%s)", s.App, s.Status),
 		"Counts from a partial crawl describe a measurement that was never " +
 			"finished, so none are reported for this application."
+}
+
+// unnotifiedWhy explains the list, once.
+//
+// The scanner's scan list says these ran; the counts come from the completion
+// email, and none arrived. So no counts are shown - not zeroes, none. The
+// usual cause is a scan with no notification configured in Qualys, which is a
+// setting, not a fault.
+const unnotifiedWhy = "Qualys ran these vulnerability scans, but no completion " +
+	"email reached the mailbox, so this report has no counts for them - " +
+	"which is not the same as none. Usually the scan has no notification " +
+	"configured in Qualys."
+
+// unnotifiedNote is the per-scan half: when it ran and, where the scanner
+// reported it, how far it got.
+func unnotifiedNote(s ScanResult) string {
+	when := "launch time not reported"
+	if !s.Started.IsZero() {
+		when = "launched " + s.Started.UTC().Format("Mon 2 Jan 15:04 UTC")
+	}
+	if s.LinksCrawled > 0 {
+		return fmt.Sprintf("%s, %d links crawled, counts unknown", when, s.LinksCrawled)
+	}
+	return when + ", counts unknown"
 }
 
 // openLabel is the authenticated/unauthenticated tag that travels with every
@@ -577,6 +615,14 @@ func (r *report) text() string {
 		fmt.Fprintf(&b, "\n  %s\n", n)
 	}
 
+	if len(r.unnotified) > 0 {
+		section(&b, fmt.Sprintf("SCANNED, NO NOTIFICATION (%d)", len(r.unnotified)))
+		for _, s := range r.unnotified {
+			fmt.Fprintf(&b, "  %-28s %-24s %s\n", s.App, openLabel(s), unnotifiedNote(s))
+		}
+		fmt.Fprintf(&b, "\n  %s\n", unnotifiedWhy)
+	}
+
 	section(&b, "CHANGED THIS WEEK")
 	worth, lowerOnly := r.changed()
 	if len(worth) == 0 {
@@ -733,6 +779,15 @@ func (r *report) html() string {
         <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                     color:#744210;background:#fffbe6;padding:8px 10px;
                     border-radius:3px">%s</div></td></tr>`, e(n))
+	}
+
+	// Scanned, but no email: listed, never counted.
+	if len(r.unnotified) > 0 {
+		sectionHTML(&b, fmt.Sprintf("SCANNED, NO NOTIFICATION (%d)", len(r.unnotified)), "#4a5568")
+		for _, s := range r.unnotified {
+			itemHTML(&b, s.App+" \u2014 "+s.Auth.Label()+" \u2014 "+unnotifiedNote(s))
+		}
+		itemHTML(&b, unnotifiedWhy)
 	}
 
 	// Changed this week.
