@@ -1622,6 +1622,36 @@ class TestFileShape(unittest.TestCase):
                 missing.append(f"cmd/{c} is never built by the Taskfile build target")
         self.assertEqual(missing, [], "\n" + "\n".join(missing))
 
+    def test_every_runner_sources_fleet_env(self):
+        """The runners load the config; the Go binaries only read the environment.
+
+        internal/config reads os.Getenv and never opens fleet.env. The
+        `sudo cti-agent` wrapper passes FLEET_ENV through --preserve-env and
+        strips everything else, so credentials can only reach a lane if its
+        runner sources the file.
+
+        run-appscan did not, and cti-appscan reported "missing required
+        environment variables: CLIENT_ID CLIENT_SECRET GRAPH_MAILBOX
+        TENANT_ID" on a box where all four were set. The error was accurate
+        and pointed at the wrong thing - it reads as a fleet.env problem when
+        the file was fine and the runner never read it.
+
+        An unwritten convention that four runners follow and the fifth does
+        not is a convention waiting to be broken again.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        missing = []
+        for runner in sorted((root / "fleet-kit" / "fleet" / "bin").glob("run-*")):
+            text = runner.read_text(encoding="utf-8")
+            if ". \"$FLEET_ENV\"" not in text:
+                missing.append(f"{runner.name} never sources fleet.env, so any "
+                               f"binary it calls runs without credentials")
+            elif "_inj_home" not in text:
+                missing.append(f"{runner.name} sources fleet.env without "
+                               f"preserving the injected FLEET_HOME, so a stale "
+                               f"value in the config file would redirect its output")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
     def test_every_systemd_timer_has_a_service_and_a_runner(self):
         """A timer pointing at nothing fires and fails, or fires and does nothing.
 
