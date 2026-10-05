@@ -219,6 +219,14 @@ now sets `UMask=0077`, so those land `0600` too. Run a lane outside systemd
 and it inherits your shell's umask instead, which is worth remembering when
 replaying by hand.
 
+**The AppSec report is the same kind of document for our web estate.** It names
+which applications have open Urgent findings, and for new ones the vulnerable
+URL and parameter. Same handling: written `0600` by `cti-appscan`, kept under
+`state/`, mailed only through its own allowlist (below). Its test fixtures are
+**synthetic** for the same reason — real scan titles and targets enumerate our
+applications and say which are scanned without a login, and this repository is
+public.
+
 `REPORT_HOSTNAMES` controls disclosure:
 
 | Value | Output |
@@ -251,7 +259,16 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   real until recently: only `.env` was listed, so a `fleet.env` copied into a
   checkout to replay a run locally could be committed.
 - `internal/fleetenv` is the single reader, so a run by hand gets the same
-  configuration as a run by systemd, and there is one place to audit.
+  configuration as a run by systemd, and there is one place to audit. A lane
+  test fails any command that loads config without calling it: `cti-appscan`
+  shipped without, and worked under its timer while failing by hand with
+  "missing required environment variables" on a box where all were set.
+- **The Qualys credentials now reach a second module.** The AppSec lane uses
+  the VM lane's `QUALYS_USERNAME`/`QUALYS_PASSWORD` against the WAS API, which
+  needs the WAS module on that account's role. It issues **search requests
+  only** - it never launches a scan, edits a web application or touches an
+  authentication record - so the role it needs is read access to WAS, and
+  granting more is not required.
 - **No default mailbox and no default recipient.** An unconfigured install
   refuses to start rather than guessing an address.
 - Each command validates only the credentials it uses, so a missing-variable
@@ -305,6 +322,20 @@ people skip, and an unused permission is standing risk with no benefit.
 - A one-off requires an explicit `--approve`.
 - There is no default recipient anywhere in the system.
 
+**Per-lane lists fail closed.** The AppSec report is sent with
+`cti-mailer --lane was`, which resolves `WAS_TO` against `WAS_ALLOW_TO` and
+refuses if **either** is unset, naming the variable. It does not fall back to
+`DIGEST_TO` or `FLEET_ALLOW_TO`, and `--approve` does not override an empty
+list — approval is for a one-off recipient, not for a missing control. This is
+stricter than the original digest path, deliberately: a report about our
+application code going to the server-patching list is a disclosure, not a
+misconfiguration.
+
+A list may reference another by exact name (`WAS_ALLOW_TO=$FLEET_ALLOW_TO,x@y`),
+so a shared core is written once. Unset references are errors, cycles are caught
+with a depth limit, and wildcard references (`$*_ALLOW_TO`, `${*}`) are refused
+by name rather than expanded to whatever happens to match.
+
 ### There are two outbound paths, and only one is gated
 
 `mailer.py` is the path for every digest and report, and it is gated as above.
@@ -322,6 +353,12 @@ logged subjects.
 Two consequences worth being deliberate about: set `FLEET_OPERATOR_EMAIL`, so
 the fallback to the whole distribution list never happens; and treat alert
 mail as carrying the same sensitivity as a report.
+
+`run-appscan` is now a caller too: when a scanner credential fails it runs
+`cti-alert --kind HOLD` with the **application names** in `--reason`. Not the
+credential record or vendor status - those stay in the `0600` file under
+`state/` - but the names alone say which of our sites a scanner can no longer
+log in to.
 
 ---
 
@@ -376,6 +413,10 @@ Deliberately absent from the grant:
 - **`cti-mailbox --for-real`.** Granted without `:*`, so only the bare command
   matches — the dry run. Moving mail is a scheduled decision, not a beat-time
   one.
+- **`run-appscan` and `cti-appscan`.** The first sends the AppSec report to
+  another team; the second reads the mailbox and the Qualys WAS API. Neither is
+  a beat-time decision. The orchestrator learns what the last run found from
+  `journalctl -u cti-agent-appscan.service`, which it is granted.
 - **A general shell.** There is no `Bash(*)` entry.
 
 Until this list existed the agent had no Bash capability at all: `acceptEdits`
@@ -566,6 +607,17 @@ a run once reported three occurrences of an issue that had twenty-six.
   rendered link is built from a constant `https://` prefix or a regex that
   pins the scheme — safe by construction rather than checked at render, which
   is worth knowing before someone adds a link from a parsed source.
+- **The AppSec report has one clickable link, and it is checked at render.**
+  Every URL that arrived in scanner mail - the report link, the vulnerable
+  paths - is printed as plain text, because the mail came to a published
+  address and a forged notification is cheap. The exception is a link the lane
+  **builds** from the scanner's authenticated API record into its own UI
+  (`ScanResult.PortalURL`). The renderer re-checks that one - `https`, no
+  userinfo, and an exact host match against hosts registered for that scan's
+  own provider - and a URL that fails is not printed at all. Nothing registered
+  means nothing is clickable. Links from mail are additionally unwrapped from
+  Proofpoint and pinned to an allowlist of specific Qualys pods, not
+  `*.qualys.com`.
 - **Log injection (CWE-117)**: log calls in the ingest lane that carry outside
   text pass through a sanitiser that replaces control characters, so a newline
   in a path or a parse error cannot forge a journal record. A forged record in

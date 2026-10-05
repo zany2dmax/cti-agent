@@ -25,6 +25,13 @@ our estate, with the affected hostnames and a Jira ticket already open for IT.
 
 Everything else is counted and not discussed.
 
+Every Monday a second, separate email goes to the people who own our
+**application code**: what the web application scanner found open on each of
+our sites, which findings are new since the last scan, and whether each scan
+logged in or covered only the public pages. Different audience, different
+recipient list, enforced in code — the patching team and the application team
+each get only the mail meant for them.
+
 ---
 
 ## The one design decision worth understanding
@@ -87,7 +94,7 @@ deliver.
 | **The brief arrives even when the model does not** | No model in the delivery path at all |
 | **"We have this" is a scanner fact, not a guess** | Every reported CVE is confirmed present by host detection before it is scored |
 | **Silence means a quiet day, not a dead pipeline** | A failed lane escalates by email; a growing unread backlog escalates on its own |
-| **It cannot mail the wrong people** | Recipients are a hard allowlist enforced in code; there is no default recipient |
+| **It cannot mail the wrong people** | Recipients are a hard allowlist enforced in code, one per report; there is no default recipient, and a report never falls back to another report's list |
 | **A wrong answer can be traced** | Every claim names its source; every ticket carries the full host list |
 
 ## What it will never do
@@ -115,6 +122,7 @@ flowchart TB
         FEEDS["RSS feeds<br/>CISA, vendors, press"]
         NVD["NVD · EPSS · CISA KEV"]
         QUALYS["Vulnerability scanner<br/>host detection"]
+        DAST["Web app scanner<br/>scan-complete mail + API"]
     end
 
     subgraph LANES["Executor lanes — on timers, deterministic, cannot talk to a human"]
@@ -122,6 +130,7 @@ flowchart TB
         SCOUT["feed poll<br/>every 4 hours"]
         PT["Patch Tuesday<br/>monthly"]
         CLEAN["mailbox cleanup<br/>07:00"]
+        APPSEC["AppSec report<br/>Monday 07:30"]
     end
 
     subgraph GO["Shared Go packages — the lanes' toolbox"]
@@ -132,11 +141,13 @@ flowchart TB
         P4["jira<br/>open + track tickets"]
         P5["mailer<br/>the recipient gate"]
         P6["triage<br/>advisories with no CVE"]
+        P7["appscan<br/>any DAST scanner"]
     end
 
     subgraph OUT["Outputs"]
         EMAIL["Security DL<br/>the morning brief"]
         TICKET["Jira<br/>one ticket per confirmed exposure"]
+        APPDEV["App Dev<br/>the AppSec report"]
     end
 
     ORCH2["ORCHESTRATOR<br/>Claude, every 2h<br/>no mailbox · no shell · no send"]
@@ -146,9 +157,11 @@ flowchart TB
     FEEDS --> SCOUT
     NVD --> DIGEST
     QUALYS --> DIGEST
+    DAST --> APPSEC
     LANES --> GO
     DIGEST --> EMAIL
     DIGEST --> TICKET
+    APPSEC --> APPDEV
     LANES --> STATE
     STATE <--> ORCH2
     ORCH2 -->|"escalate only"| EMAIL
@@ -160,10 +173,10 @@ flowchart TB
     classDef out    fill:#e0d6f2,stroke:#4e2f85,stroke-width:2px,color:#1d1133
     classDef orch   fill:#fadfc0,stroke:#9a4a08,stroke-width:3px,color:#3a1c02
     classDef store  fill:#e7e1cf,stroke:#6f6134,stroke-width:2px,color:#2a2410
-    class MBX,FEEDS,NVD,QUALYS source
-    class DIGEST,SCOUT,PT,CLEAN lane
-    class P1,P2,P3,P4,P5,P6 pkg
-    class EMAIL,TICKET out
+    class MBX,FEEDS,NVD,QUALYS,DAST source
+    class DIGEST,SCOUT,PT,CLEAN,APPSEC lane
+    class P1,P2,P3,P4,P5,P6,P7 pkg
+    class EMAIL,TICKET,APPDEV out
     class ORCH2 orch
     class STATE store
     style SRC   fill:#f1f6fb,stroke:#1f4b7a,stroke-width:2px,color:#0d1f33
@@ -177,7 +190,7 @@ flowchart TB
 | Primitive | Here | Why it exists |
 |---|---|---|
 | **Orchestrator** | A Claude session every 2 hours | Judgment. Decides what to chase and what to say nothing about |
-| **Executor lanes** | Six systemd timers | Deterministic work. Each does one thing and cannot reach a human |
+| **Executor lanes** | Six systemd timers, plus the heartbeat's | Deterministic work. Each does one thing and cannot reach a human |
 | **Heartbeat** | `cti-agent-checkin.timer` | Turns a program into a presence. It wakes whether or not you asked |
 | **Message board** | Append-only markdown | How parts that never run at the same time talk to each other |
 | **Persistent memory** | SQLite | Continuity. Without it every beat is a stranger starting over |
@@ -195,6 +208,11 @@ Each answers a different question, and the brief is the join across them.
 - **Has someone external set a deadline?** — federal remediation due dates
 - **What does a human do with this?** — a Jira ticket, with the hostnames
   attached, because our team reports and IT remediates
+- **Are our own applications exposed?** — the web application scanner, read
+  from its own completion mail and API, and reported to the people who write
+  the code. Every count says whether that scan logged in, because a zero from a
+  scan that only saw the public pages is a different number. The scanner is
+  behind a provider boundary, so a second one is a parser, not a rewrite
 - **Is the fleet itself healthy and affordable?** — the heartbeat, rationed
   against the model subscription so a crash loop cannot exhaust it
 
