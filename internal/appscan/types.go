@@ -232,8 +232,22 @@ type ScanResult struct {
 
 	// ReportURL is a link to the vendor's report, verified to belong to that
 	// vendor. Empty when the link could not be verified - see LinkProblem.
+	//
+	// It ARRIVED IN MAIL, at a published address, so it is rendered as plain
+	// text and never as an anchor, however well it verified.
 	ReportURL   string
 	LinkProblem string
+
+	// PortalURL is a link this lane BUILT, from the vendor's API record of the
+	// scan, into the vendor's own UI.
+	//
+	// The one URL the report may render as clickable, because nothing outside
+	// supplied it: the scan ID came from an authenticated API call to the host
+	// QUALYS_BASE_URL names, and the rest of the URL is a pattern in this
+	// code. Even so the renderer re-checks it - https, and a host registered
+	// with AllowPortalHosts - and falls back to plain text if it fails. A
+	// constructed URL is still a string, and the check is the guarantee.
+	PortalURL string
 
 	// Findings is per-vulnerability detail, present only when a DetailFetcher
 	// filled it in. Nil means "not fetched", NOT "none found".

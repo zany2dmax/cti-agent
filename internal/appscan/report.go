@@ -3,6 +3,7 @@ package appscan
 import (
 	"fmt"
 	"html"
+	neturl "net/url"
 	"os"
 	"sort"
 	"strings"
@@ -116,6 +117,77 @@ func orgName() string {
 }
 
 func e(s string) string { return html.EscapeString(s) }
+
+// ─── the one clickable thing ────────────────────────────────────────────────
+
+// portalHosts are the hosts a PortalURL may point at, per provider.
+//
+// Registered by the command, not hardcoded here: this package is the
+// vendor-neutral boundary and has no business knowing Qualys pod names. Nothing
+// registered means nothing is clickable - a forgotten registration degrades to
+// plain text, it does not drop the link and it does not open the gate.
+var portalHosts = map[string]map[string]bool{}
+
+// AllowPortalHosts permits clickable links to these hosts for one provider.
+// Call it before rendering; it is not safe to call concurrently with Render.
+func AllowPortalHosts(provider string, hosts ...string) {
+	if portalHosts[provider] == nil {
+		portalHosts[provider] = map[string]bool{}
+	}
+	for _, h := range hosts {
+		portalHosts[provider][strings.ToLower(h)] = true
+	}
+}
+
+// clickable reports whether a scan's PortalURL may become an anchor.
+//
+// https only, no userinfo, and an exact host match for the scan's own
+// provider. A Qualys host is not a valid portal for an Invicti result.
+func clickable(s ScanResult) bool {
+	if s.PortalURL == "" {
+		return false
+	}
+	u, err := neturl.Parse(s.PortalURL)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Host == "" {
+		return false
+	}
+	return portalHosts[s.Provider][strings.ToLower(u.Hostname())]
+}
+
+// linkFor is the report link for one scan, in the form both renderings need.
+//
+// href is set ONLY for a PortalURL that passed clickable(). Everything else -
+// the link from the notification, a portal URL that failed the check, a link
+// problem - comes back as text with no href, and the HTML path prints it as
+// text. A failed PortalURL is not printed at all: it fell back to the email's
+// link because the check exists to keep an unexpected URL out of the mail.
+func linkFor(s ScanResult) (text, href string) {
+	switch {
+	case clickable(s):
+		return "Qualys: " + s.PortalURL, s.PortalURL
+	case s.ReportURL != "":
+		return "report: " + s.ReportURL, ""
+	case s.LinkProblem != "":
+		return "report link was not usable: " + s.LinkProblem, ""
+	}
+	return "", ""
+}
+
+// linkHTML renders linkFor as one small line, or nothing.
+func linkHTML(s ScanResult) string {
+	text, href := linkFor(s)
+	switch {
+	case text == "":
+		return ""
+	case href != "":
+		return fmt.Sprintf(`<div style="font:400 11px -apple-system,Segoe UI,Arial,sans-serif;`+
+			`margin-top:2px"><a href="%s" style="color:#2c5282">open in Qualys</a></div>`, e(href))
+	}
+	// Plain, monospace, breakable: a long unlinked URL must not widen the
+	// table it sits in.
+	return fmt.Sprintf(`<div style="font:400 11px/1.4 ui-monospace,SFMono-Regular,Menlo,`+
+		`Consolas,monospace;color:#718096;margin-top:2px;word-break:break-all">%s</div>`, e(text))
+}
 
 // ─── content: computed once, rendered twice ─────────────────────────────────
 //
@@ -390,12 +462,10 @@ func detailLines(s ScanResult) []string {
 		out = append(out, "(per-finding detail not available for this run - "+
 			"counts are from the scan notification)")
 	}
-	switch {
-	case s.ReportURL != "":
-		out = append(out, "report: "+s.ReportURL)
-	case s.LinkProblem != "":
-		out = append(out, "report link was not usable: "+s.LinkProblem)
-	}
+	// The report link is NOT here any more. It used to be, which meant only
+	// an application with a Serious-or-above change ever showed one - every
+	// quiet application, including all three public sites, had no link at
+	// all. It is rendered once per application, under OPEN NOW, by linkFor.
 	return out
 }
 
@@ -481,6 +551,11 @@ func (r *report) text() string {
 		for _, s := range r.faults {
 			head, detail := faultLine(s)
 			fmt.Fprintf(&b, "  %s\n      %s\n", head, detail)
+			if text, _ := linkFor(s); text != "" && !s.Complete {
+				// Complete scans show their link under OPEN NOW. An incomplete
+				// one never reaches OPEN NOW, so this is its only chance.
+				fmt.Fprintf(&b, "      %s\n", text)
+			}
 		}
 	}
 
@@ -490,6 +565,9 @@ func (r *report) text() string {
 		// column pushed the counts out by one on exactly the row a reader is
 		// most likely to be comparing against the others.
 		fmt.Fprintf(&b, "  %-28s %-24s %s\n", s.App, openLabel(s), lead(s.AppState.Active))
+		if text, _ := linkFor(s); text != "" {
+			fmt.Fprintf(&b, "      %s\n", text)
+		}
 	}
 	if len(r.counted) == 0 {
 		b.WriteString("  No scan ran to completion this week, so there are no " +
@@ -619,7 +697,8 @@ func (r *report) html() string {
                         color:#b3001b">%s</div>
             <div style="font:400 13px/1.55 -apple-system,Segoe UI,Helvetica,Arial,
                         sans-serif;color:#1a202c;margin-top:5px">%s</div>
-          </td></tr></table></td></tr>`, e(head), e(detail))
+            %s
+          </td></tr></table></td></tr>`, e(head), e(detail), faultLinkHTML(s))
 		}
 	}
 
@@ -635,12 +714,12 @@ func (r *report) html() string {
 		// the number covers; it is not a finding about the application.
 		fmt.Fprintf(&b, `
           <tr><td style="padding:6px 8px 6px 0;border-bottom:1px solid #edf2f7;
-                         color:#1a202c;font-weight:700">%s</td>
+                         color:#1a202c;font-weight:700">%s%s</td>
               <td style="padding:6px 8px;border-bottom:1px solid #edf2f7;
                          color:#718096;font-size:11px;white-space:nowrap">%s</td>
               <td align="right" style="padding:6px 0 6px 8px;
                          border-bottom:1px solid #edf2f7;color:#1a202c">%s</td></tr>`,
-			e(s.App), e(s.Auth.Label()), e(lead(s.AppState.Active)))
+			e(s.App), linkHTML(s), e(s.Auth.Label()), e(lead(s.AppState.Active)))
 	}
 	b.WriteString(`
         </table></td></tr>`)
@@ -714,6 +793,15 @@ func (r *report) footerHTML() string {
 
 </table></td></tr></table></body></html>`,
 		e(scaleNote), e(activeNote), e(r.credit()))
+}
+
+// faultLinkHTML is the link for a fault entry - only for an incomplete scan,
+// since a complete one already shows its link under OPEN NOW.
+func faultLinkHTML(s ScanResult) string {
+	if s.Complete {
+		return ""
+	}
+	return linkHTML(s)
 }
 
 // sectionHTML is the underlined caps heading the daily uses for its bands.
