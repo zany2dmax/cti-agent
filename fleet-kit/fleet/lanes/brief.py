@@ -535,6 +535,10 @@ def render(data, kind):
         novelty_txt = ""
 
     provenance = " &middot; ".join(filter(None, [
+        # A rollup read no mailbox. Saying so is the point: without it a
+        # quiet weekly is indistinguishable from "the mailbox was quiet",
+        # and those are different facts.
+        f"{esc(meta['rollup'])}" if meta.get("rollup") else "",
         f"Mailbox {esc(meta['mailbox'])}" if meta.get("mailbox") else "",
         (f"{esc(meta['emails'])} emails in the lookback window"
          if meta.get("emails") else ""),
