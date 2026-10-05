@@ -21,10 +21,32 @@
 #   run-appscan --dry-run    render, print the subject, send nothing
 set -euo pipefail
 
-# Injected paths, same contract as the other runners.
+# THE RUNNER SOURCES fleet.env. The Go binaries do not.
+#
+# internal/config reads the environment; it does not open the config file.
+# Every other runner sources fleet.env before invoking anything, and this one
+# did not - so cti-appscan ran with no credentials at all and reported
+# "missing required environment variables: CLIENT_ID CLIENT_SECRET
+# GRAPH_MAILBOX TENANT_ID" on a box where all four are set.
+#
+# The error was accurate and pointed at the wrong thing: it reads as a
+# fleet.env problem when the file was fine and the runner simply never read
+# it. The `sudo cti-agent` wrapper passes FLEET_ENV through
+# --preserve-env and strips everything else, so the credentials can ONLY
+# arrive this way.
+FLEET_HOME="${FLEET_HOME:-$HOME}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+
+# Layout variables belong to whoever launched us - the systemd unit or the
+# wrapper - not to fleet.env. `set -a` assigns unconditionally, so a stale
+# FLEET_HOME in the config file would silently replace the correct one and
+# this lane would write its report under a path it does not own.
 _inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
-FLEET_HOME="${_inj_home:-$HOME}"
-FLEET_CODE="${_inj_code:-$FLEET_HOME}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+export FLEET_HOME FLEET_CODE
 STATE="$FLEET_HOME/state"
 
 fail() { echo "[run-appscan] error: $*" >&2; exit 1; }
