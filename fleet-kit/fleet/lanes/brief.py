@@ -145,6 +145,18 @@ def attribution():
 def subject(data, kind):
     c = data["counts"]
     day = datetime.now().strftime("%b %d")
+
+    # kind was accepted and never used. Every branch below produced a
+    # daily-shaped subject, so the Monday weekly went out with a subject
+    # BYTE-IDENTICAL to that morning's daily - including "in the last 24h" on
+    # a report that is supposed to cover seven days.
+    #
+    # The operator read it as the daily having sent twice, which is the right
+    # reading of the evidence he had. Python does not warn about an unused
+    # parameter, so the signature has claimed to vary by kind since it was
+    # written.
+    label = f"CTI Weekly {day}" if kind == "weekly" else f"CTI {day}"
+    window = "the last 7 days" if kind == "weekly" else "the last 24h"
     kev = data.get("kev_deadlines") or {}
     overdue = kev.get("overdue") or 0
     # The deadline rides along; it does not displace the severity. Sev5 means
@@ -156,12 +168,12 @@ def subject(data, kind):
         tail = (f" — {overdue} KEV deadline{'s' if overdue != 1 else ''} OVERDUE")
 
     if c.get("Sev5"):
-        return (f"[Sev5] CTI {day}: {c['Sev5']} exploited vuln"
+        return (f"[Sev5] {label}: {c['Sev5']} exploited vuln"
                 f"{'s' if c['Sev5'] != 1 else ''} present in the environment{tail}")
     if overdue:
         # No Sev5, but something is past a federal due date - still worth the
         # prefix, because it is the most actionable thing in the mail.
-        return (f"[OVERDUE] CTI {day}: {overdue} CISA KEV deadline"
+        return (f"[OVERDUE] {label}: {overdue} CISA KEV deadline"
                 f"{'s' if overdue != 1 else ''} passed, worst by "
                 f"{kev.get('worst_overdue_days', 0)}d")
     # Count what the scanner actually confirmed. The bands now separate
@@ -176,18 +188,18 @@ def subject(data, kind):
                      and f.get("priority") in ("Sev3", "Sev2"))
 
     if present:
-        s = f"CTI {day}: {present} confirmed present, no Sev5"
+        s = f"{label}: {present} confirmed present, no Sev5"
         if unverified:
             s += f", {unverified} unverified"
         return s
     if unverified:
         # Nothing confirmed, but coverage gaps on things being exploited. Say
         # exactly that rather than implying either a clean day or an exposure.
-        return (f"CTI {day}: 0 confirmed present, {unverified} exploited CVE"
+        return (f"{label}: 0 confirmed present, {unverified} exploited CVE"
                 f"{'s' if unverified != 1 else ''} the scanner could not check")
     if data["total"] == 0:
-        return f"CTI {day}: no new CVEs in the last 24h"
-    return f"CTI {day}: {data['total']} CVEs reviewed, nothing exploitable found"
+        return f"{label}: no new CVEs in {window}"
+    return f"{label}: {data['total']} CVEs reviewed, nothing exploitable found"
 
 
 def hosts_cell(f):

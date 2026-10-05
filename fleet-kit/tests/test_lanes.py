@@ -1418,6 +1418,59 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
             "something must still cover Microsoft advisories")
 
 
+class WeeklyIsDistinguishableFromDaily(unittest.TestCase):
+    """The weekly subject must never equal the daily subject.
+
+    On Monday 2026-10-05 the 06:00 daily and the 07:00 weekly went out with
+    byte-identical subjects - "CTI Oct 05: no new CVEs in the last 24h" - on a
+    report covering seven days. subject() accepted a `kind` parameter and used
+    it in none of its six return paths, and Python does not warn about that.
+
+    The operator read it as the daily having sent twice. That was the correct
+    reading of the evidence he had.
+    """
+
+    def setUp(self):
+        self.brief = load("brief")
+
+    def cases(self):
+        return {
+            "quiet": {"counts": {}, "total": 0, "findings": [], "kev_deadlines": {}},
+            "sev5": {"counts": {"Sev5": 4}, "total": 9, "findings": [],
+                     "kev_deadlines": {"overdue": 4, "worst_overdue_days": 12}},
+            "overdue only": {"counts": {}, "total": 3, "findings": [],
+                             "kev_deadlines": {"overdue": 2, "worst_overdue_days": 5}},
+            "present": {"counts": {}, "total": 5, "kev_deadlines": {},
+                        "findings": [{"status": "PRESENT", "host_count": 3,
+                                      "priority": "Sev3"}]},
+            "unverified": {"counts": {}, "total": 4, "kev_deadlines": {},
+                           "findings": [{"status": "UNKNOWN", "priority": "Sev3"}]},
+            "reviewed": {"counts": {}, "total": 7, "findings": [],
+                         "kev_deadlines": {}},
+        }
+
+    def test_no_branch_produces_the_same_subject_for_both_kinds(self):
+        for name, data in self.cases().items():
+            daily = self.brief.subject(data, "daily")
+            weekly = self.brief.subject(data, "weekly")
+            self.assertNotEqual(
+                daily, weekly,
+                f"{name}: daily and weekly subjects are identical - {daily!r}")
+
+    def test_the_weekly_says_weekly(self):
+        for name, data in self.cases().items():
+            s = self.brief.subject(data, "weekly")
+            self.assertIn("Weekly", s, f"{name}: {s!r} does not say it is weekly")
+
+    def test_neither_kind_claims_the_wrong_window(self):
+        quiet = self.cases()["quiet"]
+        self.assertIn("24h", self.brief.subject(quiet, "daily"))
+        self.assertNotIn(
+            "24h", self.brief.subject(quiet, "weekly"),
+            "the weekly subject claims a 24-hour window")
+        self.assertIn("7 days", self.brief.subject(quiet, "weekly"))
+
+
 class TestFileShape(unittest.TestCase):
     """Nothing may be defined after unittest.main().
 
