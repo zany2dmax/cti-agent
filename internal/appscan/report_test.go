@@ -636,3 +636,51 @@ func TestAnIncompleteScanStillShowsItsLink(t *testing.T) {
 		t.Errorf("an incomplete scan's link was lost:\n%s", faults)
 	}
 }
+
+// ─── scans the scanner ran but the mailbox never heard about ───────────────
+
+func emailless() ScanResult {
+	return ScanResult{
+		Provider: "qualys-was", App: "Example Store", AppID: "9004",
+		Complete: true, NoNotification: true, LinksCrawled: 120,
+		Status:  "FINISHED",
+		Started: time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC),
+		Auth:    Auth{Status: "No Authentication specified"},
+	}
+}
+
+func TestAScanWithNoNotificationIsListedNotCounted(t *testing.T) {
+	// Its counts come from an email that never arrived. They are unknown, and
+	// printing "nothing open" for it would be the reassuring zero this report
+	// exists not to print.
+	b := render(t, deepScan(), emailless())
+	if !strings.Contains(b.Text, "SCANNED, NO NOTIFICATION (1)") {
+		t.Fatalf("the email-less scan was not listed:\n%s", b.Text)
+	}
+	open := b.Text[strings.Index(b.Text, "OPEN NOW"):strings.Index(b.Text, "SCANNED, NO NOTIFICATION")]
+	if strings.Contains(open, "Example Store") {
+		t.Errorf("an application with unknown counts appeared under OPEN NOW:\n%s", open)
+	}
+	if !strings.Contains(b.Text, "counts unknown") || !strings.Contains(b.Text, "not the same as none") {
+		t.Error("the report does not say the counts are unknown rather than zero")
+	}
+	if !strings.Contains(b.HTML, "SCANNED, NO NOTIFICATION (1)") {
+		t.Error("the HTML lacks the section the text has")
+	}
+}
+
+func TestAnEmaillessAuthFailurePrintsNoInventedCount(t *testing.T) {
+	s := emailless()
+	s.Auth = Auth{Record: "store auth", Status: "Failed"}
+	b := render(t, s)
+	faults := b.Text[strings.Index(b.Text, "SCANNER FAULTS"):strings.Index(b.Text, "OPEN NOW")]
+	if !strings.Contains(faults, "no counts for it at all") {
+		t.Errorf("the fault does not say its counts are missing:\n%s", faults)
+	}
+	if strings.Contains(faults, "0 Urgent") {
+		t.Errorf("a count was invented for a scan with no notification:\n%s", faults)
+	}
+	if strings.Contains(b.Text, "SCANNED, NO NOTIFICATION") {
+		t.Error("a faulted email-less scan was listed twice")
+	}
+}

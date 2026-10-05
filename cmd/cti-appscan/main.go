@@ -93,11 +93,21 @@ func run() int {
 		logf("warn   : %s", safelog.Line(p))
 	}
 
-	// Detail is optional by construction. The counts come from the
+	// The API is optional by construction. The counts come from the
 	// notification emails and need no credentials, so the API being down,
-	// rate-limited or unlicensed costs per-finding detail and not the report.
+	// rate-limited or unlicensed costs identity, the email-less scans and the
+	// per-finding detail - and not the report.
+	windowStart := time.Now().Add(-*since)
 	if !*noDetail {
-		attachDetail(ctx, cfg, scans, time.Now().Add(-*since))
+		if api := wasAPI(cfg); api != nil {
+			scans = reconcile(ctx, api, scans, windowStart)
+			scans = newestPerApp(scans)
+			attachDetail(ctx, api, scans, windowStart)
+		} else {
+			scans = newestPerApp(scans)
+		}
+	} else {
+		scans = newestPerApp(scans)
 	}
 
 	// The only hosts a link may be clickable for. Registered here rather than
@@ -249,20 +259,39 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []string) {
 		}
 	}
 
-	// One scan per application: the newest. An application scanned twice in a
-	// week would otherwise appear twice with different numbers, and a reader
-	// has no way to tell which is current.
-	return newestPerApp(scans), problems
+	// NOT deduplicated per application here. That happens after
+	// reconciliation, when each result can be keyed on the scanner's own
+	// application id rather than a name derived from the scan title.
+	return scans, problems
 }
 
+// newestPerApp keeps one scan per application: the newest. An application
+// scanned twice in a week would otherwise appear twice with different
+// numbers, and a reader has no way to tell which is current.
+//
+// Keyed on the scanner's application id when reconciliation supplied one,
+// and on the whitespace-collapsed lower-cased name otherwise. Real names carry
+// trailing and doubled spaces, which made one application two.
 func newestPerApp(scans []appscan.ScanResult) []appscan.ScanResult {
+	when := func(s appscan.ScanResult) time.Time {
+		if !s.Finished.IsZero() {
+			return s.Finished
+		}
+		return s.Started
+	}
 	sort.SliceStable(scans, func(i, j int) bool {
-		return scans[i].Finished.After(scans[j].Finished)
+		return when(scans[i]).After(when(scans[j]))
 	})
 	var out []appscan.ScanResult
 	seen := map[string]bool{}
 	for _, s := range scans {
-		key := strings.ToLower(s.App)
+		key := "id:" + s.AppID
+		if s.AppID == "" {
+			key = "name:" + strings.ToLower(strings.Join(strings.Fields(s.App), " "))
+		}
+		if s.AppID == "" && strings.TrimSpace(s.App) == "" {
+			key = ""
+		}
 		if key == "" || seen[key] {
 			continue
 		}
@@ -272,23 +301,59 @@ func newestPerApp(scans []appscan.ScanResult) []appscan.ScanResult {
 	return out
 }
 
-// attachDetail fills in per-finding detail where credentials allow.
+// wasAPI is the Qualys WAS client, or nil when no credentials are set.
+func wasAPI(cfg config.Config) *qualys.API {
+	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
+		logf("note   : no Qualys credentials configured - reporting counts from the notifications only")
+		return nil
+	}
+	return qualys.NewAPI(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
+}
+
+// reconcile joins the notifications to the WAS scan list.
+//
+// A failure is a warning and the email-only results go on unchanged: the
+// counts are in the notifications, and losing the scan list costs the real
+// application names, the email-less scans and the id-keyed detail lookup.
+func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time) []appscan.ScanResult {
+	list, err := api.Scans(ctx, since.Add(-qualys.ScanMargin))
+	if err != nil {
+		logf("warn   : WAS scan list unavailable, reporting from the notifications only: %s",
+			safelog.Line(err.Error()))
+		return scans
+	}
+	out, rec := qualys.Reconcile(scans, list, since)
+	added := len(out) - len(scans)
+	logf("scans  : %d in the WAS scan list, %d matched a notification, %d added "+
+		"with no notification, %d skipped (discovery, in flight, or on-demand faults)",
+		len(list), rec.Matched, added, rec.Skipped)
+	for _, ref := range rec.Unmatched {
+		// The reference is a scanner identifier, not text from the mail body.
+		logf("warn   : notification for %s has no match in the WAS scan list - "+
+			"its counts are kept; it was probably launched before the list window",
+			safelog.Line(ref))
+	}
+	return out
+}
+
+// attachDetail fills in per-finding detail.
 //
 // Every failure here is a warning, never fatal. The report is already useful
 // without it, and a lane that produces nothing because an API was slow is
 // worse than one that produces counts.
-func attachDetail(ctx context.Context, cfg config.Config, scans []appscan.ScanResult, since time.Time) {
-	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
-		logf("note   : no Qualys credentials configured - reporting counts only")
-		return
-	}
-	api := qualys.NewAPI(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
-
+func attachDetail(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time) {
 	for i := range scans {
-		if scans[i].Provider != "qualys-was" {
+		// No detail for a scan we have no notification for: there are no
+		// counts to explain, and an empty findings list would read as "none".
+		if scans[i].Provider != "qualys-was" || scans[i].NoNotification {
 			continue
 		}
-		f, err := api.Findings(ctx, scans[i].App, since)
+		if scans[i].AppID == "" {
+			logf("note   : %s has no application id (no scan-list match), so detail "+
+				"is looked up by a name derived from the scan title and may come back empty",
+				safelog.Line(scans[i].App))
+		}
+		f, err := api.Findings(ctx, scans[i], since)
 		if err != nil {
 			logf("warn   : no detail for %s: %s",
 				safelog.Line(scans[i].App), safelog.Line(err.Error()))

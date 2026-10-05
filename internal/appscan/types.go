@@ -198,8 +198,32 @@ type ScanResult struct {
 
 	// App is the application as the operator named it, and ScanTitle is the
 	// individual run. They differ: a title is typically "<app> Run #48".
+	//
+	// From email alone App is derived FROM the title, and on a real estate the
+	// two rarely agree: "Example Run #47" for an application actually named
+	// "Example Homepage". A provider with an API replaces it with the name the
+	// scanner holds, which is the one its other endpoints accept.
 	App       string
 	ScanTitle string
+
+	// AppID is the scanner's own stable identifier for the application, when
+	// an API supplied it. Empty from email alone.
+	//
+	// It is the key for "one row per application" and for detail lookups.
+	// Names are not: real ones carry trailing spaces and get renamed, and a
+	// name-keyed lookup that misses returns an empty list - which reads
+	// exactly like an application with nothing new.
+	AppID string
+
+	// NoNotification marks a scan the vendor's API reports but whose
+	// completion email never reached the mailbox.
+	//
+	// Its counts are UNKNOWN, not zero - the counts come from the email - so
+	// it must never be totalled or rendered as "nothing open". It is listed
+	// so a missing notification is visible rather than a quietly thinner
+	// report.
+	NoNotification bool
+
 	// Reference is the vendor's scan identifier, used to deduplicate when the
 	// same notification is seen twice.
 	Reference string
@@ -326,6 +350,12 @@ type Provider interface {
 // cannot be broken by an API outage. A caller that cannot fetch detail still
 // has the counts.
 type DetailFetcher interface {
-	// Findings returns per-vulnerability detail for one application.
-	Findings(ctx context.Context, app string, since time.Time) ([]Finding, error)
+	// Findings returns per-vulnerability detail for the scan's application.
+	//
+	// Takes the whole result, not a name, so an implementation can use AppID
+	// when it is set. It used to take the name, and the name it was handed
+	// came from the scan title - which matched the scanner's application name
+	// in almost none of the real scans, so the lookup returned nothing and the
+	// report said "detail not available" for nearly every application.
+	Findings(ctx context.Context, s ScanResult, since time.Time) ([]Finding, error)
 }
