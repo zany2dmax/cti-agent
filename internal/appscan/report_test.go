@@ -684,3 +684,31 @@ func TestAnEmaillessAuthFailurePrintsNoInventedCount(t *testing.T) {
 		t.Error("a faulted email-less scan was listed twice")
 	}
 }
+
+func TestAnIgnoredFindingIsNotNewWork(t *testing.T) {
+	// Somebody set it aside in the scanner's console. Listing it every week
+	// as new re-raises a decision a person already made.
+	s := deepScan()
+	s.Findings = []Finding{
+		{ID: "150084", Title: "Reflected XSS", Severity: 5, Status: "NEW", Ignored: true,
+			URL: "https://portal.example/search"},
+		{ID: "150003", Title: "SQL Injection", Severity: 4, Status: "NEW",
+			URL: "https://portal.example/report"},
+	}
+	b := render(t, s)
+	if strings.Contains(b.Text, "150084") {
+		t.Errorf("an ignored finding was listed as new:\n%s", b.Text)
+	}
+	if !strings.Contains(b.Text, "150003") {
+		t.Error("the finding beside it was lost")
+	}
+}
+
+func TestAPotentialFindingSaysSo(t *testing.T) {
+	s := deepScan()
+	s.Findings = []Finding{{ID: "150520", Title: "Information Disclosure",
+		Severity: 2, Status: "NEW", Potential: true, URL: "https://portal.example/"}}
+	if b := render(t, s); !strings.Contains(b.Text, "potential - not confirmed") {
+		t.Errorf("an unconfirmed finding was listed as confirmed:\n%s", b.Text)
+	}
+}

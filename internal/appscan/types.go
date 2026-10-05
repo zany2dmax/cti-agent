@@ -288,6 +288,15 @@ type Finding struct {
 	Status    string // NEW, ACTIVE, REOPENED, FIXED
 	FirstSeen time.Time
 	LastSeen  time.Time
+
+	// Potential marks a finding the scanner reports as possible but not
+	// confirmed. Printed beside the title, because listing it with the
+	// confirmed ones claims more than the scanner did.
+	Potential bool
+	// Ignored marks a finding somebody deliberately set aside in the
+	// scanner's own console. Not shown as new work: that would re-raise a
+	// decision a person already made, every week.
+	Ignored bool
 }
 
 // Fault reports whether something is wrong with the SCAN, as distinct from

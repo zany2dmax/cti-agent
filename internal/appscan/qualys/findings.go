@@ -129,6 +129,11 @@ func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time,
 		fmt.Fprintf(&crit, `<Criteria field="webApp.name" operator="EQUALS">%s</Criteria>`,
 			xmlEscape(s.App))
 	}
+	// Vulnerabilities only. Verified against the live API. The report never
+	// shows information-gathered or sensitive-content items, and on a real
+	// application those are most of the list - the first unfiltered probe
+	// returned nothing else.
+	crit.WriteString(`<Criteria field="type" operator="EQUALS">VULNERABILITY</Criteria>`)
 	if !since.IsZero() {
 		fmt.Fprintf(&crit,
 			`<Criteria field="lastDetectedDate" operator="GREATER">%s</Criteria>`,
@@ -232,6 +237,8 @@ type wasFinding struct {
 	FirstFound string `xml:"firstDetectedDate"`
 	LastFound  string `xml:"lastDetectedDate"`
 	Param      string `xml:"param"`
+	Potential  bool   `xml:"potential"`
+	Ignored    bool   `xml:"isIgnored"`
 }
 
 func (f wasFinding) normalise() appscan.Finding {
@@ -248,6 +255,8 @@ func (f wasFinding) normalise() appscan.Finding {
 		Status:    strings.ToUpper(strings.TrimSpace(f.Status)),
 		FirstSeen: parseQualysAPITime(f.FirstFound),
 		LastSeen:  parseQualysAPITime(f.LastFound),
+		Potential: f.Potential,
+		Ignored:   f.Ignored,
 	}
 }
 

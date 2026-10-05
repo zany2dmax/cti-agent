@@ -200,7 +200,10 @@ func TestTheApplicationNameIsEscapedIntoTheQuery(t *testing.T) {
 		t.Fatalf("Findings: %v", err)
 	}
 	body := (*bodies)[0]
-	if strings.Count(body, "<Criteria") != 1 {
+	// The injected criterion, specifically - not a count. The query now
+	// carries a second, legitimate criterion (type = VULNERABILITY), and a
+	// count-based check would have to be re-tuned every time one is added.
+	if strings.Contains(body, `<Criteria field="x"`) {
 		t.Errorf("injected Criteria survived escaping:\n%s", body)
 	}
 	if !strings.Contains(body, "&lt;/Criteria&gt;") {
@@ -272,3 +275,44 @@ func TestAFindingWithNoQidFallsBackToItsUniqueId(t *testing.T) {
 // that IT satisfied a locally declared interface - which is true by
 // construction, passes forever, and proves nothing about API at all.
 var _ appscan.DetailFetcher = (*API)(nil)
+
+func TestOnlyVulnerabilitiesAreRequested(t *testing.T) {
+	// Verified against the live API. Unfiltered, a real application's first
+	// page was nothing but information-gathered items the report never shows.
+	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
+	if _, err := api.Findings(context.Background(),
+		appscan.ScanResult{AppID: "1000000001"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains((*bodies)[0], `<Criteria field="type" operator="EQUALS">VULNERABILITY</Criteria>`) {
+		t.Errorf("the search is not limited to vulnerabilities:\n%s", (*bodies)[0])
+	}
+}
+
+func TestPotentialAndIgnoredAreRead(t *testing.T) {
+	// Shape from a real response; values invented.
+	api, _ := stub(t, func(string, int) (int, string) {
+		return 200, page(false, `<Finding>
+      <id>1</id><uniqueId>u-1</uniqueId><qid>150520</qid>
+      <name><![CDATA[Information Disclosure]]></name><type>VULNERABILITY</type>
+      <potential>true</potential><findingType>QUALYS</findingType>
+      <severity>2</severity><url><![CDATA[https://app.example/]]></url>
+      <status>NEW</status>
+      <firstDetectedDate>2026-10-01T00:00:00Z</firstDetectedDate>
+      <lastDetectedDate>2026-10-04T00:00:00Z</lastDetectedDate>
+      <timesDetected>1</timesDetected>
+      <webApp><id>1</id><name><![CDATA[App]]></name></webApp>
+      <isIgnored>true</isIgnored>
+    </Finding>`)
+	})
+	got, err := api.Findings(context.Background(), appscan.ScanResult{AppID: "1"}, time.Time{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if !got[0].Potential || !got[0].Ignored {
+		t.Errorf("potential/isIgnored were not read: %+v", got[0])
+	}
+	if got[0].Param != "" {
+		t.Errorf("Param = %q; the real response carries none at top level", got[0].Param)
+	}
+}
