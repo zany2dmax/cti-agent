@@ -27,6 +27,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"github.com/zany2dmax/cti-agent/internal/appscan/qualys"
 	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
@@ -60,6 +61,17 @@ func run() int {
 			"authenticate; the runner alerts the operator when this file is "+
 			"non-empty. Absent or empty means every credential worked.")
 	flag.Parse()
+
+	// fleet.env, so a run by hand gets the same settings systemd gives it.
+	// Existing environment always wins.
+	//
+	// Every other command that reads credentials does this, and this one did
+	// not. That - not the runner - was the real cause of "missing required
+	// environment variables: CLIENT_ID CLIENT_SECRET GRAPH_MAILBOX TENANT_ID"
+	// on a box where all four were set. Making run-appscan source the file
+	// fixed the timer path and left `sudo cti-agent cti-appscan ...` broken,
+	// which is the path anyone takes to run a one-off.
+	fleetenv.Load()
 
 	cfg, err := config.LoadGraphOnly()
 	if err != nil {

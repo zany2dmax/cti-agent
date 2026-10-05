@@ -1685,6 +1685,29 @@ class TestFileShape(unittest.TestCase):
                     f"fleet/bin/ or fleet/lanes/")
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
+    def test_every_command_that_reads_credentials_loads_fleet_env(self):
+        """A binary run by hand must see the config the timer sees.
+
+        internal/config reads the environment. A command that does not call
+        fleetenv.Load() only works when a runner has sourced the file first, so
+        `sudo cti-agent <binary>` - the one-off path - fails with "missing
+        required environment variables" on a box where every one is set.
+
+        cti-appscan was that command. Fixing its runner made the timer work and
+        left the hand-run broken, and the hand-run is exactly what somebody
+        reaches for to test a two-week window.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        missing = []
+        for main in sorted((root / "cmd").glob("*/main.go")):
+            src = main.read_text(encoding="utf-8")
+            code = "\n".join(l for l in src.split("\n")
+                             if not l.lstrip().startswith("//"))
+            if re.search(r"\bconfig\.Load\w*\(", code) and "fleetenv.Load()" not in code:
+                missing.append(f"{main.parent.name} calls config.Load* but never "
+                               f"fleetenv.Load(), so it only works under a runner")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
     def test_an_authentication_failure_reaches_the_operator(self):
         """A broken scanner credential must not be reported only to the people
         who cannot fix it.
