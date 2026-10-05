@@ -69,12 +69,13 @@ quiet day — which only holds if a broken pipeline is loud.
 
 ---
 
-## The eight binaries
+## The nine binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
 | `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
-| `cti-alert` | systemd `OnFailure=` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
+| `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
+| `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails. Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
 | `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
@@ -82,12 +83,12 @@ quiet day — which only holds if a broken pipeline is loud.
 | `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
 | `cti-jira` | `run-digest`, between enrich and brief | Files one Jira ticket per confirmed KEV or Sev5 CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. Creates nothing without `--for-real` and a project in `JIRA_ALLOW_CREATE` |
 
-All seven are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All nine are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host.
 
 ```bash
-task build              # all seven into bin/
+task build              # all nine into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
 task --list             # everything else
@@ -202,20 +203,33 @@ by Limited Edition Jonathan. This repository applies it to threat intel.
 ```text
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
 cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
+cmd/cti-appscan/               weekly application-security report from DAST email
 cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
+cmd/cti-jira/                  files and updates one ticket per KEV or Sev5 CVE
 cmd/cti-kev/                   CISA KEV remediation deadline report
-cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
 cmd/cti-mailbox/               daily mailbox cleanup (the only writer)
+cmd/cti-mailer/                the single outbound channel, and the recipient gate
+cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
 
 internal/config/               environment/config loading, per-command requirements
 internal/fleetenv/             the single fleet.env reader every command uses
+internal/version/              the build stamp every command reports
+internal/safelog/              makes attacker-influenced text safe for a log record
 internal/cti/                  CTI parsing and CVE extraction
 internal/graph/                Microsoft Graph mailbox reader, sendMail, move
+internal/mailer/               per-lane recipient resolution and allowlist references
 internal/budget/               rolling-window and daily ceilings, backoff
 internal/kev/                  deadline bands, present-only filtering
+internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
 internal/mailbox/              processed-message log and the cleanup decision table
 internal/report/               markdown report writer, hostname redaction
+internal/triage/              deterministic extractor, and the verifier over model JSON
+internal/defender/             Defender for Cloud attack-path notification parsing
+internal/safelink/             Proofpoint/redirector unwrapping with a host allowlist
+internal/shellgate/            shell lint: the patterns that make a runner exit quietly
+internal/appscan/              DAST boundary: scan results, auth state, the report
+internal/appscan/qualys/       Qualys WAS: notification parser and Findings API
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for a future implementation
@@ -225,7 +239,8 @@ fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
-                               run-mailbox-cleanup, fleet-board, fleet-db
+                               run-appscan, run-mailbox-cleanup,
+                               fleet-board, fleet-db
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
 fleet-kit/fleet/systemd/       service + timer pairs, generic layout

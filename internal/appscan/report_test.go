@@ -8,9 +8,13 @@ import (
 
 func weekEnding() time.Time { return time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC) }
 
-// blindScan mirrors the real unauthenticated scan: a wide crawl that found
-// nothing, because it was never able to look past the login.
-func blindScan() ScanResult {
+// publicScan mirrors a real unauthenticated scan of a site with NO LOGIN: a
+// wide crawl that found little, because there is little behind the front page.
+//
+// Named publicScan, not blindScan. The old name carried the assumption this
+// package had to unlearn - that a scan which did not authenticate had been
+// prevented from seeing something.
+func publicScan() ScanResult {
 	return ScanResult{
 		Provider: "qualys-was", App: "Example Site", Complete: true,
 		Status: "Finished : OK", LinksCrawled: 252,
@@ -54,75 +58,255 @@ func deepScan() ScanResult {
 	}
 }
 
+// failedLogin is deepScan's application on a week the credential broke.
+func failedLogin() ScanResult {
+	s := deepScan()
+	s.Auth.Status = "Failed"
+	return s
+}
+
 func render(t *testing.T, scans ...ScanResult) Block {
 	t.Helper()
 	return Render(scans, weekEnding())
 }
 
-// ─── the coverage gap ───────────────────────────────────────────────────────
+// ─── unauthenticated is a label, not a defect ───────────────────────────────
 
-func TestAnUnauthenticatedScanLeadsTheReport(t *testing.T) {
-	// It comes before any vulnerability count. A scan that ran without
-	// authentication did not find nothing - it was never able to look.
-	// Sorting it in among real results by severity puts the least-known
-	// application at the bottom of the page looking like the best one.
-	b := render(t, deepScan(), blindScan())
+func TestAPublicSiteWithNoLoginIsNotACoverageGap(t *testing.T) {
+	// THE BUG THIS FILE EXISTS TO PREVENT A SECOND TIME.
+	//
+	// The first real send of this report named three applications under a
+	// heading reading COVERAGE GAPS. All three are public sites with no login:
+	// no credential is missing, nothing is misconfigured, and there is nothing
+	// for the audience of this mail to do. The operator's words: "those sites
+	// have no login to them, hence there is no missing authentication record."
+	b := render(t, deepScan(), publicScan())
 
-	gap := strings.Index(b.Text, "COVERAGE GAPS")
-	open := strings.Index(b.Text, "OPEN NOW")
-	if gap < 0 {
-		t.Fatalf("no coverage section:\n%s", b.Text)
-	}
-	if gap > open {
-		t.Error("coverage gaps appear below the finding counts")
-	}
-	if !strings.Contains(b.Text, "not evidence") {
-		t.Error("the report does not say the zeroes are not evidence")
-	}
-}
-
-func TestTheCaveatTravelsWithTheNumber(t *testing.T) {
-	// Not only in the section above. A zero from a blind scan read on its own
-	// is the entire failure mode, so the qualifier goes everywhere the number
-	// goes.
-	b := render(t, deepScan(), blindScan())
-	for _, line := range strings.Split(b.Text, "\n") {
-		if strings.Contains(line, "Example Site") && strings.Contains(line, "Serious") {
-			if !strings.Contains(line, "unauthenticated") {
-				t.Errorf("an unqualified count line: %q", line)
-			}
-			return
+	for _, forbidden := range []string{
+		"COVERAGE GAP", "Coverage gap", "coverage gap",
+		"no authentication record configured", "not evidence",
+	} {
+		if strings.Contains(b.Text, forbidden) {
+			t.Errorf("the report still frames an unauthenticated scan as a "+
+				"defect: found %q\n%s", forbidden, b.Text)
 		}
 	}
-	t.Error("no OPEN NOW line found for the blind scan")
-}
-
-func TestAConfiguredButFailedLoginIsAlsoACoverageGap(t *testing.T) {
-	s := blindScan()
-	s.Auth = Auth{Record: "portal auth record", Status: "Failed"}
-	b := render(t, s)
-
-	if !strings.Contains(b.Text, "COVERAGE GAPS") {
-		t.Error("a failed login was not treated as a gap")
-	}
-	if !strings.Contains(b.Text, "but failed") {
-		t.Errorf("the report does not distinguish configured-and-failed from "+
-			"never-configured:\n%s", b.Text)
+	if strings.Contains(b.Text, "SCANNER FAULTS") {
+		t.Errorf("a week with nothing broken raised a fault section:\n%s", b.Text)
 	}
 }
 
-func TestTheSubjectLeadsWithTheGapNotTheCount(t *testing.T) {
-	// "23 Urgent open" is a known quantity somebody is working through. "One
-	// application cannot be assessed" is a question nobody has answered.
-	b := render(t, deepScan(), blindScan())
-	if !strings.Contains(b.Subject, "without authentication") {
+func TestAnUnauthenticatedScanDoesNotDemandAttention(t *testing.T) {
+	// Attention() used to return true for every scan that had not
+	// authenticated, which put these at the top of the report every single
+	// week with nothing actionable in them. A permanent alarm is read as no
+	// alarm, and it trains people to skip the top of the page.
+	if publicScan().Attention() {
+		t.Error("a complete scan of a site with no login asked for attention")
+	}
+	if publicScan().Fault() {
+		t.Error("a site with no login was reported as a scanner fault")
+	}
+}
+
+func TestAnUnauthenticatedScanDoesNotOutrankRealFindings(t *testing.T) {
+	// The consequence of the above, in the ordering. The application with 23
+	// Urgent open belongs above the one with one Serious.
+	b := render(t, publicScan(), deepScan())
+	open := b.Text[strings.Index(b.Text, "OPEN NOW"):]
+	portal := strings.Index(open, "Example Portal")
+	site := strings.Index(open, "Example Site")
+	if portal < 0 || site < 0 {
+		t.Fatalf("an application is missing from OPEN NOW:\n%s", open)
+	}
+	if portal > site {
+		t.Errorf("the application with 23 Urgent sorted below a public site "+
+			"with one Serious:\n%s", open)
+	}
+}
+
+func TestEveryCountSaysWhichSurfaceItDescribes(t *testing.T) {
+	// The part of the old design worth keeping. A zero from a scan that only
+	// saw the public pages means something different from a zero from a scan
+	// that logged in, and the number alone cannot say which.
+	b := render(t, deepScan(), publicScan())
+	open := b.Text[strings.Index(b.Text, "OPEN NOW"):]
+	open = open[:strings.Index(open, "CHANGED THIS WEEK")]
+
+	// The BRACKETED form. "authenticated scan" is a substring of
+	// "unauthenticated scan", so the loose check passed either way round.
+	for app, want := range map[string]string{
+		"Example Portal": "[authenticated scan]",
+		"Example Site":   "[unauthenticated scan]",
+	} {
+		found := false
+		for _, line := range strings.Split(open, "\n") {
+			if strings.Contains(line, app) {
+				found = true
+				if !strings.Contains(line, want) {
+					t.Errorf("%s: line does not carry %q: %q", app, want, line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no OPEN NOW line for %s", app)
+		}
+	}
+}
+
+func TestTheScopeNoteExplainsWithoutAccusing(t *testing.T) {
+	b := render(t, deepScan(), publicScan())
+	if !strings.Contains(b.Text, "no login that is the whole application") {
+		t.Errorf("the report does not explain what an unauthenticated scan "+
+			"covers:\n%s", b.Text)
+	}
+	if !strings.Contains(b.Text, "labelled rather than flagged") {
+		t.Error("the report does not say the label is a property of the " +
+			"application rather than a finding")
+	}
+}
+
+// ─── a failed login IS a fault, and goes to the operator ────────────────────
+
+func TestAFailedLoginIsALoudFault(t *testing.T) {
+	// The nastiest case and the one that is a real defect: a credential is
+	// configured, so the setup looks right in Qualys, and it did not work.
+	b := render(t, failedLogin(), publicScan())
+
+	if !strings.Contains(b.Text, "SCANNER FAULTS") {
+		t.Fatalf("a failed credential did not raise a fault section:\n%s", b.Text)
+	}
+	if !strings.Contains(b.Text, "authentication failed") {
+		t.Error("the fault does not say what failed")
+	}
+	if !strings.Contains(b.Text, `Credential "portal auth record"`) {
+		t.Error("the fault does not name the credential somebody has to go and fix")
+	}
+	if !strings.Contains(b.Text, "fleet operator has been alerted") {
+		t.Error("the report does not say the operator was told - the App Dev " +
+			"audience cannot fix a scanner credential and should not be left " +
+			"thinking it is their item")
+	}
+}
+
+func TestAFailedLoginDoesNotEraseTheOpenBacklog(t *testing.T) {
+	// Found by rendering it: the first implementation partitioned faults and
+	// counted scans as mutually exclusive, so the week this application's login
+	// broke it vanished from OPEN NOW and the severity tiles read zero. A
+	// report saying "0 Urgent" because the scanner had a bad password is worse
+	// than no report.
+	b := render(t, failedLogin())
+
+	if !strings.Contains(b.Text, "23 Urgent") {
+		t.Errorf("23 open Urgent findings disappeared because the scan could "+
+			"not log in:\n%s", b.Text)
+	}
+	open := b.Text[strings.Index(b.Text, "OPEN NOW"):]
+	if !strings.Contains(open, "Example Portal") {
+		t.Errorf("the application is missing from OPEN NOW:\n%s", open)
+	}
+	if !strings.Contains(open, "authentication FAILED") {
+		t.Errorf("its counts are not marked as coming from a scan whose login "+
+			"failed:\n%s", open)
+	}
+}
+
+func TestAFailedLoginIsNotCountedAmongTheOrdinaryUnauthenticatedScans(t *testing.T) {
+	// Two public sites plus one broken login. The scope note describes the two;
+	// folding the third in would make a fault look like one of the normal ones.
+	second := publicScan()
+	second.App = "Example Careers"
+	b := render(t, failedLogin(), publicScan(), second)
+
+	if !strings.Contains(b.Text, "2 scan(s) above ran unauthenticated") {
+		t.Errorf("the scope note counted the failed login as an ordinary "+
+			"unauthenticated scan:\n%s", b.Text)
+	}
+}
+
+// ─── the subject line ───────────────────────────────────────────────────────
+
+func TestTheSubjectNamesTheFleet(t *testing.T) {
+	// It used to read "[AppSec] Week of Oct 4: ...", which nowhere says where
+	// the mail came from. Every other message the fleet sends opens with CTI.
+	for _, b := range []Block{
+		render(t, deepScan()),
+		render(t, failedLogin()),
+		render(t),
+	} {
+		if !strings.Contains(b.Subject, "CTI Fleet") {
+			t.Errorf("Subject = %q - it does not say it is from the CTI fleet",
+				b.Subject)
+		}
+	}
+}
+
+func TestTheSubjectLeadsWithTheFaultNotTheCount(t *testing.T) {
+	// "23 Urgent open" is a known quantity somebody is working through. "The
+	// scanner could not log in" means this week's numbers are not comparable
+	// with last week's and nobody has looked at why.
+	b := render(t, failedLogin(), publicScan())
+	if !strings.Contains(b.Subject, "AUTH FAILED") {
 		t.Errorf("Subject = %q", b.Subject)
 	}
 
-	// With nothing blind, the count leads.
-	b2 := render(t, deepScan())
+	// With nothing broken, the count leads - and an unauthenticated scan is
+	// not "something broken".
+	b2 := render(t, deepScan(), publicScan())
 	if !strings.Contains(b2.Subject, "23 Urgent") {
 		t.Errorf("Subject = %q, want the open Urgent count", b2.Subject)
+	}
+	if strings.Contains(b2.Subject, "without authentication") {
+		t.Errorf("Subject = %q - a public site with no login is not subject "+
+			"line news every week", b2.Subject)
+	}
+}
+
+// ─── the house style ────────────────────────────────────────────────────────
+
+func TestTheHtmlMatchesTheDailyBriefsLayout(t *testing.T) {
+	// The operator's first note on the real email: "it should mimic the daily
+	// and fleet message colors and layout". These are the daily's own values,
+	// from fleet-kit/fleet/lanes/brief.py - the page background, the navy
+	// header band, the 640px card and the Sev5 red.
+	b := render(t, deepScan(), publicScan())
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		"background:#eef1f5", // page behind the card
+		"background:#12203a", // header band
+		"max-width:640px",    // the card
+		"#b3001b",            // the palette's top-severity red
+		"-apple-system,Segoe UI",
+	} {
+		if !strings.Contains(b.HTML, want) {
+			t.Errorf("the HTML does not carry %q from the daily's style", want)
+		}
+	}
+	if !strings.Contains(b.HTML, "CTI AppSec Weekly") {
+		t.Error("the header band does not name the report")
+	}
+}
+
+func TestTheOrgNameComesFromTheEnvironment(t *testing.T) {
+	t.Setenv("FLEET_ORG", "Example Industries")
+	if b := render(t, deepScan()); !strings.Contains(b.HTML, "Example Industries") {
+		t.Error("FLEET_ORG did not reach the header band")
+	}
+}
+
+func TestTheScaleIsStatedEveryTime(t *testing.T) {
+	// Qualys severity 5 is a claim about one HTTP response; the fleet's Sev5
+	// means exploited in the wild and confirmed present. The palette is shared
+	// so the mail is recognisable; the words must not be.
+	// No apostrophe in the needle: html.EscapeString renders "fleet's" as
+	// "fleet&#39;s", so a needle containing one passes on the text and fails
+	// on the HTML for a reason that has nothing to do with the behaviour.
+	b := render(t, deepScan())
+	for _, s := range []string{b.Text, b.HTML} {
+		if !strings.Contains(s, "Sev5-Sev1 bands") {
+			t.Error("the report does not distinguish Qualys severities from " +
+				"the fleet's Sev bands")
+		}
 	}
 }
 
@@ -144,7 +328,7 @@ func TestLowSeveritiesAreCountedNotLedWith(t *testing.T) {
 	// 67 Minimal dominated the line in the first draft, pushing the one
 	// number that matters off to the right. They are a tail now - present,
 	// because silence and zero must not look the same, but not prominent.
-	b := render(t, blindScan())
+	b := render(t, publicScan())
 	if !strings.Contains(b.Text, "+69 lower") {
 		t.Errorf("lower severities were not summarised:\n%s", b.Text)
 	}
@@ -163,13 +347,25 @@ func TestAnApplicationWithNothingOpenSaysSo(t *testing.T) {
 	}
 }
 
+func TestTheTilesCountOnlyScansThatFinished(t *testing.T) {
+	s := deepScan()
+	s.Complete = false
+	s.Status = "Canceled"
+	b := render(t, s, publicScan())
+	// publicScan has one Serious active; deepScan's 23 Urgent came from a
+	// crawl that stopped partway and must not be totalled.
+	if strings.Contains(b.HTML, ">23<") {
+		t.Errorf("a partial crawl's counts reached the severity tiles:\n%s", b.HTML)
+	}
+}
+
 // ─── what changed ───────────────────────────────────────────────────────────
 
 func TestChangedUsesTheSameFloorAsAttention(t *testing.T) {
 	// The two disagreeing is how an unauthenticated scan's five reopened
 	// Minimal findings became the lead item in the section meant to carry
 	// the week's actionable news.
-	b := render(t, deepScan(), blindScan())
+	b := render(t, deepScan(), publicScan())
 
 	changed := b.Text[strings.Index(b.Text, "CHANGED THIS WEEK"):]
 	if strings.Contains(changed, "Example Site  ") {
@@ -182,7 +378,7 @@ func TestChangedUsesTheSameFloorAsAttention(t *testing.T) {
 
 func TestLowerSeverityChurnIsCountedRatherThanDropped(t *testing.T) {
 	// Quiet is not the same as absent.
-	b := render(t, deepScan(), blindScan())
+	b := render(t, deepScan(), publicScan())
 	if !strings.Contains(b.Text, "1 other application(s) had Medium or Minimal") {
 		t.Errorf("churn below the floor vanished entirely:\n%s", b.Text)
 	}
@@ -253,6 +449,12 @@ func TestAnIncompleteScanReportsNoCounts(t *testing.T) {
 	if !strings.Contains(b.Text, "never finished") {
 		t.Error("the report does not explain why its counts are withheld")
 	}
+	if strings.Contains(b.Text, "23 Urgent") {
+		t.Errorf("a partial crawl's counts were printed as a result:\n%s", b.Text)
+	}
+	if !strings.Contains(b.Subject, "INCOMPLETE") {
+		t.Errorf("Subject = %q", b.Subject)
+	}
 }
 
 func TestNoScansIsNotRenderedAsAQuietWeek(t *testing.T) {
@@ -261,6 +463,10 @@ func TestNoScansIsNotRenderedAsAQuietWeek(t *testing.T) {
 	b := Render(nil, weekEnding())
 	if !strings.Contains(b.Text, "scheduling problem") {
 		t.Errorf("an empty week did not raise the possibility:\n%s", b.Text)
+	}
+	// Still a whole document - an unbalanced one renders as a blank mail.
+	if !strings.HasSuffix(strings.TrimSpace(b.HTML), "</html>") {
+		t.Error("the empty-week HTML is not a closed document")
 	}
 }
 
@@ -280,12 +486,22 @@ func TestNothingFromAScanBecomesAClickableLink(t *testing.T) {
 	}
 }
 
+func TestTheSeparatorInAChangeLineIsNotEscapedIntoView(t *testing.T) {
+	// The HTML path joins "new: ..." and "reopened: ..." with a non-breaking
+	// space entity. Escaping the joined string rather than each part put a
+	// literal "&nbsp;" in the mail.
+	b := render(t, deepScan())
+	if strings.Contains(b.HTML, "&amp;nbsp;") {
+		t.Error("an HTML entity was escaped into visible text")
+	}
+}
+
 func TestTheReportIsStableAcrossRuns(t *testing.T) {
 	// Two runs over the same week must produce the same document, or a diff
 	// between weeks stops meaning anything.
-	first := render(t, deepScan(), blindScan()).Text
+	first := render(t, deepScan(), publicScan()).Text
 	for i := 0; i < 20; i++ {
-		if got := render(t, blindScan(), deepScan()).Text; got != first {
+		if got := render(t, publicScan(), deepScan()).Text; got != first {
 			t.Fatal("report ordering depends on input order")
 		}
 	}

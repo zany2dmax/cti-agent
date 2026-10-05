@@ -77,6 +77,7 @@ chmod 0700 "$STATE" 2>/dev/null || true
 STAMP="$(date -u +%Y-%m-%d)"
 HTML="$STATE/appscan-$STAMP.html"
 TXT="$STATE/appscan-$STAMP.txt"
+AUTHFAIL="$STATE/appscan-authfail-$STAMP.tsv"
 
 # Mode set BEFORE anything is written. A report naming which applications have
 # open Urgent findings, and which are scanned without authentication, is a map
@@ -84,7 +85,22 @@ TXT="$STATE/appscan-$STAMP.txt"
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
 
-"$APPSCAN" --out "$HTML" --text-out "$TXT" \
+# REMOVED, not created. The other two are pre-created so the mode is set before
+# any content exists; this one is deleted instead, because its ABSENCE is a
+# signal and creating it destroys that signal.
+#
+# cti-appscan writes this file on every run, so after the run: present and
+# empty means "checked, nothing failed", and absent means the binary does not
+# understand --auth-fail-out and nothing was checked at all. Pre-creating an
+# empty file collapses those two into the reassuring one - which is this
+# project's recurring bug, a silent nothing that reads as a clean result.
+#
+# cti-appscan writes it 0600 itself, so the mode does not depend on this.
+# Deleting a stale file from an earlier run on the same day also matters: that
+# one would be read as this run's answer.
+rm -f "$AUTHFAIL"
+
+"$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" \
   || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
 
 SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line"
@@ -95,6 +111,49 @@ log "subject: $SUBJECT"
 # shellcheck disable=SC2086
 "$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
   || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
+
+# ── the operator's half of the report ────────────────────────────────────────
+#
+# A SCANNER CREDENTIAL THAT STOPPED WORKING GOES TO A DIFFERENT PERSON.
+#
+# The report above is addressed to the people who own application code. They
+# cannot fix a Qualys authentication record, and a week where the scanner
+# silently stopped logging in is a week where the numbers they are reading
+# describe a smaller surface than last week's while looking like an
+# improvement. So the fault is mailed to the fleet operator through cti-alert,
+# the fleet's only escalation channel.
+#
+# The report is sent FIRST and this cannot fail the lane: an alerting problem
+# must not cost the weekly mail. HOLD rather than FAILED as the kind - the
+# unit did its job; something it depends on is broken - so `systemctl --failed`
+# keeps meaning what it says.
+#
+# An absent file is not the same as an empty one. cti-appscan writes this file
+# on every run, so empty means "checked, none found" while missing means the
+# binary is older than this runner. Say which.
+ALERT="$FLEET_CODE/bin/cti-alert"
+if [ ! -f "$AUTHFAIL" ]; then
+  log "note: no authentication-failure file at $AUTHFAIL - cti-appscan predates --auth-fail-out, so nothing was checked"
+elif [ -s "$AUTHFAIL" ]; then
+  n=$(wc -l < "$AUTHFAIL" | tr -d ' ')
+  # Applications only. The record name and vendor status stay in the file,
+  # which is 0600; the alert says what broke and where to look.
+  # awk, not `paste -sd', '`. paste treats the -d argument as a LIST of
+  # delimiters used cyclically, so with two characters it joins the first pair
+  # with a comma and the next with a space: "a, b c, d". awk joins with one
+  # separator, and exits 0 on an empty file, which matters under pipefail.
+  apps=$(awk -F'\t' '{printf "%s%s", sep, $1; sep=", "} END {print ""}' "$AUTHFAIL")
+  log "AUTH FAILED on $n scan(s): $apps"
+  if [ -n "$DRY" ]; then
+    log "dry run - would alert the operator about $n authentication failure(s)"
+  elif [ -x "$ALERT" ]; then
+    "$ALERT" --unit cti-agent-appscan.service --kind HOLD \
+      --reason "Qualys WAS authentication failed on $n application(s): $apps. The scan covered only the public surface, so this week's counts are not comparable with last week's. Check the authentication record in Qualys WAS; details in $AUTHFAIL on $(hostname -s)." \
+      || log "warn: cti-alert failed - the failure is still recorded in $AUTHFAIL"
+  else
+    log "warn: cti-alert not found at $ALERT - $n authentication failure(s) recorded in $AUTHFAIL and NOT escalated"
+  fi
+fi
 
 if [ -n "$DRY" ]; then
   log "dry run - nothing was sent. The rendered report is at $HTML"
