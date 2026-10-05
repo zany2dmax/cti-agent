@@ -22,6 +22,19 @@ var ReportHosts = []string{
 	"qualysapi.qualys.com",
 }
 
+// PortalHosts are the Qualys UI hosts a link this lane BUILDS may point at -
+// the only links the report renders as clickable.
+//
+// The qualysguard pods only. qualysapi.* is the API host: a link there opens a
+// raw XML endpoint behind a basic-auth prompt, which is no use to a reader
+// and trains them to type credentials into whatever prompt a link produces.
+var PortalHosts = []string{
+	"qualysguard.qg1.apps.qualys.com",
+	"qualysguard.qg2.apps.qualys.com",
+	"qualysguard.qg3.apps.qualys.com",
+	"qualysguard.qg4.apps.qualys.com",
+}
+
 // UnwrapReportLink returns the Qualys report URL from a notification, or an
 // error explaining why it could not be verified.
 //

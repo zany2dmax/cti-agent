@@ -516,3 +516,123 @@ func TestAnUnusableReportLinkIsStatedNotDropped(t *testing.T) {
 		t.Errorf("a rejected link vanished silently:\n%s", b.Text)
 	}
 }
+
+// ─── the one clickable link ─────────────────────────────────────────────────
+
+const portalLink = "https://qualysguard.qg3.apps.qualys.com/portal-front/was/scan/123"
+
+// allowQualys registers the one portal host these tests trust, and puts the
+// registry back afterwards so no test depends on another's leftovers.
+func allowQualys(t *testing.T) {
+	t.Helper()
+	saved := portalHosts
+	portalHosts = map[string]map[string]bool{}
+	AllowPortalHosts("qualys-was", "qualysguard.qg3.apps.qualys.com")
+	t.Cleanup(func() { portalHosts = saved })
+}
+
+func TestAPortalLinkWeBuiltIsClickable(t *testing.T) {
+	// The operator's call: links this lane builds from the API scan record
+	// are clickable; everything that arrived in mail stays plain text.
+	allowQualys(t)
+	s := deepScan()
+	s.PortalURL = portalLink
+	b := render(t, s)
+	if !strings.Contains(b.HTML, `<a href="`+portalLink+`"`) {
+		t.Errorf("a verified portal link did not become an anchor:\n%s", b.HTML)
+	}
+	if strings.Count(b.HTML, "<a href") != 1 {
+		t.Errorf("want exactly one anchor - the portal link - got %d",
+			strings.Count(b.HTML, "<a href"))
+	}
+}
+
+func TestTheEmailLinkStaysPlainTextEvenBesideAPortalLink(t *testing.T) {
+	allowQualys(t)
+	withPortal := deepScan()
+	withPortal.PortalURL = portalLink
+	mailOnly := publicScan()
+	mailOnly.ReportURL = "https://qualysguard.qg3.apps.qualys.com/was/#/reports/y"
+	b := render(t, withPortal, mailOnly)
+	if strings.Contains(b.HTML, `href="https://qualysguard.qg3.apps.qualys.com/was/`) {
+		t.Error("a link that arrived in mail was made clickable")
+	}
+	if !strings.Contains(b.HTML, "/was/#/reports/y") {
+		t.Error("the email's link was dropped instead of printed as text")
+	}
+}
+
+func TestAPortalLinkThatFailsTheCheckIsNeverPrinted(t *testing.T) {
+	// Not printed even as text. The check exists to keep an unexpected URL out
+	// of the mail; printing it unlinked would defeat half of that.
+	allowQualys(t)
+	for _, bad := range []string{
+		"https://evil.example/was/scan/123",
+		"http://qualysguard.qg3.apps.qualys.com/plain-http",
+		"javascript:alert(1)",
+		"https://user:pw@qualysguard.qg3.apps.qualys.com/x",
+		"https://qualysguard.qg3.apps.qualys.com.evil.example/x",
+	} {
+		s := deepScan()
+		s.PortalURL = bad
+		b := render(t, s)
+		if strings.Contains(b.HTML, "<a href") {
+			t.Errorf("%q became an anchor", bad)
+		}
+		if strings.Contains(b.Text, bad) || strings.Contains(b.HTML, e(bad)) {
+			t.Errorf("%q was printed after failing the check", bad)
+		}
+		// It falls back to the email's link, which deepScan carries.
+		if !strings.Contains(b.Text, "report: https://qualysguard.qg3.apps.qualys.com/was/") {
+			t.Errorf("%q: no fallback to the email link", bad)
+		}
+	}
+}
+
+func TestAPortalHostIsTrustedOnlyForItsOwnProvider(t *testing.T) {
+	allowQualys(t)
+	s := deepScan()
+	s.Provider = "invicti"
+	s.PortalURL = portalLink
+	if b := render(t, s); strings.Contains(b.HTML, "<a href") {
+		t.Error("a Qualys host was accepted as the portal for another scanner")
+	}
+}
+
+func TestWithNothingRegisteredNoLinkIsClickable(t *testing.T) {
+	// The failure mode of forgetting AllowPortalHosts is plain text.
+	saved := portalHosts
+	portalHosts = map[string]map[string]bool{}
+	t.Cleanup(func() { portalHosts = saved })
+	s := deepScan()
+	s.PortalURL = portalLink
+	if b := render(t, s); strings.Contains(b.HTML, "<a href") {
+		t.Error("an unregistered host produced an anchor")
+	}
+}
+
+func TestEveryApplicationShowsItsReportLink(t *testing.T) {
+	// The link used to be rendered only under CHANGED THIS WEEK, so a quiet
+	// application - which on the first send meant all three public sites -
+	// never showed one at all.
+	s := publicScan()
+	s.ReportURL = "https://qualysguard.qg3.apps.qualys.com/was/#/reports/quiet"
+	b := render(t, s)
+	open := b.Text[strings.Index(b.Text, "OPEN NOW"):strings.Index(b.Text, "CHANGED THIS WEEK")]
+	if !strings.Contains(open, "/reports/quiet") {
+		t.Errorf("a quiet application's report link is missing from OPEN NOW:\n%s", open)
+	}
+}
+
+func TestAnIncompleteScanStillShowsItsLink(t *testing.T) {
+	// It never reaches OPEN NOW, so the fault entry is its only chance - and
+	// "the scan did not finish" is exactly when somebody wants to open it.
+	s := deepScan()
+	s.Complete = false
+	s.Status = "Canceled"
+	b := render(t, s)
+	faults := b.Text[strings.Index(b.Text, "SCANNER FAULTS"):strings.Index(b.Text, "OPEN NOW")]
+	if !strings.Contains(faults, "report: https://qualysguard") {
+		t.Errorf("an incomplete scan's link was lost:\n%s", faults)
+	}
+}
