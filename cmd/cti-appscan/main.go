@@ -100,6 +100,11 @@ func run() int {
 		attachDetail(ctx, cfg, scans, time.Now().Add(-*since))
 	}
 
+	// The only hosts a link may be clickable for. Registered here rather than
+	// inside internal/appscan, which is vendor-neutral; forgetting it degrades
+	// every link to plain text rather than dropping one or opening the gate.
+	appscan.AllowPortalHosts(qualys.Provider{}.Name(), qualys.PortalHosts...)
+
 	block := appscan.Render(scans, time.Now())
 
 	if *subjectOnly {
