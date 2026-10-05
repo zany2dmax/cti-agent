@@ -474,7 +474,7 @@ func (r *report) changed() (worth []ScanResult, lowerOnly int) {
 func detailLines(s ScanResult) []string {
 	var worth []Finding
 	for _, f := range s.Findings {
-		if f.Status == "NEW" || f.Status == "REOPENED" {
+		if (f.Status == "NEW" || f.Status == "REOPENED") && !f.Ignored {
 			worth = append(worth, f)
 		}
 	}
@@ -488,6 +488,9 @@ func detailLines(s ScanResult) []string {
 			break
 		}
 		line := fmt.Sprintf("sev %d  %s  %s", f.Severity, f.ID, f.Title)
+		if f.Potential {
+			line += " (potential - not confirmed by the scanner)"
+		}
 		if f.URL != "" {
 			line += "  " + f.URL
 			if f.Param != "" {
