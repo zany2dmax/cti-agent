@@ -62,12 +62,19 @@ const pageSize = 500
 // than returning a partial list that looks complete.
 const maxPages = 40
 
-// Findings returns every finding for one web application, newest detection
-// first.
+// Findings returns every finding for the scan's web application.
 //
 // Implements appscan.DetailFetcher. since filters on last detection date; a
 // zero time means no lower bound.
-func (a *API) Findings(ctx context.Context, app string, since time.Time) ([]appscan.Finding, error) {
+//
+// Keyed on webApp.id whenever reconciliation against the scan list supplied
+// one, and on webApp.name only as a fallback. The name this used to receive
+// came from the scan TITLE ("Example Run #47" -> "Example"), which on the
+// real estate matched the scanner's application name in almost no case - so
+// the search returned zero findings, without error, and the report printed
+// "detail not available" for nearly every application.
+func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Time) ([]appscan.Finding, error) {
+	app := s.App
 	var out []appscan.Finding
 	lastID := 0
 
@@ -80,7 +87,7 @@ func (a *API) Findings(ctx context.Context, app string, since time.Time) ([]apps
 					"list that would read as complete", maxPages, app)
 		}
 
-		body, err := a.search(ctx, app, since, lastID)
+		body, err := a.search(ctx, s, since, lastID)
 		if err != nil {
 			return nil, err
 		}
@@ -113,10 +120,15 @@ func (a *API) Findings(ctx context.Context, app string, since time.Time) ([]apps
 }
 
 // search POSTs one page of the finding search.
-func (a *API) search(ctx context.Context, app string, since time.Time, afterID int) ([]byte, error) {
+func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time, afterID int) ([]byte, error) {
 	var crit strings.Builder
-	fmt.Fprintf(&crit, `<Criteria field="webApp.name" operator="EQUALS">%s</Criteria>`,
-		xmlEscape(app))
+	if s.AppID != "" {
+		fmt.Fprintf(&crit, `<Criteria field="webApp.id" operator="EQUALS">%s</Criteria>`,
+			xmlEscape(s.AppID))
+	} else {
+		fmt.Fprintf(&crit, `<Criteria field="webApp.name" operator="EQUALS">%s</Criteria>`,
+			xmlEscape(s.App))
+	}
 	if !since.IsZero() {
 		fmt.Fprintf(&crit,
 			`<Criteria field="lastDetectedDate" operator="GREATER">%s</Criteria>`,
@@ -130,8 +142,16 @@ func (a *API) search(ctx context.Context, app string, since time.Time, afterID i
 		`<ServiceRequest><preferences><limitResults>%d</limitResults></preferences>`+
 			`<filters>%s</filters></ServiceRequest>`, pageSize, crit.String())
 
-	endpoint := a.baseURL + "/qps/rest/3.0/search/was/finding/"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
+	return a.post(ctx, "/qps/rest/3.0/search/was/finding/", payload)
+}
+
+// post sends one QPS search and returns the body of a 2xx response.
+//
+// Shared by every WAS search so the authentication-error explanation is in
+// one place: the finding and scan searches fail identically when the role
+// lacks the WAS module.
+func (a *API) post(ctx context.Context, path, payload string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path,
 		strings.NewReader(payload))
 	if err != nil {
 		return nil, err
