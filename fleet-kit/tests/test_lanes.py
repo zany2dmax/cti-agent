@@ -1418,6 +1418,106 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
             "something must still cover Microsoft advisories")
 
 
+class WeeklyRollsUpStoredFindings(unittest.TestCase):
+    """The weekly covers a week, and says where its numbers came from.
+
+    cti-agent-weekly.service runs run-digest with no --lookback, so the weekly
+    read GRAPH_LOOKBACK_HOURS - the same 24 hours as the daily. It had never
+    been a week. On 2026-10-05 both briefs reported reading the same four
+    emails, an hour apart.
+
+    Widening the mailbox read does not fix it: the cleanup lane archives
+    advisories 48 hours after a completed run has read them, so a 7-day
+    mailbox query sees only what happened not to be archived. That is a
+    partial week presented as a whole one.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.tmp, "state"), exist_ok=True)
+        self.env = dict(os.environ, FLEET_HOME=self.tmp)
+        self.db = str(LANES.parent / "bin" / "fleet-db")
+        subprocess.run([sys.executable, self.db, "init"], env=self.env,
+                       capture_output=True, check=True)
+        self.seed()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def seed(self):
+        import sqlite3
+        from datetime import datetime, timezone, timedelta
+
+        def iso(days):
+            return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(
+                timespec="seconds")
+
+        con = sqlite3.connect(os.path.join(self.tmp, "state", "memory.db"))
+        overdue = (datetime.now(timezone.utc) - timedelta(days=9)).date().isoformat()
+        rows = [
+            ("CVE-A", "PRESENT", "Sev5", 12, 1, overdue, iso(-2), iso(0)),
+            ("CVE-B", "PRESENT", "Sev4", 3, 0, None, iso(-20), iso(-1)),
+            # Untouched for a month: outside the window, must not appear.
+            ("CVE-C", "NOT_PRESENT", "Sev1", 0, 0, None, iso(-30), iso(-25)),
+        ]
+        for cve, st, pr, hc, kev, due, fs, up in rows:
+            con.execute(
+                "INSERT OR REPLACE INTO findings(cve,status,priority,host_count,"
+                "kev,kev_due,first_seen,updated) VALUES(?,?,?,?,?,?,?,?)",
+                (cve, st, pr, hc, kev, due, fs, up))
+        con.commit()
+        con.close()
+
+    def rollup(self, days=7):
+        r = subprocess.run([sys.executable, self.db, "rollup", "--days", str(days)],
+                           env=self.env, capture_output=True, text=True, check=True)
+        return json.loads(r.stdout)
+
+    def test_the_window_excludes_findings_nothing_has_touched(self):
+        cves = {f["cve"] for f in self.rollup()["findings"]}
+        self.assertEqual(cves, {"CVE-A", "CVE-B"},
+                         "a finding untouched for a month was included")
+
+    def test_a_finding_still_open_from_before_is_not_called_new(self):
+        by = {f["cve"]: f for f in self.rollup()["findings"]}
+        self.assertTrue(by["CVE-A"]["is_new"], "first seen 2 days ago")
+        self.assertFalse(by["CVE-B"]["is_new"],
+                         "first seen 20 days ago - still open, but not new")
+
+    def test_it_does_not_claim_to_have_read_a_mailbox(self):
+        d = self.rollup()
+        meta = d["source_meta"]
+        self.assertIn("rollup", meta)
+        self.assertIn("no mailbox read", meta["rollup"])
+        for k in ("mailbox", "emails", "with_cves"):
+            self.assertNotIn(k, meta,
+                             f"{k} in a run that read no mail would report zero, "
+                             f"which reads as 'the mailbox was empty'")
+
+    def test_the_emails_read_section_is_absent_not_zero(self):
+        # brief.py drops the section when email_subjects is missing. Setting it
+        # to [] would render "0 total", which is a different claim.
+        self.assertNotIn("email_subjects", self.rollup())
+
+    def test_deadlines_are_computed_the_same_way_the_daily_reports_them(self):
+        kev = self.rollup()["kev_deadlines"]
+        self.assertEqual(kev["overdue"], 1)
+        self.assertEqual(kev["worst_overdue_days"], 9)
+
+    def test_the_rendered_weekly_states_its_provenance(self):
+        d = self.rollup()
+        enriched = os.path.join(self.tmp, "enriched.json")
+        with open(enriched, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        out = os.path.join(self.tmp, "w.html")
+        subprocess.run([sys.executable, str(LANES / "brief.py"), "--weekly",
+                        "--enriched", enriched, "--out", out],
+                       capture_output=True, check=True)
+        html = pathlib.Path(out).read_text(encoding="utf-8")
+        self.assertIn("no mailbox read this run", html)
+        self.assertNotIn("EMAILS READ THIS RUN", html)
+
+
 class WeeklyIsDistinguishableFromDaily(unittest.TestCase):
     """The weekly subject must never equal the daily subject.
 
