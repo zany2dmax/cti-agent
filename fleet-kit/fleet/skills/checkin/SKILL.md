@@ -80,6 +80,7 @@ What you owe the schedule instead is **checking it happened**:
 |---|---|---|
 | Daily digest sent | `fleet-db was-sent $(date +%F) daily` | Post to the board. Look for a `cti-alert` line first — the cause is probably already there |
 | Weekly sent (Mon) | `fleet-db was-sent $(date +%F) weekly` | Same |
+| AppSec report ran (Mon, after 07:30) | `journalctl -u cti-agent-appscan.service --since today --no-pager` | No `[run-appscan] done` line: post to the board. An `AUTH FAILED on N scan(s)` line has **already** alerted the operator - track it, do not re-escalate. `0 notification(s)` is a question, not a quiet week |
 | Timers still enabled | `systemctl list-timers 'cti-agent-*'` | A disabled timer is silent forever. Tell the operator |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
