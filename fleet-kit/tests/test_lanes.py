@@ -1685,6 +1685,26 @@ class TestFileShape(unittest.TestCase):
                     f"fleet/bin/ or fleet/lanes/")
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
+    def test_every_unit_logs_under_its_own_name(self):
+        """A unit that tags its journal lines with another unit's name.
+
+        cti-agent-appscan.service was generated from the weekly digest's unit
+        and kept SyslogIdentifier=cti-agent-weekly. Its log lines - including
+        "AUTH FAILED on N scan(s)" - then read as the weekly digest's, and
+        `journalctl -t cti-agent-appscan` returned nothing at all. Same origin
+        as the stray "weekly" argument its ExecStart arrived with.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        wrong = []
+        for unit in sorted((root / "fleet-kit" / "fleet").glob("systemd*/*.service")):
+            m = re.search(r"^SyslogIdentifier=(.+)$",
+                          unit.read_text(encoding="utf-8"), re.M)
+            want = unit.stem.rstrip("@")
+            if m and m.group(1).strip() != want:
+                wrong.append(f"{unit.parent.name}/{unit.name} logs as "
+                             f"{m.group(1).strip()!r}, want {want!r}")
+        self.assertEqual(wrong, [], "\n" + "\n".join(wrong))
+
     def test_every_command_that_reads_credentials_loads_fleet_env(self):
         """A binary run by hand must see the config the timer sees.
 

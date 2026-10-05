@@ -203,6 +203,34 @@ not yet measurable" in one paragraph while printing fifteen perfectly usable
 QIDs in the next. The source was telling us the answer in a format we were
 treating as decoration.
 
+### Axis 9 — the other estate: *are the applications we write exposed?*
+
+`cti-appscan` — weekly, from the web application scanner's own scan-completion
+mail plus its API. Every other axis is about software somebody else wrote and
+we run; this one is about code our own developers wrote, so it goes to **them**,
+on its own recipient list, enforced in code. The patching team and the
+application team receiving each other's mail is how both learn to skim.
+
+It is the first lane that is **push-shaped**. A vulnerability lookup is a
+question — "is CVE-X on our hosts?" — so its provider interface is a query. A
+DAST scanner finishes and tells you, so the primitive here is "recognise and
+parse a completion notification". That turned out to make a second scanner
+cheap in a way the VM boundary is not: parsing an email needs no credentials,
+so a new provider is useful the day its mail arrives, and an API is an
+optional extra rather than a prerequisite.
+
+Its first real send taught the lesson of [Silence has to mean
+something](#2-silence-has-to-mean-something) from the other side. The report
+opened with a section headed *coverage gaps*, listing every scan that had not
+logged in. Three of them were public sites with no login at all — there was
+nothing missing and nothing to do, and the loudest section of the report was a
+standing complaint about applications for being what they are. A permanent
+alarm is read as no alarm. The fix was to separate a **label** from a
+**fault**: every count says whether its scan logged in, because a zero from a
+scan that only saw the public pages is a different number; but only a
+credential that *was* configured and *failed* is a fault, and that goes to the
+operator rather than to the developers, who cannot fix it.
+
 ### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
 
 Two lanes that watch the fleet rather than the estate:
@@ -308,6 +336,7 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 |---|---|
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
 | Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, with our own exposure and the scanner query |
+| Report web application scan results to the developers who own the code | `cti-appscan`, weekly, on its own recipient list, with a broken scanner login escalated to us rather than to them |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
 | Track known-exploited vulnerabilities and compliance deadlines | `cti-kev`, against CISA's published due dates |
@@ -373,12 +402,16 @@ The pattern's real payoff is that extension is cheap and bounded. To add one:
    API, output to a file and the board. No mail, no chat, no exceptions.
 3. **Decide the cadence honestly.** Some signals are daily. Some are
    incidents. Do not put an incident on a daily timer.
-4. **Give it a failure mode that is loud.** `OnFailure=cti-agent-alert@%n`.
-5. **Tell the orchestrator it exists.** `CLAUDE.md` and the skills are the
+4. **Decide who reads it, and enforce that in code.** A lane with a different
+   audience gets its own recipient list that fails closed — not a section in
+   someone else's email, and not a fallback to the default list when its own
+   is unset.
+5. **Give it a failure mode that is loud.** `OnFailure=cti-agent-alert@%n`.
+6. **Tell the orchestrator it exists.** `CLAUDE.md` and the skills are the
    agent's actual instructions. A tool the orchestrator doesn't know about is a
    tool that never gets used — and stale instructions produce wrong decisions,
    not just bad documentation.
-6. **Write the test before the integration.** Stub the network. The lane tests
+7. **Write the test before the integration.** Stub the network. The lane tests
    here run offline and deterministically, which is why they can be trusted to
    fail for real reasons.
 

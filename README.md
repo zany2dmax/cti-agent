@@ -6,9 +6,11 @@ decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
 
 It reads CTI advisories from a shared Microsoft 365 mailbox, extracts CVEs,
 asks a vulnerability scanner which of them are *actually present in the
-estate*, and mails a prioritised digest every morning — plus a monthly Microsoft Patch Tuesday synopsis, CISA KEV
-deadline tracking, and a cleanup lane that keeps the mailbox tidy without
-touching anything a human still needs to see.
+estate*, and mails a prioritised digest every morning — plus a monthly Microsoft
+Patch Tuesday synopsis, a weekly application-security report from the web app
+scanner to the people who own the code, CISA KEV deadline tracking, and a
+cleanup lane that keeps the mailbox tidy without touching anything a human still
+needs to see.
 
 The organising principle: **presence is determined only by the scanner.** CTI
 email text provides urgency and context, never proof that a vulnerability
@@ -55,6 +57,14 @@ wrap-ups, correlates the release against Host Detection, and answers the
 question neither public write-up can: what landed on *our* machines. One table
 row per QID, the Qualys Detection Score, and the review's own QQL verbatim so
 somebody can paste it into the console and see the same set.
+
+**A weekly AppSec report.** Mondays, to a separate list — the people who own
+application code, not the people who patch servers, and the split is enforced
+in code. Built from the DAST scanner's own scan-completion mail (Qualys WAS
+today, any scanner behind `internal/appscan`) plus its API for per-finding
+detail. Open counts per application, what is new since the last scan, and a
+label on every count saying whether that scan logged in. A scanner credential
+that stops working alerts the operator rather than the developers.
 
 **KEV deadline tracking.** CISA remediation deadlines, but only for CVEs the
 scanner actually found in the estate — a deadline for something you do not have

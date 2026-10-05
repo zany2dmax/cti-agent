@@ -113,6 +113,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   runner reads the config file, because four of the five followed an unwritten
   convention and the fifth did not.
 
+- **`cti-appscan` did not load `fleet.env` itself.** The runner fix above made
+  the timer work and left the hand-run broken: `sudo cti-agent cti-appscan
+  --since 336h` still reported the same missing variables, because the binary
+  never opened the file - only its runner did. Every other command that reads
+  credentials calls `fleetenv.Load()`; a lane test now fails one that does not.
+
+- **The AppSec unit logged as the weekly digest.** It was generated from the
+  weekly's unit and kept `SyslogIdentifier=cti-agent-weekly`, so its lines -
+  including `AUTH FAILED` - read as the digest's, and `journalctl -t
+  cti-agent-appscan` returned nothing. A lane test now checks every unit logs
+  under its own name.
+
+- **Quiet applications had no report link.** The link was rendered only under
+  CHANGED THIS WEEK, so an application with nothing new - on the first send,
+  all three public sites - never showed one. It is now one line under every
+  application in OPEN NOW, and under the fault entry for a scan that did not
+  finish.
+
 - **`run-appscan` accepted and ignored unknown arguments.** The unit file was
   first generated from the weekly one and arrived with a stray `weekly` on its
   `ExecStart`. The runner would have shrugged and run in the default mode while
@@ -128,7 +146,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   mail had come from.
 
   The severity **colours** are shared with the daily; the severity **words**
-  are not, and the footer says so on every send. Qualys severity 5 is a claim
+  are not, and the footer says so on every send.
+
+- **One clickable link, for links the lane builds.** Every URL that arrived in
+  scanner mail stays plain text. `ScanResult.PortalURL` - a link this lane will
+  build from the scanner's authenticated API record into its own UI - is the
+  only thing rendered as an anchor, after an https and exact-host check against
+  hosts registered for that scan's provider. Nothing sets it yet: that waits on
+  the WAS scan-list lookup. Qualys severity 5 is a claim
   about one HTTP response; the fleet's Sev5 means exploited in the wild and
   confirmed present in the estate.
 

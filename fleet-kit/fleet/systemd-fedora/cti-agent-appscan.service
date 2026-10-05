@@ -71,4 +71,4 @@ CapabilityBoundingSet=
 # rotation, size caps and retention already.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=cti-agent-weekly
+SyslogIdentifier=cti-agent-appscan

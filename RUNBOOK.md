@@ -990,6 +990,30 @@ The file is written on **every** run. Empty means "checked, none failed";
 absent means the binary predates `--auth-fail-out` and nothing was checked. The
 runner says which in its log, because those two look identical from the mail.
 
+### Links in the report
+
+Each application shows one report link, under OPEN NOW. A link that came from
+the scanner's email is **plain text** — the mail arrived at a published
+address, and the findings name attackable paths on our own sites. A link the
+lane builds from the scanner's API record is **clickable**, after an https and
+host check. A built link that fails the check is not printed; the email's link
+is used instead.
+
+### A different window
+
+`run-appscan` takes only `--dry-run`. For a two-week test, run the binary and
+send it yourself:
+
+```bash
+S=/var/lib/cti-agent/state
+sudo cti-agent cti-appscan --since 336h --out $S/appscan-14d.html --text-out $S/appscan-14d.txt
+sudo cti-agent cti-mailer --lane was --to you@example.com \
+  --html $S/appscan-14d.html --text $S/appscan-14d.txt --subject "[TEST 14d] AppSec"
+```
+
+The copy still says "this week", and each application still gets one row from
+its newest scan. An address outside `WAS_ALLOW_TO` needs `--approve`.
+
 ### Adding a second scanner
 
 `internal/appscan` is a provider boundary, like `internal/vulnlookup` for host
