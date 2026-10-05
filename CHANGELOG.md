@@ -35,6 +35,145 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.1 — 2026-10-05
+
+### Added
+
+- **A weekly application-security lane.** `cti-appscan` +
+  `cti-agent-appscan.timer`, Mondays 07:30. It reads the DAST scanner's own
+  scan-completion emails out of the CTI mailbox, optionally pulls per-finding
+  detail from the Qualys WAS Findings API, and mails the result to the people
+  who own application code.
+
+  `internal/appscan` is a provider boundary, the way `internal/vulnlookup` is
+  for host VM. A new scanner needs `Name`, `Recognises(sender, subject)` and
+  `Parse(body)` — **no credentials**, so Invicti or Wiz becomes useful the day
+  its email arrives rather than the day somebody negotiates API access. An API
+  is an optional second interface, `DetailFetcher`; losing it costs
+  per-finding detail and not the report.
+
+  The lane reports the Qualys **Active** counts, never the lifecycle totals.
+  The two differ by an order of magnitude on a real application — one carries
+  270 "Urgent" on record of which 247 are already fixed — and leading with the
+  lifecycle number would be a false alarm twelve times too large.
+
+- **Per-lane recipient allowlists, fail-closed.** `cti-mailer --lane was`
+  resolves `WAS_TO` against `WAS_ALLOW_TO` and **refuses if either is unset**,
+  naming the variable that is missing. There is no fallback to the digest
+  audience, and `--approve` does not override an empty list. An allowlist may
+  reference another by name — `PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com` —
+  with cycles caught and a depth limit; a wildcard reference (`$*_ALLOW_TO`)
+  is refused by name rather than resolved to something surprising.
+
+### Fixed
+
+- **An unauthenticated scan was being reported as a coverage gap.** It is not
+  one. The first real send of this report put three applications under a
+  heading reading `COVERAGE GAPS`; all three are public sites with **no login
+  at all**, so there is no missing authentication record, nothing to configure
+  and nothing for the audience of that mail to do. The lane was filing a
+  defect against three applications for being public.
+
+  Authentication is now two separate things. A **label** — every count in the
+  report says whether an authenticated or an unauthenticated scan produced it,
+  because a zero from a scan that never logged in is not the same number, and
+  that caveat is the part of the old design worth keeping. And a **fault**,
+  but only when a credential *was* configured and *failed*: then the scan
+  covered the public surface while still looking configured in Qualys, and
+  this week's counts are not comparable with last week's.
+
+  `Auth.Blind()` is gone, replaced by `Configured()`, `Authenticated()`,
+  `Failed()` and `Label()`. `ScanResult.Attention()` no longer fires merely
+  because a scan did not authenticate — it used to sort three public sites to
+  the top of the report every week with nothing actionable in them, and a
+  permanent alarm is read as no alarm.
+
+- **A failed login no longer alerts the wrong people — or nobody.** An
+  authentication failure now emails the fleet operator through `cti-alert`
+  (kind `HOLD`), because the App Dev audience cannot fix a scanner credential.
+  `cti-appscan --auth-fail-out` writes the finding to a file and the runner
+  decides what to do with it: this binary does not send mail and must not
+  learn how, since `cti-mailer` holds the only recipient gate in the fleet.
+  The file is written on **every** run — empty means "checked, none failed",
+  absent means an older binary that never checked, and the runner says which.
+
+- **A broken login stopped erasing the open backlog.** Found by rendering it:
+  the report partitioned "faulted" and "counted" scans as mutually exclusive,
+  so the week an application's login failed it dropped out of `OPEN NOW`
+  entirely and the severity tiles went to zero with it. An application with 23
+  Urgent findings open does not become clean because the scanner had a bad
+  password. The two sets now overlap; only an *incomplete* scan has no numbers
+  to print.
+
+- **`run-appscan` did not source `fleet.env`.** Every other runner does, and
+  this one did not, so `cti-appscan` ran with no credentials at all and
+  reported `missing required environment variables: CLIENT_ID CLIENT_SECRET
+  GRAPH_MAILBOX TENANT_ID` on a box where all four are set. The error was
+  accurate and pointed at the wrong thing. A lane test now asserts that every
+  runner reads the config file, because four of the five followed an unwritten
+  convention and the fifth did not.
+
+- **`run-appscan` accepted and ignored unknown arguments.** The unit file was
+  first generated from the weekly one and arrived with a stray `weekly` on its
+  `ExecStart`. The runner would have shrugged and run in the default mode while
+  the service file looked correct to anyone reading it; it now refuses.
+
+### Changed
+
+- **The application-security email looks like the rest of the fleet's mail.**
+  The daily brief's palette, navy header band and 640px card, severity tiles,
+  and a subject in the family shape — `CTI Fleet AppSec Oct 05: ...`, with
+  `[AUTH FAILED]` or `[INCOMPLETE]` in front when something is broken. It
+  previously read `[AppSec] Week of Oct 4: ...`, which nowhere said where the
+  mail had come from.
+
+  The severity **colours** are shared with the daily; the severity **words**
+  are not, and the footer says so on every send. Qualys severity 5 is a claim
+  about one HTTP response; the fleet's Sev5 means exploited in the wild and
+  confirmed present in the estate.
+
+- **The weekly digest is a roll-up of stored findings, not a second mailbox
+  read.** It never was a week: `cti-agent-weekly.service` runs `run-digest`
+  with no `--lookback`, so it read the same 24 hours as the daily. On
+  2026-10-05 both briefs reported reading the same four emails an hour apart,
+  and the operator reasonably read that as the daily having sent twice.
+
+  Widening the mailbox query to 168h does not fix it — the cleanup lane
+  archives advisories on a 48-hour grace once a completed run has read them, so
+  a 7-day query sees only what happened not to be archived yet. That is a
+  partial week presented as a whole one, which is worse than the honest 24
+  hours it produced before. `fleet-db rollup --days N` reads the findings table
+  instead: those are what the fleet concluded, they outlive the mail they came
+  from, and they are immune to the archive grace.
+
+- **The weekly subject is no longer byte-identical to the daily's.**
+  `subject(data, kind)` accepted `kind` and used it in none of its six return
+  paths, so the Monday weekly went out with the daily's subject line —
+  including "in the last 24h" on a report covering seven days.
+
+### Upgrade
+
+Reinstall and set two variables. The lane's timer is **not** enabled by the
+installer; see [RUNBOOK 11f](RUNBOOK.md#11f-the-weekly-application-security-lane).
+
+```bash
+# in fleet.env, both required - the mailer refuses without them
+WAS_TO="appdev-leads@example.com"
+WAS_ALLOW_TO="appdev-leads@example.com,security@example.com"
+```
+
+```bash
+sudo cti-agent run-appscan --dry-run     # open the HTML it leaves in state/
+sudo systemctl enable --now cti-agent-appscan.timer
+```
+
+Nothing else changes meaning. The Qualys WAS Findings API uses the same
+credentials as the VM lane and the same `QUALYS_BASE_URL`, but needs the WAS
+module enabled on the account's role — without it the lane reports counts from
+the notification emails and logs a warning naming the role.
+
+---
+
 ## 1.0.2 — 2026-10-04
 
 ### Fixed

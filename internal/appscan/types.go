@@ -100,13 +100,39 @@ type Lifecycle struct {
 // Observed on two scans run the same night by the same scanner: an
 // unauthenticated scan crawled 252 links and reported zero Urgent and zero
 // Critical. An authenticated scan of a different application crawled 67 and
-// found twenty Urgent. The first application is not safer; the scanner never
-// got past the front door.
+// found twenty Urgent. The first application is not safer; the scanner covered
+// a different surface.
 //
-// A clean result from an unauthenticated scan is therefore not evidence of
-// anything, and reporting its zeroes without saying so is the exact failure
-// this codebase keeps having to fix: a number that looks like good news and
-// means nothing.
+// # THE DISTINCTION THIS TYPE EXISTS TO MAKE
+//
+// An earlier version of this package collapsed the whole question into one
+// predicate, Blind(), meaning "not authenticated". That read every
+// unauthenticated scan as a coverage gap, and the report named three
+// applications as having one. All three are public sites with NO LOGIN AT ALL.
+// There is nothing to authenticate as, so there is no missing credential, no
+// gap, and nothing for anybody to go and fix. The report was raising a defect
+// against the applications for being what they are.
+//
+// There are three states and they want different handling:
+//
+//	no credential configured   The scan covers the whole application, because
+//	                           the whole application is public. A LABEL on the
+//	                           scan - "unauthenticated scan" - so a reader
+//	                           knows which surface the numbers describe.
+//	configured and succeeded   Also a label - "authenticated scan".
+//	configured and FAILED      A FAULT. Authentication was meant to happen here
+//	                           and did not, so the scan covered less than it
+//	                           was configured to cover while still looking
+//	                           configured to anyone reading the setup. That is
+//	                           the fleet operator's problem, not the App Dev
+//	                           audience's - they cannot fix a scanner
+//	                           credential - so it is alerted, not merely
+//	                           printed.
+//
+// What survives from the old design is that the LABEL travels with every
+// count. An unauthenticated scan's numbers are true about the public surface
+// and silent about anything behind a login; a reader who does not know which
+// kind of scan produced a zero cannot interpret the zero.
 type Auth struct {
 	// Record is the scanner's named credential set, empty when none.
 	Record string
@@ -115,17 +141,56 @@ type Auth struct {
 	Status string
 }
 
+// Configured reports whether a credential set was attached to this scan.
+//
+// A property of the SETUP, not of the outcome. True says somebody intended
+// this scan to log in; it says nothing about whether it managed to.
+func (a Auth) Configured() bool { return a.Record != "" }
+
 // Authenticated reports whether the scan actually got in.
 //
-// Requires BOTH a configured record and a successful status. A configured
-// record that failed to authenticate produces the same blind scan as no record
-// at all, while looking configured to anyone reading the setup.
+// Requires BOTH a configured record and a successful status.
 func (a Auth) Authenticated() bool {
-	return a.Record != "" && strings.EqualFold(a.Status, "successful")
+	return a.Configured() && strings.EqualFold(a.Status, "successful")
 }
 
-// Blind reports whether this scan's results describe only the public surface.
-func (a Auth) Blind() bool { return !a.Authenticated() }
+// Failed reports a credential that was meant to work and did not.
+//
+// THE ONLY AUTH STATE THAT IS A FAULT. Compare with Authenticated(): a scan
+// can be neither, which is the ordinary case for a site with no login.
+//
+// Two ways to be true, because either alone leaves a hole:
+//
+//   - the vendor says so. Requiring a named record as well would mean a
+//     notification that states a failure but leaves the record field as
+//     Qualys's literal "None" gets filed as an ordinary unauthenticated scan.
+//     Not observed; cheap to cover, and the failure mode is silent.
+//   - a record is configured and the status is not success. Covers a status
+//     this code has never seen, including the empty string the parser leaves
+//     when the vendor changes its template.
+func (a Auth) Failed() bool {
+	if strings.Contains(strings.ToLower(a.Status), "fail") {
+		return true
+	}
+	return a.Configured() && !a.Authenticated()
+}
+
+// Label describes which surface this scan's numbers are about.
+//
+// The first two are plain descriptions, not verdicts: both are normal, and a
+// reader needs to know which one produced a number before the number means
+// anything. The third is a verdict, and it says so - a row of counts from a
+// scan whose login broke must not sit under the same neutral tag as a public
+// site that never had one.
+func (a Auth) Label() string {
+	switch {
+	case a.Failed():
+		return "authentication FAILED"
+	case a.Authenticated():
+		return "authenticated scan"
+	}
+	return "unauthenticated scan"
+}
 
 // ScanResult is one completed scan, normalised across vendors.
 type ScanResult struct {
@@ -187,14 +252,36 @@ type Finding struct {
 	LastSeen  time.Time
 }
 
+// Fault reports whether something is wrong with the SCAN, as distinct from
+// something being wrong with the application.
+//
+// Two cases, and they share a consequence: this week's numbers for this
+// application cannot be compared with last week's, because the measurement
+// changed. An incomplete scan stopped early; a failed credential means it
+// covered the public surface when it was set up to cover more.
+//
+// Both are the fleet operator's problem rather than the App Dev audience's -
+// nobody writing application code can fix a scanner credential or a cancelled
+// job - which is why this is the predicate cmd/cti-appscan alerts on.
+//
+// An unauthenticated scan with NO credential configured is not a fault. There
+// is nothing missing: the scan covered what there was to cover.
+func (s ScanResult) Fault() bool { return !s.Complete || s.Auth.Failed() }
+
 // Attention reports whether a human should look at this scan now.
 //
 // New and Reopened findings, not the backlog: the backlog is the subject of a
 // remediation programme, whereas something that appeared since the last scan
-// is the thing a weekly report exists to surface. A blind scan always warrants
-// attention regardless of its counts, because its counts are not evidence.
+// is the thing a weekly report exists to surface.
+//
+// AN UNAUTHENTICATED SCAN IS NOT BY ITSELF ATTENTION. This used to return true
+// for every scan that had not authenticated, which sorted three public sites
+// with no login to the top of the report every week with nothing for anybody
+// to do about them - and a permanent alarm is read as no alarm. A scan that was
+// SUPPOSED to authenticate and could not is a different matter, and that is
+// what Auth.Failed() picks out.
 func (s ScanResult) Attention() bool {
-	if !s.Complete || s.Auth.Blind() {
+	if s.Fault() {
 		return true
 	}
 	n, r := s.AppState.New, s.AppState.Reopened

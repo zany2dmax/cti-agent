@@ -156,33 +156,53 @@ func TestTheSectionBoundIsRespected(t *testing.T) {
 	}
 }
 
-func TestAnUnauthenticatedScanIsNotACleanResult(t *testing.T) {
-	// The single most important behaviour in this package.
-	//
+func TestAnUnauthenticatedScanIsLabelledNotFaulted(t *testing.T) {
 	// Observed on two real scans the same night: the unauthenticated one
 	// crawled 252 links and reported zero Urgent and zero Critical; the
 	// authenticated one crawled 67 and found twenty Urgent. The first
-	// application is not safer - the scanner never got past the front door.
+	// application is not safer - the two scans covered different surfaces,
+	// and a reader looking at a zero cannot tell which kind produced it.
+	//
+	// SO THE SCAN CARRIES A LABEL. What it must NOT carry is a defect. The
+	// first version of this package returned true from Blind() here and true
+	// from Attention(), which put three public sites with no login at the top
+	// of the weekly report under a heading reading COVERAGE GAPS - a standing
+	// complaint, with no missing credential behind it and nothing anybody
+	// could do. A permanent alarm is read as no alarm.
 	r, _ := Provider{}.Parse(blindScan)
 
 	if r.Auth.Record != "" {
 		t.Errorf("Auth.Record = %q - Qualys's literal \"None\" must read as absent", r.Auth.Record)
 	}
+	if r.Auth.Configured() {
+		t.Error("Configured() is true with no credential set")
+	}
 	if r.Auth.Authenticated() {
 		t.Error("an unauthenticated scan reported itself authenticated")
 	}
-	if !r.Auth.Blind() {
-		t.Error("Blind() is false for a scan with no authentication")
+	if r.Auth.Failed() {
+		t.Error("no credential was configured, so nothing failed - Failed() " +
+			"must mean a credential that did not work")
 	}
-	if !r.Attention() {
-		t.Error("a blind scan with zero findings did not warrant attention - " +
-			"its zeroes are not evidence of anything")
+	if got := r.Auth.Label(); got != "unauthenticated scan" {
+		t.Errorf("Label() = %q", got)
+	}
+	if r.Fault() {
+		t.Error("an unauthenticated scan was treated as a scanner fault")
+	}
+	if r.Attention() {
+		t.Error("a complete scan of a site with no login demanded attention " +
+			"every week with nothing to act on")
 	}
 }
 
-func TestAConfiguredButFailedLoginIsAlsoBlind(t *testing.T) {
-	// The nastiest case: a record IS configured, so the setup looks right to
-	// anyone reviewing it, and the scan still only saw the public surface.
+func TestAConfiguredButFailedLoginIsAFault(t *testing.T) {
+	// The nastiest case, and the one that IS a fault: a record is configured,
+	// so the setup looks right to anyone reviewing it in Qualys, and the scan
+	// nonetheless only saw the public surface. This week's numbers therefore
+	// are not comparable with last week's, and nobody writing application code
+	// can fix it - which is why cti-appscan alerts the operator on exactly
+	// this predicate.
 	body := strings.Replace(deepScan,
 		"Authentication Status : Successful",
 		"Authentication Status : Failed", 1)
@@ -191,8 +211,17 @@ func TestAConfiguredButFailedLoginIsAlsoBlind(t *testing.T) {
 	if r.Auth.Record == "" {
 		t.Fatal("the fixture should still have a record configured")
 	}
+	if !r.Auth.Configured() {
+		t.Error("a scan with a named credential reported none configured")
+	}
 	if r.Auth.Authenticated() {
 		t.Error("a failed login counted as authenticated")
+	}
+	if !r.Auth.Failed() {
+		t.Error("a configured credential that did not authenticate is a failure")
+	}
+	if !r.Fault() {
+		t.Error("a failed authentication is a scanner fault")
 	}
 	if !r.Attention() {
 		t.Error("a failed authentication did not warrant attention")

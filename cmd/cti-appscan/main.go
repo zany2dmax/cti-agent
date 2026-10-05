@@ -55,6 +55,10 @@ func run() int {
 	subjectOnly := flag.Bool("subject-only", false, "print the subject line and exit")
 	noDetail := flag.Bool("no-detail", false,
 		"skip the Qualys WAS API; report counts from the notifications only")
+	authFailOut := flag.String("auth-fail-out", "",
+		"write one line per scan whose configured credential failed to "+
+			"authenticate; the runner alerts the operator when this file is "+
+			"non-empty. Absent or empty means every credential worked.")
 	flag.Parse()
 
 	cfg, err := config.LoadGraphOnly()
@@ -91,6 +95,39 @@ func run() int {
 		return exitOK
 	}
 
+	// THE AUTHENTICATION-FAILURE FILE, AND WHY IT IS A FILE.
+	//
+	// A credential that was configured and did not work is the fleet
+	// operator's problem, not the App Dev audience's: nobody writing
+	// application code can fix a scanner login. So it has to reach a different
+	// person from the one this report is addressed to.
+	//
+	// This binary does not send mail and must not learn how - cti-mailer holds
+	// the only recipient gate in the fleet, and cti-alert is the only
+	// escalation channel. So the finding is written to a file and the runner,
+	// which already knows how to call cti-alert, decides. Same shape as the
+	// cve->ticket map the digest passes to brief.py, and for the same reason:
+	// the component that can talk to the outside world is the one that talks.
+	//
+	// Empty file, or no file, means no failures. The runner must not treat a
+	// missing file as an error, because the overwhelmingly common case is that
+	// every credential worked.
+	if *authFailOut != "" {
+		if err := writeAuthFailures(*authFailOut, scans); err != nil {
+			// A warning. The report is the deliverable; losing the alert hint
+			// must not cost the weekly mail.
+			logf("warn   : could not write %s: %s",
+				safelog.Line(*authFailOut), safelog.Line(err.Error()))
+		}
+	}
+	for _, s := range scans {
+		if s.Auth.Failed() {
+			logf("AUTH FAILED: %s (%s) - the fleet operator needs to know; "+
+				"this scan covered less than it was configured to cover",
+				safelog.Line(s.App), safelog.Line(s.Auth.Status))
+		}
+	}
+
 	logf("scans  : %d notification(s) in the last %s", len(scans), *since)
 	logf("subject: %s", safelog.Line(block.Subject))
 
@@ -115,6 +152,37 @@ func run() int {
 		fmt.Print(block.Text)
 	}
 	return exitOK
+}
+
+// writeAuthFailures records the scans whose credential did not work.
+//
+// Always written, even when empty. A file that exists and is empty says "this
+// run checked and found none"; an absent file says "this run did not check",
+// and the runner cannot tell those apart if the empty case is skipped. That
+// distinction is the whole value of the file - a lane that quietly stops
+// reporting failures looks exactly like a lane with no failures, which is the
+// mistake this fleet has made more than once.
+//
+// 0600 and one line per application, no counts: it names which applications
+// exist and which of them has a broken scanner credential, which is the same
+// class of information as the report itself.
+func writeAuthFailures(path string, scans []appscan.ScanResult) error {
+	var b strings.Builder
+	for _, s := range scans {
+		if !s.Auth.Failed() {
+			continue
+		}
+		status := s.Auth.Status
+		if status == "" {
+			status = "no authentication status in the notification"
+		}
+		// Tab-separated and sanitised. The runner puts this in a --reason
+		// argument that reaches an email and a journal, and both fields come
+		// from a vendor email.
+		fmt.Fprintf(&b, "%s\t%s\t%s\n",
+			safelog.Line(s.App), safelog.Line(s.Auth.Record), safelog.Line(status))
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
 // providers is every scanner this lane understands.

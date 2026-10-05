@@ -23,6 +23,7 @@ document assumes you have decided to run it.
 - [11c. Verifying the Jira connection](#11c-verifying-the-jira-connection)
 - [11d. What version is this box running?](#11d-what-version-is-this-box-running)
 - [11e. Taking a host off the schedule](#11e-taking-a-host-off-the-schedule)
+- [11f. The weekly application-security lane](#11f-the-weekly-application-security-lane)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -190,6 +191,8 @@ regression test.
 | `REPORT_PATH` | Markdown output file for the agent |
 | `DIGEST_TO` | Digest recipients, comma-separated. No default |
 | `FLEET_ALLOW_TO` | Recipient allowlist enforced in code; anything outside it needs `--approve` |
+| `WAS_TO` | Application-security report recipients — the people who own application code, not the people who patch servers. No default |
+| `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `FLEET_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
 | `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, `count`. [Section 13](#13-report-sensitivity) |
@@ -373,6 +376,7 @@ one is enabled.
 | 4 | `cti-agent-checkin.timer` | orchestrator heartbeat | Claude Code installed, budget ceilings set |
 | 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent |
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
+| 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 
 ```bash
 systemctl list-timers 'cti-agent-*' --all
@@ -921,6 +925,80 @@ Every run verifies the result rather than announcing it, and exits non-zero if
 any timer is still active or still enabled. A stop that quietly did nothing is
 the failure that matters here — you would believe the host was off while it
 kept archiving a mailbox the new host is reading.
+
+---
+
+## 11f. The weekly application-security lane
+
+`cti-agent-appscan.timer`, Mondays 07:30. Reads the DAST scanner's own
+completion notifications out of the CTI mailbox, pulls per-finding detail from
+the Qualys WAS Findings API where credentials allow, and mails the result
+through `cti-mailer --lane was`.
+
+```bash
+sudo cti-agent run-appscan --dry-run   # render, print the subject, send nothing
+sudo cti-agent run-appscan             # render and send
+```
+
+A dry run leaves the rendered report at
+`$FLEET_HOME/state/appscan-YYYY-MM-DD.html`, mode 0600. Open it before enabling
+the timer: it names which applications have open Urgent findings, so it is a
+map of where to look, and it is handled like the VM reports for that reason.
+
+### A different audience, enforced in code
+
+This mail goes to the people who own application code — not the people who
+patch servers. The split is not a convention: `cti-mailer --lane was` resolves
+`WAS_TO` against `WAS_ALLOW_TO` and **refuses if either is unset**. It does not
+fall back to the digest audience, and `--approve` does not override an empty
+allowlist.
+
+### Authenticated and unauthenticated scans are both normal
+
+Every count in the report is labelled with the kind of scan that produced it.
+That is a statement of scope, not a defect:
+
+- **unauthenticated scan** — covers what a visitor can reach without logging
+  in. For a site with no login that is the whole application.
+- **authenticated scan** — the scanner logged in, so the pages behind the login
+  were tested too.
+
+The report does **not** treat an unauthenticated scan as a coverage gap. An
+earlier version did, and named three public sites with no login as having one
+— a standing complaint with nothing behind it and nothing anybody could do.
+
+### What does raise a fault
+
+`SCANNER FAULTS` appears only for two things, and both are yours rather than
+the App Dev team's:
+
+| Fault | Means | Where to look |
+|---|---|---|
+| `authentication failed` | A credential **is** configured and did not work. The scan covered the public surface while still looking configured, so this week's counts are not comparable with last week's | The authentication record in Qualys WAS |
+| `scan did not complete` | Cancelled, errored, or hit a time limit. Its counts describe a crawl that stopped partway, so none are reported | The scan schedule and the scan's own log in Qualys |
+
+An authentication failure also **emails you** through `cti-alert`, kind `HOLD`,
+because the people receiving the report cannot fix a scanner login. The runner
+sends the report first; an alerting problem never costs the weekly mail.
+
+```bash
+# which applications failed to authenticate on the last run
+sudo cat "$FLEET_HOME"/state/appscan-authfail-$(date -u +%F).tsv
+```
+
+The file is written on **every** run. Empty means "checked, none failed";
+absent means the binary predates `--auth-fail-out` and nothing was checked. The
+runner says which in its log, because those two look identical from the mail.
+
+### Adding a second scanner
+
+`internal/appscan` is a provider boundary, like `internal/vulnlookup` for host
+VM. A new scanner needs a `Provider` — `Name`, `Recognises(sender, subject)`,
+`Parse(body)` — and nothing else; no credentials are required to implement one,
+so Invicti or Wiz becomes useful the day its email arrives rather than the day
+somebody negotiates API access. A provider that *does* have an API additionally
+implements `DetailFetcher`, and losing that costs per-finding detail and not
+the report.
 
 ---
 

@@ -1685,6 +1685,97 @@ class TestFileShape(unittest.TestCase):
                     f"fleet/bin/ or fleet/lanes/")
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
+    def test_an_authentication_failure_reaches_the_operator(self):
+        """A broken scanner credential must not be reported only to the people
+        who cannot fix it.
+
+        The AppSec report goes to the team that owns application code. They
+        cannot repair a Qualys authentication record, and a week where the
+        scanner silently stopped logging in is a week where their numbers
+        describe a smaller surface than last week's while looking like an
+        improvement.
+
+        So the chain has to be intact end to end, and every link of it is
+        hand-written: cti-appscan has to be ASKED for the file (--auth-fail-out
+        is opt-in), the runner has to test the file, and it has to call
+        cti-alert. Any one of those missing leaves a lane that still sends a
+        perfectly ordinary-looking report and escalates nothing - which is this
+        project's recurring failure, something reporting success while doing
+        nothing.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+
+        # CODE ONLY. Written first with the whole file, and it passed while the
+        # flag had been deleted from the invocation - because the comment four
+        # lines above still mentioned "--auth-fail-out". A test satisfied by
+        # prose about the thing is the same bug as the one it is guarding.
+        def code(path):
+            return "\n".join(
+                line for line in path.read_text(encoding="utf-8").split("\n")
+                if not line.lstrip().startswith(("#", "//")))
+
+        runner = code(root / "fleet-kit" / "fleet" / "bin" / "run-appscan")
+        main = code(root / "cmd" / "cti-appscan" / "main.go")
+
+        # The INVOCATION, not a mention. Stripping comments was still not
+        # enough: the runner has a `log "...predates --auth-fail-out..."` line,
+        # which is executable code, so a flag deleted from the command line
+        # left the assertion passing on a log message about its absence.
+        self.assertRegex(
+            runner, r'"\$APPSCAN"[^\n]*(\\\n[^\n]*)*--auth-fail-out',
+            "run-appscan does not pass --auth-fail-out to cti-appscan, so "
+            "there is nothing to escalate no matter how many logins failed")
+        self.assertIn('"auth-fail-out"', main,
+                      "cti-appscan does not define --auth-fail-out, so the "
+                      "runner is passing a flag that will stop the lane dead")
+        self.assertRegex(
+            runner, r'"\$ALERT"\s+--unit',
+            "run-appscan never runs cti-alert - assigning its path to a "
+            "variable is not calling it, and an authentication failure would "
+            "be recorded in a 0600 file nobody opens")
+        self.assertRegex(
+            runner, r'-s\s+"\$AUTHFAIL"',
+            "run-appscan does not test whether the failure file has anything "
+            "in it; `-f` alone fires on every run, because the file is written "
+            "even when nothing failed")
+        # Order matters: the report is the deliverable, and an alerting
+        # problem must not cost the weekly mail.
+        self.assertLess(
+            runner.index("--lane was"), runner.index("cti-alert"),
+            "run-appscan alerts before it sends - a cti-alert failure would "
+            "then take the report down with it")
+
+    def test_the_appscan_report_does_not_call_a_public_site_a_coverage_gap(self):
+        """An unauthenticated scan is a label, not a defect.
+
+        The first real send named three applications under a heading reading
+        COVERAGE GAPS. All three are public sites with no login at all, so
+        there is no missing authentication record and nothing for anybody to
+        fix. A report whose loudest section is a standing complaint about
+        applications being what they are teaches its readers to skip the top
+        of the page.
+
+        Asserted here as well as in the Go tests because this one came from
+        the operator reading the actual email, and the wording is the thing
+        that was wrong.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        for name in ("report.go", "types.go"):
+            src = (root / "internal" / "appscan" / name).read_text(encoding="utf-8")
+            code = "\n".join(
+                line for line in src.split("\n")
+                if not line.lstrip().startswith("//"))
+            for banned in ("COVERAGE GAP", "coverage gap", "Coverage gap"):
+                self.assertNotIn(
+                    banned, code,
+                    f"internal/appscan/{name} still frames a scan as a "
+                    f"coverage gap outside a comment")
+            self.assertNotIn(
+                "func (a Auth) Blind()", code,
+                "Auth.Blind() conflated 'this site has no login' with "
+                "'authentication failed' - the two need different handling, "
+                "and only the second is a fault")
+
     def test_the_taskfile_defines_no_task_twice(self):
         """A duplicate YAML key is silently the last one.
 
