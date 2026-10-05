@@ -91,9 +91,17 @@ func (p Provider) Parse(body string) (appscan.ScanResult, []string) {
 	field := func(label string) string { return fieldValue(lines, label) }
 
 	r.ScanTitle = field("Scan Title")
+	// The application's name is the Target line - a real notification reads
+	// "Target : <web app name>" - and the title only as a fallback. The title
+	// is a run name ("<something> Bimonthly Run #47") that on the real estate
+	// rarely matched the application's actual name, which is what the finding
+	// search is keyed on when no application id is available.
 	r.App = appFromTitle(r.ScanTitle)
 	r.Reference = field("Scan Reference")
 	r.Target = field("Target")
+	if t := tidy(r.Target); t != "" {
+		r.App = t
+	}
 	r.LinksCrawled = atoiOr(firstMatch(lines, crawledRE), 0)
 
 	r.Auth = appscan.Auth{

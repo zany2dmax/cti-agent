@@ -125,6 +125,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   cti-agent-appscan` returned nothing. A lane test now checks every unit logs
   under its own name.
 
+- **Per-finding detail was empty for nearly every application.** The finding
+  search was keyed on `webApp.name`, and the name it was given came from the
+  scan title ("Example Run #47" -> "Example"), which on the real estate matched
+  the scanner's application name in almost no scan. The search returned zero
+  findings without error and the report said "detail not available". It is
+  now keyed on `webApp.id` from the scan list, asks for vulnerabilities only,
+  marks unconfirmed ("potential") findings as such, and no longer lists
+  findings someone set to ignored in Qualys as new work. The application name
+  falls back to the notification's `Target` line, not the title.
+
 - **Quiet applications had no report link.** The link was rendered only under
   CHANGED THIS WEEK, so an application with nothing new - on the first send,
   all three public sites - never showed one. It is now one line under every
@@ -149,11 +159,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   are not, and the footer says so on every send.
 
 - **One clickable link, for links the lane builds.** Every URL that arrived in
-  scanner mail stays plain text. `ScanResult.PortalURL` - a link this lane will
-  build from the scanner's authenticated API record into its own UI - is the
-  only thing rendered as an anchor, after an https and exact-host check against
-  hosts registered for that scan's provider. Nothing sets it yet: that waits on
-  the WAS scan-list lookup. Qualys severity 5 is a claim
+  scanner mail stays plain text. Each application's "open in Qualys" link is
+  built from the WAS scan list: the UI host derived from `QUALYS_BASE_URL`,
+  a constant path, and the scan's integer id -
+  `/was/#/reports/online-reports/email-report/scan/<id>`, the same page
+  Qualys's own email links to, with the id checked against a real
+  notification. It is rendered as an anchor only after an https and
+  exact-host check against hosts registered for that scan's provider.
+
+- **The mailbox is reconciled with the Qualys WAS scan list.** Joined on the
+  scan reference. The API supplies the real application name and id, can mark
+  a scan's authentication FAILED (never the reverse), and adds vulnerability
+  scans whose completion email never arrived - listed under SCANNED, NO
+  NOTIFICATION with no counts, never totalled. Discovery scans, scans still
+  running, and on-demand runs that failed with no email are left out; a
+  scheduled authentication failure is a fault whether or not an email came.
+  With no Qualys credentials the lane reports from the notifications exactly
+  as before. Qualys severity 5 is a claim
   about one HTTP response; the fleet's Sev5 means exploited in the wild and
   confirmed present in the estate.
 

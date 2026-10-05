@@ -64,7 +64,14 @@ type Reconciliation struct {
 // notification unmatched. Email-less scans are only ADDED if they launched
 // at or after since, so the margin widens the join without widening the
 // report.
-func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time) ([]appscan.ScanResult, Reconciliation) {
+//
+// # THE LINK
+//
+// portal is PortalOrigin(QUALYS_BASE_URL). When set, every result that
+// matched or came from the scan list gets PortalURL = ScanReportURL(portal,
+// id): built from the API's integer id, never copied from mail. Empty means
+// no built links, and the renderer falls back to the email's link as text.
+func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time, portal string) ([]appscan.ScanResult, Reconciliation) {
 	var rec Reconciliation
 	byRef := make(map[string]Scan, len(scans))
 	for _, s := range scans {
@@ -88,6 +95,7 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time) ([]a
 		rec.Matched++
 		notified[r.Reference] = true
 		r = applyScan(r, s)
+		r.PortalURL = ScanReportURL(portal, s.ID)
 		if r.AppID != "" {
 			haveApp[r.AppID] = true
 		}
@@ -108,6 +116,7 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time) ([]a
 			continue
 		}
 		r := fromScan(s)
+		r.PortalURL = ScanReportURL(portal, s.ID)
 		if r.Fault() && s.Mode != "SCHEDULED" {
 			// An on-demand run that was cancelled, or whose login failed, with
 			// no notification: somebody at the console, troubleshooting. The
