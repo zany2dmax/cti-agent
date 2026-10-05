@@ -72,7 +72,33 @@ if [ -z "$DRY" ] && [ "$("$DB" was-sent "$DAY" "$KIND" 2>/dev/null || echo no)" 
   say "$KIND digest already sent for $DAY - nothing to do"; exit 0
 fi
 
-# ── 1. ingest ────────────────────────────────────────────────────────────────
+# ── 1. ingest, OR roll up stored findings ────────────────────────────────────
+#
+# THE WEEKLY DOES NOT READ THE MAILBOX.
+#
+# It used to, and it was never a week. cti-agent-weekly.service runs this with
+# no --lookback, so the weekly read GRAPH_LOOKBACK_HOURS - the same 24 hours as
+# the daily. On 2026-10-05 both briefs reported reading the same four emails,
+# an hour apart.
+#
+# Widening the mailbox read to 168h does not fix it: the cleanup lane archives
+# advisories once a completed run has read them, on a 48-hour grace, so a 7-day
+# mailbox query sees only what happened not to be archived yet. That is a
+# partial week presented as a whole one - silently wrong, and worse than the
+# honest 24 hours it produced before.
+#
+# Stored findings have neither problem. They are what the fleet concluded, they
+# outlive the mail they came from, and rolling them up is immune to the archive
+# grace. The weekly is a rollup; it was only ever an ingest by accident.
+if [ "$KIND" = weekly ]; then
+  DAYS="${WEEKLY_DAYS:-7}"
+  say "rollup: $DAYS days of stored findings (no mailbox read)"
+  "$DB" rollup --days "$DAYS" > "$ENRICHED" \
+    || fail "fleet-db rollup failed - is the findings table populated?"
+  [ -s "$ENRICHED" ] || fail "rollup produced nothing at $ENRICHED"
+  say "rollup: $(python3 -c "import json,sys;print(json.load(open('$ENRICHED'))['total'])" 2>/dev/null || echo '?') finding(s) in the window"
+else
+
 say "ingest: reading $GRAPH_MAILBOX"
 if [ -x "${CTI_AGENT_DIR:-}/cti-agent" ]; then
   ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
@@ -87,9 +113,15 @@ fi
 say "ingest: $(grep -c '^| CVE-' "$RAW" || true) CVE rows"
 
 # ── 2. enrich ────────────────────────────────────────────────────────────────
+#
+# Inside the else: the rollup is already enriched. Those findings were scored
+# when they were first ingested, and re-enriching them would spend several
+# hundred NVD and scanner calls to recompute numbers already on disk.
 say "enrich: NVD + EPSS + KEV"
 python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
   || fail "enrich lane failed"
+
+fi
 
 # ── 2b. ticket ───────────────────────────────────────────────────────────────
 # Files or updates one Jira ticket per confirmed KEV or Sev5 CVE, and writes a
@@ -107,8 +139,13 @@ python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
 # It is skipped entirely on a dry run. A --dry-run that silently files real
 # tickets would be the same class of mistake as the dropped --dry-run that
 # sent a real digest in September, with a longer cleanup.
+# Daily only. The weekly reports findings that were already ticketed when the
+# daily first saw them; running this again would add a comment to every open
+# ticket every Monday for no new information.
 JIRA="$FLEET_CODE/bin/cti-jira"
-if [ -z "$DRY" ] && [ -x "$JIRA" ]; then
+if [ "$KIND" = weekly ]; then
+  say "ticket: skipped - the weekly reports findings the daily already filed"
+elif [ -z "$DRY" ] && [ -x "$JIRA" ]; then
   say "ticket: filing KEV and Sev5 findings"
   "$JIRA" --from-enriched "$ENRICHED" --for-real || true
 elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
