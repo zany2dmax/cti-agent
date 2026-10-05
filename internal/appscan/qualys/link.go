@@ -1,6 +1,10 @@
 package qualys
 
 import (
+	neturl "net/url"
+	"strconv"
+	"strings"
+
 	"github.com/zany2dmax/cti-agent/internal/safelink"
 )
 
@@ -45,4 +49,43 @@ var PortalHosts = []string{
 // name in the From field.
 func UnwrapReportLink(raw string) (string, error) {
 	return safelink.Unwrap(raw, ReportHosts...)
+}
+
+// PortalOrigin maps the API base URL to the matching Qualys UI origin.
+//
+// QUALYS_BASE_URL names the API host - qualysapi.qgN.apps.qualys.com - and
+// the UI for the same pod is qualysguard.qgN.apps.qualys.com. Derived from
+// the operator's own configuration, never from mail. Returns "" for a host
+// that does not map onto one of PortalHosts, so an unexpected platform gets
+// no link rather than a guessed one.
+func PortalOrigin(baseURL string) string {
+	u, err := neturl.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if !strings.HasPrefix(host, "qualysapi.") {
+		return ""
+	}
+	ui := "qualysguard." + strings.TrimPrefix(host, "qualysapi.")
+	for _, h := range PortalHosts {
+		if h == ui {
+			return "https://" + ui
+		}
+	}
+	return ""
+}
+
+// ScanReportURL is the UI page for one scan's results.
+//
+// The same page Qualys links from its own completion email -
+// /was/#/reports/online-reports/email-report/scan/<scan id> - and the id in
+// that link is the <id> the scan list returns, checked against a real
+// notification. Built here from an integer and a constant path, so it is the
+// one link the report renders as clickable. Empty origin or id, empty URL.
+func ScanReportURL(origin string, scanID int) string {
+	if origin == "" || scanID <= 0 {
+		return ""
+	}
+	return origin + "/was/#/reports/online-reports/email-report/scan/" + strconv.Itoa(scanID)
 }

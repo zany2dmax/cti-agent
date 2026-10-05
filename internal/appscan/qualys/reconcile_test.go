@@ -40,7 +40,7 @@ func TestTheJoinIsOnTheReferenceAndTakesTheRealName(t *testing.T) {
 		[]appscan.ScanResult{fromMail("was/1.1", "ExHome")},
 		[]Scan{listScan(1, "was/1.1", "VULNERABILITY", "SCHEDULED", "9001",
 			"Example Homepage", "", "FINISHED", "NONE", day(1))},
-		window)
+		window, "")
 	if rec.Matched != 1 || len(got) != 1 {
 		t.Fatalf("matched %d, got %d results", rec.Matched, len(got))
 	}
@@ -62,7 +62,7 @@ func TestTheApiCanMakeAScanWorseNeverBetter(t *testing.T) {
 		[]appscan.ScanResult{fromMail("was/1.2", "ExPortal")},
 		[]Scan{listScan(2, "was/1.2", "VULNERABILITY", "SCHEDULED", "9002",
 			"Example Portal", "portal auth", "FINISHED", "FAILED", day(1))},
-		window)
+		window, "")
 	if !got[0].Auth.Failed() {
 		t.Errorf("an API-reported auth failure was dropped: %+v", got[0].Auth)
 	}
@@ -77,7 +77,7 @@ func TestTheApiCanMakeAScanWorseNeverBetter(t *testing.T) {
 	got2, _ := Reconcile([]appscan.ScanResult{m},
 		[]Scan{listScan(3, "was/1.3", "VULNERABILITY", "SCHEDULED", "9002",
 			"Example Portal", "portal auth", "FINISHED", "SUCCESSFUL", day(1))},
-		window)
+		window, "")
 	if !got2[0].Auth.Failed() {
 		t.Error("the API overrode a notification's authentication failure with a success")
 	}
@@ -87,7 +87,7 @@ func TestAScanWithNoEmailIsAddedWithoutCounts(t *testing.T) {
 	got, _ := Reconcile(nil,
 		[]Scan{listScan(4, "was/1.4", "VULNERABILITY", "SCHEDULED", "9004",
 			"Example Store", "", "FINISHED", "NONE", day(2))},
-		window)
+		window, "")
 	if len(got) != 1 || !got[0].NoNotification {
 		t.Fatalf("an email-less vulnerability scan was not added as such: %+v", got)
 	}
@@ -105,7 +105,7 @@ func TestDiscoveryAndRunningScansAreNotResults(t *testing.T) {
 	got, rec := Reconcile(nil, []Scan{
 		listScan(5, "was/1.5", "DISCOVERY", "ONDEMAND", "9005", "Staging", "x", "FINISHED", "FAILED", day(1)),
 		listScan(6, "was/1.6", "VULNERABILITY", "SCHEDULED", "9006", "Site", "", "RUNNING", "", day(1)),
-	}, window)
+	}, window, "")
 	if len(got) != 0 {
 		t.Errorf("discovery or in-flight scans were reported: %+v", got)
 	}
@@ -121,7 +121,7 @@ func TestAnOnDemandFaultWithNoEmailIsNotAScannerFault(t *testing.T) {
 	got, rec := Reconcile(nil, []Scan{
 		listScan(7, "was/1.7", "VULNERABILITY", "ONDEMAND", "9007", "Staging", "auth", "FINISHED", "FAILED", day(1)),
 		listScan(8, "was/1.8", "VULNERABILITY", "ONDEMAND", "9007", "Staging", "", "CANCELED", "", day(1)),
-	}, window)
+	}, window, "")
 	if len(got) != 0 || rec.Skipped != 2 {
 		t.Errorf("on-demand faults were reported: got %d, skipped %d", len(got), rec.Skipped)
 	}
@@ -133,7 +133,7 @@ func TestAScheduledAuthFailureWithNoEmailIsStillAFault(t *testing.T) {
 	got, _ := Reconcile(nil, []Scan{
 		listScan(9, "was/1.9", "VULNERABILITY", "SCHEDULED", "9009", "Example Portal",
 			"portal auth", "FINISHED", "FAILED", day(1)),
-	}, window)
+	}, window, "")
 	if len(got) != 1 || !got[0].Fault() || !got[0].Auth.Failed() {
 		t.Fatalf("a scheduled authentication failure was lost: %+v", got)
 	}
@@ -146,7 +146,7 @@ func TestANewerEmaillessRunDoesNotDisplaceTheOneWithCounts(t *testing.T) {
 	got, _ := Reconcile([]appscan.ScanResult{m}, []Scan{
 		listScan(10, "was/1.10", "VULNERABILITY", "SCHEDULED", "9001", "Example Homepage", "", "FINISHED", "NONE", day(1)),
 		listScan(11, "was/1.11", "VULNERABILITY", "SCHEDULED", "9001", "Example Homepage", "", "FINISHED", "NONE", day(5)),
-	}, window)
+	}, window, "")
 	if len(got) != 1 || got[0].NoNotification {
 		t.Errorf("the email-less run was added beside or instead of the notified one: %+v", got)
 	}
@@ -160,7 +160,7 @@ func TestTheMarginWidensTheJoinNotTheReport(t *testing.T) {
 	got, rec := Reconcile([]appscan.ScanResult{fromMail("was/1.12", "ExHome")}, []Scan{
 		listScan(12, "was/1.12", "VULNERABILITY", "SCHEDULED", "9001", "Example Homepage", "", "FINISHED", "NONE", early),
 		listScan(13, "was/1.13", "VULNERABILITY", "SCHEDULED", "9013", "Example Other", "", "FINISHED", "NONE", early),
-	}, window)
+	}, window, "")
 	if rec.Matched != 1 {
 		t.Error("a scan launched just before the window did not match its notification")
 	}
@@ -170,11 +170,38 @@ func TestTheMarginWidensTheJoinNotTheReport(t *testing.T) {
 }
 
 func TestANotificationTheListLacksIsKeptAndReported(t *testing.T) {
-	got, rec := Reconcile([]appscan.ScanResult{fromMail("was/9.99", "ExHome")}, nil, window)
+	got, rec := Reconcile([]appscan.ScanResult{fromMail("was/9.99", "ExHome")}, nil, window, "")
 	if len(got) != 1 || got[0].AppState.Active.Serious != 2 {
 		t.Error("an unmatched notification's counts were dropped")
 	}
 	if len(rec.Unmatched) != 1 || rec.Unmatched[0] != "was/9.99" {
 		t.Errorf("Unmatched = %v", rec.Unmatched)
+	}
+}
+
+const testPortal = "https://qualysguard.qg3.apps.qualys.com"
+
+func TestEveryListedScanGetsALinkBuiltFromItsId(t *testing.T) {
+	got, _ := Reconcile([]appscan.ScanResult{fromMail("was/1.20", "ExHome")}, []Scan{
+		listScan(20, "was/1.20", "VULNERABILITY", "SCHEDULED", "9001", "Example Homepage", "", "FINISHED", "NONE", day(1)),
+		listScan(21, "was/1.21", "VULNERABILITY", "SCHEDULED", "9021", "Example Store", "", "FINISHED", "NONE", day(2)),
+	}, window, testPortal)
+	want := map[string]string{
+		"Example Homepage": testPortal + "/was/#/reports/online-reports/email-report/scan/20",
+		"Example Store":    testPortal + "/was/#/reports/online-reports/email-report/scan/21",
+	}
+	for _, r := range got {
+		if r.PortalURL != want[r.App] {
+			t.Errorf("%s: PortalURL = %q, want %q", r.App, r.PortalURL, want[r.App])
+		}
+	}
+}
+
+func TestNoPortalMeansNoBuiltLink(t *testing.T) {
+	got, _ := Reconcile([]appscan.ScanResult{fromMail("was/1.22", "ExHome")}, []Scan{
+		listScan(22, "was/1.22", "VULNERABILITY", "SCHEDULED", "9001", "Example Homepage", "", "FINISHED", "NONE", day(1)),
+	}, window, "")
+	if got[0].PortalURL != "" {
+		t.Errorf("a link was built with no portal configured: %q", got[0].PortalURL)
 	}
 }

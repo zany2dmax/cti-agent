@@ -100,7 +100,7 @@ func run() int {
 	windowStart := time.Now().Add(-*since)
 	if !*noDetail {
 		if api := wasAPI(cfg); api != nil {
-			scans = reconcile(ctx, api, scans, windowStart)
+			scans = reconcile(ctx, api, scans, windowStart, qualys.PortalOrigin(cfg.QualysBaseURL))
 			scans = newestPerApp(scans)
 			attachDetail(ctx, api, scans, windowStart)
 		} else {
@@ -315,14 +315,18 @@ func wasAPI(cfg config.Config) *qualys.API {
 // A failure is a warning and the email-only results go on unchanged: the
 // counts are in the notifications, and losing the scan list costs the real
 // application names, the email-less scans and the id-keyed detail lookup.
-func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time) []appscan.ScanResult {
+func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time, portal string) []appscan.ScanResult {
 	list, err := api.Scans(ctx, since.Add(-qualys.ScanMargin))
 	if err != nil {
 		logf("warn   : WAS scan list unavailable, reporting from the notifications only: %s",
 			safelog.Line(err.Error()))
 		return scans
 	}
-	out, rec := qualys.Reconcile(scans, list, since)
+	if portal == "" {
+		logf("note   : QUALYS_BASE_URL does not map to a known Qualys UI host, so " +
+			"report links stay plain text from the notifications")
+	}
+	out, rec := qualys.Reconcile(scans, list, since, portal)
 	added := len(out) - len(scans)
 	logf("scans  : %d in the WAS scan list, %d matched a notification, %d added "+
 		"with no notification, %d skipped (discovery, in flight, or on-demand faults)",

@@ -316,3 +316,13 @@ func contains(ss []string, want string) bool {
 	}
 	return false
 }
+
+func TestTheApplicationNameComesFromTheTargetLine(t *testing.T) {
+	// A real notification reads "Target : <web app name>". The title is a
+	// run name and on the real estate rarely matched; the target is what the
+	// finding search can be keyed on when no application id is available.
+	r, _ := Provider{}.Parse(blindScan)
+	if r.App != "Example Homepage" {
+		t.Errorf("App = %q, want the Target line rather than the title", r.App)
+	}
+}
