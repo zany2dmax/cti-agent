@@ -110,6 +110,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --dry-run promises to write nothing, and --mark-sent's only effect is a
+	// write. Together they used to mark the manifest sent, because the
+	// --mark-sent branch below returns before --dry-run is ever looked at.
+	//
+	// That mattered beyond tidiness: the orchestrator's grant for this binary
+	// is "--dry-run, any arguments after it", which is only safe if no
+	// invocation beginning with --dry-run can change state. A manifest marked
+	// sent for a synopsis that never went out makes the daily digest drop the
+	// whole release's CVEs, and nothing in either email would say so.
+	if *markSent && *dryRun {
+		fmt.Fprintln(os.Stderr,
+			"cti-patchtuesday: --mark-sent with --dry-run is refused. A dry run "+
+				"writes nothing, and marking a manifest sent is a write that makes "+
+				"the daily digest hold back this release's CVEs.")
+		os.Exit(2)
+	}
+
 	// --mark-sent is bookkeeping about a run that already happened, so it does
 	// no fetching and must not be able to fail for any reason to do with the
 	// sources. It comes before everything else for that reason.
