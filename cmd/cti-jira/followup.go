@@ -152,8 +152,10 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		f := findingFromLookup(cve, res)
 
 		if !forReal {
-			logf("DRY RUN follow-up: %s (%s) would be re-checked - %d host(s) now",
-				issue.Key, cve, f.Count())
+			// The same decision the real run acts on, read-only: whether IT
+			// gets a comment, and why - not just a host count to interpret.
+			logf("DRY RUN follow-up: %s (%s): %s", issue.Key, cve,
+				previewUpdate(ctx, c, issue, f, now))
 			checked++
 			continue
 		}
