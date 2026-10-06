@@ -727,6 +727,12 @@ export FLEET_CODE=$CODE_DIR
 export FLEET_ENV=$CONF_DIR/fleet.env
 export FLEET_FEEDS=$CONF_DIR/feeds.txt
 export HOME=$STATE_DIR
+# Run from the state directory, as the systemd units do (WorkingDirectory=).
+# Without this a relative path in fleet.env - QUALYS_KB_CACHE's old default,
+# ./qualys_kb_cache.json - resolved against whatever directory the operator
+# typed the command in, so a hand run and the timer read different files and
+# the hand run failed where the timer did not.
+cd "$STATE_DIR"
 cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 case "\$cmd" in

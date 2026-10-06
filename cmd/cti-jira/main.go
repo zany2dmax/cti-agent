@@ -69,9 +69,9 @@ func run() int {
 			"on spread, on reaching zero, or once on closed-but-still-detected")
 	flag.Parse()
 
-	if !*check && !*testTicket && *fromEnriched == "" {
+	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag {
 		flag.Usage()
-		return die("nothing to do - pass --check, --test-ticket or --from-enriched")
+		return die("nothing to do - pass --check, --test-ticket, --from-enriched or --follow-up")
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A
@@ -106,7 +106,9 @@ func run() int {
 	if *testTicket {
 		return doTestTicket(ctx, c, cfg, *forReal)
 	}
-	if *fromEnriched != "" {
+	// --follow-up on its own is allowed: re-checking the open tickets needs
+	// the scanner and Jira, not today's findings.
+	if *fromEnriched != "" || *followUpFlag {
 		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal, *approve, *followUpFlag)
 	}
 	return exitOK
@@ -456,17 +458,34 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 
 	now := time.Now().UTC()
 
-	ef, err := loadEnriched(path)
-	if err != nil {
-		logf("WARNING: %s - no tickets this run", safelog.Line(err.Error()))
-		return exitOK
+	// TODAY'S FINDINGS ARE OPTIONAL TO THE FOLLOW-UP. This used to return here
+	// on a missing or unreadable enriched file, which also skipped the
+	// follow-up - and the only line in the log said "no tickets this run",
+	// which reads as "nothing to do" rather than "the open tickets were not
+	// checked". The follow-up starts from Jira, so it runs either way.
+	var ef enrichedFile
+	if path != "" {
+		loaded, err := loadEnriched(path)
+		if err != nil {
+			logf("WARNING: %s - nothing filed from today's findings", safelog.Line(err.Error()))
+		} else {
+			ef = loaded
+		}
 	}
 
+	// The scanner is NOT optional: without it there is nothing to compare a
+	// ticket with. Say exactly what did not happen.
 	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
 		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
 	if _, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath); err != nil {
-		logf("WARNING: scanner KB cache unavailable (%s) - no tickets this run",
-			safelog.Line(err.Error()))
+		skipped := "no tickets filed"
+		if withFollowUp {
+			skipped += " and NO OPEN TICKET RE-CHECKED"
+		}
+		logf("WARNING: scanner KB cache unavailable at %s (%s) - %s this run. "+
+			"A relative QUALYS_KB_CACHE resolves against the directory the command "+
+			"was run from; set it to an absolute path in fleet.env",
+			safelog.Line(cfg.QualysKBCachePath), safelog.Line(err.Error()), skipped)
 		return exitOK
 	}
 
