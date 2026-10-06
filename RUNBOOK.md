@@ -764,7 +764,7 @@ sudo cti-agent cti-jira --from-enriched <file> --for-real --approve
 ```
 
 `--approve` is a command-line flag and not a `fleet.env` setting on purpose:
-`run-digest` never passes it, so the scheduled 10:00 run can only ever file
+`run-digest` never passes it, so the scheduled 06:00 run can only ever file
 KEV entries. Making it configuration would turn "the fleet decided to file
 this" into something that happens overnight with nobody watching.
 
@@ -772,6 +772,29 @@ this" into something that happens overnight with nobody watching.
 
 The ticket is found by its `cti-<cve>` label and **updated in place** — the
 fleet never files a second ticket for a CVE it has already reported.
+
+**Which tickets are re-checked: all of them, every morning.** `run-digest`
+passes `--follow-up`, which searches Jira for the fleet's own tickets — the
+`cti-agent` label, open or touched in the last 30 days — and asks the scanner
+about each one whether or not its CVE is in that day's mail. Before this, a
+ticket was only compared on a day its CVE happened to be back in the news, and
+the "no detections left" comment below could never be sent: only PRESENT
+findings reached the ticketing step, and a remediated CVE is not present.
+
+Only a definite answer is compared. A lookup that failed, or a CVE the scanner
+cannot map yet (`UNKNOWN`), leaves the ticket alone — a lookup that did not
+answer is not a fix, and reading its zero hosts as "remediated" would tell IT a
+live exposure was closed. The run logs one line:
+
+```text
+[cti-jira] follow-up: 14 fleet ticket(s) found, 11 re-checked, 2 already handled this run, 0 with no CVE label, 1 left alone because the scanner could not answer
+```
+
+To see what it would do without writing anything:
+
+```bash
+sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json --follow-up
+```
 
 What it says, and when:
 
