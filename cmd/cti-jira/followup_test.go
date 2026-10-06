@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -253,4 +254,94 @@ func TestTheCVEComesFromTheIdempotencyLabel(t *testing.T) {
 	if got := cveFromLabels([]string{jira.IdempotencyLabel("CVE-2026-4242")}); got != "CVE-2026-4242" {
 		t.Errorf("round trip through IdempotencyLabel = %q", got)
 	}
+}
+
+// ─── through the entry point the operator runs ─────────────────────────────
+
+// withScanner swaps the real Qualys lookup for a fake for one test.
+func withScanner(t *testing.T, sc *scanner) {
+	t.Helper()
+	saved := scannerFor
+	scannerFor = func(context.Context, config.Config) (hostFiller, error) { return sc.look, nil }
+	t.Cleanup(func() { scannerFor = saved })
+}
+
+func TestTheFollowUpFlagReachesTheFollowUp(t *testing.T) {
+	// THE REGRESSION THIS FILE MISSED. The commit that added --follow-up never
+	// called followUp() from doFromEnriched. The flag parsed, Go accepted the
+	// unused parameter, and every test above passed because they call
+	// followUp() directly. The operator's dry run against four open tickets
+	// printed no follow-up line at all, and that was the first sign.
+	fj, c := newFakeJira(t, ticket("SEC-20", "CVE-2026-2020", "indeterminate"))
+	previously(fj, "SEC-20", "CVE-2026-2020", "host-a", "host-b")
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-2020": {Status: vulnlookup.StatusNotPresent}}}
+	withScanner(t, sc)
+
+	// Today's findings exist but none qualifies - the shape of the real run.
+	path := writeEnriched(t, `{"findings":[{"cve":"CVE-2026-0001","status":"NOT_PRESENT","priority":"Sev3"}]}`)
+	doFromEnriched(context.Background(), c, testCfg, path, true, false, true)
+
+	if sc.calls["CVE-2026-2020"] != 1 {
+		t.Fatalf("--follow-up did not re-check the open ticket (lookups: %v)", sc.calls)
+	}
+	if len(fj.comments["SEC-20"]) != 1 {
+		t.Errorf("the fixed CVE got no resolved comment: %q", fj.comments["SEC-20"])
+	}
+}
+
+func TestWithoutTheFlagNoTicketIsReChecked(t *testing.T) {
+	fj, c := newFakeJira(t, ticket("SEC-21", "CVE-2026-2121", "indeterminate"))
+	previously(fj, "SEC-21", "CVE-2026-2121", "host-a")
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-2121": {Status: vulnlookup.StatusNotPresent}}}
+	withScanner(t, sc)
+	path := writeEnriched(t, `{"findings":[]}`)
+	doFromEnriched(context.Background(), c, testCfg, path, true, false, false)
+	if len(sc.calls) != 0 || len(fj.comments) != 0 {
+		t.Error("tickets were re-checked without --follow-up")
+	}
+}
+
+func TestTheFollowUpRunsWithNoFindingsFileAtAll(t *testing.T) {
+	// It used to return on a missing enriched file before reaching the
+	// follow-up, saying only "no tickets this run".
+	fj, c := newFakeJira(t, ticket("SEC-22", "CVE-2026-2222", "indeterminate"))
+	previously(fj, "SEC-22", "CVE-2026-2222", "host-a")
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-2222": {Status: vulnlookup.StatusNotPresent}}}
+	withScanner(t, sc)
+
+	for _, path := range []string{"", t.TempDir() + "/does-not-exist.json"} {
+		sc.calls = nil
+		doFromEnriched(context.Background(), c, testCfg, path, false, false, true)
+		if sc.calls["CVE-2026-2222"] != 1 {
+			t.Errorf("path %q: the follow-up did not run", path)
+		}
+	}
+	if len(fj.comments) != 0 {
+		t.Error("a dry run commented")
+	}
+}
+
+func TestAScannerThatWillNotLoadStopsTheFollowUpAndSaysSo(t *testing.T) {
+	fj, c := newFakeJira(t, ticket("SEC-23", "CVE-2026-2323", "indeterminate"))
+	saved := scannerFor
+	scannerFor = func(context.Context, config.Config) (hostFiller, error) {
+		return nil, errors.New("kb cache: permission denied")
+	}
+	t.Cleanup(func() { scannerFor = saved })
+	doFromEnriched(context.Background(), c, testCfg, "", true, false, true)
+	if len(fj.comments) != 0 {
+		t.Error("tickets were touched with no scanner to compare against")
+	}
+}
+
+func writeEnriched(t *testing.T, body string) string {
+	t.Helper()
+	p := t.TempDir() + "/enriched-2026-10-06.json"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
