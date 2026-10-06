@@ -50,6 +50,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   that failed or returned `UNKNOWN` leaves the ticket alone, so an outage can
   never be reported to IT as a fix.
 
+  A dry run now says what each ticket would get - `WOULD COMMENT: grew 300 ->
+  340 host(s), 40 new host(s)`, `WOULD COMMENT: no detections remain`, or
+  `no change - no comment` - from the same decision function the real run
+  acts on, so the preview and the run cannot disagree.
+
 - **The orchestrator's grant allowed what its prompt forbade.** `fleet-db:*`
   let a beat record a digest as sent (so `run-digest` would skip the real one)
   and rewrite stored findings; `cti-patchtuesday:*` let it mark a Patch Tuesday

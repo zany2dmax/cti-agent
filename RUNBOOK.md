@@ -790,7 +790,10 @@ live exposure was closed. The run logs one line:
 [cti-jira] follow-up: 14 fleet ticket(s) found, 11 re-checked, 2 already handled this run, 0 with no CVE label, 1 left alone because the scanner could not answer
 ```
 
-To see what it would do without writing anything:
+To see what it would do without writing anything - one line per ticket,
+saying whether IT would get a comment and why (`WOULD COMMENT: grew 300 -> 340
+host(s)`, `WOULD COMMENT: no detections remain (was 12)`, `no change (220
+host(s)) - no comment`):
 
 ```bash
 sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json --follow-up

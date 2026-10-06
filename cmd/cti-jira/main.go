@@ -337,30 +337,20 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 	key := issue.Key
 	logf("ticket for %s already exists: %s (%s)", f.CVE, key, c.BrowseURL(key))
 
-	var prev jira.ExposureState
-	found, err := c.GetProperty(ctx, key, jira.PropertyKey, &prev)
-	if err != nil {
-		// A malformed or unreadable property is reported and treated as
-		// absent. It costs one comparison; it must not kill the run.
-		logf("WARNING: %s", safelog.Line(err.Error()))
-	}
-	var prevPtr *jira.ExposureState
-	if found {
-		prevPtr = &prev
-	}
+	// Decided by planUpdate, the same function a dry run prints - so what a
+	// preview says and what a real run does cannot drift apart.
+	prev, found := storedState(ctx, c, key)
+	plan := planUpdate(issue, prev, f, now)
 
-	// A CLOSED ticket with live detections is a human question, not an
-	// automation one. Somebody closed it deliberately - exception,
-	// compensating control, a replacement ticket - and software that reverses
-	// that every night is software that gets switched off. Say it once.
-	if issue.IsDone() && f.Count() > 0 {
-		if found && !prev.ClosedButDetectedAt.IsZero() {
-			logf("closed, still detected on %d host(s) - already noted on %s, saying nothing",
-				f.Count(), prev.ClosedButDetectedAt.Format("2006-01-02"))
-			emit(map[string]any{"mode": "for-real", "created": false,
-				"reason": "closed-but-detected-already-noted", "key": key})
-			return key, exitOK
-		}
+	switch plan.kind {
+	case planClosedNoted:
+		logf("closed, still detected on %d host(s) - already noted on %s, saying nothing",
+			f.Count(), plan.notedAt.Format("2006-01-02"))
+		emit(map[string]any{"mode": "for-real", "created": false,
+			"reason": "closed-but-detected-already-noted", "key": key})
+		return key, exitOK
+
+	case planClosedComment:
 		if err := c.AddComment(ctx, key, jira.ClosedButDetectedComment(f, now)); err != nil {
 			return key, die("commenting on %s: %s", key, safelog.Line(err.Error()))
 		}
@@ -375,8 +365,8 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		return key, exitOK
 	}
 
-	d := jira.DiffExposure(prevPtr, f, now)
-	if !d.Material() {
+	d := plan.drift
+	if plan.kind == planRecordOnly {
 		// Still record state, so a shrink today is visible in the comparison
 		// that a growth tomorrow produces. Quiet is not the same as lost.
 		st := jira.StateFrom(f, key, now)
@@ -593,7 +583,7 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	if len(existing) > 0 {
 		issue := existing[0]
 		if !forReal {
-			logf("DRY RUN %s: would update %s (%d hosts)", f.CVE, issue.Key, f.Count())
+			logf("DRY RUN %s: %s: %s", f.CVE, issue.Key, previewUpdate(ctx, c, issue, f, now))
 			return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
 				Status: issue.Fields.Status.Name}, nil
 		}
