@@ -35,6 +35,37 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The orchestrator's grant allowed what its prompt forbade.** `fleet-db:*`
+  let a beat record a digest as sent (so `run-digest` would skip the real one)
+  and rewrite stored findings; `cti-patchtuesday:*` let it mark a Patch Tuesday
+  manifest sent, which makes the daily drop the release's CVEs. The grant is
+  now per subcommand, and `cti-patchtuesday` refuses `--mark-sent` with
+  `--dry-run` - previously the combination marked the manifest sent despite
+  `--dry-run` promising to write nothing.
+- **The orchestrator's prompt described a capability it did not have.** It
+  said it could "run any lane", recover with `run-digest`, escalate through
+  `mailer.py`, check timers with `systemctl`, and read replies from the
+  mailbox. None was granted; on an unattended beat a denied command just does
+  not happen. The prompt and the `/checkin` skill now say exactly what a beat
+  can run, re-runs are escalated as `sudo cti-agent ...` commands for the
+  operator, and answers come back on the board. `systemctl list-timers` is
+  now granted - read-only, and the only way a beat can see a disabled timer.
+- **The prompt told the agent to read `fleet.env`.** It holds the Graph secret,
+  the Qualys password and a Claude token, and what the model reads is sent
+  with its context. It now says never to.
+
+### Upgrade
+
+Reinstall. Nothing to configure. The three operator playbooks
+(`/cti-digest`, `/patch-tuesday`, `/scout-sweep`) are unchanged in content and
+now say they are for a session with you present.
+
+---
+
 ## 1.1 — 2026-10-06
 
 ### Added

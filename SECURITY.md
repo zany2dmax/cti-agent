@@ -381,8 +381,29 @@ allowlisted list. Everything else is proposed on the message board and waits.
 ### What the orchestrator may run
 
 The heartbeat runs `claude -p` unattended, with `--permission-mode acceptEdits`
-and an explicit `--allowedTools` list: the fleet's own binaries and
-`journalctl`, by absolute path, and nothing else.
+and an explicit `--allowedTools` list: named fleet commands by absolute path,
+`journalctl`, `systemctl list-timers`, and nothing else.
+
+**Named per subcommand, not per binary.** The list used to grant `fleet-db:*`
+and `cti-patchtuesday:*`. The first included `fleet-db sent`, which records a
+digest as delivered so `run-digest` skips the real one, and `fleet-db finding`,
+which rewrites the findings the digest reports. The second included
+`--mark-sent`, which makes the daily digest drop a whole Patch Tuesday
+release's CVEs. `CLAUDE.md` forbade all three, but a prohibition that lives
+only in the prompt, on a capability the grant includes, is not a control. The
+grant is now `fleet-db` read and memory subcommands only, and `cti-patchtuesday
+--dry-run:*`, made safe by the binary itself refusing `--mark-sent` together
+with `--dry-run`. `tests/test_lanes.py` fails if a forbidden command becomes
+grantable, or if the instructions tell the agent to run something that is not.
+
+**`fleet.env` is outside the agent's reach by instruction only.** The service
+account must be able to read it, so the operating system will not stop the
+agent's file tools opening it, and the prompt used to tell it to. It now says
+never to, because anything the model reads is sent with its context and the
+file holds every credential the fleet has. Enforcing that with a Claude Code
+deny rule on the heartbeat command is the stronger control; it is not in
+place yet because the rule syntax has not been verified on the installed
+version, and a malformed flag would stop every beat.
 
 **The list is a command-line flag in `run-checkin`, not a settings file.**
 `acceptEdits` means the agent can write files, so a permissions file inside its

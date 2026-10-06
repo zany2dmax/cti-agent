@@ -218,10 +218,14 @@ Each answers a different question, and the brief is the join across them.
 
 ### The constraints on the model
 
-The orchestrator has no mailbox, no shell, no database write access and no
-ability to send mail. It may call a short allowlist of binaries and nothing
-else. Its only route to a person is `cti-alert`, which has no recipient
-argument.
+The orchestrator has no mailbox, no shell and no ability to address mail. It
+may call a short allowlist of commands — named **per subcommand**, so it can
+write its own notes but cannot record a digest as sent, rewrite a finding, or
+mark a monthly release delivered — and nothing else. It cannot run any lane:
+every one of them sends or moves mail, and timers own them. Its only route to a
+person is `cti-alert`, which has no recipient argument. A test checks that
+everything its instructions tell it to run is on that list, and that nothing
+they forbid is.
 
 Separately, the component that reads advisory text — which arrives at a
 published address anyone can write to, and is therefore hostile input — runs

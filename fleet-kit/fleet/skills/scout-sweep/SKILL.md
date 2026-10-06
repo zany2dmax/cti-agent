@@ -5,6 +5,13 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 
 # /scout-sweep
 
+> **Operator-attended playbook.** Not runnable on the unattended heartbeat:
+> `scout.py` and `enrich.py` are not on the orchestrator's grant (see
+> `CLAUDE.md`, *What a beat can run*), and they do not need to be -
+> `cti-agent-scout.timer` runs the sweep itself every four hours. On a beat,
+> read what it found with `fleet-db recent` and the journal. In a session with
+> the operator present, Claude Code asks before each command below.
+
 Runs every 4 hours. The mailbox is reactive — this lane is how you find things
 before a vendor newsletter gets around to telling you.
 

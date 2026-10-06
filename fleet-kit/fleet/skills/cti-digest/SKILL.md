@@ -5,6 +5,12 @@ description: Run the full CTI pipeline and send the digest to the security DL. U
 
 # /cti-digest [--daily|--weekly|--dry-run]
 
+> **Operator-attended playbook.** Not runnable on the unattended heartbeat:
+> several commands below send mail or move it, and none of them is on the
+> orchestrator's grant (see `CLAUDE.md`, *What a beat can run*). In a session
+> with the operator present, Claude Code asks before each one. On a beat,
+> escalate with the command instead of running it.
+
 Full pipeline: ingest → enrich → brief → send. Default is `--daily`.
 
 ## Prefer run-digest over these steps
