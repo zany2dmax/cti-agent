@@ -1685,6 +1685,192 @@ class TestFileShape(unittest.TestCase):
                     f"fleet/bin/ or fleet/lanes/")
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
+    # ── the orchestrator's grant, and what its instructions say ─────────────
+
+    @staticmethod
+    def _orchestrator_grant():
+        """The --allowedTools rules run-checkin passes, with $FLEET_CODE literal.
+
+        Executes run-checkin's own assignment block rather than re-parsing it,
+        so a loop or a conditional in the grant is evaluated the way bash
+        evaluates it - a regex over the file is how a grant and a test about
+        the grant quietly start describing different things.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        src = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
+        start = src.index('ALLOWED_TOOLS="Bash(')
+        end = src.index('echo "[run-checkin', start)
+        block = src[start:end]
+        out = subprocess.run(
+            ["bash", "-c", "FLEET_CODE='$FLEET_CODE'\n" + block + '\nprintf "%s" "$ALLOWED_TOOLS"'],
+            capture_output=True, text=True, check=True).stdout
+        return [r for r in out.split(",") if r]
+
+    @staticmethod
+    def _allowed(rules, command):
+        """Claude Code's Bash rule semantics: Bash(P:*) is a prefix, Bash(P) exact."""
+        command = " ".join(command.split())
+        for r in rules:
+            m = re.fullmatch(r"Bash\((.*)\)", r)
+            if not m:
+                continue
+            pat = m.group(1)
+            if pat.endswith(":*"):
+                if command.startswith(pat[:-2]):
+                    return True
+            elif command == pat:
+                return True
+        return False
+
+    @staticmethod
+    def _commands_in(text):
+        """Commands an instruction file tells the agent to run.
+
+        Backticked spans and fenced-code lines that start with $FLEET_CODE/,
+        python3, journalctl or systemctl - with backslash continuations
+        joined. `sudo cti-agent ...` is the operator's form and is not
+        matched, which is the point: it is how an instruction names a command
+        for a person rather than for the agent.
+        """
+        found = []
+        start = re.compile(r'^"?(\$FLEET_CODE/|python3 |journalctl|systemctl )')
+        for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
+            joined = re.sub(r"\\\n\s*", " ", block)
+            for line in joined.split("\n"):
+                line = line.split("  #")[0].strip()
+                if start.match(line):
+                    found.append(line.replace('"$FLEET_CODE', "$FLEET_CODE").replace('fleet-db"', "fleet-db"))
+        # Prose, not tables. A table row naming a script is a description -
+        # the lanes table lists what the timers run - and the On a beat
+        # column has its own test below.
+        prose = re.sub(r"```.*?```", "", text, flags=re.S)
+        prose = "\n".join(l for l in prose.split("\n") if not l.lstrip().startswith("|"))
+        for span in re.findall(r"`([^`\n]+)`", prose):
+            if start.match(span):
+                found.append(span)
+        # Placeholders are arguments, not part of the command's identity.
+        return [re.split(r"\s[\[<…]|\s\.\.\.", c)[0].strip() for c in found]
+
+    def test_the_heartbeat_is_told_to_run_only_what_it_is_granted(self):
+        """An instruction the grant cannot satisfy fails silently on a beat.
+
+        CLAUDE.md said "you may act without asking on: running any lane", and
+        the /checkin skill said to check timers with systemctl, recover with
+        run-digest and escalate through mailer.py. None was granted. On an
+        unattended beat a denied command has nobody to approve it, so the
+        instruction simply does not happen - which is how "spotting that a
+        timer got disabled", a headline duty in ARCHITECTURE.md, could not
+        work at all.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        rules = self._orchestrator_grant()
+        missing = []
+        for name in ("fleet-kit/fleet/CLAUDE.md", "fleet-kit/fleet/skills/checkin/SKILL.md"):
+            for cmd in self._commands_in((root / name).read_text(encoding="utf-8")):
+                if not self._allowed(rules, cmd):
+                    missing.append(f"{name}: {cmd!r} is not granted")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
+    def test_every_yes_in_the_on_a_beat_column_is_granted_and_every_no_is_not(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        rules = self._orchestrator_grant()
+        text = (root / "fleet-kit/fleet/CLAUDE.md").read_text(encoding="utf-8")
+        rows = re.findall(r"^\| `([^`]+)` \| (yes[^|]*|no) \|", text, re.M)
+        self.assertGreater(len(rows), 5, "the On a beat table was not found")
+        wrong = []
+        for cmd, beat in rows:
+            cmd = re.split(r"\s[\[<]", cmd)[0].strip()
+            if beat.startswith("yes, by subcommand"):
+                continue  # checked against "What a beat can run" below
+            if beat.startswith("yes") and not self._allowed(rules, cmd):
+                wrong.append(f"says yes, not granted: {cmd}")
+            if beat == "no" and self._allowed(rules, cmd):
+                wrong.append(f"says no, but granted: {cmd}")
+        self.assertEqual(wrong, [], "\n" + "\n".join(wrong))
+
+    def test_the_what_a_beat_can_run_table_is_the_grant(self):
+        """The table CLAUDE.md calls "the whole of your grant" must be granted,
+        row by row. A bare subcommand in a row - `findings` after
+        `$FLEET_CODE/bin/fleet-db recent` - belongs to that row's binary."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        rules = self._orchestrator_grant()
+        text = (root / "fleet-kit/fleet/CLAUDE.md").read_text(encoding="utf-8")
+        table = text[text.index("### What a beat can run"):text.index("**You cannot run any lane")]
+        checked, wrong = 0, []
+        for row in re.findall(r"^\| (.+?) \|", table, re.M):
+            spans = re.findall(r"`([^`]+)`", row)
+            if not spans or spans[0] == "Command":
+                continue
+            binary = None
+            for span in spans:
+                span = re.split(r"\s[\[<(…]|\s…", span)[0].replace(" …", "").strip()
+                if span.startswith(("$FLEET_CODE/", "journalctl", "systemctl")):
+                    binary = span.split()[0]
+                    cmd = span
+                elif binary:
+                    cmd = binary + " " + span
+                else:
+                    continue
+                checked += 1
+                if not self._allowed(rules, cmd):
+                    wrong.append(cmd)
+        self.assertGreater(checked, 10, "the table was not parsed")
+        self.assertEqual(wrong, [], "documented as granted but not: " + ", ".join(wrong))
+
+    def test_what_the_prompt_forbids_is_not_granted(self):
+        """A prohibition that lives only in the prompt is not a control.
+
+        fleet-db:* granted `sent`, which fakes a delivered digest so run-digest
+        skips the real one, and `finding`, which rewrites what the digest
+        reports. cti-patchtuesday:* granted --mark-sent, which makes the daily
+        drop a whole release's CVEs. The orchestrator reads text written by
+        people who would like it to do exactly these things.
+        """
+        rules = self._orchestrator_grant()
+        F = "$FLEET_CODE"
+        for cmd in (
+            f"{F}/bin/cti-patchtuesday --mark-sent",
+            f"{F}/bin/cti-patchtuesday --month 2026-09 --mark-sent",
+            f"{F}/bin/fleet-db sent 2026-10-06 0 0 0 0 0 x daily",
+            f"{F}/bin/fleet-db finding upsert {{}}",
+            f"{F}/bin/fleet-db note CVE-2026-0001 handled",
+            f"{F}/bin/fleet-db init",
+            f"{F}/bin/cti-mailbox --for-real",
+            f"{F}/bin/run-digest daily",
+            f"{F}/bin/run-patchtuesday",
+            f"{F}/bin/run-appscan",
+            f"{F}/bin/run-mailbox-cleanup --for-real",
+            f"{F}/bin/cti-mailer --to someone@example.com",
+            f"{F}/bin/cti-appscan --since 336h",
+            f"python3 {F}/lanes/mailer.py --to-operator",
+            "systemctl stop cti-agent-digest.timer",
+            "systemctl disable cti-agent-digest.timer",
+            "cat /etc/cti-agent/fleet.env",
+        ):
+            self.assertFalse(self._allowed(rules, cmd), f"granted: {cmd}")
+
+    def test_dry_run_cannot_mark_a_manifest_sent(self):
+        """The grant is `cti-patchtuesday --dry-run:*`, which is safe only if
+        no invocation starting with --dry-run can write. --mark-sent's branch
+        returns before --dry-run is looked at, so the refusal has to come
+        first."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        src = (root / "cmd" / "cti-patchtuesday" / "main.go").read_text(encoding="utf-8")
+        guard = src.find("if *markSent && *dryRun {")
+        branch = src.find("if *markSent {")
+        self.assertGreater(guard, 0, "no refusal of --mark-sent with --dry-run")
+        self.assertLess(guard, branch, "the refusal comes after the --mark-sent branch")
+
+    def test_the_heartbeat_is_never_told_to_read_the_config_file(self):
+        """fleet.env holds the Graph secret, the Qualys password and a Claude
+        token. What the model reads is sent with its context."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        for name in ("fleet-kit/fleet/CLAUDE.md", "fleet-kit/fleet/skills/checkin/SKILL.md"):
+            text = (root / name).read_text(encoding="utf-8")
+            for bad in ("Load `$FLEET_ENV`", "Read those on your first beat",
+                        "cat $FLEET_ENV", "cat \"$FLEET_ENV\""):
+                self.assertNotIn(bad, text, f"{name} tells the agent to read fleet.env")
+
     def test_every_unit_logs_under_its_own_name(self):
         """A unit that tags its journal lines with another unit's name.
 

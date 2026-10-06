@@ -5,6 +5,12 @@ description: Build and send the monthly Microsoft Patch Tuesday synopsis — two
 
 # /patch-tuesday [--month YYYY-MM] [--dry-run]
 
+> **Operator-attended playbook.** Not runnable on the unattended heartbeat:
+> several commands below send mail or move it, and none of them is on the
+> orchestrator's grant (see `CLAUDE.md`, *What a beat can run*). In a session
+> with the operator present, Claude Code asks before each one. On a beat,
+> escalate with the command instead of running it.
+
 Once a month Microsoft ships a defined set of fixes, and the patching team
 needs one email: how big was it, what of it is on our machines, and what do I
 paste into Qualys to see it myself.

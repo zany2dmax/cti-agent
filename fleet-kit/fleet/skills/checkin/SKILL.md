@@ -37,13 +37,16 @@ and say so on the board rather than guessing.
 
 ## 1. Orient
 
-- Note the current time and day of week. Load `$FLEET_ENV`.
+- Note the current time and day of week. **Do not read `$FLEET_ENV`** - it
+  holds the fleet's credentials, and what you read is sent with your context.
+  The tools already have the configuration in their environment.
 - `$FLEET_CODE/bin/fleet-board read` — lines for `@you` and `@all`.
 - `$FLEET_CODE/bin/fleet-db recent` — last 20 memory rows, open tasks, unacked mailbox.
-- `ls -la $FLEET_HOME/reports/` — what exists, how fresh.
+- `$FLEET_HOME/reports/` — what exists, how fresh. Use your file tools to list
+  it; there is no general shell on a beat, so `ls` is not available.
 - `journalctl -u 'cti-agent-*' --since '-3h' --no-pager` — did any timer fail
-  since the last beat? On the generic layout, `tail -50 $FLEET_HOME/logs/*.log`
-  instead.
+  since the last beat? On the generic layout, read `$FLEET_HOME/logs/*.log`
+  with your file tools instead.
 - `$FLEET_CODE/bin/cti-budget status` — how much of your own quota is left. If
   you are near the window ceiling, prefer a short beat.
 
@@ -51,10 +54,11 @@ If this is the first beat ever, do the bootstrap from CLAUDE.md first.
 
 ## 2. Postmaster pass
 
-- Email any board line addressed to the operator via
-  `mailer.py --to-operator --board-id <id>`, so their reply can be matched.
-- Read `$CTI_REPLY_MAILBOX` for replies tagged `[FLEET <id>]` and post them
-  back to the board with `fleet-board post`.
+- Email any board line addressed to the operator with `cti-alert --kind
+  ESCALATION`, quoting the board id in `--reason`.
+- Pick up the operator's answers from the board - `@operator` lines carrying
+  `re:<id>`. You cannot read mail, so tell them in the escalation how to
+  answer: `sudo cti-agent fleet-board post @operator @you A "re:<id> ..."`.
 - Prune resolved and stale lines into `$FLEET_HOME/archive/board-archive.md`.
 - Ack any mailbox row you have actioned: `fleet-db ack <id>`.
 
@@ -81,13 +85,14 @@ What you owe the schedule instead is **checking it happened**:
 | Daily digest sent | `fleet-db was-sent $(date +%F) daily` | Post to the board. Look for a `cti-alert` line first — the cause is probably already there |
 | Weekly sent (Mon) | `fleet-db was-sent $(date +%F) weekly` | Same |
 | AppSec report ran (Mon, after 07:30) | `journalctl -u cti-agent-appscan.service --since today --no-pager` | No `[run-appscan] done` line: post to the board. An `AUTH FAILED on N scan(s)` line has **already** alerted the operator - track it, do not re-escalate. `0 notification(s)` is a question, not a quiet week |
-| Timers still enabled | `systemctl list-timers 'cti-agent-*'` | A disabled timer is silent forever. Tell the operator |
+| Timers still enabled | `systemctl list-timers 'cti-agent-*' --all` | A disabled timer is silent forever. Tell the operator |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
-Running the pipeline **by hand** is still correct when the operator asks, or
-when a timer genuinely failed and you are recovering. Use
-`$FLEET_CODE/bin/run-digest daily` rather than the lanes individually: it holds
-the already-sent guard, and the guard is what makes recovery safe.
+**You cannot re-run the pipeline yourself** - no runner is on your grant,
+because every runner sends or moves mail. When a timer genuinely failed,
+escalate with the exact command for the operator: `sudo cti-agent run-digest
+daily`, which holds the already-sent guard, so running it after a partial
+failure cannot send twice. Say what failed and what the journal showed.
 
 ## 4. Decide — ask BOTH questions
 
@@ -98,9 +103,12 @@ approval to notify the distribution list, not notifying it. Everything else
 waits for the digest.
 
 ```
-python3 $FLEET_CODE/lanes/mailer.py --to-operator --board-id <id> \
-  --subject "Sev5: CVE-... present on N hosts" --message "<what and why>"
+$FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --kind ESCALATION \
+  --reason "Sev5: CVE-... present on N hosts. Approve notifying the DL? board id <id>"
 ```
+
+`cti-alert` is your only mail. It has no `--to`; the operator is the only
+person it can reach, which is the point.
 
 **Something to DO?** If there is no ping, you owe the fleet a proactive task.
 Pick from the quiet-beat list in CLAUDE.md — resolve an UNKNOWN, nudge a stale
