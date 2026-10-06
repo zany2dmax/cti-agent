@@ -59,7 +59,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   IT is told; and there was no rate limit - hosts that appear within a week of
   the last host-change comment are now held and named together in the next.
   "No detections remain", a new QID, a comeback after the all-clear, and
-  closed-but-still-detected are never held. Test tickets no longer carry the
+  closed-but-still-detected are never held.
+  Tickets from before this change have no record of when IT was last told,
+  so on the first morning their weekly clock starts instead of a comment
+  going out; a host still affected a week later is reported then. Test tickets no longer carry the
   `cti-agent` label, and the setup test ticket (`CVE-1900-00000`) is skipped
   by name.
 

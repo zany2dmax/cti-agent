@@ -396,9 +396,17 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		// stored set, and when the next scan saw it again it was announced as
 		// newly affected. On a ticket with hundreds of hosts that is most
 		// mornings. Only a first look writes - it has nothing to compare to.
-		if d.FirstLook {
+		switch {
+		case d.FirstLook:
 			if err := c.SetProperty(ctx, key, jira.PropertyKey, jira.StateFrom(f, key, now)); err != nil {
 				logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
+			}
+		case d.StartClock:
+			// The stored list stays as it is; only the clock starts.
+			st := *prev
+			st.LastReportedAt = now
+			if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
+				logf("WARNING: could not start the weekly clock on %s: %s", key, safelog.Line(err.Error()))
 			}
 		}
 		switch {

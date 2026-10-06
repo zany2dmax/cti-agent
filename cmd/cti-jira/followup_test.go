@@ -106,7 +106,9 @@ func (s *scanner) look(_ context.Context, cve string) (vulnlookup.Result, error)
 var testCfg = config.Config{JiraProjectKey: "SEC"}
 
 func previously(fj *fakeJira, key, cve string, hosts ...string) {
-	fj.state[key] = jira.StateFrom(jira.Finding{CVE: cve, Hosts: hosts}, key, time.Now().Add(-48*time.Hour))
+	st := jira.StateFrom(jira.Finding{CVE: cve, Hosts: hosts}, key, time.Now().Add(-48*time.Hour))
+	st.LastReportedAt = time.Now().Add(-30 * 24 * time.Hour) // outside the weekly limit
+	fj.state[key] = st
 }
 
 func TestAFixedVulnerabilityFinallyGetsItsResolvedComment(t *testing.T) {
@@ -478,5 +480,52 @@ func TestATestTicketDoesNotCarryTheLabelTheFollowUpSelectsOn(t *testing.T) {
 		if l == "cti-agent" {
 			t.Fatal("a new test ticket would be picked up by the follow-up as a real one")
 		}
+	}
+}
+
+func TestTheUpgradeMorningStartsTheClockInsteadOfCommenting(t *testing.T) {
+	// State from before the weekly limit has no LastReportedAt, and its host
+	// list is the last RUN's - so "1 new host" against it is mostly a host one
+	// scan missed. The operator's dry run showed three of four real tickets
+	// about to be commented on for exactly that. Hold the change and start the
+	// clock; a host still there in a week goes out in the normal comment.
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-47", "CVE-2026-4747", "indeterminate"))
+	legacy := jira.StateFrom(jira.Finding{CVE: "CVE-2026-4747",
+		Hosts: []string{"host-a", "host-b"}}, "SEC-47", now.Add(-3*24*time.Hour))
+	fj.state["SEC-47"] = legacy // no LastReportedAt
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-4747": present("host-a", "host-c")}} // one swapped
+
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if n := len(fj.comments["SEC-47"]); n != 0 {
+		t.Fatalf("the upgrade morning commented: %q", fj.comments["SEC-47"])
+	}
+	st := fj.state["SEC-47"]
+	if st.LastReportedAt.IsZero() {
+		t.Fatal("the weekly clock was not started")
+	}
+	if st.HostCount != 2 || !strings.Contains(strings.Join(st.Hosts, ","), "host-b") {
+		t.Errorf("starting the clock rewrote the stored host list: %+v", st.Hosts)
+	}
+
+	// A week on, host-c is still there: it goes out, once.
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now.Add(7*24*time.Hour), true)
+	got := fj.comments["SEC-47"]
+	if len(got) != 1 || !strings.Contains(got[0], "host-c") {
+		t.Errorf("after the week, comments = %q", got)
+	}
+}
+
+func TestTheUpgradeMorningStillSaysResolved(t *testing.T) {
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-48", "CVE-2026-4848", "indeterminate"))
+	fj.state["SEC-48"] = jira.StateFrom(jira.Finding{CVE: "CVE-2026-4848",
+		Hosts: []string{"host-a"}}, "SEC-48", now.Add(-3*24*time.Hour))
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-4848": {Status: vulnlookup.StatusNotPresent}}}
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if len(fj.comments["SEC-48"]) != 1 {
+		t.Error("the all-clear was held on pre-upgrade state")
 	}
 }
