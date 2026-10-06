@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## 1.1 — 2026-10-05
+## 1.1 — 2026-10-06
 
 ### Added
 
