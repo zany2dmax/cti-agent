@@ -19,6 +19,7 @@ func issueIn(category string) jira.Issue {
 func stateOf(hosts ...string) *jira.ExposureState {
 	st := jira.StateFrom(jira.Finding{CVE: "CVE-2026-3030", Hosts: hosts}, "SEC-30",
 		time.Now().Add(-24*time.Hour))
+	st.LastReportedAt = time.Now().Add(-30 * 24 * time.Hour) // outside the weekly limit
 	return &st
 }
 

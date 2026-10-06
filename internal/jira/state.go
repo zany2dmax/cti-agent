@@ -145,6 +145,10 @@ type Drift struct {
 	// the next comment, from NextReportAt.
 	Held         bool
 	NextReportAt time.Time
+	// StartClock marks state written before LastReportedAt existed: the
+	// change is held and the caller records LastReportedAt now, leaving the
+	// stored host list as it was.
+	StartClock bool
 }
 
 // DiffExposure compares stored state against what the scanner reports now.
@@ -183,7 +187,20 @@ func DiffExposure(prev *ExposureState, f Finding, now time.Time) Drift {
 // to say so would make the all-clear look more trustworthy than it was.
 func holdGrowth(d Drift, prev *ExposureState, now time.Time) Drift {
 	grew := len(d.NewHosts) > 0 || (d.HostsUnknown && d.CountAfter > d.CountBefore)
-	if !grew || prev.LastReportedAt.IsZero() || prev.HostCount == 0 {
+	if !grew || prev.HostCount == 0 {
+		return d
+	}
+	// STATE FROM BEFORE LastReportedAt. Its host list is the last RUN's, not
+	// what IT was told, so "new" against it is mostly hosts that missed one
+	// scan. Commenting would post the very noise this replaces, once per
+	// ticket on the morning of the upgrade; silently adopting today's list
+	// would swallow a host that really is new. So start the clock: hold the
+	// change for one interval, and if the host is still there it goes out in
+	// the normal weekly comment.
+	if prev.LastReportedAt.IsZero() {
+		d.Held = true
+		d.StartClock = true
+		d.NextReportAt = now.Add(GrowthInterval)
 		return d
 	}
 	if next := prev.LastReportedAt.Add(GrowthInterval); now.Before(next) {

@@ -4,12 +4,16 @@ import (
 	"encoding/csv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stateWith(hosts []string, qids []string, kept bool) *ExposureState {
 	s := &ExposureState{
 		CVE: "CVE-2026-85880", HostCount: len(hosts),
 		HostsHash: HostsHashOf(hosts), QIDs: sortedCopy(qids), HostsKept: kept,
+		// Reported long ago, so the weekly limit is not in play unless a test
+		// sets it. Zero would be pre-upgrade state, which starts the clock.
+		LastReportedAt: now.Add(-30 * 24 * time.Hour),
 	}
 	if kept {
 		s.Hosts = sortedCopy(hosts)
