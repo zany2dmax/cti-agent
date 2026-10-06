@@ -801,13 +801,24 @@ sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date
 
 What it says, and when:
 
-| Since last run | Comment? |
+Everything is compared with **what IT was last told** — the host list at the
+time the ticket was filed or last commented on — not with yesterday's scan.
+
+| Compared with the last report | Comment? |
 |---|---|
 | Nothing changed | No. A daily "still 441 hosts" is the storm in a different costume |
-| Hosts only went away | No — but it is recorded, so it shows up next time something else prompts a comment |
-| New hosts, or a new QID | **Yes**, naming up to 20 new hosts with a fresh dated CSV attached |
-| No detections left anywhere | **Yes** — "this ticket can be closed", the one piece of good news this lane produces |
+| A host missed one scan and came back | No. It was never gone from IT's point of view |
+| Hosts only went away | No — they are listed the next time something else earns a comment |
+| Hosts IT has not been told about | **Yes, at most once a week per ticket.** Hosts that appear in between are held and named together in the next comment, with a fresh dated CSV |
+| A new QID | **Yes**, straight away |
+| No detections left anywhere | **Yes**, straight away — "this ticket can be closed" |
+| Back after "no detections left" | **Yes**, straight away — a regression is not held |
 | Ticket is closed, detections persist | **Once, ever.** It is not reopened |
+
+The weekly limit exists because the first daily dry run against real tickets
+showed three of four would be commented on every morning, each for one host
+swapped for another on a list of hundreds. A dry run shows a held change as
+`N host(s) not yet reported - held for the weekly comment, due YYYY-MM-DD`.
 
 That last row is deliberate. Somebody closed the ticket on purpose — an
 exception, a compensating control, a replacement ticket — and software that

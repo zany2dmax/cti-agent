@@ -318,3 +318,29 @@ func TestAStaleAttachmentCanOnlyOverstateExposure(t *testing.T) {
 		t.Error("growth was not material - a new host could go without a fresh CSV")
 	}
 }
+
+func TestAComebackAfterTheAllClearNamesTheHost(t *testing.T) {
+	// The stored state after "no detections remain" has no hosts. That is a
+	// measurement, and the comeback comment must name what came back - not
+	// claim the previous list was too large to store.
+	cleared := StateFrom(finding(nil, []string{"1"}), "CR-1", now)
+	if !cleared.HostsKept {
+		t.Fatal("an empty host list was treated as unstored")
+	}
+	f := finding([]string{"host-a"}, []string{"1"})
+	d := DiffExposure(&cleared, f, now)
+	if !d.Material() || len(d.NewHosts) != 1 || d.HostsUnknown {
+		t.Errorf("drift = %+v", d)
+	}
+	if strings.Contains(DriftComment(d, f, "", now), "too large") {
+		t.Error("the comment says a list of zero hosts was too large to store")
+	}
+}
+
+func TestAProviderThatCannotNameHostsIsStillUnstored(t *testing.T) {
+	f := finding(nil, []string{"1"})
+	f.HostCount = 12
+	if StateFrom(f, "CR-1", now).HostsKept {
+		t.Error("a count of 12 with no names was recorded as a complete list")
+	}
+}

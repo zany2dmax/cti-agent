@@ -345,3 +345,138 @@ func writeEnriched(t *testing.T, body string) string {
 	}
 	return p
 }
+
+// ─── noise: what counts as new, and how often IT hears about it ────────────
+
+// reportedAt stores the set IT was told about, and when.
+func reportedAt(fj *fakeJira, key, cve string, at time.Time, hosts ...string) {
+	st := jira.StateFrom(jira.Finding{CVE: cve, Hosts: hosts}, key, at)
+	st.LastReportedAt = at
+	fj.state[key] = st
+}
+
+func present(hosts ...string) vulnlookup.Result {
+	return vulnlookup.Result{Status: vulnlookup.StatusPresent, HostCount: len(hosts), Hosts: hosts}
+}
+
+func TestAHostThatMissedAScanIsNotNewWhenItComesBack(t *testing.T) {
+	// The noise the operator's dry run exposed. One scan misses host-c; the
+	// next sees it again. It was never gone from IT's point of view, and
+	// announcing it as "newly affected" on a ticket with hundreds of hosts
+	// happens most mornings.
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-40", "CVE-2026-4040", "indeterminate"))
+	reportedAt(fj, "SEC-40", "CVE-2026-4040", now.Add(-10*24*time.Hour), "host-a", "host-b", "host-c")
+	sc := &scanner{answers: map[string]vulnlookup.Result{}}
+
+	sc.answers["CVE-2026-4040"] = present("host-a", "host-b") // the scan that missed one
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if fj.propPuts["SEC-40"] != 0 {
+		t.Fatal("a run that told IT nothing overwrote the set IT was told about")
+	}
+
+	sc.answers["CVE-2026-4040"] = present("host-a", "host-b", "host-c") // it is back
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now.Add(24*time.Hour), true)
+	if n := len(fj.comments["SEC-40"]); n != 0 {
+		t.Errorf("a host back from one missed scan was announced as new: %q", fj.comments["SEC-40"])
+	}
+}
+
+func TestNewHostsAreHeldForAWeekAndThenReportedTogether(t *testing.T) {
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-41", "CVE-2026-4141", "indeterminate"))
+	reportedAt(fj, "SEC-41", "CVE-2026-4141", now.Add(-2*24*time.Hour), "host-a")
+	sc := &scanner{answers: map[string]vulnlookup.Result{}}
+
+	sc.answers["CVE-2026-4141"] = present("host-a", "host-b")
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	sc.answers["CVE-2026-4141"] = present("host-a", "host-b", "host-c")
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now.Add(24*time.Hour), true)
+	if n := len(fj.comments["SEC-41"]); n != 0 {
+		t.Fatalf("a host-change comment went out %d time(s) inside the week", n)
+	}
+
+	// Seven days after the last report: due. One comment, naming both.
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now.Add(5*24*time.Hour), true)
+	got := fj.comments["SEC-41"]
+	if len(got) != 1 {
+		t.Fatalf("comments after the week = %d, want 1", len(got))
+	}
+	for _, h := range []string{"host-b", "host-c"} {
+		if !strings.Contains(got[0], h) {
+			t.Errorf("the batched comment does not name %s:\n%s", h, got[0])
+		}
+	}
+	// And the clock restarts from that comment.
+	sc.answers["CVE-2026-4141"] = present("host-a", "host-b", "host-c", "host-d")
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now.Add(6*24*time.Hour), true)
+	if len(fj.comments["SEC-41"]) != 1 {
+		t.Error("a second host-change comment went out a day after the first")
+	}
+}
+
+func TestResolvedIsNeverHeld(t *testing.T) {
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-42", "CVE-2026-4242", "indeterminate"))
+	reportedAt(fj, "SEC-42", "CVE-2026-4242", now.Add(-24*time.Hour), "host-a")
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-4242": {Status: vulnlookup.StatusNotPresent}}}
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if len(fj.comments["SEC-42"]) != 1 || !strings.Contains(fj.comments["SEC-42"][0], "No detections remain") {
+		t.Errorf("the all-clear was held: %q", fj.comments["SEC-42"])
+	}
+}
+
+func TestAComebackAfterTheAllClearIsNotHeld(t *testing.T) {
+	// IT was told it was gone yesterday. It is back. Waiting a week to say so
+	// would make the all-clear look more trustworthy than it was.
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-43", "CVE-2026-4343", "indeterminate"))
+	reportedAt(fj, "SEC-43", "CVE-2026-4343", now.Add(-24*time.Hour)) // zero hosts
+	sc := &scanner{answers: map[string]vulnlookup.Result{"CVE-2026-4343": present("host-a")}}
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if len(fj.comments["SEC-43"]) != 1 {
+		t.Errorf("a regression after the all-clear was held: %q", fj.comments["SEC-43"])
+	}
+}
+
+func TestANewQIDIsNotHeld(t *testing.T) {
+	now := time.Now()
+	fj, c := newFakeJira(t, ticket("SEC-44", "CVE-2026-4444", "indeterminate"))
+	reportedAt(fj, "SEC-44", "CVE-2026-4444", now.Add(-24*time.Hour), "host-a")
+	res := present("host-a")
+	res.ExternalIDs = []string{"100001"}
+	sc := &scanner{answers: map[string]vulnlookup.Result{"CVE-2026-4444": res}}
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, now, true)
+	if len(fj.comments["SEC-44"]) != 1 {
+		t.Errorf("a new QID was held: %q", fj.comments["SEC-44"])
+	}
+}
+
+func TestThePreviewSaysWhenAHeldCommentIsDue(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	prev := jira.StateFrom(jira.Finding{CVE: "CVE-2026-4545", Hosts: []string{"host-a"}}, "SEC-45", now)
+	prev.LastReportedAt = now.Add(-2 * 24 * time.Hour)
+	f := jira.Finding{CVE: "CVE-2026-4545", Hosts: []string{"host-a", "host-b"}}
+	got := planUpdate(issueIn("indeterminate"), &prev, f, now).describe(f)
+	if !strings.Contains(got, "held for the weekly comment, due 2026-10-11") {
+		t.Errorf("preview = %q", got)
+	}
+}
+
+func TestTheSetupTestTicketIsRecognisedAndNotLookedUp(t *testing.T) {
+	_, c := newFakeJira(t, ticket("SEC-46", testCVE, "indeterminate"))
+	sc := &scanner{}
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+	if sc.calls[testCVE] != 0 {
+		t.Error("the setup test ticket was sent to the scanner")
+	}
+}
+
+func TestATestTicketDoesNotCarryTheLabelTheFollowUpSelectsOn(t *testing.T) {
+	for _, l := range testLabels(testFinding(time.Now())) {
+		if l == "cti-agent" {
+			t.Fatal("a new test ticket would be picked up by the follow-up as a real one")
+		}
+	}
+}

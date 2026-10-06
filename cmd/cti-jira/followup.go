@@ -140,6 +140,12 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		case done[cve]:
 			already++
 			continue
+		case cve == testCVE:
+			// The setup test ticket. It carried the cti-agent label before
+			// test tickets were given their own.
+			logf("note   : follow-up: %s is the setup test ticket (%s) - close it in Jira",
+				issue.Key, testCVE)
+			continue
 		}
 
 		res, err := look(ctx, cve)

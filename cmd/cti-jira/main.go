@@ -208,9 +208,26 @@ func doCheck(ctx context.Context, c *jira.Client, cfg config.Config) int {
 
 // testFinding is obviously synthetic. A test ticket that looks like a real
 // finding is one somebody acts on.
+// testCVE is the deliberately impossible CVE the setup test ticket carries.
+// The follow-up recognises it by name: Qualys can never map it, and a test
+// ticket left open would otherwise be reported as unanswerable every morning.
+const testCVE = "CVE-1900-00000"
+
+// testLabels marks a test ticket WITHOUT the cti-agent label the follow-up
+// selects on, so it is never mistaken for one of the fleet's real tickets.
+func testLabels(f jira.Finding) []string {
+	out := []string{"cti-agent-test"}
+	for _, l := range jira.Labels(f) {
+		if l != "cti-agent" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func testFinding(now time.Time) jira.Finding {
 	return jira.Finding{
-		CVE:      "CVE-1900-00000",
+		CVE:      testCVE,
 		Title:    "CTI AGENT TEST TICKET - not a real vulnerability, please close",
 		QIDs:     []string{"999999"},
 		Hosts:    []string{"test-host-1.invalid", "test-host-2.invalid"},
@@ -277,7 +294,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		IssueType:   cfg.JiraIssueType,
 		Summary:     summary,
 		Description: desc,
-		Labels:      jira.Labels(f),
+		Labels:      testLabels(f),
 	})
 	if err != nil {
 		return die("creating the ticket: %s", safelog.Line(err.Error()))
@@ -302,6 +319,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 	// ticket that was never created would make the next run think it had
 	// already reported hosts nobody has seen.
 	st := jira.StateFrom(f, res.Key, now)
+	st.LastReportedAt = now // the description and CSV are the first report
 	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
 		// Not fatal. The ticket is filed and that was the point; a missing
 		// state record costs one skipped drift comparison next run, which
@@ -356,6 +374,11 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		}
 		st := jira.StateFrom(f, key, now)
 		st.ClosedButDetectedAt = now
+		// The note names the current count, so it is a report; the host-change
+		// clock is left where it was.
+		if found {
+			st.LastReportedAt = prev.LastReportedAt
+		}
 		if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
 			logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
 		}
@@ -367,21 +390,26 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 
 	d := plan.drift
 	if plan.kind == planRecordOnly {
-		// Still record state, so a shrink today is visible in the comparison
-		// that a growth tomorrow produces. Quiet is not the same as lost.
-		st := jira.StateFrom(f, key, now)
-		if found {
-			st.ClosedButDetectedAt = prev.ClosedButDetectedAt
-		}
-		if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
-			logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
+		// THE STORED SET IS WHAT IT WAS LAST TOLD, so a run that tells it
+		// nothing leaves it alone. This used to write today's set every run,
+		// and that was the noise: a host one scan missed fell out of the
+		// stored set, and when the next scan saw it again it was announced as
+		// newly affected. On a ticket with hundreds of hosts that is most
+		// mornings. Only a first look writes - it has nothing to compare to.
+		if d.FirstLook {
+			if err := c.SetProperty(ctx, key, jira.PropertyKey, jira.StateFrom(f, key, now)); err != nil {
+				logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
+			}
 		}
 		switch {
 		case d.FirstLook:
 			logf("no stored state - recorded %d host(s), no comment (this is not a discovery)",
 				f.Count())
+		case d.Held:
+			logf("%d host(s) not yet reported on %s - held for the weekly comment, due %s",
+				len(d.NewHosts), key, d.NextReportAt.Format("2006-01-02"))
 		default:
-			logf("no material change (%d -> %d hosts) - state updated, no comment",
+			logf("no material change since the last report (%d -> %d hosts) - no comment",
 				d.CountBefore, d.CountAfter)
 		}
 		emit(map[string]any{"mode": "for-real", "created": false,
@@ -412,6 +440,7 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 	// run re-reports the same drift - noisy, but never silent. The opposite
 	// ordering would record hosts as reported that nobody was told about.
 	st := jira.StateFrom(f, key, now)
+	st.LastReportedAt = now
 	if found {
 		st.ClosedButDetectedAt = prev.ClosedButDetectedAt
 	}
@@ -639,6 +668,7 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 	}
 	st := jira.StateFrom(f, res.Key, now)
+	st.LastReportedAt = now // the description and CSV are the first report
 	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
 		logf("WARNING: could not record exposure state on %s: %s",
 			res.Key, safelog.Line(err.Error()))
