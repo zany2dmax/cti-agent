@@ -475,9 +475,8 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 
 	// The scanner is NOT optional: without it there is nothing to compare a
 	// ticket with. Say exactly what did not happen.
-	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
-		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
-	if _, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath); err != nil {
+	fill, err := scannerFor(ctx, cfg)
+	if err != nil {
 		skipped := "no tickets filed"
 		if withFollowUp {
 			skipped += " and NO OPEN TICKET RE-CHECKED"
@@ -489,9 +488,6 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 		return exitOK
 	}
 
-	fill := func(ctx context.Context, cve string) (vulnlookup.Result, error) {
-		return q.LookupCVE(ctx, cve)
-	}
 	findings := selectForTicketing(ctx, ef.Findings, fill,
 		func(format string, a ...any) { logf("WARNING: "+format, a...) })
 
@@ -522,6 +518,23 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 	}
 
+	// After the morning path, so a CVE in today's mail is compared once, by
+	// that path, with the digest's own numbers.
+	//
+	// THIS CALL WAS MISSING from the commit that introduced the follow-up.
+	// The flag parsed, the parameter arrived, Go accepts an unused parameter,
+	// and the unit tests called followUp() directly - so everything passed
+	// while `cti-jira --follow-up` did nothing at all. The operator's dry run
+	// on four open tickets was the first thing to notice. See
+	// TestTheFollowUpFlagReachesTheFollowUp.
+	if withFollowUp {
+		followUp(ctx, c, cfg, fill, done, now, forReal)
+	}
+
+	if path == "" {
+		// A follow-up on its own has no digest to write a ticket map for.
+		return exitOK
+	}
 	out := TicketMapPath(path)
 
 	// A DRY RUN MUST NOT TOUCH THE MAP.
@@ -543,6 +556,24 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 	logf("wrote %d ticket reference(s) to %s", len(tm.Tickets), out)
 	return exitOK
+}
+
+// scannerFor builds the CVE lookup that ticketing and the follow-up use.
+//
+// A variable so a test can drive doFromEnriched end to end - flag, wiring,
+// follow-up - without Qualys. The follow-up shipped once with its call
+// missing from doFromEnriched while every test passed, because the tests
+// called followUp() directly; the only way to catch that is to test through
+// the entry point the operator runs.
+var scannerFor = func(ctx context.Context, cfg config.Config) (hostFiller, error) {
+	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
+		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
+	if _, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath); err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, cve string) (vulnlookup.Result, error) {
+		return q.LookupCVE(ctx, cve)
+	}, nil
 }
 
 // fileOrUpdate creates a ticket, or updates the one that already exists.
