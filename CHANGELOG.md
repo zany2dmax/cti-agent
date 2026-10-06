@@ -50,6 +50,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   that failed or returned `UNKNOWN` leaves the ticket alone, so an outage can
   never be reported to IT as a fix.
 
+  **At most one host-change comment a week per ticket, against what IT was
+  last told.** The first dry run against real tickets showed three of four
+  would be commented on every morning, each for one host swapped for another
+  on a list of hundreds. Two causes, both fixed: the stored host list was
+  overwritten every run, so a host that missed one scan was "newly affected"
+  when it came back - it is now the list IT was last given, updated only when
+  IT is told; and there was no rate limit - hosts that appear within a week of
+  the last host-change comment are now held and named together in the next.
+  "No detections remain", a new QID, a comeback after the all-clear, and
+  closed-but-still-detected are never held. Test tickets no longer carry the
+  `cti-agent` label, and the setup test ticket (`CVE-1900-00000`) is skipped
+  by name.
+
   A dry run now says what each ticket would get - `WOULD COMMENT: grew 300 ->
   340 host(s), 40 new host(s)`, `WOULD COMMENT: no detections remain`, or
   `no change - no comment` - from the same decision function the real run
