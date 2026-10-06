@@ -142,9 +142,13 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			continue
 		case cve == testCVE:
 			// The setup test ticket. It carried the cti-agent label before
-			// test tickets were given their own.
-			logf("note   : follow-up: %s is the setup test ticket (%s) - close it in Jira",
-				issue.Key, testCVE)
+			// test tickets were given their own. Only worth a word if it is
+			// still open: a closed one is in the pass because of the 30-day
+			// window for closed tickets, and drops out by itself.
+			if !issue.IsDone() {
+				logf("note   : follow-up: %s is the setup test ticket (%s) - close it in Jira",
+					issue.Key, testCVE)
+			}
 			continue
 		}
 
