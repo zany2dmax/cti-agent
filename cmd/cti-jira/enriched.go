@@ -206,17 +206,10 @@ func selectForTicketing(ctx context.Context, rows []enrichedRow, fill hostFiller
 			warn("could not fetch hosts for %s, skipping it: %s", f.CVE, err)
 			continue
 		}
-		f.Hosts = res.Hosts
-		if res.HostCount > 0 {
-			// The scanner's count beats the digest's, being the fresher of
-			// the two and the one the host names came from.
-			f.HostCount = res.HostCount
-		}
-		f.CountIsFloor = res.HostCountIsFloor
-		if len(res.ExternalIDs) > 0 {
-			f.QIDs = res.ExternalIDs
-			f.QQL = "vulnerabilities.vulnerability.qid:[" + strings.Join(f.QIDs, ",") + "]"
-		}
+		// The scanner's count beats the digest's, being the fresher of the
+		// two and the one the host names came from. Shared with the
+		// follow-up pass, so both compare a ticket on the same numbers.
+		applyLookup(&f, res)
 		out = append(out, f)
 	}
 	// Worst first, so a truncated run files the biggest exposure.

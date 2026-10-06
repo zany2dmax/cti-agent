@@ -146,11 +146,15 @@ JIRA="$FLEET_CODE/bin/cti-jira"
 if [ "$KIND" = weekly ]; then
   say "ticket: skipped - the weekly reports findings the daily already filed"
 elif [ -z "$DRY" ] && [ -x "$JIRA" ]; then
-  say "ticket: filing KEV and Sev5 findings"
-  "$JIRA" --from-enriched "$ENRICHED" --for-real || true
+  say "ticket: filing KEV and Sev5 findings, then re-checking every open fleet ticket"
+  # --follow-up re-checks tickets whose CVE is NOT in today's mail too. Without
+  # it a ticket was compared only on a day its CVE was back in the news, and
+  # "no detections remain" could never be said: a remediated CVE is not
+  # PRESENT, and only PRESENT findings reach the ticketing step.
+  "$JIRA" --from-enriched "$ENRICHED" --for-real --follow-up || true
 elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
-  say "ticket: dry run, nothing will be filed"
-  "$JIRA" --from-enriched "$ENRICHED" || true
+  say "ticket: dry run, nothing will be filed or commented"
+  "$JIRA" --from-enriched "$ENRICHED" --follow-up || true
 fi
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
