@@ -236,9 +236,13 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 # inherit the grant.
 #
 # NOT GRANTED, deliberately:
-#   cti-mailer / mailer.py  - the orchestrator must not be able to send mail
-#                             on its own. Escalation goes through cti-alert,
-#                             which the alert units invoke, not the agent.
+#   cti-mailer / mailer.py  - the orchestrator must not be able to address
+#                             mail. Escalation goes through cti-alert, which
+#                             IS granted below and has no recipient argument.
+#   run-digest, run-patchtuesday, run-appscan, run-mailbox-cleanup
+#                           - every runner either sends mail or moves it.
+#                             Timers own those; a beat that needs one re-run
+#                             escalates with the exact command for a person.
 #   cti-mailbox --for-real  - listed WITHOUT :* so only the bare command
 #                             matches, which is the dry run. Moving mail is a
 #                             scheduled decision, not a beat-time one.
@@ -247,12 +251,35 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 # journalctl is read-only in practice here: its destructive flags
 # (--vacuum-*, --rotate) act on the system journal and need privileges this
 # unprivileged service account does not have.
+#
+# PER SUBCOMMAND, NOT PER BINARY. `fleet-db:*` granted `fleet-db sent`, which
+# records a digest as delivered - run-digest then skips that day's real send -
+# and `fleet-db finding`, which rewrites the findings the digest is built
+# from. `cti-patchtuesday:*` granted `--mark-sent`, which CLAUDE.md forbids
+# and which makes the daily drop a whole release's CVEs. A prohibition that
+# lives only in the prompt, on a capability the grant includes, is not a
+# control. Each line below is a prefix match, so it names exactly the
+# subcommands CLAUDE.md and the /checkin skill tell the agent to use, and
+# tests/test_lanes.py checks the two stay in step.
 ALLOWED_TOOLS="Bash($FLEET_CODE/bin/fleet-board:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/fleet-db:*)"
+# fleet-db: reads, plus the memory, task and board-mail writes the agent is
+# told to make every beat. NOT sent (fakes a delivered digest), finding
+# (rewrites what the digest reports), note (silences the stale-finding nudge
+# for a CVE) or init (schema setup is the installer's).
+for sub in recent findings was-sent rollup remember task mail ack vacuum; do
+  ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/fleet-db $sub:*)"
+done
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday:*)"
+# Rendering only. cti-patchtuesday refuses --mark-sent with --dry-run, so no
+# invocation that starts with --dry-run can change state.
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday --dry-run:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox)"
+# Read-only, and the only way a beat can see that a timer was disabled - the
+# failure that raises no alarm at all, and the one ARCHITECTURE.md says the
+# orchestrator exists to catch. A prefix that starts with list-timers cannot
+# become stop or disable.
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(systemctl list-timers:*)"
 # cti-alert is the escalation channel, and the ONLY mail capability granted.
 # It is narrow by construction rather than by trust: it has no --to flag, so
 # the recipient is FLEET_OPERATOR_EMAIL from the environment and the agent
