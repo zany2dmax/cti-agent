@@ -63,6 +63,10 @@ func run() int {
 	approve := flag.Bool("approve", false,
 		"also file the findings that would otherwise wait for a human: "+
 			"Sev5 findings that are not on CISA KEV")
+	followUpFlag := flag.Bool("follow-up", false,
+		"with --from-enriched: also re-check every open fleet ticket against "+
+			"the scanner, whether or not its CVE is in today's mail, and comment "+
+			"on spread, on reaching zero, or once on closed-but-still-detected")
 	flag.Parse()
 
 	if !*check && !*testTicket && *fromEnriched == "" {
@@ -83,7 +87,15 @@ func run() int {
 	}
 
 	c := jira.New(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Two minutes covers the morning path's handful of tickets. The follow-up
+	// makes one scanner lookup and up to three Jira calls per open ticket, and
+	// a deadline that cut it off part-way would re-check a sample while the
+	// log said the pass ran.
+	budget := 2 * time.Minute
+	if *followUpFlag {
+		budget = 15 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
 	if *check {
@@ -95,7 +107,7 @@ func run() int {
 		return doTestTicket(ctx, c, cfg, *forReal)
 	}
 	if *fromEnriched != "" {
-		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal, *approve)
+		return doFromEnriched(ctx, c, cfg, *fromEnriched, *forReal, *approve, *followUpFlag)
 	}
 	return exitOK
 }
@@ -440,7 +452,7 @@ func emit(v map[string]any) {
 // daily security email, so every failure path below returns exitOK. A Jira
 // outage must cost tickets, never the digest.
 func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
-	path string, forReal, approve bool) int {
+	path string, forReal, approve, withFollowUp bool) int {
 
 	now := time.Now().UTC()
 
@@ -469,7 +481,9 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 
 	tm := TicketMap{Generated: now.Format(time.RFC3339), Tickets: map[string]TicketRef{}}
 
+	done := map[string]bool{}
 	for _, f := range findings {
+		done[strings.ToUpper(strings.TrimSpace(f.CVE))] = true
 		ref, err := fileOrUpdate(ctx, c, cfg, f, now, forReal, approve)
 		if err != nil {
 			// One bad ticket must not stop the rest, and must not stop the

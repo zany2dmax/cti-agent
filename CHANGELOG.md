@@ -39,6 +39,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **Tickets were only re-checked when their CVE was back in the news, and were
+  never told they were finished.** Ticketing started from that morning's mail,
+  so an open ticket whose CVE nobody mentioned again was never compared with
+  the scanner. And the "no detections remain - this ticket can be closed"
+  comment, though written, could never be sent: only PRESENT findings reached
+  the ticketing step, and a remediated CVE is not present. `run-digest` now
+  passes `cti-jira --follow-up`, which re-checks every fleet ticket that is
+  open or touched in the last 30 days, under the same quiet rules. A lookup
+  that failed or returned `UNKNOWN` leaves the ticket alone, so an outage can
+  never be reported to IT as a fix.
+
 - **The orchestrator's grant allowed what its prompt forbade.** `fleet-db:*`
   let a beat record a digest as sent (so `run-digest` would skip the real one)
   and rewrite stored findings; `cti-patchtuesday:*` let it mark a Patch Tuesday
@@ -60,7 +71,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Upgrade
 
-Reinstall. Nothing to configure. The three operator playbooks
+Reinstall. Nothing to configure. The first morning after, IT may see a "no
+detections remain" comment on tickets that were fixed some time ago and never
+told - that is the backlog clearing once, not a burst of new activity. The
+three operator playbooks
 (`/cti-digest`, `/patch-tuesday`, `/scout-sweep`) are unchanged in content and
 now say they are for a session with you present.
 
