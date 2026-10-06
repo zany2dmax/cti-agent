@@ -41,7 +41,7 @@ func TestThePreviewSaysWhetherAnybodyGetsAComment(t *testing.T) {
 			planRecordOnly, "no stored state yet", false},
 		{"unchanged", issueIn("indeterminate"), stateOf("host-a", "host-b"),
 			jira.Finding{CVE: "CVE-2026-3030", Hosts: []string{"host-a", "host-b"}},
-			planRecordOnly, "no change (2 host(s))", false},
+			planRecordOnly, "no change since the last report (2 host(s))", false},
 		{"shrank", issueIn("indeterminate"), stateOf("host-a", "host-b", "host-c"),
 			jira.Finding{CVE: "CVE-2026-3030", Hosts: []string{"host-a"}},
 			planRecordOnly, "shrank 3 -> 1", false},

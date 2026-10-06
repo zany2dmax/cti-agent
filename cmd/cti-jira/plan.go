@@ -72,14 +72,19 @@ func (p updatePlan) describe(f jira.Finding) string {
 		return fmt.Sprintf("WOULD COMMENT ONCE: closed, but the scanner still sees it on %d host(s)",
 			f.Count())
 	case planRecordOnly:
+		if d.Held {
+			return fmt.Sprintf("%d host(s) not yet reported - held for the weekly comment, due %s",
+				len(d.NewHosts), d.NextReportAt.Format("2006-01-02"))
+		}
 		if d.FirstLook {
 			return fmt.Sprintf("no stored state yet - would record %d host(s), no comment",
 				f.Count())
 		}
 		if d.CountAfter < d.CountBefore {
-			return fmt.Sprintf("shrank %d -> %d host(s) - recorded, no comment", d.CountBefore, d.CountAfter)
+			return fmt.Sprintf("shrank %d -> %d host(s) since the last report - no comment",
+				d.CountBefore, d.CountAfter)
 		}
-		return fmt.Sprintf("no change (%d host(s)) - no comment", d.CountAfter)
+		return fmt.Sprintf("no change since the last report (%d host(s)) - no comment", d.CountAfter)
 	}
 	if d.Resolved {
 		return fmt.Sprintf("WOULD COMMENT: no detections remain (was %d) - this ticket can be closed",

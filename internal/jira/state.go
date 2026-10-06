@@ -58,6 +58,17 @@ type ExposureState struct {
 	// ticket still has live detections. Without it, every run says it again,
 	// and a ticket somebody deliberately closed becomes a daily argument.
 	ClosedButDetectedAt time.Time `json:"closed_but_detected_at,omitempty"`
+
+	// LastReportedAt is when IT was last given this ticket's host list: when
+	// the ticket was filed, or when a host-change comment was posted. Zero on
+	// state written before it existed.
+	//
+	// It is also what Hosts and HostCount now MEAN. They are the set IT was
+	// last told about, not the set seen on the last run, and a run that posts
+	// nothing leaves them alone. Overwriting them every run was the source of
+	// the noise: a host that missed one scan dropped out of the stored set,
+	// and when the next scan saw it again it was announced as newly affected.
+	LastReportedAt time.Time `json:"last_reported_at,omitempty"`
 }
 
 // HostsHashOf fingerprints a host set, order-independently.
@@ -90,7 +101,12 @@ func StateFrom(f Finding, ticketKey string, now time.Time) ExposureState {
 		UpdatedAt: now,
 		TicketKey: ticketKey,
 	}
-	if len(f.Hosts) > 0 && len(f.Hosts) <= MaxPropertyHosts {
+	// An EMPTY list is kept too, when the count is also zero: "no hosts" is a
+	// measurement, and treating it as "too large to store" made a comeback
+	// after the all-clear read "the previous host list was too large to store
+	// on this ticket" - about a list of none. A nonzero count with no names
+	// (a provider that cannot enumerate) is still not kept.
+	if len(f.Hosts) <= MaxPropertyHosts && (len(f.Hosts) > 0 || f.Count() == 0) {
 		s.Hosts = sortedCopy(f.Hosts)
 		s.HostsKept = true
 	}
@@ -122,10 +138,24 @@ type Drift struct {
 	// filed before state was recorded. Not drift, and must not be reported
 	// as every host appearing at once.
 	FirstLook bool
+
+	// Held means hosts IT has not been told about have appeared, but a
+	// host-change comment was posted less than GrowthInterval ago. They stay
+	// un-reported - the stored set is not updated - and go out together in
+	// the next comment, from NextReportAt.
+	Held         bool
+	NextReportAt time.Time
 }
 
 // DiffExposure compares stored state against what the scanner reports now.
-func DiffExposure(prev *ExposureState, f Finding, _ time.Time) Drift {
+// GrowthInterval is the least time between two host-change comments on one
+// ticket. Hosts that appear in between are batched into the next.
+//
+// Reaching zero, a new QID, and closed-but-still-detected are not held: the
+// first is the news IT is waiting for, and the other two are rare.
+const GrowthInterval = 7 * 24 * time.Hour
+
+func DiffExposure(prev *ExposureState, f Finding, now time.Time) Drift {
 	d := Drift{CountAfter: f.Count()}
 
 	if prev == nil {
@@ -140,9 +170,26 @@ func DiffExposure(prev *ExposureState, f Finding, _ time.Time) Drift {
 
 	if !prev.HostsKept {
 		d.HostsUnknown = true
-		return d
+		return holdGrowth(d, prev, now)
 	}
 	d.NewHosts, d.GoneHosts = diffSets(prev.Hosts, f.Hosts)
+	return holdGrowth(d, prev, now)
+}
+
+// holdGrowth applies GrowthInterval to a host-change drift.
+//
+// Not when the last report was "no detections remain": a vulnerability coming
+// back after IT was told it was gone is a regression, and waiting up to a week
+// to say so would make the all-clear look more trustworthy than it was.
+func holdGrowth(d Drift, prev *ExposureState, now time.Time) Drift {
+	grew := len(d.NewHosts) > 0 || (d.HostsUnknown && d.CountAfter > d.CountBefore)
+	if !grew || prev.LastReportedAt.IsZero() || prev.HostCount == 0 {
+		return d
+	}
+	if next := prev.LastReportedAt.Add(GrowthInterval); now.Before(next) {
+		d.Held = true
+		d.NextReportAt = next
+	}
 	return d
 }
 
@@ -204,6 +251,10 @@ func (d Drift) Material() bool {
 	}
 	if len(d.NewQIDs) > 0 {
 		return true
+	}
+	if d.Held {
+		// Inside GrowthInterval since the last host-change comment.
+		return false
 	}
 	if d.HostsUnknown {
 		// Without a stored list, growth can only be seen in the total.
