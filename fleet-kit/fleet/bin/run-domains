@@ -52,11 +52,13 @@ STAMP="$(date -u +%Y-%m-%d)"
 HTML="$STATE/domains-$STAMP.html"
 TXT="$STATE/domains-$STAMP.txt"
 SUBJ="$STATE/domains-$STAMP.subject"
+CSV="$STATE/domains-$STAMP.csv"
 
 # Mode before content: the report lists every domain we own and which of them
 # can be spoofed.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
+: > "$CSV";  chmod 0600 "$CSV"
 # The subject file is deleted, not pre-created: an empty one left over from a
 # failed run must not read as this run's subject.
 rm -f "$SUBJ"
@@ -65,7 +67,7 @@ NOSTATE=""
 [ -n "$DRY" ] && NOSTATE="--no-state-write"
 
 # shellcheck disable=SC2086
-"$DOMAINS" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" $NOSTATE \
+"$DOMAINS" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" --csv-out "$CSV" $NOSTATE \
   || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
 
 [ -s "$SUBJ" ] || fail "no subject written - refusing to send"
@@ -73,8 +75,10 @@ SUBJECT="$(head -n1 "$SUBJ")"
 [ -n "$SUBJECT" ] || fail "empty subject - refusing to send"
 log "subject: $SUBJECT"
 
+# The CSV is sitecheck.go's full per-host output, attached so the detail the
+# email summarises is one click away and sortable.
 # shellcheck disable=SC2086
-"$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+"$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $DRY \
   || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
 
 if [ -n "$DRY" ]; then

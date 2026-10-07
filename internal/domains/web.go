@@ -16,6 +16,8 @@ import (
 type Web struct {
 	Host  string
 	Addrs Lookup
+	// HasA / HasAAAA split Addrs by family, as the original checker reported.
+	HasA, HasAAAA bool
 	// CNAME is the canonical name when it differs from Host.
 	CNAME string
 	// Dangling: Host has a CNAME whose target does not resolve. Whoever can
@@ -33,14 +35,25 @@ type Fetch struct {
 	Tried    bool
 	Status   int
 	FinalURL string
+	Elapsed  time.Duration
 	Err      string
 	Title    string
-	// Parked is the indicator that matched, "" when none did.
+	Server   string // the Server header, for the CSV
+	HSTS     bool   // Strict-Transport-Security on the response
+	// Parked is the parking or for-sale indicator that matched, "" when none.
 	Parked string
+	// Registrar is set when the page is served by the registrar's own hosting
+	// (the original checker's GoDaddy indicators): a parked lander OR a
+	// Website Builder site. Reported, not treated as parked - see below.
+	Registrar string
 }
 
-// OK reports whether the request produced a response at all.
+// OK reports whether the request produced a response at all, of any status.
 func (f Fetch) OK() bool { return f.Tried && f.Err == "" && f.Status > 0 }
+
+// Serving is the original checker's "active": a 2xx or 3xx response. A 404 or
+// a 503 answered, but it is not a working site.
+func (f Fetch) Serving() bool { return f.OK() && f.Status >= 200 && f.Status <= 399 }
 
 // Cert is the certificate the host presented on 443, judged separately from
 // whether a page was served.
@@ -56,11 +69,37 @@ type Cert struct {
 	VerifyErr string
 	NotAfter  time.Time
 	Issuer    string
+	Names     []string // the leaf's DNS names (SANs)
 	DialErr   string
 }
 
-// Live reports whether the host answered on either port.
-func (w Web) Live() bool { return w.HTTPS.OK() || w.HTTP.OK() }
+// Live is the original checker's "active": a 2xx/3xx on either scheme.
+func (w Web) Live() bool { return w.HTTPS.Serving() || w.HTTP.Serving() }
+
+// Answered reports whether anything responded at all, including error pages.
+func (w Web) Answered() bool { return w.HTTPS.OK() || w.HTTP.OK() }
+
+// Best is the fetch the report describes: HTTPS when it served, else HTTP,
+// else whichever answered.
+func (w Web) Best() Fetch {
+	switch {
+	case w.HTTPS.Serving():
+		return w.HTTPS
+	case w.HTTP.Serving():
+		return w.HTTP
+	case w.HTTPS.OK():
+		return w.HTTPS
+	}
+	return w.HTTP
+}
+
+// RegistrarPage is the registrar-hosting indicator from either fetch.
+func (w Web) RegistrarPage() string {
+	if w.HTTPS.Registrar != "" {
+		return w.HTTPS.Registrar
+	}
+	return w.HTTP.Registrar
+}
 
 // ParkedBy is the parking indicator from whichever fetch found one.
 func (w Web) ParkedBy() string {
@@ -70,7 +109,7 @@ func (w Web) ParkedBy() string {
 	return w.HTTP.Parked
 }
 
-// parkedIndicators are matched against the final URL and the first 64 KiB of
+// parkedIndicators are matched against the final URL and the first 1 MiB of
 // the page, lower-cased.
 //
 // Specific on purpose. The original list included wsimg.com and
@@ -93,12 +132,39 @@ var parkedIndicators = []string{
 	"hugedomains.com",
 }
 
+// registrarIndicators are the original checker's GoDaddy markers, matched
+// against the body, a handful of headers and the final URL host as it did.
+//
+// Kept, but as a SEPARATE signal from parked. They also match a real site
+// built with GoDaddy Website Builder, which loads the same CDN; calling that
+// parked would hide a live site from every web check. So a match is reported
+// as "registrar-hosted", which is still worth knowing - nobody here may
+// remember building it - and the strong indicators above decide "parked".
+var registrarIndicators = []string{
+	"godaddy",
+	"wsimg.com",
+	"secureservercdn.net",
+	"godaddysites.com",
+	"myftpupload.com",
+}
+
+// indicatorHeaders are the headers the original checker scanned.
+var indicatorHeaders = []string{"Content-Security-Policy", "Link", "Set-Cookie",
+	"Referrer-Policy", "Report-To", "Server"}
+
 // WebProber fetches a host. A field so tests can replace the network.
 type WebProber func(ctx context.Context, host string) (https, plain Fetch, cert Cert)
 
 // ProbeWeb resolves host and, if it resolves, fetches it.
 func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web {
 	w := Web{Host: host, Addrs: lookupHost(ctx, r, host)}
+	for _, a := range w.Addrs.Values {
+		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+			w.HasA = true
+		} else if ip != nil {
+			w.HasAAAA = true
+		}
+	}
 	if c, err := r.LookupCNAME(ctx, host); err == nil {
 		if c = cleanHost(c); c != "" && c != host {
 			w.CNAME = c
@@ -115,15 +181,28 @@ func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web
 }
 
 // NetWebProber is the real network.
-func NetWebProber(timeout time.Duration) WebProber {
+//
+// retries is how many times a request that got NO response is repeated. A
+// response of any status is an answer and is never retried.
+func NetWebProber(timeout time.Duration, retries int) WebProber {
 	return func(ctx context.Context, host string) (Fetch, Fetch, Cert) {
-		return get(ctx, "https://"+host+"/", timeout), get(ctx, "http://"+host+"/", timeout),
+		return getRetry(ctx, "https://"+host+"/", timeout, retries),
+			getRetry(ctx, "http://"+host+"/", timeout, retries),
 			certOf(ctx, host, timeout)
 	}
 }
 
+func getRetry(ctx context.Context, url string, timeout time.Duration, retries int) Fetch {
+	f := get(ctx, url, timeout)
+	for i := 0; i < retries && !f.OK() && ctx.Err() == nil; i++ {
+		f = get(ctx, url, timeout)
+	}
+	return f
+}
+
 func get(ctx context.Context, url string, timeout time.Duration) Fetch {
 	f := Fetch{Tried: true}
+	start := time.Now()
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
@@ -156,10 +235,31 @@ func get(ctx context.Context, url string, timeout time.Duration) Fetch {
 	defer func() { _ = resp.Body.Close() }()
 	f.Status = resp.StatusCode
 	f.FinalURL = resp.Request.URL.String()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	f.Server = resp.Header.Get("Server")
+	f.HSTS = resp.Header.Get("Strict-Transport-Security") != ""
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	f.Elapsed = time.Since(start)
 	f.Title = title(body)
 	f.Parked = parked(f.FinalURL, body)
+	var hdr strings.Builder
+	for _, h := range indicatorHeaders {
+		hdr.WriteString(resp.Header.Get(h))
+		hdr.WriteString("\n")
+	}
+	f.Registrar = registrarHosted(resp.Request.URL.Host, hdr.String(), body)
 	return f
+}
+
+// registrarHosted applies the original checker's indicators to the body, the
+// headers it scanned, and the final URL host.
+func registrarHosted(finalHost, headers string, body []byte) string {
+	hay := strings.ToLower(finalHost + "\n" + headers + "\n" + string(body))
+	for _, ind := range registrarIndicators {
+		if strings.Contains(hay, ind) {
+			return ind
+		}
+	}
+	return ""
 }
 
 func parked(finalURL string, body []byte) string {
@@ -225,6 +325,7 @@ func certOf(ctx context.Context, host string, timeout time.Duration) Cert {
 	leaf := certs[0]
 	c.NotAfter = leaf.NotAfter.UTC()
 	c.Issuer = issuerName(leaf)
+	c.Names = append([]string(nil), leaf.DNSNames...)
 	inter := x509.NewCertPool()
 	for _, ic := range certs[1:] {
 		inter.AddCert(ic)

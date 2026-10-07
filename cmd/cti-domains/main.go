@@ -25,6 +25,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,8 +54,9 @@ var registrarFor = func(token string) domains.Registrar { return godaddy.New(tok
 
 // resolver and webProber are seams for the same reason.
 var (
-	resolver  domains.Resolver
-	webProber domains.WebProber
+	resolver   domains.Resolver
+	webProber  domains.WebProber
+	smtpProber domains.SMTPProber
 )
 
 func defaultState() string {
@@ -86,6 +88,8 @@ func run() int {
 	noRegistrar := flag.Bool("no-registrar", false, "skip GoDaddy; DNS and web checks only")
 	concurrency := flag.Int("concurrency", 8, "domains probed at once")
 	timeout := flag.Duration("timeout", 10*time.Second, "per-request web timeout")
+	retries := flag.Int("retries", 1, "retries for a web request that got no response at all")
+	csvOut := flag.String("csv-out", "", "write every probed host as CSV (sitecheck.go's columns first)")
 	flag.Parse()
 
 	f, err := os.Open(*inventory)
@@ -148,11 +152,32 @@ func run() int {
 	}
 	web := webProber
 	if web == nil {
-		web = domains.NetWebProber(*timeout)
+		web = domains.NetWebProber(*timeout, *retries)
+	}
+	// SMTP greeting on the first answering MX: on unless DOMAINS_SMTP=off.
+	smtpMode := ""
+	sp := smtpProber
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DOMAINS_SMTP")), "off") {
+		sp, smtpMode = nil, "off"
+	} else if sp == nil {
+		port := 25
+		if v := strings.TrimSpace(os.Getenv("DOMAINS_SMTP_PORT")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 65535 {
+				return die("DOMAINS_SMTP_PORT=%q is not a port", safelog.Line(v))
+			}
+			port = n
+		}
+		sp = domains.NetSMTPProber(port, *timeout)
 	}
 	p := domains.Prober{Resolver: res, Web: web, Selectors: selectors,
-		Concurrency: *concurrency, PerDomain: 4 * *timeout}
+		Concurrency: *concurrency, PerDomain: 6 * *timeout, SMTP: sp}
 	results := p.Run(ctx, entries, orgOf)
+	if smtpMode == "" && domains.SMTPBlocked(results) {
+		smtpMode = "blocked"
+		opt.SMTPBlocked = true
+		logf("note   : no MX answered on the SMTP port - outbound SMTP looks blocked from this host")
+	}
 	findings := domains.Evaluate(results, cmp, opt)
 
 	prev, err := domains.LoadState(*statePath)
@@ -166,11 +191,12 @@ func run() int {
 
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
-		FirstRun: prev == nil, Selectors: selectors}
+		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode}
 	block := rep.Render()
 
 	for _, w := range []struct{ path, body string }{
 		{*out, block.HTML}, {*textOut, block.Text}, {*subjectOut, block.Subject + "\n"},
+		{*csvOut, string(domains.CSV(results))},
 	} {
 		if w.path == "" {
 			continue

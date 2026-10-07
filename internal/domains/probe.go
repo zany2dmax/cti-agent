@@ -38,6 +38,12 @@ type Prober struct {
 	// PerDomain bounds one domain's whole probe, so one black-holed name
 	// cannot hold the run.
 	PerDomain time.Duration
+	// SMTP, when set, greets the first answering MX of every domain that has
+	// one (the original checker's -smtp). nil: not checked, and the report
+	// says so.
+	SMTP SMTPProber
+
+	smtp *smtpCache
 }
 
 // Run probes every entry. Order is preserved.
@@ -52,6 +58,9 @@ func (p Prober) Run(ctx context.Context, entries []Entry, orgOf map[string]Regis
 	per := p.PerDomain
 	if per <= 0 {
 		per = 60 * time.Second
+	}
+	if p.SMTP != nil {
+		p.smtp = newSMTPCache(p.SMTP)
 	}
 	out := make([]Result, len(entries))
 	sem := make(chan struct{}, n)
@@ -82,5 +91,8 @@ func (p Prober) one(ctx context.Context, e Entry, org string) Result {
 		r.Web = append(r.Web, ProbeWeb(ctx, p.Resolver, p.Web, "www."+e.Name))
 	}
 	r.Mail = ProbeMail(ctx, p.Resolver, e.Name, org, p.Selectors)
+	if p.smtp != nil && r.Mail.MX.Present() {
+		r.Mail.SMTP = p.smtp.first(ctx, r.Mail.MX.Values, r.Mail.MXUnresolved)
+	}
 	return r
 }
