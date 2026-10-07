@@ -24,6 +24,7 @@ document assumes you have decided to run it.
 - [11d. What version is this box running?](#11d-what-version-is-this-box-running)
 - [11e. Taking a host off the schedule](#11e-taking-a-host-off-the-schedule)
 - [11f. The weekly application-security lane](#11f-the-weekly-application-security-lane)
+- [11g. The weekly domains lane](#11g-the-weekly-domains-lane)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -377,6 +378,7 @@ one is enabled.
 | 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent |
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
+| 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
 
 ```bash
 systemctl list-timers 'cti-agent-*' --all
@@ -1083,6 +1085,67 @@ so Invicti or Wiz becomes useful the day its email arrives rather than the day
 somebody negotiates API access. A provider that *does* have an API additionally
 implements `DetailFetcher`, and losing that costs per-finding detail and not
 the report.
+
+## 11g. The weekly domains lane
+
+`cti-agent-domains.timer`, Mondays 08:00, to the security team through
+`cti-mailer --lane dom`. What it checks is in
+[fleet-kit/README.md → The weekly domains check](fleet-kit/README.md#the-weekly-domains-check).
+
+### 1. The inventory (not in the repository)
+
+```bash
+sudo install -m 0640 -o root -g ctiagent /dev/null /etc/cti-agent/domains.txt
+sudoedit /etc/cti-agent/domains.txt
+```
+
+One domain per line; `send` after a domain that sends mail; `#` comments.
+Everything not marked `send` is checked as a domain that must **not** send
+(`v=spf1 -all`, DMARC `p=reject`). A typo in the marker is reported in the
+email rather than silently read as "does not send". `domains.txt` is in
+`.gitignore`, and a test fails if one appears anywhere in the tree.
+
+### 2. The GoDaddy token
+
+Create a Personal Access Token in the GoDaddy developer portal with **only**
+`domains.domain:read`. Put it in `GODADDY_PAT` in `/etc/cti-agent/fleet.env`.
+The lane makes one call, `GET /v1/domains`, and never requests auth codes.
+
+| Error | Means |
+|---|---|
+| `HTTP 401` | token missing, expired or revoked |
+| `HTTP 403` | token lacks `domains.domain:read`, or the account is not eligible - GoDaddy's code in the message says which |
+| `HTTP 429` | rate limited; the next weekly run will retry |
+
+Without a token the report still runs DNS, web and mail checks, and its subject
+carries `[REGISTRAR NOT CHECKED]`.
+
+### 3. Recipients and the first run
+
+```bash
+# in fleet.env
+DOM_TO=$FLEET_OPERATOR_EMAIL           # or the security team's list
+DOM_ALLOW_TO=$DOM_TO
+
+sudo cti-agent cti-mailer --check      # lists DOM_TO / DOM_ALLOW_TO
+sudo cti-agent run-domains --dry-run   # renders, sends nothing, baseline untouched
+sudo systemctl enable --now cti-agent-domains.timer
+```
+
+The first real run says *"First run: no previous week to compare with"*. The
+week-over-week section starts the Monday after. State is
+`$FLEET_HOME/state/domains-state.json` (0600); move it aside to start over.
+
+### 4. DKIM selectors and DMARC reports
+
+DKIM keys cannot be listed, only probed by selector. If a sending domain shows
+"no DKIM key at the selectors tried", find the selector from a message header
+(`DKIM-Signature: ... s=<selector>`) and add it to `DOMAINS_DKIM_SELECTORS`.
+
+`DOMAINS_DMARC_RUA` is **empty pending a decision** on where aggregate reports
+should go (the mail gateway may provide an address). Until it is set the check
+is only that every sending domain has *some* `rua=`; once set, every sending
+domain's `rua=` must include it.
 
 ---
 

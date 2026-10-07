@@ -455,6 +455,17 @@ else
   info "  rather than reasoning from empty headings - placeholder prose fails"
   info "  silently in a way placeholder credentials do not."
 fi
+
+# The domain inventory, same rule as the profile: it is a list of everything
+# the organisation owns, so it lives only in $CONF_DIR and is never created
+# from the repository. Reported, not created - cti-domains refuses to run on
+# an absent or empty file rather than mailing "no issues across 0 domains".
+if [ -f "$CONF_DIR/domains.txt" ]; then
+  ok "$CONF_DIR/domains.txt exists ($(awk '!/^[[:space:]]*(#|$)/{n++} END{print n+0}' "$CONF_DIR/domains.txt" 2>/dev/null) domain line(s))"
+else
+  info "$CONF_DIR/domains.txt not present - the domains lane will not run until it is"
+  info "  one domain per line, 'send' after those that send mail; root:$FLEET_GROUP 0640"
+fi
 info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
 
 # ────────────────────────────────────────────────────────── the Go agent ─────
@@ -561,6 +572,12 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-appscan" ./cmd/cti-appscan )
   chmod 0755 "$CODE_DIR/bin/cti-appscan"
   ok "built $CODE_DIR/bin/cti-appscan"
+
+  # Weekly domains check. Sends through cti-mailer --lane dom, which refuses
+  # unless DOM_TO and DOM_ALLOW_TO are both set, so installing it does not arm it.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-domains" ./cmd/cti-domains )
+  chmod 0755 "$CODE_DIR/bin/cti-domains"
+  ok "built $CODE_DIR/bin/cti-domains"
 else
   info "would build $AGENT_SRC/cti-agent"
 fi
@@ -778,6 +795,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" \
+         "$CODE_DIR/bin/cti-domains" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

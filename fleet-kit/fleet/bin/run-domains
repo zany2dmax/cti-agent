@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# run-domains - weekly domains check to the security team.
+#
+# For every domain in DOMAINS_FILE: registration at GoDaddy, live/parked,
+# certificate validity, and whether its mail records match what the file says
+# it does. Then what changed since last week. Mailed through
+# cti-mailer --lane dom, which resolves DOM_TO against DOM_ALLOW_TO and
+# REFUSES if either is unset - no fallback to the digest audience.
+#
+# No model is involved. Every line in the report is a DNS answer, an HTTP
+# response, a certificate, or a field from the registrar's API.
+#
+# USAGE
+#   run-domains              probe, render, send, advance last week's baseline
+#   run-domains --dry-run    probe, render, print the subject; send nothing and
+#                            leave the baseline alone, so the real run still
+#                            reports this week's changes
+set -euo pipefail
+
+# Sourced here AND loaded by the binary: see run-appscan for why both.
+FLEET_HOME="${FLEET_HOME:-$HOME}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+export FLEET_HOME FLEET_CODE
+STATE="$FLEET_HOME/state"
+
+fail() { echo "[run-domains] error: $*" >&2; exit 1; }
+log()  { echo "[run-domains] $*" >&2; }
+
+DRY=""
+case "${1:-}" in
+  "")         ;;
+  --dry-run)  DRY="--dry-run" ;;
+  *)          fail "unknown argument: $1 (only --dry-run is accepted)" ;;
+esac
+[ $# -le 1 ] || fail "too many arguments: $*"
+
+DOMAINS="$FLEET_CODE/bin/cti-domains"
+MAILER="$FLEET_CODE/bin/cti-mailer"
+[ -x "$DOMAINS" ] || fail "cti-domains not found at $DOMAINS - rerun the installer"
+[ -x "$MAILER" ]  || fail "cti-mailer not found at $MAILER - rerun the installer"
+
+mkdir -p "$STATE"
+chmod 0700 "$STATE" 2>/dev/null || true
+
+STAMP="$(date -u +%Y-%m-%d)"
+HTML="$STATE/domains-$STAMP.html"
+TXT="$STATE/domains-$STAMP.txt"
+SUBJ="$STATE/domains-$STAMP.subject"
+
+# Mode before content: the report lists every domain we own and which of them
+# can be spoofed.
+: > "$HTML"; chmod 0600 "$HTML"
+: > "$TXT";  chmod 0600 "$TXT"
+# The subject file is deleted, not pre-created: an empty one left over from a
+# failed run must not read as this run's subject.
+rm -f "$SUBJ"
+
+NOSTATE=""
+[ -n "$DRY" ] && NOSTATE="--no-state-write"
+
+# shellcheck disable=SC2086
+"$DOMAINS" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" $NOSTATE \
+  || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
+
+[ -s "$SUBJ" ] || fail "no subject written - refusing to send"
+SUBJECT="$(head -n1 "$SUBJ")"
+[ -n "$SUBJECT" ] || fail "empty subject - refusing to send"
+log "subject: $SUBJECT"
+
+# shellcheck disable=SC2086
+"$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+  || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
+
+if [ -n "$DRY" ]; then
+  log "dry run - nothing was sent and the baseline was not advanced. Report: $HTML"
+fi
+log "done"

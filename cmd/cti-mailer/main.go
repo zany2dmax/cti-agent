@@ -364,6 +364,8 @@ var optional = [][2]string{
 	{"FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"},
 	{"WAS_TO", "--lane was recipients; app-security, a different audience"},
 	{"WAS_ALLOW_TO", "--lane was allowlist; NO fallback - unset means it will not send"},
+	{"DOM_TO", "--lane dom recipients; the weekly domains check, security team only"},
+	{"DOM_ALLOW_TO", "--lane dom allowlist; NO fallback - unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},
 }

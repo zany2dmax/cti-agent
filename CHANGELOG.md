@@ -37,6 +37,30 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **A weekly domains check (`cti-domains`, `run-domains`,
+  `cti-agent-domains.timer`, Mondays 08:00).** For every domain in an
+  operator-kept inventory (`/etc/cti-agent/domains.txt`, never in the
+  repository; `send` marks a domain that sends mail): is it in the GoDaddy
+  account, and is the account holding domains the inventory does not list;
+  status, expiry, auto-renew and transfer lock; registrar nameservers against
+  DNS; live, parked or dark; dangling CNAMEs; certificates verified separately
+  from reachability; and mail records by role - SPF, DKIM at known selectors
+  and an enforcing DMARC with `rua=` for senders, `v=spf1 -all` and
+  `p=reject` for everything else, with a non-sender that authorises senders
+  asked as a question. Then what changed since last week. Mailed to the
+  security team through `cti-mailer --lane dom` (`DOM_TO` / `DOM_ALLOW_TO`,
+  fail-closed, no fallback). Forked from a standalone checker and reshaped:
+  a failed lookup is reported as not checked rather than as a missing record,
+  and the parking indicators no longer match real Website Builder sites.
+- New settings: `DOM_TO`, `DOM_ALLOW_TO`, `DOMAINS_FILE`, `GODADDY_PAT`
+  (read-only, `domains.domain:read`; the client never requests auth codes),
+  `DOMAINS_DKIM_SELECTORS`, `DOMAINS_DMARC_RUA` (empty pending a decision on
+  where aggregate reports go).
+
+## 1.1.1 — 2026-10-06
+
 ### Fixed
 
 - **Tickets were only re-checked when their CVE was back in the news, and were

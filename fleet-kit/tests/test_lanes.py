@@ -1974,6 +1974,45 @@ class TestFileShape(unittest.TestCase):
             "run-appscan alerts before it sends - a cti-alert failure would "
             "then take the report down with it")
 
+    def test_the_domains_lane_is_wired_and_read_only(self):
+        """The weekly domains check: its own audience, a dry run that does not
+        advance the baseline, and a registrar client that never asks for the
+        auth codes that would let anyone transfer our domains away."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+
+        def code(path):
+            return "\n".join(
+                line for line in path.read_text(encoding="utf-8").split("\n")
+                if not line.lstrip().startswith(("#", "//")))
+
+        runner = code(root / "fleet-kit" / "fleet" / "bin" / "run-domains")
+        self.assertRegex(runner, r'"\$MAILER"\s+--lane dom\b',
+                         "run-domains does not send through cti-mailer --lane dom")
+        self.assertIn('NOSTATE="--no-state-write"', runner,
+                      "a dry run would advance last week's baseline, so the real "
+                      "run reports no changes in a week that had them")
+        self.assertRegex(runner, r'"\$DOMAINS"[^\n]*\$NOSTATE',
+                         "--no-state-write is set but never passed to cti-domains")
+
+        client = code(root / "internal" / "domains" / "godaddy" / "client.go")
+        self.assertNotRegex(client.lower(), r'q\.set\("includes",\s*"[^"]*authcode',
+                            "the GoDaddy client requests authCode")
+        self.assertIn('q.Set("includes", "nameServers")', client)
+        self.assertNotIn("http.MethodPost", client, "the registrar client must only read")
+
+        unit = (root / "fleet-kit" / "fleet" / "systemd-fedora"
+                / "cti-agent-domains.service").read_text(encoding="utf-8")
+        self.assertIn("SyslogIdentifier=cti-agent-domains", unit)
+
+        env = (root / "fleet-kit" / "fleet" / "fleet.env.example").read_text(encoding="utf-8")
+        for var in ("DOM_TO=", "DOM_ALLOW_TO=", "GODADDY_PAT=", "DOMAINS_FILE="):
+            self.assertIn("\n" + var, env, f"{var} is not documented in fleet.env.example")
+
+        # The inventory is an operator file. A domains.txt in the public
+        # repository is the list this lane exists to keep private.
+        tracked = [p for p in root.rglob("domains.txt") if ".git" not in p.parts]
+        self.assertEqual(tracked, [], "a domains.txt is inside the repository tree")
+
     def test_the_appscan_report_does_not_call_a_public_site_a_coverage_gap(self):
         """An unauthenticated scan is a label, not a defect.
 

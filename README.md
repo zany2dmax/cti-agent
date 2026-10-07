@@ -67,6 +67,15 @@ detail. Open counts per application, what is new since the last scan, and a
 label on every count saying whether that scan logged in. A scanner credential
 that stops working alerts the operator rather than the developers.
 
+**A weekly domains check.** Mondays, security team only. For every domain in an
+operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
+repository): still registered in the GoDaddy account, and is the account
+holding domains nobody listed; live, parked or dark; does the certificate
+verify; and do the mail records match the domain's role — a sender needs SPF,
+DKIM and an enforcing DMARC, a non-sender must publish `v=spf1 -all` and
+`p=reject` so nobody can send as it. Then what changed since last week. A
+failed DNS lookup is reported as *not checked*, never as a missing record.
+
 **KEV deadline tracking.** CISA remediation deadlines, but only for CVEs the
 scanner actually found in the estate — a deadline for something you do not have
 is noise.
@@ -87,6 +96,7 @@ quiet day — which only holds if a broken pipeline is loud.
 | `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
 | `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
 | `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails. Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
+| `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom` |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
 | `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
@@ -215,6 +225,7 @@ by Limited Edition Jonathan. This repository applies it to threat intel.
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
 cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
 cmd/cti-appscan/               weekly application-security report from DAST email
+cmd/cti-domains/               weekly domains check: registrar, DNS, web, mail records
 cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
 cmd/cti-jira/                  files and updates one ticket per KEV or Sev5 CVE
 cmd/cti-kev/                   CISA KEV remediation deadline report
@@ -241,6 +252,8 @@ internal/safelink/             Proofpoint/redirector unwrapping with a host allo
 internal/shellgate/            shell lint: the patterns that make a runner exit quietly
 internal/appscan/              DAST boundary: scan results, auth state, the report
 internal/appscan/qualys/       Qualys WAS: notification parser and Findings API
+internal/domains/              inventory, probes, findings by role, week-over-week diff
+internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for a future implementation
@@ -250,7 +263,7 @@ fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
-                               run-appscan, run-mailbox-cleanup,
+                               run-appscan, run-domains, run-mailbox-cleanup,
                                fleet-board, fleet-db
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
