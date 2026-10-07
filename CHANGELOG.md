@@ -54,6 +54,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   fail-closed, no fallback). Forked from a standalone checker and reshaped:
   a failed lookup is reported as not checked rather than as a missing record,
   and the parking indicators no longer match real Website Builder sites.
+- **Every check `sitecheck.go` made.** A/AAAA, CNAME, status, final URL and
+  response time per host; one retry; live as 2xx/3xx; its GoDaddy markers kept
+  as "registrar-hosted" beside the stricter parked test; `-mxstrict` (MX hosts
+  must resolve); `-smtp` (banner from the first answering MX) with STARTTLS,
+  each MX dialled once per run; and its full CSV, same columns first, attached
+  to every send with formula-leading cells defused. Added beside them: 5xx and
+  off-portfolio redirects, `http://` that does not upgrade, DKIM key size,
+  certificate SANs and HSTS in the CSV.
+- New settings: `DOMAINS_SMTP`, `DOMAINS_SMTP_PORT`.
 - New settings: `DOM_TO`, `DOM_ALLOW_TO`, `DOMAINS_FILE`, `GODADDY_PAT`
   (read-only, `domains.domain:read`; the client never requests auth codes),
   `DOMAINS_DKIM_SELECTORS`, `DOMAINS_DMARC_RUA` (empty pending a decision on

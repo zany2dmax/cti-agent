@@ -104,8 +104,9 @@ func TestLookupDistinguishesAbsentFromFailed(t *testing.T) {
 
 func goodSender() fakeDNS {
 	return fakeDNS{
-		host: map[string][]string{"example.com": {"192.0.2.1"}, "www.example.com": {"192.0.2.1"}},
-		mx:   map[string][]*net.MX{"example.com": {{Host: "mx.example-mail.test.", Pref: 10}}},
+		host: map[string][]string{"example.com": {"192.0.2.1"}, "www.example.com": {"192.0.2.1"},
+			"mx.example-mail.test": {"192.0.2.25"}},
+		mx: map[string][]*net.MX{"example.com": {{Host: "mx.example-mail.test.", Pref: 10}}},
 		txt: map[string][]string{
 			"example.com":                      {"some-verification=abc", "v=spf1 include:_spf.example-mail.test -all"},
 			"_spf.example-mail.test":           {"v=spf1 ip4:192.0.2.0/24 -all"},

@@ -1136,7 +1136,20 @@ The first real run says *"First run: no previous week to compare with"*. The
 week-over-week section starts the Monday after. State is
 `$FLEET_HOME/state/domains-state.json` (0600); move it aside to start over.
 
-### 4. DKIM selectors and DMARC reports
+### 4. Outbound port 25
+
+The lane greets each domain's MX on port 25 to check STARTTLS. Many networks
+block outbound 25; if every probe fails the report says *"outbound port 25 is
+almost certainly blocked from this host"* once, in its footer, and nothing per
+domain. To test from the box:
+
+```bash
+timeout 5 bash -c '</dev/tcp/<an-mx-host>/25' && echo open || echo blocked
+```
+
+Either open it for this host or set `DOMAINS_SMTP=off`.
+
+### 5. DKIM selectors and DMARC reports
 
 DKIM keys cannot be listed, only probed by selector. If a sending domain shows
 "no DKIM key at the selectors tried", find the selector from a message header

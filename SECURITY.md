@@ -812,9 +812,13 @@ nor the portal reports the effective scope.
 - **Model-based triage will be non-deterministic.** The controls designed for
   it are compensating, not eliminating. A model can still be wrong about
   relevance — which is why it must not be able to suppress.
-- **Eleven `#nosec` annotations exist**, each inline with its reason: six
-  G304, three G706, one G204, one G306. `.golangci.yml` has no exclusion list.
-  `scripts/nosec-audit.py` reports any that suppress nothing.
+- **`#nosec` annotations exist**, each inline with its reason - mostly G304
+  (config and state paths set by the operator), plus G706, G204, G306, and two
+  G402 in the domains lane, where the web fetch deliberately skips certificate
+  verification and the certificate is then verified separately. A fixed count
+  here went stale twice, so run `task gosec:audit` for the current list.
+  `.golangci.yml` has no exclusion list. `scripts/nosec-audit.py` reports any
+  annotation that suppresses nothing.
 - **One installer path is built but not verified.** The ingest binary is built
   to `$CTI_AGENT_DIR`, outside the directory the installer's verification loop
   checks, so a lane can run older code than everything around it. Check its

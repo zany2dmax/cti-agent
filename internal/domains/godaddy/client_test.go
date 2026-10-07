@@ -26,7 +26,7 @@ func TestDomainsRequestShape(t *testing.T) {
 		if inc != "nameServers" || r.URL.Query().Get("limit") != "1000" {
 			t.Errorf("query = %s", r.URL.RawQuery)
 		}
-		fmt.Fprint(w, `[{"domain":"Example.COM","status":"active","expires":"2027-01-02T03:04:05.000Z",
+		_, _ = fmt.Fprint(w, `[{"domain":"Example.COM","status":"active","expires":"2027-01-02T03:04:05.000Z",
 		  "renewAuto":true,"locked":true,"privacy":false,
 		  "nameServers":["NS2.example-dns.test.","ns1.example-dns.test","ns1.example-dns.test"]}]`)
 	}))
@@ -63,7 +63,7 @@ func TestDomainsPaginates(t *testing.T) {
 		for i := 0; i < n; i++ {
 			rows = append(rows, fmt.Sprintf(`{"domain":"d%04d-%s.example"}`, i, strings.TrimSuffix(m, ".example")))
 		}
-		fmt.Fprint(w, "["+strings.Join(rows, ",")+"]")
+		_, _ = fmt.Fprint(w, "["+strings.Join(rows, ",")+"]")
 	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
@@ -82,7 +82,7 @@ func TestDomainsStuckMarkerIsAnError(t *testing.T) {
 		for i := range rows {
 			rows[i] = `{"domain":"same.example"}`
 		}
-		fmt.Fprint(w, "["+strings.Join(rows, ",")+"]")
+		_, _ = fmt.Fprint(w, "["+strings.Join(rows, ",")+"]")
 	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
@@ -101,7 +101,7 @@ func TestDomainsErrorsSayWhy(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "30")
 			w.WriteHeader(code)
-			fmt.Fprint(w, `{"code":"UNABLE_TO_AUTHENTICATE","message":"synthetic"}`)
+			_, _ = fmt.Fprint(w, `{"code":"UNABLE_TO_AUTHENTICATE","message":"synthetic"}`)
 		}))
 		c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
 		_, err := c.Domains(context.Background())

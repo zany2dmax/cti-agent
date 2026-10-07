@@ -926,6 +926,8 @@ play.
 | `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository |
 | `GODADDY_PAT` | GoDaddy Personal Access Token, `domains.domain:read` only. Unset: registrar checks are skipped and the subject says so |
 | `DOMAINS_DKIM_SELECTORS` | DKIM selectors to probe; empty uses a built-in list. DKIM keys cannot be enumerated, so add your mail service's selector |
+| `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
+| `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
@@ -1564,7 +1566,8 @@ Operating detail is in
 | Area | Checks |
 |---|---|
 | Registrar | every inventory domain is in the account; every account domain is in the inventory; status ACTIVE; expiry (30/60 days, worse with auto-renew off); transfer lock on; registrar nameservers match DNS |
-| Web | live, parked (lander and for-sale markers only - not Website Builder assets, which real sites load too), or dark; dangling CNAME (takeover); certificate rejected by browsers; HTTP only; certificate expiry 14/30 days |
+| Web | everything `sitecheck.go` reported - A/AAAA, CNAME, status, final URL, response time, TLS issuer and names - for the apex and `www.`, one retry on no response. Live means 2xx/3xx, as sitecheck's `active`; a 5xx is a finding. Parked by lander and for-sale markers; sitecheck's GoDaddy markers are kept as **registrar-hosted**, because a real Website Builder site matches them too. Dangling CNAME (takeover); certificate rejected by browsers; HTTP only; `http://` not redirecting to `https://`; a redirect off our domains; certificate expiry 14/30 days |
+| Mail delivery (every domain) | sitecheck's `-mxstrict` (every MX host resolves) and `-smtp` (greet the first answering MX, record the banner) plus whether it offers STARTTLS. Each MX host is dialled once per run however many domains share it. If no MX answers at all, outbound port 25 is reported once as blocked rather than 93 times. DKIM key size: under 1024-bit High, 1024 Medium |
 | Sending domains | SPF present, single, not `+all`, under 10 lookups; a DKIM key at a known selector; DMARC present, `quarantine`/`reject`, `pct=100`, with `rua=`; an MX |
 | Non-sending domains | `v=spf1 -all`; DMARC `p=reject`; and anything that suggests it **is** sending - an authorising SPF or a DKIM key - asked as a question |
 | Week over week | nameservers, MX, SPF, DMARC, CNAMEs, live/parked, certificate issuer, registrar status/lock/auto-renew, and any domain that left the account. Not A records: CDNs churn them |
@@ -1574,9 +1577,18 @@ record, and its previous value is carried forward so one timeout cannot
 produce a "removed" this week and an "added" next week. A subdomain with no
 DMARC of its own is judged by its parent's `sp=`/`p=`.
 
-The footer lists what is **not** checked - CAA, DNSSEC, STARTTLS/MTA-STS,
+The footer lists what is **not** checked - CAA, DNSSEC, MTA-STS/TLS-RPT,
 DKIM selectors outside the list, subdomains not in the inventory - on every
 send.
+
+### The CSV
+
+Every send attaches `domains-<date>.csv`: one row per probed host, with
+`sitecheck.go`'s 28 columns first, in its order and under its names, then the
+lane's additions (role, registrar-hosted, verified TLS, SANs, HSTS, STARTTLS,
+DKIM key size, DMARC policy and rua). A cell starting with `=`, `+`, `-` or
+`@` is prefixed with `'`: page titles and banners come from the remote end, and
+Excel executes formulas when the file is opened.
 
 ### Dry run
 

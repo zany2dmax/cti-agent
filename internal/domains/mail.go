@@ -2,6 +2,9 @@ package domains
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"strconv"
 	"strings"
 )
@@ -14,7 +17,8 @@ import (
 // selectors we tried", and the report says exactly that. selector1/selector2
 // are Microsoft 365's; google is Workspace's; the rest are common defaults.
 // Add the mail gateway's selector to fleet.env once it is known.
-var DefaultDKIMSelectors = []string{"selector1", "selector2", "google", "default", "mail", "s1", "s2", "k1", "dkim"}
+var DefaultDKIMSelectors = []string{"selector1", "selector2", "google", "default", "mail",
+	"s1", "s2", "k1", "k2", "k3", "dkim"}
 
 // wildcardSelector is a name nobody publishes. If it answers, the zone has a
 // wildcard TXT and every selector will appear to exist, so the DKIM result
@@ -24,6 +28,15 @@ const wildcardSelector = "cti-agent-probe-nonexistent"
 // Mail is what DNS says about a domain's mail.
 type Mail struct {
 	MX Lookup
+	// MXUnresolved are MX hosts that do not resolve to any address: mail to
+	// the domain bounces at that host, and a lapsed name there can be claimed.
+	// The original checker's -mxstrict.
+	MXUnresolved []string
+	// MXResolveFailed are MX hosts whose lookup errored - unknown, not absent.
+	MXResolveFailed []string
+	// SMTP is the banner probe of the first MX that answers (-smtp), filled in
+	// by the Prober so one MX shared by many domains is dialled once.
+	SMTP SMTPResult
 	// SPF is every v=spf1 TXT at the name. More than one is itself a fault:
 	// receivers treat it as a permanent error, which is the same as none.
 	SPF Lookup
@@ -49,6 +62,11 @@ type DKIMResult struct {
 	Revoked  []string // record exists with an empty p= - a deliberately revoked key
 	Failed   []string // the lookup itself failed
 	Wildcard bool     // the zone answers for any selector; result is meaningless
+	// Bits is the RSA modulus size per found selector, 0 when the key is not
+	// RSA (ed25519) or could not be parsed. Under 1024 is forgeable today.
+	Bits map[string]int
+	// Records keeps the raw TXT per found selector, for the CSV.
+	Records map[string]string
 }
 
 func isSPF(s string) bool {
@@ -100,6 +118,19 @@ func ProbeMail(ctx context.Context, r Resolver, name, org string, selectors []st
 		}
 	}
 
+	// -mxstrict: every MX host must resolve.
+	for _, h := range m.MX.Values {
+		if h == "." {
+			continue
+		}
+		switch l := lookupHost(ctx, r, h); {
+		case !l.Known():
+			m.MXResolveFailed = append(m.MXResolveFailed, h)
+		case !l.Present():
+			m.MXUnresolved = append(m.MXUnresolved, h)
+		}
+	}
+
 	m.DKIM.Tried = selectors
 	if w := lookupTXT(ctx, r, wildcardSelector+"._domainkey."+name); w.Present() {
 		m.DKIM.Wildcard = true
@@ -116,10 +147,38 @@ func ProbeMail(ctx context.Context, r Resolver, name, org string, selectors []st
 				m.DKIM.Revoked = append(m.DKIM.Revoked, sel)
 			} else {
 				m.DKIM.Found = append(m.DKIM.Found, sel)
+				if m.DKIM.Bits == nil {
+					m.DKIM.Bits, m.DKIM.Records = map[string]int{}, map[string]string{}
+				}
+				m.DKIM.Bits[sel] = dkimBits(rec)
+				m.DKIM.Records[sel] = rec
 			}
 		}
 	}
 	return m
+}
+
+// dkimBits is the RSA key size in a DKIM record, 0 if not RSA or unparseable.
+func dkimBits(rec string) int {
+	if k, ok := tag(rec, "k"); ok && !strings.EqualFold(k, "rsa") {
+		return 0
+	}
+	p, _ := tag(rec, "p")
+	der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(p), ""))
+	if err != nil {
+		return 0
+	}
+	if pub, err := x509.ParsePKIXPublicKey(der); err == nil {
+		if k, ok := pub.(*rsa.PublicKey); ok {
+			return k.N.BitLen()
+		}
+		return 0
+	}
+	// Some publishers put the bare PKCS#1 key in p=.
+	if k, err := x509.ParsePKCS1PublicKey(der); err == nil {
+		return k.N.BitLen()
+	}
+	return 0
 }
 
 // countSPFLookups counts the mechanisms that cost a DNS query, following

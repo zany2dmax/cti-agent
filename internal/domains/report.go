@@ -3,6 +3,7 @@ package domains
 import (
 	"fmt"
 	"html"
+	neturl "net/url"
 	"os"
 	"sort"
 	"strings"
@@ -29,13 +30,16 @@ type Report struct {
 	Problems     []string // inventory file problems
 	FirstRun     bool     // no previous state, so no changes can be reported
 	Selectors    []string
+	// SMTP is "off" when the probe was disabled, "blocked" when every
+	// connection failed (port 25 closed outbound from this host), else "".
+	SMTP string
 }
 
 // NotChecked is said in every report, because a check that is silently
 // absent reads as a check that passed.
 var NotChecked = []string{
 	"CAA and DNSSEC (the fleet's Go code is standard-library only, which cannot query them)",
-	"SMTP STARTTLS and MTA-STS on the MX hosts",
+	"MTA-STS and TLS-RPT policies on the MX hosts",
 	"DKIM selectors other than those listed - a key at any other selector is invisible to this check",
 	"subdomains not listed in domains.txt",
 }
@@ -155,18 +159,76 @@ func webState(r Result) string {
 			st = "DNS error"
 		case !w.Addrs.Present():
 			st = "no DNS"
-		case !w.Live():
+		case !w.Answered():
 			st = "no answer"
 		case w.ParkedBy() != "":
 			st = "parked"
-		case w.HTTPS.OK():
+		case !w.Live():
+			st = fmt.Sprintf("HTTP %d", w.Best().Status)
+		case w.HTTPS.Serving():
 			st = "live"
 		default:
 			st = "live (HTTP only)"
 		}
+		if w.Live() && w.ParkedBy() == "" {
+			if t := redirectHost(w); t != "" {
+				st += " → " + t
+			}
+			if g := w.RegistrarPage(); g != "" {
+				st += " (registrar-hosted)"
+			}
+		}
 		parts = append(parts, label+" "+st)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// redirectHost is where the best fetch ended up, when that is another host.
+func redirectHost(w Web) string {
+	u, err := neturl.Parse(w.Best().FinalURL)
+	if err != nil || u.Hostname() == "" || strings.EqualFold(u.Hostname(), w.Host) {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// webDetail is the second line of the inventory row: what sitecheck printed -
+// status, response time, certificate, address families - for the apex.
+func webDetail(r Result) string {
+	if len(r.Web) == 0 {
+		return ""
+	}
+	w := r.Web[0]
+	var p []string
+	if fam := families(w); fam != "" {
+		p = append(p, fam)
+	}
+	if w.CNAME != "" {
+		p = append(p, "CNAME "+w.CNAME)
+	}
+	if b := w.Best(); b.OK() {
+		p = append(p, fmt.Sprintf("%d in %dms", b.Status, b.Elapsed.Milliseconds()))
+	}
+	if c := w.TLS; c.Checked && c.DialErr == "" {
+		v := "valid"
+		if !c.Verified {
+			v = "INVALID"
+		}
+		p = append(p, fmt.Sprintf("cert %s, %s, exp %s", v, c.Issuer, c.NotAfter.Format("2 Jan 2006")))
+	}
+	return strings.Join(p, " · ")
+}
+
+func families(w Web) string {
+	switch {
+	case w.HasA && w.HasAAAA:
+		return "A+AAAA"
+	case w.HasA:
+		return "A"
+	case w.HasAAAA:
+		return "AAAA"
+	}
+	return ""
 }
 
 func mailState(r Result) string {
@@ -219,7 +281,14 @@ func mailState(r Result) string {
 	case len(m.MX.Values) == 1 && m.MX.Values[0] == ".":
 		p = append(p, "null MX")
 	default:
-		p = append(p, "MX")
+		mx := "MX"
+		switch sm := m.SMTP; {
+		case sm.Checked && sm.Err == "" && sm.StartTLS:
+			mx += " (STARTTLS)"
+		case sm.Checked && sm.Err == "":
+			mx += " (no STARTTLS)"
+		}
+		p = append(p, mx)
 	}
 	return strings.Join(p, " · ")
 }
@@ -292,6 +361,9 @@ func (r Report) text() string {
 	fmt.Fprintf(&b, "\nINVENTORY (%d domains, %d live)\n", len(r.Results), r.live())
 	for _, x := range sortedResults(r.Results) {
 		fmt.Fprintf(&b, "  %-32s %-8s %s\n      %s\n", x.Entry.Name, role(x.Entry), webState(x), mailState(x))
+		if d := webDetail(x); d != "" {
+			fmt.Fprintf(&b, "      %s\n", d)
+		}
 	}
 
 	fmt.Fprintf(&b, "\nNOT CHECKED\n")
@@ -307,6 +379,13 @@ func (r Report) notChecked() []string {
 	if len(r.Selectors) > 0 {
 		out[2] = "DKIM selectors other than " + strings.Join(r.Selectors, ", ") +
 			" - a key at any other selector is invisible to this check"
+	}
+	switch r.SMTP {
+	case "off":
+		out = append(out, "SMTP greeting and STARTTLS on the MX hosts (DOMAINS_SMTP=off)")
+	case "blocked":
+		out = append(out, "SMTP greeting and STARTTLS: every connection to an MX failed, so "+
+			"outbound port 25 is almost certainly blocked from this host")
 	}
 	return out
 }
@@ -431,8 +510,9 @@ func (r Report) html() string {
                          font-weight:700;word-break:break-all">%s
                 <div style="font-weight:400;color:#718096;font-size:11px">%s</div></td>
               <td style="padding:5px 8px;border-bottom:1px solid #edf2f7;color:#4a5568">%s
-                <div style="color:#718096;font-size:11px">%s</div></td></tr>`,
-			e(x.Entry.Name), e(role(x.Entry)), e(webState(x)), e(mailState(x)))
+                <div style="color:#718096;font-size:11px">%s</div>
+                <div style="color:#a0aec0;font-size:11px">%s</div></td></tr>`,
+			e(x.Entry.Name), e(role(x.Entry)), e(webState(x)), e(mailState(x)), e(webDetail(x)))
 	}
 	b.WriteString(`
         </table></td></tr>

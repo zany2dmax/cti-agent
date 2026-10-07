@@ -70,6 +70,8 @@ const stateVersion = 1
 // run); a corrupt one is an error, because silently starting over would
 // report no changes in a week that may have had them.
 func LoadState(path string) (*State, error) {
+	// #nosec G304 -- path is --state, defaulting to $FLEET_HOME/state; set by
+	// the unit or the operator, never by anything the lane reads from outside.
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -218,9 +220,9 @@ func Diff(prev, cur *State, registrarChecked bool, registrar string) []Finding {
 			field(d, h+" CNAME", ph.CNAME, ch.CNAME, Medium)
 			if ph.Live != ch.Live {
 				if ch.Live {
-					add(d, Medium, "%s started answering on the web", h)
+					add(d, Medium, "%s started serving a working page (2xx/3xx)", h)
 				} else {
-					add(d, Medium, "%s stopped answering on the web", h)
+					add(d, Medium, "%s no longer serves a working page (2xx/3xx)", h)
 				}
 			}
 			if ph.Live && ch.Live && ph.Parked != ch.Parked {
