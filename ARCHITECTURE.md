@@ -123,6 +123,7 @@ flowchart TB
         NVD["NVD · EPSS · CISA KEV"]
         QUALYS["Vulnerability scanner<br/>host detection"]
         DAST["Web app scanner<br/>scan-complete mail + API"]
+        DNSREG["Public DNS + our sites<br/>GoDaddy account (read-only)"]
     end
 
     subgraph LANES["Executor lanes — on timers, deterministic, cannot talk to a human"]
@@ -131,6 +132,7 @@ flowchart TB
         PT["Patch Tuesday<br/>monthly"]
         CLEAN["mailbox cleanup<br/>07:00"]
         APPSEC["AppSec report<br/>Monday 07:30"]
+        DOMS["domains check<br/>Monday 08:00"]
     end
 
     subgraph GO["Shared Go packages — the lanes' toolbox"]
@@ -142,6 +144,7 @@ flowchart TB
         P5["mailer<br/>the recipient gate"]
         P6["triage<br/>advisories with no CVE"]
         P7["appscan<br/>any DAST scanner"]
+        P8["domains<br/>registrar · DNS · mail records"]
     end
 
     subgraph OUT["Outputs"]
@@ -158,10 +161,12 @@ flowchart TB
     NVD --> DIGEST
     QUALYS --> DIGEST
     DAST --> APPSEC
+    DNSREG --> DOMS
     LANES --> GO
     DIGEST --> EMAIL
     DIGEST --> TICKET
     APPSEC --> APPDEV
+    DOMS --> EMAIL
     LANES --> STATE
     STATE <--> ORCH2
     ORCH2 -->|"escalate only"| EMAIL
@@ -173,9 +178,9 @@ flowchart TB
     classDef out    fill:#e0d6f2,stroke:#4e2f85,stroke-width:2px,color:#1d1133
     classDef orch   fill:#fadfc0,stroke:#9a4a08,stroke-width:3px,color:#3a1c02
     classDef store  fill:#e7e1cf,stroke:#6f6134,stroke-width:2px,color:#2a2410
-    class MBX,FEEDS,NVD,QUALYS,DAST source
-    class DIGEST,SCOUT,PT,CLEAN,APPSEC lane
-    class P1,P2,P3,P4,P5,P6,P7 pkg
+    class MBX,FEEDS,NVD,QUALYS,DAST,DNSREG source
+    class DIGEST,SCOUT,PT,CLEAN,APPSEC,DOMS lane
+    class P1,P2,P3,P4,P5,P6,P7,P8 pkg
     class EMAIL,TICKET,APPDEV out
     class ORCH2 orch
     class STATE store
@@ -190,7 +195,7 @@ flowchart TB
 | Primitive | Here | Why it exists |
 |---|---|---|
 | **Orchestrator** | A Claude session every 2 hours | Judgment. Decides what to chase and what to say nothing about |
-| **Executor lanes** | Six systemd timers, plus the heartbeat's | Deterministic work. Each does one thing and cannot reach a human |
+| **Executor lanes** | Seven systemd timers, plus the heartbeat's | Deterministic work. Each does one thing and cannot reach a human |
 | **Heartbeat** | `cti-agent-checkin.timer` | Turns a program into a presence. It wakes whether or not you asked |
 | **Message board** | Append-only markdown | How parts that never run at the same time talk to each other |
 | **Persistent memory** | SQLite | Continuity. Without it every beat is a stranger starting over |
@@ -213,6 +218,11 @@ Each answers a different question, and the brief is the join across them.
   the code. Every count says whether that scan logged in, because a zero from a
   scan that only saw the public pages is a different number. The scanner is
   behind a provider boundary, so a second one is a parser, not a rewrite
+- **Can somebody impersonate us, or take a domain from us?** — the weekly
+  domains check: registrar state (expiry, transfer lock, a domain leaving the
+  account), dangling CNAMEs, certificates, and whether each domain's mail
+  records match whether it sends. A nameserver change nobody planned is how a
+  hijack looks from outside, so changes are diffed week over week
 - **Is the fleet itself healthy and affordable?** — the heartbeat, rationed
   against the model subscription so a crash loop cannot exhaust it
 
