@@ -227,6 +227,22 @@ URL and parameter. Same handling: written `0600` by `cti-appscan`, kept under
 applications and say which are scanned without a login, and this repository is
 public.
 
+**The domains check is a target list, and its input never enters the
+repository.** The report names every domain we own and which of them can be
+spoofed or taken over; the inventory says which ones send mail. So the
+inventory is an operator file (`/etc/cti-agent/domains.txt`, `root:ctiagent`
+0640, the same rule as `ORG-PROFILE.md`), `domains.txt` is gitignored and a test
+fails if one appears in the tree, the report and `domains-state.json` are
+written `0600`, it goes only to `DOM_TO` through its own fail-closed allowlist,
+and every fixture is a reserved example name.
+
+**The GoDaddy token can read, and the client never asks for auth codes.** The
+listing endpoint will return each domain's transfer auth code on request; a
+file or log holding those for every domain we own would be the most valuable
+thing on the box. The client requests `nameServers` and nothing else, makes no
+non-GET call, and a test fails if either changes. Grant the PAT
+`domains.domain:read` only.
+
 `REPORT_HOSTNAMES` controls disclosure:
 
 | Value | Output |
@@ -434,6 +450,10 @@ Deliberately absent from the grant:
 - **`cti-mailbox --for-real`.** Granted without `:*`, so only the bare command
   matches — the dry run. Moving mail is a scheduled decision, not a beat-time
   one.
+- **`run-domains` and `cti-domains`.** Not granted. The first sends to the
+  security team; the second probes every domain we own and advances last
+  week's baseline, so an extra run would swallow a week's changes. The
+  orchestrator reads `journalctl -u cti-agent-domains.service`.
 - **`run-appscan` and `cti-appscan`.** The first sends the AppSec report to
   another team; the second reads the mailbox and the Qualys WAS API. Neither is
   a beat-time decision. The orchestrator learns what the last run found from

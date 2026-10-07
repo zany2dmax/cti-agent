@@ -84,3 +84,7 @@ __pycache__/
 # the natural mistake is dropping a working copy beside the template.
 ORG-PROFILE.md
 **/ORG-PROFILE.md
+
+# The domains-lane inventory is an operator file (/etc/cti-agent/domains.txt):
+# a list of every domain we own does not belong in a public repository.
+domains.txt

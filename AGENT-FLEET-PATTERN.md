@@ -231,6 +231,24 @@ scan that only saw the public pages is a different number; but only a
 credential that *was* configured and *failed* is a fault, and that goes to the
 operator rather than to the developers, who cannot fix it.
 
+### Axis 10 — the name itself: *can somebody be us?*
+
+`cti-domains` — weekly, no model. Every other axis asks about software; this
+one asks about the names that software answers to. A domain that lapses, loses
+its transfer lock, or has a CNAME pointing at a deleted cloud app can be taken;
+a domain with no DMARC can be sent as. The input is a list the operator keeps
+**outside** the repository, each entry marked as sending mail or not, because
+the right answer for the two is opposite: a sender needs SPF, DKIM and an
+enforcing DMARC, a non-sender must publish that it sends nothing - and a
+non-sender that turns out to authorise senders is a question about the
+inventory, not just a record to fix.
+
+Two rules carried over from the rest of the fleet. A failed lookup is *not
+checked*, never *missing*: a resolver timeout must not become a High finding
+about a domain that is fine. And the week-over-week diff skips what churns
+(address records behind a CDN) so the section that reports a nameserver swap
+is still being read when one happens.
+
 ### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
 
 Two lanes that watch the fleet rather than the estate:
@@ -337,6 +355,7 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
 | Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, with our own exposure and the scanner query |
 | Report web application scan results to the developers who own the code | `cti-appscan`, weekly, on its own recipient list, with a broken scanner login escalated to us rather than to them |
+| Keep the domain portfolio registered, un-hijackable and un-spoofable | `cti-domains`, weekly: registrar state, DNS, certificates and mail records by role, with changes since last week |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
 | Track known-exploited vulnerabilities and compliance deadlines | `cti-kev`, against CISA's published due dates |

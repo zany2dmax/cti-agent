@@ -402,6 +402,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailer ./cmd/cti-mailer
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-jira ./cmd/cti-jira
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-appscan ./cmd/cti-appscan
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-domains ./cmd/cti-domains
 
   run:
     desc: Run the agent locally using environment variables

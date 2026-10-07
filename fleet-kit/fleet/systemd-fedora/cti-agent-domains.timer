@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly domains check, Monday 08:00 local
+
+[Timer]
+# After the 07:00 weekly rollup and the 07:30 AppSec report, so a Graph
+# problem shows up in an earlier lane's journal first.
+OnCalendar=Mon *-*-* 08:00:00
+AccuracySec=1min
+Persistent=true
+Unit=cti-agent-domains.service
+
+[Install]
+WantedBy=timers.target
