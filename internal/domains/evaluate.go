@@ -2,6 +2,7 @@ package domains
 
 import (
 	"fmt"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"time"
@@ -46,6 +47,10 @@ type Options struct {
 	// Empty until the mail team says where aggregate reports should go; then
 	// the check is only that SOME rua= exists.
 	ExpectRUA string
+	// SMTPBlocked: every SMTP probe this run failed to connect, so port 25 is
+	// almost certainly blocked outbound from this host. Per-domain "did not
+	// answer" lines are then noise; the report says it once instead.
+	SMTPBlocked bool
 }
 
 // Evaluate turns observations into findings.
@@ -77,6 +82,32 @@ func Evaluate(results []Result, cmp *Comparison, opt Options) []Finding {
 		}
 	}
 
+	inInventory := map[string]bool{}
+	for _, res := range results {
+		inInventory[res.Entry.Name] = true
+	}
+	ours := func(host string) bool {
+		host = cleanHost(host)
+		for d := range inInventory {
+			if coveredBy(host, d) {
+				return true
+			}
+		}
+		if cmp != nil {
+			for _, r := range cmp.Covered {
+				if coveredBy(host, r.Domain) {
+					return true
+				}
+			}
+			for _, r := range cmp.NotInInventory {
+				if coveredBy(host, r.Domain) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	for _, res := range results {
 		d := res.Entry.Name
 		if cmp != nil {
@@ -85,8 +116,9 @@ func Evaluate(results []Result, cmp *Comparison, opt Options) []Finding {
 			}
 		}
 		for _, w := range res.Web {
-			evalWeb(d, w, opt.Now, add)
+			evalWeb(d, w, opt.Now, ours, add)
 		}
+		evalMailCommon(d, res.Mail, opt, add)
 		if res.Entry.Sends {
 			evalSender(d, res.Mail, opt, add)
 		} else {
@@ -142,7 +174,7 @@ func evalDelegation(d string, reg Registration, ns Lookup, registrar string, add
 	}
 }
 
-func evalWeb(d string, w Web, now time.Time, add adder) {
+func evalWeb(d string, w Web, now time.Time, ours func(string) bool, add adder) {
 	h := w.Host
 	where := ""
 	if h != d {
@@ -160,15 +192,30 @@ func evalWeb(d string, w Web, now time.Time, add adder) {
 	if !w.Addrs.Present() {
 		return // not live is a state, shown in the inventory table, not a finding
 	}
-	if !w.Live() {
+	if !w.Answered() {
 		add(d, Info, "web", "%sresolves but nothing answered on 80 or 443", where)
 		return
 	}
 	if p := w.ParkedBy(); p != "" {
 		return // parked is a state, shown in the table
 	}
+	best := w.Best()
+	if !w.Live() {
+		// Answered, but not with a page: the original checker's active=false.
+		if best.Status >= 500 {
+			add(d, Medium, "web", "%sreturns HTTP %d - the site is up but broken", where, best.Status)
+		} else {
+			add(d, Info, "web", "%sreturns HTTP %d - nothing is published here", where, best.Status)
+		}
+	}
+	if u, err := neturl.Parse(best.FinalURL); err == nil && u.Host != "" && !ours(u.Hostname()) {
+		add(d, Info, "web", "%sredirects to %s, which is not one of our domains", where, u.Hostname())
+	}
+	if w.HTTPS.Serving() && w.HTTP.Serving() && strings.HasPrefix(w.HTTP.FinalURL, "http://") {
+		add(d, Info, "tls", "%shttp:// serves the page instead of redirecting to https://", where)
+	}
 	switch {
-	case !w.HTTPS.OK() && w.HTTP.OK():
+	case !w.HTTPS.OK() && w.HTTP.Serving():
 		add(d, Medium, "tls", "%sserves a page over HTTP only - nothing usable on 443 (%s)", where,
 			firstNonEmpty(w.TLS.DialErr, w.HTTPS.Err))
 	case w.TLS.Checked && w.TLS.DialErr == "" && !w.TLS.Verified:
@@ -179,6 +226,43 @@ func evalWeb(d string, w Web, now time.Time, add adder) {
 			add(d, High, "tls", "%scertificate expires in %d days (%s)", where, days, w.TLS.NotAfter.Format("2 Jan"))
 		} else if days <= 30 {
 			add(d, Medium, "tls", "%scertificate expires in %d days (%s)", where, days, w.TLS.NotAfter.Format("2 Jan"))
+		}
+	}
+}
+
+// evalMailCommon applies to every domain, whatever its role: where its mail
+// is delivered, and the strength of any DKIM key it publishes.
+func evalMailCommon(d string, m Mail, opt Options, add adder) {
+	for _, h := range m.MXUnresolved {
+		add(d, Medium, "mail", "MX host %s does not resolve - mail to this domain bounces there, "+
+			"and if that name lapses someone else can receive it", h)
+	}
+	if len(m.MXResolveFailed) > 0 {
+		add(d, Info, "mail", "could not resolve MX host(s) %s - not checked",
+			strings.Join(m.MXResolveFailed, ", "))
+	}
+	if sm := m.SMTP; sm.Checked {
+		switch {
+		case sm.Err == "" && !sm.StartTLS:
+			add(d, Medium, "mail", "MX %s does not offer STARTTLS - mail to this domain crosses "+
+				"the internet unencrypted", sm.Host)
+		case sm.Err != "" && !opt.SMTPBlocked:
+			add(d, Info, "mail", "MX %s did not answer on port %d (%s)", sm.Host, sm.Port, sm.Err)
+		}
+	}
+	sels := make([]string, 0, len(m.DKIM.Bits))
+	for sel := range m.DKIM.Bits {
+		sels = append(sels, sel)
+	}
+	sort.Strings(sels)
+	for _, sel := range sels {
+		switch b := m.DKIM.Bits[sel]; {
+		case b == 0:
+		case b < 1024:
+			add(d, High, "mail", "DKIM key at %s is %d-bit RSA - short enough to factor, so "+
+				"signatures with it can be forged", sel, b)
+		case b < 2048:
+			add(d, Medium, "mail", "DKIM key at %s is %d-bit RSA; rotate to 2048", sel, b)
 		}
 	}
 }
