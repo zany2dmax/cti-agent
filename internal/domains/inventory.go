@@ -123,12 +123,19 @@ func Normalise(s string) (string, bool) {
 			return "", false
 		}
 		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			if !labelRune(r) {
 				return "", false
 			}
 		}
 	}
 	return s, true
+}
+
+// labelRune reports whether r may appear in a hostname label: ASCII letters
+// (already lower-cased), digits and hyphen. IDNs must be listed in their
+// xn-- form.
+func labelRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-'
 }
 
 // coveredBy reports whether name is domain itself or a subdomain of it.
