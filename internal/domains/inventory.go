@@ -38,6 +38,7 @@ type Entry struct {
 // ParseInventory reads the inventory file.
 //
 //	example.com send     # sends mail: needs SPF, DKIM, DMARC
+//	example.org,send     # comma works too (a spreadsheet export)
 //	example.net          # does not send: must be locked down
 //	# comments and blank lines are ignored
 //
@@ -58,7 +59,10 @@ func ParseInventory(r io.Reader) ([]Entry, []string, error) {
 		if i := strings.Index(line, "#"); i >= 0 {
 			line = line[:i]
 		}
-		fields := strings.Fields(line)
+		// Commas count as spaces: "example.com,send" is what a list kept in a
+		// spreadsheet exports to, and skipping it as "not a domain" dropped the
+		// very domains somebody had taken the trouble to mark as senders.
+		fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
 		if len(fields) == 0 {
 			continue
 		}
