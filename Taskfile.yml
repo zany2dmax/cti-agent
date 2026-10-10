@@ -369,7 +369,7 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build all eight binaries, stamped with the current tag and commit
+    desc: Build all ten binaries, stamped with the current tag and commit
     deps: [tidy]
     # Stamped here as well as in install-fedora.sh, so a binary built on the
     # workstation does not claim "unknown" while the one in production can
