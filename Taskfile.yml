@@ -70,6 +70,24 @@ tasks:
     # reason next to the code, rather than a blanket exclusion list here:
     # a suppression whose justification lives in a config file is a
     # suppression nobody will ever re-examine.
+    #
+    # GOSEC_GOTOOLCHAIN, WHEN GOSEC LAGS A GO RELEASE
+    #
+    # gosec type-checks against export data written by the go command. When Go
+    # changes that format (1.27 did) a gosec built before the release cannot
+    # read it, prints "export data version N is greater than maximum supported"
+    # for every import, and fails with "Issues: 0" - a gate that is red without
+    # having checked anything.
+    #
+    # The override runs gosec's package loading under an older toolchain:
+    #
+    #     GOSEC_GOTOOLCHAIN=go1.26.9 task ship
+    #
+    # Safe because gosec reads source and writes nothing. The binaries ship
+    # builds are still compiled by your current Go, so the stdlib fixes that
+    # govulncheck asks for are kept. Drop it once gosec supports the new Go.
+    # Never set by default: a stale pin would quietly mean gosec checks the code
+    # as an old compiler sees it, long after the reason has gone.
     cmds:
       - |
         if ! command -v gosec >/dev/null 2>&1; then
@@ -77,7 +95,24 @@ tasks:
           echo "  go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
           exit 1
         fi
-        gosec ./...
+        if [ -n "${GOSEC_GOTOOLCHAIN:-}" ]; then
+          echo "  note: gosec loading packages with GOTOOLCHAIN=$GOSEC_GOTOOLCHAIN" >&2
+          export GOTOOLCHAIN="$GOSEC_GOTOOLCHAIN"
+        fi
+        set -o pipefail   # without it, rc below is tee's status and always 0
+        out="$(mktemp -t gosec.XXXXXX)"
+        trap 'rm -f "$out"' EXIT
+        rc=0
+        gosec ./... 2>&1 | tee "$out" || rc=$?
+        if [ "$rc" -ne 0 ] && grep -q "export data version" "$out"; then
+          echo "" >&2
+          echo "gosec could not READ the packages - nothing was checked." >&2
+          echo "It was built against an older Go than $(go env GOVERSION)." >&2
+          echo "  1. rebuild it:  brew reinstall --build-from-source gosec" >&2
+          echo "  2. if that still fails, gosec has no release for this Go yet:" >&2
+          echo "       GOSEC_GOTOOLCHAIN=go1.26.9 task ship" >&2
+        fi
+        exit "$rc"
 
   gosec:audit:
     desc: "Show what the #nosec annotations are hiding. Advisory - never gates."
@@ -103,6 +138,7 @@ tasks:
           echo "  brew install gosec   # or: go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
           exit 1
         fi
+        [ -n "${GOSEC_GOTOOLCHAIN:-}" ] && export GOTOOLCHAIN="$GOSEC_GOTOOLCHAIN"
         report="$(mktemp -t gosec-nosec.XXXXXX.json)"
         trap 'rm -f "$report"' EXIT
         echo "== findings with every #nosec annotation IGNORED =="
