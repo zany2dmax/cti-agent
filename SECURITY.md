@@ -276,8 +276,9 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   checkout to replay a run locally could be committed.
 - `internal/fleetenv` is the single reader, so a run by hand gets the same
   configuration as a run by systemd, and there is one place to audit. A lane
-  test fails any command that loads config without calling it: `cti-appscan`
-  shipped without, and worked under its timer while failing by hand with
+  test fails any command that loads config without calling it (`cti-domains`
+  calls it before its flag defaults are read, so `DOMAINS_FILE` applies to a
+  run by hand too): `cti-appscan` shipped without, and worked under its timer while failing by hand with
   "missing required environment variables" on a box where all were set.
 - **The Qualys credentials now reach a second module.** The AppSec lane uses
   the VM lane's `QUALYS_USERNAME`/`QUALYS_PASSWORD` against the WAS API, which
