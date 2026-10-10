@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.2 — 2026-10-10
 
 ### Added
 
@@ -67,6 +67,34 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   (read-only, `domains.domain:read`; the client never requests auth codes),
   `DOMAINS_DKIM_SELECTORS`, `DOMAINS_DMARC_RUA` (empty pending a decision on
   where aggregate reports go).
+
+### Fixed
+
+- **`example.com,send` in the inventory was skipped as "not a domain".** A
+  list exported from a spreadsheet uses commas, and the parser split only on
+  whitespace, so the four domains that had been marked as senders were the
+  four that were dropped. Commas now separate like spaces.
+
+### Upgrade
+
+Reinstall, then configure the new lane before enabling its timer - nothing
+existing changes:
+
+1. Create `/etc/cti-agent/domains.txt` (`root:ctiagent`, `0640`), one domain
+   per line, `send` after the ones that send mail.
+2. In `fleet.env`: `DOM_TO`, `DOM_ALLOW_TO` (required to send), and
+   `GODADDY_PAT` when you have it (without it the subject says
+   `[REGISTRAR NOT CHECKED]`). Set `DOMAINS_DKIM_SELECTORS` to your mail
+   service's selectors. Leave `DOMAINS_SMTP` empty if outbound 25 is open.
+3. `sudo cti-agent run-domains --dry-run`, read the report and its CSV, then
+   `sudo systemctl enable --now cti-agent-domains.timer`.
+
+Separately, if your live `/etc/cti-agent/feeds.txt` still has
+`msrc.microsoft.com/blog/feed`, replace it with
+`https://api.msrc.microsoft.com/update-guide/rss` - the installer never
+overwrites that file, so the template fix did not reach it.
+
+---
 
 ## 1.1.1 — 2026-10-06
 
