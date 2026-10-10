@@ -18,6 +18,7 @@ example.com
 not_a_domain
 localhost
 shop.example.com   sends
+Example.EDU,send
 `
 	got, problems, err := ParseInventory(strings.NewReader(in))
 	if err != nil {
@@ -28,6 +29,7 @@ shop.example.com   sends
 		{Name: "www.example.net", Line: 3},
 		{Name: "example.org", Line: 4},
 		{Name: "shop.example.com", Sends: true, Line: 8},
+		{Name: "example.edu", Sends: true, Line: 9},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries %+v, want %d", len(got), got, len(want))
