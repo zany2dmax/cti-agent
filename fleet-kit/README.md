@@ -1610,9 +1610,9 @@ enforced in three independent places, because a prompt alone isn't a control.
 
 **No approval needed:** running lanes; reading mailbox, scanner, NVD, EPSS, KEV,
 feeds; writing to memory, reports, logs, board; sending the scheduled daily and
-weekly digests to `SECURITY_DL`, and the Monday AppSec report to `WAS_TO`. The
-AppSec report is sent by its timer; the orchestrator cannot run `run-appscan` at
-all.
+weekly digests to `SECURITY_DL`, the Monday AppSec report to `WAS_TO`, and the
+Monday domains check to `DOM_TO`. Both Monday reports are sent by their timers;
+the orchestrator cannot run `run-appscan` or `run-domains` at all.
 
 **Approval required:** any off-cycle email, including an "urgent" one; any
 recipient outside the allowlist; creating tickets, changing scanner config or
@@ -1676,6 +1676,8 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 | Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
 | Wed after the 2nd Tuesday, 07:30 | Microsoft Patch Tuesday synopsis | `cti-agent-patchtuesday.timer` |
 | Mon 07:30 | AppSec report to `WAS_TO` | `cti-agent-appscan.timer` |
+| 07:00 daily | mailbox cleanup | `cti-agent-mailbox.timer` |
+| Mon 08:00 | domains check to `DOM_TO`, CSV attached | `cti-agent-domains.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then
