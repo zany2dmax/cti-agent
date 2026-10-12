@@ -184,23 +184,27 @@ func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web
 //
 // retries is how many times a request that got NO response is repeated. A
 // response of any status is an answer and is never retried.
-func NetWebProber(timeout time.Duration, retries int) WebProber {
+//
+// res resolves the names it connects to - the same resolver the DNS checks
+// use, so a site is fetched at the address the internet sees, not the one an
+// internal DNS view hands this host. nil means the system resolver.
+func NetWebProber(timeout time.Duration, retries int, res *net.Resolver) WebProber {
 	return func(ctx context.Context, host string) (Fetch, Fetch, Cert) {
-		return getRetry(ctx, "https://"+host+"/", timeout, retries),
-			getRetry(ctx, "http://"+host+"/", timeout, retries),
-			certOf(ctx, host, timeout)
+		return getRetry(ctx, "https://"+host+"/", timeout, retries, res),
+			getRetry(ctx, "http://"+host+"/", timeout, retries, res),
+			certOf(ctx, host, timeout, res)
 	}
 }
 
-func getRetry(ctx context.Context, url string, timeout time.Duration, retries int) Fetch {
-	f := get(ctx, url, timeout)
+func getRetry(ctx context.Context, url string, timeout time.Duration, retries int, res *net.Resolver) Fetch {
+	f := get(ctx, url, timeout, res)
 	for i := 0; i < retries && !f.OK() && ctx.Err() == nil; i++ {
-		f = get(ctx, url, timeout)
+		f = get(ctx, url, timeout, res)
 	}
 	return f
 }
 
-func get(ctx context.Context, url string, timeout time.Duration) Fetch {
+func get(ctx context.Context, url string, timeout time.Duration, res *net.Resolver) Fetch {
 	f := Fetch{Tried: true}
 	start := time.Now()
 	client := &http.Client{
@@ -211,6 +215,7 @@ func get(ctx context.Context, url string, timeout time.Duration) Fetch {
 			// checked separately in certOf, with verification on.
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12},
 			Proxy:                 nil,
+			DialContext:           (&net.Dialer{Timeout: timeout, Resolver: res}).DialContext,
 			DisableKeepAlives:     true,
 			ResponseHeaderTimeout: timeout,
 		},
@@ -296,10 +301,10 @@ func title(body []byte) string {
 }
 
 // certOf dials 443 and verifies the chain against the system roots for host.
-func certOf(ctx context.Context, host string, timeout time.Duration) Cert {
+func certOf(ctx context.Context, host string, timeout time.Duration, res *net.Resolver) Cert {
 	c := Cert{Checked: true}
 	d := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: timeout},
+		NetDialer: &net.Dialer{Timeout: timeout, Resolver: res},
 		// #nosec G402 -- the handshake must complete so the certificate can be
 		// read; it is then verified explicitly below, with the result recorded.
 		Config: &tls.Config{InsecureSkipVerify: true, ServerName: host, MinVersion: tls.VersionTLS12},

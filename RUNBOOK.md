@@ -1136,7 +1136,21 @@ The first real run says *"First run: no previous week to compare with"*. The
 week-over-week section starts the Monday after. State is
 `$FLEET_HOME/state/domains-state.json` (0600); move it aside to start over.
 
-### 4. Outbound port 25
+### 4. Public DNS, and outbound port 53
+
+The lane asks public resolvers (1.1.1.1, 8.8.8.8) rather than this host's DNS.
+On the first real run the internal resolver answered for the organisation's
+own domains from an internal zone with no SPF or DMARC, and the report called
+both domains spoofable. Check the box can reach public DNS:
+
+```bash
+dig @1.1.1.1 example.com TXT +short     # use one of your domains
+```
+
+If outbound 53 is blocked, set `DOMAINS_DNS_SERVERS` to a resolver that
+answers with the public view, or `system` to accept the internal one.
+
+### 4b. Outbound port 25
 
 The lane greets each domain's MX on port 25 to check STARTTLS. Many networks
 block outbound 25; if every probe fails the report says *"outbound port 25 is

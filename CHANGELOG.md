@@ -58,9 +58,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   rollup now always lists all five bands, and the log step tolerates a
   missing one.
 
+- **The domains check used the box's own DNS, which can be internal.** On the
+  first real run the organisation's main sending domains showed "no SPF
+  record" and "no DMARC record" - the internal zone for them has neither,
+  the public zone has both. It now asks public resolvers by default
+  (`DOMAINS_DNS_SERVERS`, `system` to opt out), and the web and SMTP probes
+  connect to the addresses those return.
+- **A failure on the domains lane's first run read as a change the next
+  week.** A lookup that failed, or a site that did not answer, with nothing
+  earlier to carry forward was saved as absent or down; six hours later the
+  dry run reported "MX appeared", "DMARC appeared" and "started serving a
+  working page" for domains that had not changed. Both are saved as unknown
+  now, and unknown is never reported as a change.
+
 ### Upgrade
 
-Reinstall. Links return from the next daily; the weekly gets them from the
+Reinstall, and delete `/var/lib/cti-agent/state/domains-state.json` once, so
+next Monday's run starts a clean baseline from public DNS instead of diffing
+against one taken through the internal resolver. Links return from the next daily; the weekly gets them from the
 following Monday. If a weekly failed this way, it WAS sent: record it by hand
 rather than restarting the unit, which would send it again -
 `sudo cti-agent fleet-db sent <day> <S5> <S4> <S3> <S2> <S1> <request-id> weekly`

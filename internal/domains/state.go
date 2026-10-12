@@ -38,7 +38,7 @@ type State struct {
 }
 
 // Snapshot is one domain. Multi-valued fields are space-joined and sorted;
-// "" means absent.
+// "" means absent; unknownMark ("?") means never successfully looked up.
 type Snapshot struct {
 	NS    string              `json:"ns,omitempty"`
 	MX    string              `json:"mx,omitempty"`
@@ -50,10 +50,12 @@ type Snapshot struct {
 
 // HostSnap is one probed host.
 type HostSnap struct {
-	CNAME  string `json:"cname,omitempty"`
-	Live   bool   `json:"live"`
-	Parked bool   `json:"parked"`
-	Issuer string `json:"issuer,omitempty"`
+	// Unknown: never observed answering or failing cleanly - see Snap.
+	Unknown bool   `json:"unknown,omitempty"`
+	CNAME   string `json:"cname,omitempty"`
+	Live    bool   `json:"live"`
+	Parked  bool   `json:"parked"`
+	Issuer  string `json:"issuer,omitempty"`
 }
 
 // RegSnap is the registrar's view.
@@ -111,8 +113,18 @@ func SaveState(path string, s *State) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func joinLookup(l Lookup, prev string) string {
+// unknownMark records a field whose lookup failed with nothing earlier to
+// carry forward. Without it, a lookup that failed on the FIRST run was saved
+// as "" - absent - and the next run reported "DMARC appeared" and "MX
+// appeared" for records that had been there all along. Diff never compares a
+// field marked unknown on either side.
+const unknownMark = "?"
+
+func joinLookup(l Lookup, prev string, hadPrev bool) string {
 	if !l.Known() {
+		if !hadPrev {
+			return unknownMark
+		}
 		return prev
 	}
 	v := append([]string(nil), l.Values...)
@@ -125,20 +137,28 @@ func Snap(now time.Time, results []Result, cmp *Comparison, regs []Registration,
 	s := &State{Version: stateVersion, Taken: now.UTC(), Domains: map[string]Snapshot{}}
 	for _, r := range results {
 		var p Snapshot
+		had := false
 		if prev != nil {
-			p = prev.Domains[r.Entry.Name]
+			p, had = prev.Domains[r.Entry.Name]
 		}
 		sn := Snapshot{
-			NS:    joinLookup(r.NS, p.NS),
-			MX:    joinLookup(r.Mail.MX, p.MX),
-			SPF:   joinLookup(r.Mail.SPF, p.SPF),
-			DMARC: joinLookup(r.Mail.DMARC, p.DMARC),
+			NS:    joinLookup(r.NS, p.NS, had),
+			MX:    joinLookup(r.Mail.MX, p.MX, had),
+			SPF:   joinLookup(r.Mail.SPF, p.SPF, had),
+			DMARC: joinLookup(r.Mail.DMARC, p.DMARC, had),
 			Hosts: map[string]HostSnap{},
 		}
 		for _, w := range r.Web {
-			if !w.Addrs.Known() {
+			// Unknown, not "down": the address lookup failed, or the name
+			// resolved and nothing answered at all (a timeout or a refused
+			// connection is as likely to be the network as the site). Saved
+			// as down, one slow morning read "started serving a working
+			// page" the following week for sites that never stopped.
+			if !w.Addrs.Known() || (w.Addrs.Present() && !w.Answered()) {
 				if old, ok := p.Hosts[w.Host]; ok {
 					sn.Hosts[w.Host] = old
+				} else {
+					sn.Hosts[w.Host] = HostSnap{Unknown: true}
 				}
 				continue
 			}
@@ -179,7 +199,7 @@ func Diff(prev, cur *State, registrarChecked bool, registrar string) []Finding {
 		out = append(out, Finding{Domain: d, Sev: s, Area: "change", Text: fmt.Sprintf(f, a...)})
 	}
 	field := func(d, name, was, now string, sev Severity) {
-		if was == now {
+		if was == now || was == unknownMark || now == unknownMark {
 			return
 		}
 		switch {
@@ -214,7 +234,7 @@ func Diff(prev, cur *State, registrarChecked bool, registrar string) []Finding {
 		sort.Strings(hosts)
 		for _, h := range hosts {
 			ch, ph := c.Hosts[h], p.Hosts[h]
-			if _, had := p.Hosts[h]; !had {
+			if _, had := p.Hosts[h]; !had || ph.Unknown || ch.Unknown {
 				continue
 			}
 			field(d, h+" CNAME", ph.CNAME, ch.CNAME, Medium)

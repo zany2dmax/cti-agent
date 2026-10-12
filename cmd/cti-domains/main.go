@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/domains"
@@ -146,13 +147,24 @@ func run() int {
 	if s := strings.Fields(strings.ReplaceAll(os.Getenv("DOMAINS_DKIM_SELECTORS"), ",", " ")); len(s) > 0 {
 		selectors = s
 	}
-	res := resolver
-	if res == nil {
-		res = net.DefaultResolver
+	// WHICH DNS. The box's own resolver may be an internal DNS server with a
+	// split-horizon view: on the first real run the organisation's main
+	// domain showed "no SPF record" and "no DMARC record" because the internal
+	// zone for it carries neither, while the public zone carries both. This
+	// lane reports what the INTERNET sees, so by default it asks public
+	// resolvers, and the web and SMTP probes connect through the same answers.
+	netRes, resDesc, err := dnsResolver(os.Getenv("DOMAINS_DNS_SERVERS"))
+	if err != nil {
+		return die("DOMAINS_DNS_SERVERS: %s", safelog.Line(err.Error()))
+	}
+	logf("dns    : %s", resDesc)
+	var res domains.Resolver = netRes
+	if resolver != nil {
+		res = resolver
 	}
 	web := webProber
 	if web == nil {
-		web = domains.NetWebProber(*timeout, *retries)
+		web = domains.NetWebProber(*timeout, *retries, netRes)
 	}
 	// SMTP greeting on the first answering MX: on unless DOMAINS_SMTP=off.
 	smtpMode := ""
@@ -168,7 +180,7 @@ func run() int {
 			}
 			port = n
 		}
-		sp = domains.NetSMTPProber(port, *timeout)
+		sp = domains.NetSMTPProber(port, *timeout, netRes)
 	}
 	p := domains.Prober{Resolver: res, Web: web, Selectors: selectors,
 		Concurrency: *concurrency, PerDomain: 6 * *timeout, SMTP: sp}
@@ -226,6 +238,54 @@ func run() int {
 	}
 	logf("subject: %s", safelog.Line(block.Subject))
 	return exitOK
+}
+
+// defaultDNSServers are public resolvers, so the report describes the public
+// view of every domain. Two operators, so one being unreachable is not an
+// outage of the lane.
+const defaultDNSServers = "1.1.1.1:53,8.8.8.8:53"
+
+// dnsResolver builds the resolver from DOMAINS_DNS_SERVERS: empty for the
+// public default, "system" for the host's own resolver, or a list of IPs
+// (port optional). IPs only - a resolver named by hostname would be looked up
+// through the very resolver it is meant to replace.
+func dnsResolver(spec string) (*net.Resolver, string, error) {
+	spec = strings.TrimSpace(spec)
+	if strings.EqualFold(spec, "system") {
+		return net.DefaultResolver, "the system resolver (DOMAINS_DNS_SERVERS=system)", nil
+	}
+	if spec == "" {
+		spec = defaultDNSServers
+	}
+	var servers []string
+	for _, s := range strings.Fields(strings.ReplaceAll(spec, ",", " ")) {
+		host, port, err := net.SplitHostPort(s)
+		if err != nil {
+			host, port = strings.TrimSuffix(strings.TrimPrefix(s, "["), "]"), "53"
+		}
+		if net.ParseIP(host) == nil {
+			return nil, "", fmt.Errorf("%q is not an IP address", s)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return nil, "", fmt.Errorf("%q has a bad port", s)
+		}
+		servers = append(servers, net.JoinHostPort(host, port))
+	}
+	if len(servers) == 0 {
+		return nil, "", fmt.Errorf("%q lists no DNS servers", spec)
+	}
+	var next atomic.Uint32
+	r := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			// Round-robin per attempt. The Go resolver retries a failed query
+			// by dialling again, so a dead server costs one attempt, not the run.
+			addr := servers[next.Add(1)%uint32(len(servers))] // #nosec G115 -- len(servers) is a handful of entries
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+	return r, "DNS servers " + strings.Join(servers, ", "), nil
 }
 
 func stateWhen(s *domains.State) string {
