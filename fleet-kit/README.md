@@ -1294,8 +1294,9 @@ could not check coverage for is not a clean result, it means you did not look.
 ## The monthly Patch Tuesday synopsis
 
 Once a month Microsoft ships a defined set of fixes and the patching team needs
-one email. This lane builds it: the two public wrap-ups everyone reads, plus the
-one thing neither of them can tell you — what landed on *our* machines.
+one email. This lane builds it from Microsoft's own release data (the Security
+Update Guide API), cross-checked against BleepingComputer's write-up, plus the
+one thing neither can tell you — what landed on *our* machines.
 
 ```bash
 fleet run-patchtuesday --dry-run          # render, send nothing
@@ -1475,13 +1476,16 @@ jq .sent $FLEET_HOME/state/patchtuesday-2026-09.json       # is it authorised
 rm $FLEET_HOME/state/patchtuesday-2026-09.json             # daily reports them again
 ```
 
-### Two new outbound hosts
+### Outbound hosts
 
-The lane reads `blog.qualys.com` and `www.bleepingcomputer.com` over 443. Both
-are now in the installer's connectivity preflight. If your egress is filtered
-as tightly as port 22 was, expect to need a firewall change — and note that a
-publisher blocking an unrecognised user agent shows up here as `HTTP 403`,
-which the banner reports rather than working around.
+The lane reads `api.msrc.microsoft.com` (Microsoft's release data, the primary
+source) and `www.bleepingcomputer.com` (the cross-check) over 443, and tries
+`blog.qualys.com` as an optional extra. All three are in the installer's
+connectivity preflight. The Qualys blog answers `HTTP 403` to Azure addresses
+whatever the request looks like, so on an Azure box expect it to be listed as
+"optional, not read"; that does not mark the report incomplete. Losing it
+costs only its published QQL, which the lane rebuilds from our own
+detections.
 
 ---
 

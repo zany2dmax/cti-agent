@@ -34,7 +34,7 @@ import (
 // account behind JIRA_EMAIL should be one that can create issues in the
 // allowlisted project and little else. See SECURITY.md.
 type Client struct {
-	BaseURL string // https://crhomeusa.atlassian.net
+	BaseURL string // https://example.atlassian.net
 	Email   string
 	Token   string
 	HTTP    *http.Client

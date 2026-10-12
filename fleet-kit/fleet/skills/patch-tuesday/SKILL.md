@@ -1,6 +1,6 @@
 ---
 name: patch-tuesday
-description: Build and send the monthly Microsoft Patch Tuesday synopsis — two public wrap-ups, correlated against what Qualys actually finds here.
+description: Build and send the monthly Microsoft Patch Tuesday synopsis — Microsoft's own release data, cross-checked against BleepingComputer, correlated against what Qualys actually finds here.
 ---
 
 # /patch-tuesday [--month YYYY-MM] [--dry-run]
@@ -162,13 +162,17 @@ monthly did not send, not to mark the manifest.
 
 ## If the sources move
 
-The URL patterns are computable but not guaranteed. The Qualys review path
-uses the Patch Tuesday date; BleepingComputer's slug carries the flaw count, so
-the lane discovers it from the tag listing. When either changes:
+Microsoft's release document is at a fixed API address
+(`api.msrc.microsoft.com/cvrf/v3.0/cvrf/YYYY-Mon`) and is the primary source.
+The Qualys blog is optional and refuses Azure addresses with HTTP 403; that is
+expected and does not make the report incomplete. The article URL patterns
+are computable but not guaranteed: the Qualys path uses the Patch Tuesday
+date, and BleepingComputer's slug carries the flaw count, so the lane
+discovers it from the tag listing. When any of them changes:
 
 ```
 $FLEET_CODE/bin/cti-patchtuesday --month 2026-09 \
-  --url-qualys <URL> --url-bleeping <URL> --dry-run
+  --url-msrc <URL> --url-qualys <URL> --url-bleeping <URL> --dry-run
 ```
 
 Post the working URLs to the board so the operator can decide whether the

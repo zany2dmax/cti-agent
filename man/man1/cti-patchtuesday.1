@@ -15,6 +15,8 @@ cti-patchtuesday \- build the monthly Microsoft Patch Tuesday synopsis and corre
 .RB [ \-\-no\-manifest ]
 .RB [ \-\-provider
 .BR none ]
+.RB [ \-\-url\-msrc
+.IR URL | none ]
 .RB [ \-\-url\-qualys
 .IR URL ]
 .RB [ \-\-url\-bleeping
@@ -50,14 +52,35 @@ from
 .B cti\-agent\-patchtuesday.timer
 at 07:30 on the Wednesday after the second Tuesday (the 9th to the 15th).
 .PP
-It reads two public wrap-ups: the Qualys security update review, at a URL
-computed from the release date, and the BleepingComputer article, found by
-trying the expected URL and then the site's Patch Tuesday tag listing. A
-source that cannot be read is named on standard error and in the email; the
-synopsis is still produced from the other. CVEs whose every sighting names a
-product and none names a Microsoft one are scoped out of the release, and
-listed on standard error. Where each headline figure came from is also
-printed there.
+It reads three public sources.
+.TP
+.B Microsoft Security Update Guide (primary)
+The month's CVRF document from
+.IR https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/YYYY\-Mon ,
+as JSON (no key, no account). The release is the entries Microsoft itself
+assigned, first published on Patch Tuesday, that need customer action; those
+fixed in Microsoft's cloud with nothing to install are counted separately and
+named in the email. It supplies the counts and severities, the exploited and
+publicly disclosed CVEs (the Zero-days paragraph), the by-impact table, the
+product families and the CVE list that is correlated with Qualys. The email
+links the human release-notes page.
+.TP
+.B BleepingComputer (cross-check)
+Found by trying the expected URL and then the site's Patch Tuesday tag
+listing. Its total is compared with Microsoft's and a difference is stated in
+the email; it also supplies the Edge count and the Adobe paragraph.
+.TP
+.B Qualys blog (optional)
+At a URL computed from the release date. Used when it loads, for its
+published QQL; when it does not (it answers 403 to Azure addresses), it is
+listed as "optional, not read" and the report is not marked incomplete.
+.PP
+When Microsoft's document or BleepingComputer cannot be read, the email opens
+with an
+.B Incomplete sources
+banner saying what it was built from and what failed, and the figures fall
+back to the articles. With no source at all, nothing is produced. Where each
+headline figure came from is printed on standard error.
 .PP
 It then maps the release's CVEs to Qualys QIDs through the KnowledgeBase
 cache, adds the QIDs the Qualys review itself publishes, and asks Qualys Host
@@ -170,6 +193,14 @@ Print the base subject line,
 and exit. Nothing is fetched, so the detection and host counts a full run
 adds to the subject are never included.
 Default:\~\fBfalse\fR.
+.TP
+.BI \-\-url\-msrc " URL"
+Read Microsoft's release document from
+.I URL
+instead of the API address, or skip it with
+.BR none ,
+in which case the figures come from the articles as before 1.3.
+Default:\~\fIhttps://api.msrc.microsoft.com/cvrf/v3.0/cvrf/YYYY\-Mon\fR.
 .TP
 .BI \-\-url\-qualys " URL"
 Read the Qualys review from
@@ -308,7 +339,7 @@ Nothing usable was produced:
 .B \-\-month
 is not
 .IR YYYY\-MM ;
-that month's Patch Tuesday is in the future; neither source could be read;
+that month's Patch Tuesday is in the future; no source could be read;
 or
 .B \-\-out
 or
