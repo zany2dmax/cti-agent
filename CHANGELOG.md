@@ -35,6 +35,26 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Jira ticket links appeared only for CVEs in that day's mail.** The
+  cve -> ticket map the digest reads held only the tickets cti-jira filed or
+  updated from that morning's findings, so a ticketed CVE lost its link on
+  any day it was not back in the news. `--follow-up` already finds every
+  fleet ticket; it now hands them all to the map (today's references win).
+- **The Monday weekly overwrote the Monday daily's findings, and had no ticket
+  links.** Both wrote `state/enriched-$DAY.json`, an hour apart. The weekly
+  now writes `weekly-enriched-$DAY.json` - not prefixed `enriched-`, so
+  `cti-kev`'s newest-file pick still finds the daily - and borrows the newest
+  daily ticket map, since it never runs cti-jira itself.
+
+### Upgrade
+
+Reinstall. Links return from the next daily; the weekly gets them from the
+following Monday.
+
 ## 1.2 — 2026-10-10
 
 ### Added
