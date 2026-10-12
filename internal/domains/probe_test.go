@@ -335,3 +335,40 @@ func TestClassifyPlainError(t *testing.T) {
 		t.Errorf("a non-DNS error read as an answer: %+v", l)
 	}
 }
+
+// The first real run against the live portfolio reported, six hours later,
+// "MX appeared", "DMARC appeared" and "started serving a working page" for
+// domains that had not changed. A lookup that failed, or a site that did not
+// answer, on a run with nothing earlier to carry forward was saved as absent
+// or down. Both are now saved as unknown, and unknown is never a change.
+func TestFirstRunFailuresAreNotReportedAsChanges(t *testing.T) {
+	r := goodSender()
+	inv := []Entry{{Name: "example.com", Sends: true}}
+	regs := []Registration{goodReg()}
+	cmp := Compare("godaddy", inv, regs)
+	silent := func(context.Context, string) (Fetch, Fetch, Cert) {
+		return Fetch{Tried: true, Err: "timed out"}, Fetch{Tried: true, Err: "timed out"}, Cert{Checked: true, DialErr: "timed out"}
+	}
+	res1 := Prober{Resolver: mxFails{r}, Web: silent}.Run(context.Background(), inv, cmp.Covered)
+	week1 := Snap(now, res1, &cmp, regs, nil)
+	if got := week1.Domains["example.com"].MX; got != unknownMark {
+		t.Fatalf("first-run MX failure saved as %q, want unknown", got)
+	}
+	if h := week1.Domains["example.com"].Hosts["example.com"]; !h.Unknown {
+		t.Fatalf("a site that did not answer on the first run was saved as %+v, want unknown", h)
+	}
+
+	res2 := Prober{Resolver: r, Web: okWeb("CA", now.AddDate(1, 0, 0))}.Run(context.Background(), inv, cmp.Covered)
+	week2 := Snap(now.AddDate(0, 0, 7), res2, &cmp, regs, week1)
+	if d := texts(Diff(week1, week2, true, "godaddy")); d != "" {
+		t.Errorf("unknown-to-known reported as change:\n%s", d)
+	}
+	// And once known, a real change still shows.
+	r.mx["example.com"] = []*net.MX{{Host: "mx.example-other.test.", Pref: 10}}
+	r.host["mx.example-other.test"] = []string{"192.0.2.26"}
+	res3 := Prober{Resolver: r, Web: okWeb("CA", now.AddDate(1, 0, 0))}.Run(context.Background(), inv, cmp.Covered)
+	week3 := Snap(now.AddDate(0, 0, 14), res3, &cmp, regs, week2)
+	if d := texts(Diff(week2, week3, true, "godaddy")); !strings.Contains(d, "MX changed") {
+		t.Errorf("a real MX change after unknown was missed:\n%s", d)
+	}
+}
