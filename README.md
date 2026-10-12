@@ -54,8 +54,9 @@ gaps](SECURITY.md#known-gaps-and-accepted-risks)
 present, enriches with NVD CVSS, EPSS and CISA KEV, prioritises Sev5–Sev1, and
 mails an HTML digest with the exploited-and-present findings at the top.
 
-**A monthly Patch Tuesday synopsis.** Reads the Qualys and BleepingComputer
-wrap-ups, correlates the release against Host Detection, and answers the
+**A monthly Patch Tuesday synopsis.** Reads Microsoft's own release data,
+cross-checks it against BleepingComputer (and the Qualys blog when it loads),
+correlates the release against Host Detection, and answers the
 question neither public write-up can: what landed on *our* machines. One table
 row per QID, the Qualys Detection Score, and the review's own QQL verbatim so
 somebody can paste it into the console and see the same set.

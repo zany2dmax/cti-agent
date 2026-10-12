@@ -257,7 +257,7 @@ esac
 bold "Outbound connectivity"
 for host in login.microsoftonline.com graph.microsoft.com \
             services.nvd.nist.gov api.first.org www.cisa.gov \
-            blog.qualys.com www.bleepingcomputer.com; do
+            api.msrc.microsoft.com www.bleepingcomputer.com blog.qualys.com; do
   if timeout 6 bash -c "</dev/tcp/$host/443" 2>/dev/null; then
     ok "$host:443"
   else
@@ -1044,7 +1044,8 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
      sudo cti-agent run-patchtuesday --dry-run --month 2026-08
      sudo systemctl enable --now cti-agent-patchtuesday.timer
 
-   Needs outbound 443 to blog.qualys.com and www.bleepingcomputer.com.
+   Needs outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com
+   (blog.qualys.com is optional; it refuses Azure addresses).
 
 7. LAST, and only when the digest has been running for a few days: mailbox
    cleanup. It moves mail in a shared mailbox, so it is the one lane whose
