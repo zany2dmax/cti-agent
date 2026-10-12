@@ -78,20 +78,12 @@ needs it. Ends with
 or
 .BR "fix the above before continuing" .
 .IP
-The role test matches
-.B "MISSING Mail.Read"
-and
-.B "MISSING Mail.Send"
-with one space, and
+If
 .B "mailer.py \-\-check"
-prints two, so a missing role is not caught and the stage reports both
-granted. It reports the same when
+printed no role list at all (it stops before requesting a token when, for
+example,
 .B FLEET_OPERATOR_EMAIL
-is unset, because
-.B \-\-check
-then stops before requesting a token. Read the
-.B \-\-check
-lines it prints above the verdict.
+is unset), that is a hard failure too, rather than a pass.
 .TP
 .B ingest
 Always rebuilds the Go agent
@@ -116,18 +108,9 @@ on today's report into
 .IR .fleet\-local/state/enriched\-YYYY\-MM\-DD.json ,
 which also upserts the findings into
 .IR .fleet\-local/state/memory.db ,
-then tries to print the band counts and the top findings. That summary
-reads counts named
-.BR P1 \(en P4 ,
-which
-.B enrich.py
-no longer writes, so it fails with a Python
-.B KeyError
-after the enriched file is written, and the run ends with status 1; under
-.B all
-the brief stage is never reached. Run
-.B brief
-on its own afterwards.
+then prints the
+.BR Sev5 \(en Sev1
+band counts and the top Sev5 and Sev4 findings.
 .TP
 .B brief
 Runs

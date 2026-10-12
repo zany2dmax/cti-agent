@@ -58,29 +58,46 @@ with the command described under COMMANDS, run through
 .RS
 .EX
 sudo \-u ctiagent \e
-  \-\-preserve\-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME
+  \-\-preserve\-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \e
+  /bin/bash \-c '<load fleet.env, restore the five, exec>'
 .EE
 .RE
+.IP 5. 4
+As
+.BR ctiagent ,
+before the command starts, loads
+.I /etc/cti\-agent/fleet.env
+with
+.B set \-a
+as the runners do, then puts the five variables back to the values above, so
+a stale
+.B FLEET_HOME
+in
+.I fleet.env
+cannot point a hand run at different files.
 .PP
 Only those five variables cross the
 .B sudo
-boundary; everything else in the caller's environment is reset by sudo.
+boundary; everything else in the caller's environment is reset by sudo, and
+then
+.I fleet.env
+is loaded.
 .B GRAPH_LOOKBACK_HOURS=168 sudo cti\-agent ...
 therefore runs with the configured value, not 168. Use a command's own flag
 (for example
 .BR "run\-digest \-\-lookback" )
 for one-off overrides.
 .PP
-The wrapper does
-.B not
-read
-.IR fleet.env .
-Each command loads it itself: the runners source it in shell, the Go
-commands through their shared loader, and
-.B mailer.py
-in Python. The one exception is
-.BR cti\-budget (1),
-which reads only its own environment.
+Since 1.3 the wrapper loads
+.I fleet.env
+for every command (step 5), so a hand run sees the same settings as the
+timer, including for the commands that do not load it themselves
+.RB ( cti\-kev ,
+.BR enrich.py ,
+.BR brief.py ,
+.BR scout.py ,
+.BR fleet\-db ).
+Before 1.3 those ran on their built-in defaults by hand.
 .PP
 The wrapper does not check the name against a list. The usage message names
 the common commands, but any file in
@@ -131,9 +148,9 @@ received in the last
 through Microsoft Graph.
 .TP
 .B Skips its own mail
-A message carrying the
+A message carrying a correctly signed
 .B X\-CTI\-Agent\-Sent
-header, or sent from
+header (an unsigned or forged one is ignored), or sent from
 .B GRAPH_MAILBOX
 itself, is the fleet's own report coming back and is dropped before
 anything else sees it. The count of skipped messages is logged.
