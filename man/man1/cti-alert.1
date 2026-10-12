@@ -1,0 +1,273 @@
+.TH CTI-ALERT 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-alert \- tell the operator that a fleet unit failed, is holding, or needs a person
+.SH SYNOPSIS
+.B cti-alert
+.B \-\-unit
+.I UNIT
+.RB [ \-\-kind
+.IR KIND ]
+.RB [ \-\-reason
+.IR TEXT ]
+.RB [ \-\-dry\-run ]
+.PP
+.B cti-alert
+.RI [ options ]
+.I UNIT
+.PP
+.B sudo cti\-agent cti\-alert
+.B \-\-unit
+.I UNIT
+.RB [ \-\-dry\-run ]
+.SH DESCRIPTION
+.B cti-alert
+reports on one systemd unit to the fleet operator, through two channels:
+.TP
+.B The message board
+One line posted with
+.IR $FLEET_CODE/bin/fleet\-board " " post " " @systemd " " @operator ,
+which needs no network and is read by the orchestrator on its next
+heartbeat. Posted first, because it is the channel most likely to survive
+whatever broke.
+.TP
+.B Email
+One message through Microsoft Graph, sent as
+.B GRAPH_MAILBOX
+to
+.B FLEET_OPERATOR_EMAIL
+(or
+.B DIGEST_TO
+when that is empty). It quotes systemd's
+.BR Result ,
+.B ExecMainStatus
+and
+.B NRestarts
+for the unit, the last 40 lines of its journal, and the commands to run
+next. Marked high importance only for a failure of a unit whose name
+contains
+.B digest
+or
+.BR weekly ,
+because a missing digest looks exactly like a quiet day.
+.PP
+It is run by:
+.IP \(bu 2
+.BR cti\-agent\-alert@.service ,
+started by
+.B OnFailure=
+on every fleet service as
+.BR "cti\-alert \-\-unit %i" .
+That unit has no
+.B OnFailure=
+of its own, so a failing alert cannot loop.
+.IP \(bu 2
+.BR run\-checkin (1)
+with
+.B \-\-kind HOLD
+when
+.BR cti\-budget (1)
+stops the heartbeat, and the orchestrator itself, for which this is the only
+mail it is allowed to send
+.RB ( "\-\-kind ESCALATION" ).
+.IP \(bu 2
+.BR run\-appscan (1)
+with
+.B \-\-kind HOLD
+when a scanner credential failed.
+.IP \(bu 2
+The operator, by hand, to test the alert path.
+.PP
+The headline word decides how the message looks:
+.TP
+.B FAILED
+Red banner, an
+.B ERROR
+line on the board. The default. A
+.B FAILED
+alert for a unit that is visibly healthy (exit status
+.B 0
+and result
+.BR success ,
+empty or unknown) is rewritten to
+.B TEST
+before anything is sent, so a hand-run test cannot open an incident.
+.TP
+.B HOLD
+Amber banner, an
+.B INFO
+line on the board, never high importance: the lane stopped itself on
+purpose.
+.TP
+.B TEST
+Green banner, an
+.B INFO
+line on the board. Inferred as above, or given explicitly.
+.TP
+.B ESCALATION
+Navy banner: the orchestrator needs a person and nothing is broken. On the
+board it is posted as an
+.B ERROR
+"failed" line, like
+.BR FAILED .
+.PP
+Any other word is uppercased and shown in the subject, and is otherwise
+treated as
+.BR FAILED ,
+so a mistyped kind errs towards alarm.
+.PP
+The subject is
+.IR "[CTI FLEET KIND] UNIT on HOST" .
+.PP
+.B cti-alert
+has no recipient option and cannot be pointed anywhere but the operator
+address in
+.IR fleet.env .
+It does not go through
+.BR cti\-mailer (1)
+or the
+.B FLEET_ALLOW_TO
+gate: mail to the operator is pre-approved. It never restarts, stops or
+changes the unit it reports on.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-unit ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-unit " UNIT"
+The unit to report on, for example
+.BR cti\-agent\-digest.service .
+Required; when omitted, the first argument after the options is used
+instead. With neither, nothing is sent and the exit status is 2.
+Default:\~empty.
+.TP
+.BI \-\-kind " KIND"
+The headline word:
+.BR FAILED ,
+.BR HOLD ,
+.B ESCALATION
+or
+.BR TEST ,
+case-insensitive. See DESCRIPTION.
+Default:\~\fBFAILED\fR.
+.TP
+.BI \-\-reason " TEXT"
+One line shown above the systemd detail, in the email and in a
+.B HOLD
+board line. When a
+.B FAILED
+alert is turned into
+.B TEST
+and no reason was given, a standard "manual test of the alert path" reason
+is supplied.
+Default:\~empty.
+.TP
+.B \-\-dry\-run
+Print the subject, whether the board post worked, and the plain-text body,
+and send no email.
+The board line
+.B is still posted
+(as INFO for a test), because the board is written before this option is
+looked at.
+Default:\~off.
+.SH ENVIRONMENT
+.I fleet.env
+is loaded at start from
+.B FLEET_ENV
+(else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env );
+variables already in the environment win.
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET
+The Entra app registration used to send.
+.I fleet.env
+section 1.
+.TP
+.B GRAPH_MAILBOX
+The mailbox the alert is sent as. Section 1.
+.TP
+.B FLEET_OPERATOR_EMAIL
+Recipients, comma-separated. A person, not a distribution list.
+Section 4.
+.TP
+.B DIGEST_TO
+Used as the recipient list only when
+.B FLEET_OPERATOR_EMAIL
+is empty. Section 4.
+.TP
+.B FLEET_CODE
+Where
+.B bin/fleet\-board
+is found. No
+.B fleet\-board
+there means no board post.
+Default:\~\fI/opt/cti\-agent\fR.
+.TP
+.BR FLEET_ENV ", " FLEET_HOME
+Locate
+.IR fleet.env .
+.PP
+If any of the Graph variables or both recipient variables are empty, the
+email is not sent; the reason, and the full text of the alert, go to
+standard error (the journal), and the board post still happens.
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Credentials and the operator address.
+.TP
+.I /opt/cti\-agent/bin/fleet\-board
+The board the alert is posted to.
+.TP
+.I /etc/systemd/system/cti\-agent\-alert@.service
+The template unit that runs it, as
+.BR ctiagent ,
+with
+.B SupplementaryGroups=systemd\-journal
+so it can read the failed unit's journal. Run by hand without that group,
+the journal section reads
+.IR "(journal unavailable: ...)" .
+.SH EXIT STATUS
+.TP
+.B 0
+Always, once a unit name is known: whether or not the board post or the
+email worked. A failed send is reported on standard error, not in the exit
+status, so the alert unit is never itself marked failed and
+.B systemctl \-\-failed
+still names the unit that really broke.
+.TP
+.B 2
+No unit was given, or an option was not recognised.
+.B \-\-help
+prints the usage and exits 0.
+.SH EXAMPLES
+Test the alert path end to end (the unit is healthy, so this arrives as a
+green TEST):
+.PP
+.EX
+sudo systemctl start cti\-agent\-alert@cti\-agent\-digest.service.service
+.EE
+.PP
+See what would be sent, without mailing (this still posts to the board):
+.PP
+.EX
+sudo cti\-agent cti\-alert \-\-unit cti\-agent\-digest.service \-\-dry\-run
+.EE
+.PP
+Report a deliberate hold:
+.PP
+.EX
+sudo cti\-agent cti\-alert \-\-unit cti\-agent\-checkin.service \e
+    \-\-kind HOLD \-\-reason "paused for maintenance on host\-a"
+.EE
+.SH SEE ALSO
+.BR cti\-budget (1),
+.BR run\-checkin (1),
+.BR run\-appscan (1),
+.BR fleet\-board (1),
+.BR cti\-agent (1),
+.BR systemd.unit (5)
+.PP
+RUNBOOK.md section 15; fleet\-kit/README.md, "Failure alerting".

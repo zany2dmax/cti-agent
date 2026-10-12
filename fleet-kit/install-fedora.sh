@@ -159,14 +159,24 @@ cfgval() {
 if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   [ "$(id -u)" = 0 ] || { bad "run with sudo"; bail 1; }
   bold "Stopping and disabling timers"
-  for t in digest weekly checkin scout patchtuesday; do
-    systemctl disable --now "cti-agent-$t.timer" 2>/dev/null || true
-    ok "cti-agent-$t.timer"
+  # Every installed timer, not a hand-kept list: the list stopped at
+  # patchtuesday, so uninstall left the mailbox, appscan and domains timers
+  # enabled and firing at units that no longer existed.
+  for unit in "$UNIT_DIR"/cti-agent-*.timer; do
+    [ -f "$unit" ] || continue
+    t="$(basename "$unit")"
+    systemctl disable --now "$t" 2>/dev/null || true
+    ok "$t"
   done
   bold "Removing units"
   rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
+  bold "Removing man pages"
+  for page in "$SRC/../man/man1"/*.1; do
+    if [ -f "$page" ]; then rm -f "/usr/local/share/man/man1/$(basename "$page")"; fi
+  done
+  ok "/usr/local/share/man/man1"
   bold "Removing code"
   rm -rf "$CODE_DIR"
   ok "$CODE_DIR"
@@ -580,6 +590,29 @@ if [ "$MODE" != dryrun ]; then
   ok "built $CODE_DIR/bin/cti-domains"
 else
   info "would build $AGENT_SRC/cti-agent"
+fi
+
+# ──────────────────────────────────────────────────────────── man pages ─────
+# One page per operator command, so `man cti-domains` works on the box. Same
+# checkout as everything else installed here. /usr/local/share/man is on the
+# default MANPATH on Fedora, so nothing needs configuring.
+bold "Man pages"
+MAN_SRC="$SRC/../man/man1"
+MAN_DIR=/usr/local/share/man/man1
+if [ -d "$MAN_SRC" ]; then
+  run install -d -m 0755 "$MAN_DIR"
+  n=0
+  for page in "$MAN_SRC"/*.1; do
+    [ -f "$page" ] || continue
+    run install -m 0644 "$page" "$MAN_DIR/"
+    n=$((n + 1))
+  done
+  if command -v mandb >/dev/null 2>&1; then
+    run mandb -q "/usr/local/share/man" >/dev/null 2>&1 || true
+  fi
+  ok "$n man page(s) -> $MAN_DIR"
+else
+  warn "no man pages at $MAN_SRC - skipped"
 fi
 
 # ──────────────────────────────────────────────────────────── systemd ───────
