@@ -1,0 +1,358 @@
+.TH RUN-DIGEST 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+run-digest \- the deterministic daily digest and Monday rollup: ingest, enrich, ticket, brief, send
+.SH SYNOPSIS
+.B run\-digest
+.RB [ daily | weekly ]
+.RB [ \-\-dry\-run ]
+.RB [ \-\-lookback
+.IR DURATION ]
+.PP
+.B sudo cti\-agent run\-digest
+.RB [ daily | weekly ]
+.RI [ options ]
+.SH DESCRIPTION
+.B run-digest
+builds the CTI digest and mails it. It is plain shell with no model in the
+loop, so delivery never depends on the orchestrator noticing the clock.
+.PP
+It is run by two units:
+.TP
+.B cti\-agent\-digest.service
+.B run\-digest daily
+from
+.BR cti\-agent\-digest.timer ,
+every day at 06:00
+.RB ( Persistent=true :
+a missed run fires at boot).
+.TP
+.B cti\-agent\-weekly.service
+.B run\-digest weekly
+from
+.BR cti\-agent\-weekly.timer ,
+every Monday at 07:00
+.RB ( Persistent=true ).
+.PP
+The installer replaces both times with
+.B FLEET_DIGEST_TIME
+and
+.B FLEET_WEEKLY_TIME
+in a drop-in when
+.B FLEET_TIMEZONE
+is set. Both units run as
+.B ctiagent
+with
+.BR UMask=0077 ,
+and a failure triggers
+.BR cti\-agent\-alert@.service .
+.PP
+The steps, in order:
+.TP
+.B 0. Already sent?
+On a real run,
+.B fleet\-db was\-sent
+.I DATE KIND
+is asked whether this kind of digest already went out today (local date).
+If it did, the runner says so and exits 0. If
+.B fleet\-db
+fails, the digest is treated as not sent. A dry run skips the check.
+.TP
+.B 1a. Ingest (daily)
+Runs the Go ingest binary from
+.BR CTI_AGENT_DIR :
+.I $CTI_AGENT_DIR/cti\-agent
+if it is executable, otherwise
+.B go run ./cmd/cti\-agent
+in that directory, with
+.B REPORT_PATH
+set to today's raw report and
+.B \-\-lookback
+passed through when given. It reads the CTI mailbox over Graph, looks the
+CVEs up in the scanner, writes
+.IR reports/raw\-DATE.md ,
+and records the messages it read in the processed-message log that
+.BR run\-mailbox\-cleanup (1)
+relies on. Fatal if
+.B CTI_AGENT_DIR
+is unset or missing, if the binary exits non-zero, or if the raw report is
+empty.
+.TP
+.B 1b. Rollup (weekly)
+The weekly does not read the mailbox. It runs
+.B fleet\-db rollup \-\-days
+.I N
+.RB ( WEEKLY_DAYS ,
+default 7) over the stored findings into
+.IR state/weekly\-enriched\-DATE.json ,
+fatal if that fails or is empty. It then copies the newest daily ticket map
+.RI ( state/enriched\-DATE\-tickets.json )
+beside it, mode 0600, so the weekly can link tickets; with no daily map the
+weekly renders without links.
+.TP
+.B 2. Enrich (daily)
+.B python3 lanes/enrich.py \-\-report
+.I raw
+.B \-\-out
+.IR state/enriched\-DATE.json :
+NVD, EPSS and CISA KEV, and an upsert of the findings into
+.IR state/memory.db .
+Fatal on failure. The weekly skips it; its findings were scored when first
+ingested.
+.TP
+.B 2b. Ticket (daily, non-fatal)
+If
+.I $FLEET_CODE/bin/cti\-jira
+is executable:
+.B cti\-jira \-\-from\-enriched
+.I file
+.B \-\-for\-real \-\-follow\-up
+on a real run, the same without
+.B \-\-for\-real
+on a dry run. Any failure, including the binary being absent, costs tickets
+and nothing else. The weekly never runs it.
+.TP
+.B 3. Brief
+.B python3 lanes/brief.py \-\-daily
+(or
+.BR \-\-weekly )
+renders
+.I reports/digest\-KIND\-DATE.html
+and the matching
+.IR .txt ,
+then is run again with
+.B \-\-subject\-only
+for the subject line. Fatal on failure.
+.TP
+.B 4. Send
+.B python3 lanes/mailer.py
+with the HTML, the text, the subject and
+.I reports/raw\-DATE.md
+attached, plus
+.B \-\-dry\-run
+on a dry run. The mailer resolves recipients from
+.B DIGEST_TO
+and
+.B DIGEST_CC
+against
+.BR FLEET_ALLOW_TO ;
+see the mailer for the send gate. Fatal on failure. The mailer's JSON
+result is printed.
+.TP
+.B 5. Log
+On a real run: the Sev5..Sev1 counts from the enriched file and the Graph
+request id are recorded with
+.BR "fleet\-db sent" ,
+which is what step 0 checks tomorrow, and an INFO line is posted to the
+board for
+.BR @you .
+On a dry run only a board line naming the HTML file.
+.PP
+A fatal step prints
+.B FAILED:
+and posts an ERROR line to the board before exiting 1.
+.PP
+A dry run still does everything up to the mailer: the daily reads the
+mailbox, writes the processed-message log, calls NVD and the scanner,
+writes the findings into
+.IR memory.db ,
+and runs
+.B cti\-jira
+in its own dry-run mode. It does not send mail, does not file or comment on
+tickets, and does not record the digest as sent, so the real run that day
+still goes out.
+.PP
+.B run-digest
+never sends twice for the same day and kind, never reads the mailbox for the
+weekly, and never runs
+.B cti\-jira
+for the weekly.
+.SH OPTIONS
+These are shell arguments, matched exactly and accepted in any order. Any
+other argument is refused with a usage line and exit status 2.
+.TP
+.BR daily ", " weekly
+Which digest. Given more than once, the last wins.
+Default:\~\fBdaily\fR.
+.TP
+.B \-\-dry\-run
+Run every step but send nothing: the mailer gets
+.BR \-\-dry\-run ,
+.B cti\-jira
+runs without
+.BR \-\-for\-real ,
+the already-sent check is skipped and nothing is recorded as sent. See
+DESCRIPTION for what a dry run still writes.
+.TP
+.BI \-\-lookback " DURATION"
+.TQ
+.BI \-\-lookback= DURATION
+A catch-up window for the daily ingest, as a Go duration
+.RB ( 168h ),
+replacing
+.B GRAPH_LOOKBACK_HOURS
+for this run. It is an argument rather than an environment variable because
+the
+.B cti\-agent
+wrapper drops the environment at the sudo hop. The ingest binary refuses a
+value that is not positive or is over 90 days (2160h). Ignored by the weekly.
+The value is required: a bare
+.B \-\-lookback
+at the end of the line stops the runner with an unbound-variable error,
+exit status 1.
+.SH ENVIRONMENT
+.I fleet.env
+is sourced with every assignment exported, and its values replace the
+process environment, except
+.BR FLEET_HOME ,
+.B FLEET_CODE
+and
+.BR FLEET_FEEDS ,
+which keep the value the unit or wrapper injected.
+.TP
+.B FLEET_HOME
+State directory: reports, state, board.
+Default:\~\fI$HOME/fleet\fR; the units set \fI/var/lib/cti\-agent\fR.
+.TP
+.B FLEET_CODE
+Code directory holding
+.I bin/
+and
+.IR lanes/ .
+Default:\~\fB$FLEET_HOME\fR; the units set \fI/opt/cti\-agent\fR.
+.TP
+.B FLEET_ENV
+The config file to source.
+Default:\~\fI$FLEET_HOME/fleet.env\fR; the units set
+\fI/etc/cti\-agent/fleet.env\fR.
+.TP
+.B FLEET_FEEDS
+Preserved across the source of
+.I fleet.env
+for the lanes; not read by the runner itself.
+.TP
+.B GRAPH_MAILBOX
+The CTI mailbox (section 1). The daily names it in its log, and stops with an
+unbound-variable error if it is unset.
+.TP
+.B GRAPH_LOOKBACK_HOURS
+The ingest window when
+.B \-\-lookback
+is not given (section 1), read by the ingest binary.
+.TP
+.B CTI_AGENT_DIR
+Where the ingest binary or its source lives (section 3).
+.TP
+.B WEEKLY_DAYS
+Days of stored findings in the weekly rollup. Not in
+.IR fleet.env.example .
+Default:\~\fB7\fR.
+.TP
+.BR DIGEST_TO ", " DIGEST_CC ", " FLEET_ALLOW_TO
+Recipients and the send allowlist, read by
+.B mailer.py
+(section 4).
+.TP
+.B REPORT_PATH
+Set by the runner for the ingest binary; any value in the environment is
+replaced.
+.SH FILES
+Under
+.I /var/lib/cti\-agent
+on the Fedora layout; files are 0600 under the units'
+.BR UMask=0077 .
+.I DATE
+is the local date.
+.TP
+.I reports/raw\-DATE.md
+The ingest report, 0600, attached to the mail. The weekly attaches it too
+when a daily ran that day.
+.TP
+.I state/enriched\-DATE.json
+The daily's enriched findings.
+.TP
+.I state/enriched\-DATE\-tickets.json
+The CVE-to-ticket map
+.B cti\-jira
+writes for
+.BR brief.py .
+.TP
+.IR state/weekly\-enriched\-DATE.json ", " state/weekly\-enriched\-DATE\-tickets.json
+The weekly rollup and its borrowed ticket map, 0600. Not named
+.I enriched\-*
+so
+.B cti\-kev
+does not take the week for the day.
+.TP
+.IR reports/digest\-KIND\-DATE.html ", " reports/digest\-KIND\-DATE.txt
+The rendered digest.
+.TP
+.I state/memory.db
+SQLite: findings, and the digests table behind the already-sent check.
+.TP
+.I state/processed\-messages.json
+Written by the daily ingest, read by mailbox cleanup.
+.TP
+.I board.md
+The fleet board, appended to by
+.BR fleet\-board .
+.SH EXIT STATUS
+.TP
+.B 0
+The digest was sent, it had already been sent today, or the dry run
+completed.
+.TP
+.B 1
+A fatal step failed (FAILED and a board ERROR line), or the shell stopped
+on an error outside those steps: a missing
+.B \-\-lookback
+value, an unset
+.BR GRAPH_MAILBOX ,
+a failing subject render, or a failure of
+.B fleet\-db sent
+or the closing board post. The last two happen after the mail has gone, so
+the digest is not recorded as sent and a re-run would send it again.
+.TP
+.B 2
+An unknown argument.
+.SH EXAMPLES
+Rehearse today's daily, then read what it would send:
+.PP
+.EX
+sudo cti\-agent run\-digest daily \-\-dry\-run
+sudo less /var/lib/cti\-agent/reports/digest\-daily\-$(date +%F).txt
+.EE
+.PP
+Catch up after the timer was off for a week:
+.PP
+.EX
+sudo cti\-agent run\-digest daily \-\-lookback 168h
+.EE
+.PP
+Send the Monday rollup by hand:
+.PP
+.EX
+sudo cti\-agent run\-digest weekly
+.EE
+.PP
+See the last run:
+.PP
+.EX
+journalctl \-u cti\-agent\-digest.service \-n 50
+.EE
+.SH SEE ALSO
+.BR fleet\-db (1),
+.BR fleet\-board (1),
+.BR cti\-jira (1),
+.BR cti\-kev (1),
+.BR run\-mailbox\-cleanup (1),
+.BR cti\-agent (1)
+.PP
+The lanes
+.IR lanes/enrich.py ,
+.I lanes/brief.py
+and
+.I lanes/mailer.py
+under
+.IR /opt/cti\-agent .
+.PP
+RUNBOOK.md sections 9, 11a and 12; fleet\-kit/README.md, "Schedule".

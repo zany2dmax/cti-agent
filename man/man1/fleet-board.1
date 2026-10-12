@@ -1,0 +1,206 @@
+.TH FLEET-BOARD 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+fleet-board \- the fleet's append-only message board: post, read, prune and tail board.md
+.SH SYNOPSIS
+.B fleet\-board post
+.I from to kind body...
+.br
+.B fleet\-board read
+.RI [ handle ]
+.br
+.B fleet\-board prune
+.I pattern
+.br
+.B fleet\-board tail
+.RI [ n ]
+.br
+.B fleet\-board
+.PP
+.B sudo cti\-agent fleet\-board
+.I command
+.RI [ arguments ]
+.SH DESCRIPTION
+.B fleet\-board
+is how the lanes, the orchestrator and the operator talk to each other.
+The board is one text file,
+.IR $FLEET_HOME/board.md ,
+with one message per line:
+.PP
+.EX
+[2026\-10\-12 09:30] @enrich  \-> @you     Q        id=q17 NVD rate\-limited
+.EE
+.PP
+The runners post their results and failures to it
+.RB ( run\-digest
+posts
+.B INFO
+when a digest is sent and
+.B ERROR
+when a run fails), the orchestrator heartbeat reads it every beat and is the
+only party that prunes it, and the operator answers on it by posting as
+.BR @operator .
+Handles in use are
+.B @you
+(the orchestrator),
+.BR @operator ,
+.BR @ingest ,
+.BR @enrich ,
+.BR @scout ,
+.BR @brief ,
+.BR @patchtuesday ,
+.BR @mailbox ,
+.BR @appscan ,
+.B @domains
+and
+.BR @all ;
+they are a convention, not checked.
+.PP
+Writes
+.RB ( post ,
+.BR prune )
+are serialised with a lock directory,
+.IR $FLEET_HOME/.board.lock ,
+created with
+.BR mkdir (1),
+which is atomic, so two writers never interleave. A lock older than 60
+seconds is taken to belong to a dead process and is removed. The lock is
+released when the command exits. Reads do not lock.
+.PP
+Every invocation, including a bad one, first creates
+.I $FLEET_HOME/archive
+and touches the board and the archive file.
+.PP
+.B fleet\-board
+sends no mail; reaching the operator by email is
+.BR cti\-alert 's
+job.
+.SH COMMANDS
+With no command,
+.B read
+is run.
+.TP
+.BI post " from to kind body..."
+Append one line: the local time to the minute, then
+.IR from ,
+.I to
+and
+.I kind
+each padded to 8 characters, then the body. The remaining arguments are
+joined into the body; newlines in it become spaces and runs of spaces
+collapse to one, because a message is always one line.
+.I kind
+is free text; the fleet uses
+.BR Q ,
+.BR A ,
+.BR INFO ,
+.BR P1 ,
+.B APPROVE
+and
+.BR ERROR .
+An empty body is refused.
+.TP
+.BR read " [\fIhandle\fR]"
+Print every line addressed to
+.I handle
+or to
+.BR @all ,
+that is, lines matching
+.BI "\-> +(" handle "|@all) "
+as an extended regular expression; the handle is not escaped.
+Default:\~\fB@you\fR. Prints
+.BI "(nothing for " handle )
+when nothing matches.
+.TP
+.BI prune " pattern"
+Move every line matching the extended regular expression
+.I pattern
+to the end of
+.I $FLEET_HOME/archive/board\-archive.md
+and remove it from the board. Prints
+.BI "pruned lines matching: " pattern\fR.
+The board is rewritten through a temporary file, so afterwards it has mode
+0600 and is owned by whoever ran the prune. The orchestrator's job only.
+.TP
+.BR tail " [\fIn\fR]"
+The last
+.I n
+lines of the board.
+Default:\~\fB20\fR.
+.SH ENVIRONMENT
+.B fleet\-board
+does not read
+.I fleet.env
+itself.
+.TP
+.B FLEET_HOME
+Where the board, the archive and the lock live.
+Default:\~\fI$HOME/fleet\fR. Set to
+.I /var/lib/cti\-agent
+by the systemd units and
+.BR cti\-agent (1).
+.TP
+.B LOCK_TIMEOUT
+Seconds to wait for the lock before giving up, checked in 0.2-second steps.
+Default:\~\fB10\fR.
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/board.md
+The board.
+.TP
+.I /var/lib/cti\-agent/archive/board\-archive.md
+Pruned lines, appended in board order.
+.TP
+.I /var/lib/cti\-agent/.board.lock
+The lock directory, present only while a write is in progress. One left by
+a killed process is removed by the next writer after 60 seconds.
+.SH EXIT STATUS
+.TP
+.B 0
+Success, including a
+.B read
+that found nothing.
+.TP
+.B 1
+.B post
+without
+.IR from ,
+.I to
+or
+.IR kind ,
+or with an empty body;
+.B prune
+without a pattern; or the lock could not be taken within
+.B LOCK_TIMEOUT
+seconds.
+.TP
+.B 2
+Unknown command; a usage line is printed.
+.SH EXAMPLES
+The latest traffic, and what is waiting for the orchestrator:
+.PP
+.EX
+sudo cti\-agent fleet\-board tail 30
+sudo cti\-agent fleet\-board read @you
+.EE
+.PP
+Answer a question the orchestrator escalated as
+.BR q17 :
+.PP
+.EX
+sudo cti\-agent fleet\-board post @operator @you A "re:q17 yes, go ahead"
+.EE
+.PP
+What the operator has said:
+.PP
+.EX
+sudo grep \-F '@operator \->' /var/lib/cti\-agent/board.md
+.EE
+.SH SEE ALSO
+.BR fleet\-db (1),
+.BR run\-checkin (1),
+.BR run\-digest (1),
+.BR cti\-alert (1),
+.BR cti\-agent (1)
+.PP
+fleet\-kit/fleet/CLAUDE.md, "Message board \- you are the postmaster";
+RUNBOOK.md section 15.

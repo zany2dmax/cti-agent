@@ -1,0 +1,413 @@
+.TH FLEET-DB 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+fleet-db \- the fleet's SQLite memory: findings, digests sent, tasks, notes and board mail
+.SH SYNOPSIS
+.B fleet\-db init
+.br
+.B fleet\-db remember
+.I category topic content...
+.br
+.B fleet\-db recent
+.RI [ n ]
+.br
+.B fleet\-db task add
+.I title...
+.br
+.B fleet\-db task done
+.I id
+.br
+.B fleet\-db task list
+.br
+.B fleet\-db mail send
+.I agent kind body...
+.br
+.B fleet\-db mail inbox
+.I agent
+.br
+.B fleet\-db mail ack
+.I id
+.br
+.B fleet\-db ack
+.I id
+.br
+.B fleet\-db finding
+.RI [ word " [" json... ]]
+.br
+.B fleet\-db findings
+.RB [ \-\-priority
+.IR BAND ]
+.RB [ \-\-stale\-days
+.IR N ]
+.br
+.B fleet\-db rollup
+.RB [ \-\-days
+.IR N ]
+.br
+.B fleet\-db note
+.I cve
+.RI [ text... ]
+.br
+.B fleet\-db sent
+.I day s5 s4 s3 s2 s1 message_id
+.RI [ kind ]
+.br
+.B fleet\-db was\-sent
+.I day
+.RI [ kind ]
+.br
+.B fleet\-db vacuum
+.PP
+.B sudo cti\-agent fleet\-db
+.I command
+.RI [ arguments ]
+.SH DESCRIPTION
+.B fleet\-db
+is the only writer of
+.IR $FLEET_HOME/state/memory.db ,
+the database that holds what the fleet has concluded and what it has done.
+It is called by the runners
+.RB ( run\-digest (1)
+records each send with
+.B sent
+and checks
+.B was\-sent
+before sending again; the weekly digest is built from
+.BR rollup ),
+by
+.B enrich.py
+(which upserts every enriched finding through
+.BR finding ),
+by
+.B cti\-jira
+.RB ( note ),
+and by the orchestrator heartbeat, whose tool allowlist grants only
+.BR recent ,
+.BR findings ,
+.BR was\-sent ,
+.BR rollup ,
+.BR remember ,
+.BR task ,
+.BR mail ,
+.B ack
+and
+.BR vacuum .
+.PP
+Every invocation except a bare
+.B fleet\-db
+creates any missing table and index, then applies the severity migration:
+.B digests
+columns
+.BR p1 .. p4
+become
+.BR sev5 .. sev1
+(the new Sev3 column starts at 0), and stored
+.B findings.priority
+values P1, P2, P3, P4 are rewritten to Sev5, Sev4, Sev2, Sev1. Each step is
+guarded, so it runs once and costs one
+.B PRAGMA
+thereafter; what it changed is reported on standard error. The database is
+opened in WAL mode with a 5-second busy timeout so lanes can read while one
+writes.
+.PP
+Arguments are positional and not validated beyond what the code needs: a
+missing argument, or a non-number where an id or count is expected, ends in
+a Python traceback and exit status 1. Text arguments after the fixed ones
+are joined with single spaces, so quoting is optional.
+.PP
+.B fleet\-db
+sends no mail and makes no network calls.
+.SH COMMANDS
+.TP
+.B init
+Create the schema and run the migration, then print
+.BI "initialized " path\fR.
+Idempotent.
+.B install.sh
+runs it once; on the Fedora layout the schema is created by the first
+command that touches the database, since every command does the same.
+.TP
+.BI remember " category topic content..."
+Store a free-text memory with the current UTC time. Prints
+.BR ok .
+.TP
+.BR recent " [\fIn\fR]"
+Print the
+.I n
+newest memories (default 20, each truncated to 160 characters), every open
+task, every unacknowledged mailbox message (body truncated to 120
+characters), and a count of findings per priority band
+.RB ( unscored
+for rows with none). The orchestrator reads this at the start of each beat.
+.TP
+.BI "task add" " title..."
+Add an open task.
+.TP
+.BI "task done" " id"
+Mark task
+.I id
+done and record when.
+.TP
+.B task list
+Every task, open ones first, as
+.B [ ]
+or
+.BR [x] .
+.IP
+Any other word after
+.B task
+does nothing and exits 0.
+.TP
+.BI "mail send" " agent kind body..."
+Queue a message for
+.I agent
+(a board handle such as
+.BR @enrich ).
+.TP
+.BI "mail inbox" " agent"
+Unacknowledged messages for
+.IR agent ,
+oldest first.
+.TP
+.BI "mail ack" " id"
+.TQ
+.BI ack " id"
+Mark message
+.I id
+acknowledged. The two forms are identical.
+.IP
+Any other word after
+.B mail
+does nothing and exits 0.
+.TP
+.BR finding " [\fIword\fR [\fIjson...\fR]]"
+Insert or update findings, keyed on
+.BR cve .
+The JSON, a single object or an array of objects, is taken from the
+arguments after the first (the first is ignored; callers write
+.BR upsert ),
+or from standard input when there are none. Recognised keys are
+.BR cve ,
+.BR status ,
+.BR provider ,
+.BR qids ,
+.BR host_count ,
+.BR qualys_score ,
+.BR last_seen ,
+.BR sample_hosts ,
+.BR cvss ,
+.BR cvss_severity ,
+.BR epss ,
+.BR epss_pct ,
+.BR kev ,
+.BR kev_added ,
+.BR kev_due ,
+.BR ransomware ,
+.BR priority ,
+.B rationale
+and
+.BR description ;
+others are ignored. On an existing row every recognised column is replaced
+(a key absent from the JSON becomes NULL) and
+.B updated
+is set to now;
+.B first_seen
+is set only when the row is created, and
+.B remediation_note
+is never touched. Prints
+.BI "upserted " N " findings"\fR.
+Not on the heartbeat's allowlist: it rewrites what the digest reports.
+.TP
+.BR findings " [\fB\-\-priority\fR \fIBAND\fR] [\fB\-\-stale\-days\fR \fIN\fR]"
+Print stored findings as a JSON array, ordered by priority then host count,
+largest first.
+.B \-\-priority
+keeps one band, written exactly as stored
+.RB ( Sev5 ,
+.BR Sev4 ,
+.BR Sev3 ,
+.BR Sev2 ,
+.BR Sev1 ).
+.B \-\-stale\-days
+.I N
+keeps only findings with no remediation note whose
+.B updated
+time is more than
+.I N
+days ago; timestamps are compared as datetimes, so a row from the cutoff's
+own calendar day is counted correctly. Both may be given.
+.TP
+.BR rollup " [\fB\-\-days\fR \fIN\fR]"
+Print, on standard output, a JSON document in the shape
+.B enrich.py
+writes, built from stored findings rather than from a mailbox read: every
+finding updated or first seen in the last
+.I N
+days (default 7), each with
+.B is_new
+set when
+.B first_seen
+falls inside the window. It carries all five band counts even when zero
+(plus
+.B unscored
+when a row has no priority),
+.BR total ,
+an empty
+.BR degraded ,
+.B kev_deadlines
+with
+.B overdue
+and
+.B worst_overdue_days
+counted over every row with a
+.B kev_due
+date, and a
+.B source_meta.rollup
+line saying no mailbox was read. It has no
+.B email_subjects
+key, so the digest omits its emails section.
+.B run\-digest weekly
+renders this with
+.BR brief.py (1).
+.TP
+.BR note " \fIcve\fR [\fItext...\fR]"
+Set the finding's
+.B remediation_note
+(who is handling it, a ticket key) and its
+.B updated
+time. With no
+.I text
+the note is cleared. A finding with a note is no longer reported by
+.BR "findings \-\-stale\-days" .
+A CVE with no row prints
+.BI "no finding for " cve " \- note not recorded"
+and still exits 0, because a ticket can exist for a CVE the table has not
+seen.
+.TP
+.BR sent " \fIday s5 s4 s3 s2 s1 message_id\fR [\fIkind\fR]"
+Record that the
+.I kind
+digest
+.RB ( daily
+by default;
+.B weekly
+for the weekly) went out for
+.I day
+.RB ( YYYY\-MM\-DD ),
+with the five band counts as integers and the Graph request id. A second
+record for the same kind and day replaces the first. Prints
+.BR logged .
+Not on the heartbeat's allowlist: a fake record makes
+.B run\-digest
+skip that day's real send.
+.TP
+.BR was\-sent " \fIday\fR [\fIkind\fR]"
+Print
+.B yes
+and exit 0 if a
+.I kind
+digest (default
+.BR daily )
+is recorded for
+.IR day ;
+otherwise print
+.B no
+and exit 1.
+.TP
+.B vacuum
+Compact the database. Prints
+.BR vacuumed .
+.SH ENVIRONMENT
+.B fleet\-db
+does not read
+.I fleet.env
+itself.
+.TP
+.B FLEET_HOME
+State directory; the database is
+.IR $FLEET_HOME/state/memory.db ,
+and
+.I $FLEET_HOME/state
+is created if missing.
+Default:\~\fI~/fleet\fR. Set to
+.I /var/lib/cti\-agent
+by the systemd units and
+.BR cti\-agent (1)
+(\fIfleet.env\fR section 3, PATHS, records the same value).
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/state/memory.db
+The database, with its
+.I \-wal
+and
+.I \-shm
+companions. Tables:
+.BR memories ,
+.BR tasks ,
+.BR mailbox ,
+.BR findings ,
+.B scout_items
+(written by
+.BR scout.py ),
+.BR digests .
+.TP
+.I /opt/cti\-agent/bin/fleet\-db
+The program.
+.SH EXIT STATUS
+.TP
+.B 0
+The command ran, including
+.B note
+for an unknown CVE, an unrecognised
+.B task
+or
+.B mail
+sub-command, and a
+.B findings
+query that matched nothing.
+.TP
+.B 1
+.B was\-sent
+found no record; or a missing or malformed argument, invalid JSON for
+.BR finding ,
+or a database error (Python traceback on standard error).
+.TP
+.B 2
+No command, or an unknown one; the usage text is printed. An unknown
+command still creates the schema and runs the migration first.
+.SH EXAMPLES
+What the fleet remembers, and the band counts:
+.PP
+.EX
+sudo cti\-agent fleet\-db recent 40
+.EE
+.PP
+Exploited and present, and anything nobody has picked up in a week:
+.PP
+.EX
+sudo cti\-agent fleet\-db findings \-\-priority Sev5
+sudo cti\-agent fleet\-db findings \-\-stale\-days 7
+.EE
+.PP
+Record who is handling a finding, then clear it again:
+.PP
+.EX
+sudo cti\-agent fleet\-db note CVE\-2026\-1234 SEC\-101 host\-a team
+sudo cti\-agent fleet\-db note CVE\-2026\-1234
+.EE
+.PP
+Did today's daily go out? Preview the weekly's input:
+.PP
+.EX
+sudo cti\-agent fleet\-db was\-sent $(date +%F) daily
+sudo cti\-agent fleet\-db rollup \-\-days 7 | less
+.EE
+.SH SEE ALSO
+.BR fleet\-board (1),
+.BR enrich.py (1),
+.BR scout.py (1),
+.BR brief.py (1),
+.BR run\-digest (1),
+.BR cti\-agent (1),
+.BR sqlite3 (1)
+.PP
+RUNBOOK.md section 12; fleet\-kit/fleet/CLAUDE.md, "Message board".

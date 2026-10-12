@@ -1,0 +1,351 @@
+.TH CTI-PATCHTUESDAY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-patchtuesday \- build the monthly Microsoft Patch Tuesday synopsis and correlate it with the scanner
+.SH SYNOPSIS
+.B cti-patchtuesday
+.RB [ \-\-month
+.IR YYYY\-MM ]
+.RB [ \-\-out
+.IR FILE ]
+.RB [ \-\-text\-out
+.IR FILE ]
+.RB [ \-\-json
+.IR FILE ]
+.RB [ \-\-dry\-run ]
+.RB [ \-\-provider
+.BR none ]
+.RB [ \-\-url\-qualys
+.IR URL ]
+.RB [ \-\-url\-bleeping
+.IR URL ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-max\-rows
+.IR N ]
+.PP
+.B cti-patchtuesday
+.RB [ \-\-month
+.IR YYYY\-MM ]
+.B \-\-subject\-only
+.PP
+.B cti-patchtuesday
+.RB [ \-\-month
+.IR YYYY\-MM ]
+.BI \-\-explain " CVE"
+.RI [ "source options" ]
+.PP
+.B cti-patchtuesday
+.RB [ \-\-month
+.IR YYYY\-MM ]
+.B \-\-mark\-sent
+.PP
+.B sudo cti\-agent cti\-patchtuesday
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-patchtuesday
+writes the monthly synopsis of Microsoft's Patch Tuesday release. It is run by
+.BR run\-patchtuesday (1)
+from
+.B cti\-agent\-patchtuesday.timer
+at 07:30 on the Wednesday after the second Tuesday (the 9th to the 15th).
+.PP
+It reads two public wrap-ups: the Qualys security update review, at a URL
+computed from the release date, and the BleepingComputer article, found by
+trying the expected URL and then the site's Patch Tuesday tag listing. A
+source that cannot be read is named on standard error and in the email; the
+synopsis is still produced from the other. CVEs whose every sighting names a
+product and none names a Microsoft one are scoped out of the release, and
+listed on standard error. Where each headline figure came from is also
+printed there.
+.PP
+It then maps the release's CVEs to Qualys QIDs through the KnowledgeBase
+cache, adds the QIDs the Qualys review itself publishes, and asks Qualys Host
+Detection, in batches of 300, which are open here. The email's table has one
+row per detecting QID with the scanner's own host count. If the
+KnowledgeBase cache cannot be loaded, the published QIDs alone are used. If
+correlation fails altogether, or
+.B \-\-provider none
+is given, the synopsis still goes out with exposure marked
+.BR "NOT MEASURED" ,
+never as zero.
+.PP
+A month whose Patch Tuesday has not happened yet is refused, so an early run
+cannot produce a confidently empty email.
+.PP
+.B cti-patchtuesday
+does not send mail; the runner hands its output to the mailer.
+.SS The release manifest
+A normal run (no
+.BR \-\-month ,
+no
+.BR \-\-dry\-run )
+also writes
+.IR $FLEET_HOME/state/patchtuesday\-YYYY\-MM.json ,
+0600, listing every CVE in the release and marked
+.BR "sent: false" .
+The daily digest holds back a release's CVEs only when this month's or last
+month's manifest is marked sent, and only
+.B \-\-mark\-sent
+marks it.
+.B run\-patchtuesday
+calls
+.B \-\-mark\-sent
+after the mailer reports success and at no other time, so a synopsis that
+never went out cannot silence the daily. A manifest that cannot be written is
+a warning, not a failure: the daily simply keeps reporting those CVEs.
+.PP
+A
+.B \-\-month
+replay neither writes nor changes the manifest, because overwriting a sent
+month would reset it to unsent.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-month ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-month " YYYY\-MM"
+Report on this release instead of the most recent one, to replay a past
+month and compare it with an email already sent. A replay does not touch the
+manifest. Applies to
+.B \-\-mark\-sent
+and
+.B \-\-subject\-only
+too.
+Default: this month if its Patch Tuesday has passed, otherwise last month.
+.TP
+.BI \-\-out " FILE"
+Write the HTML email to
+.IR FILE ,
+mode 0600.
+.TP
+.BI \-\-text\-out " FILE"
+Write the plain-text version to
+.IR FILE ,
+mode 0600. If neither
+.B \-\-out
+nor
+.B \-\-text\-out
+is given, the text version goes to standard output.
+.TP
+.BI \-\-json " FILE"
+Write the structured digest to
+.IR FILE ,
+mode 0600: the month, sources and parsed figures, exposure, the QQL used,
+every detecting QID (the full list, not capped by
+.BR \-\-max\-rows ),
+and the subject including the exposure counts. It carries host names.
+Written even with
+.BR \-\-dry\-run ,
+and a write failure is silently ignored.
+.TP
+.B \-\-dry\-run
+Print the text version to standard output and stop: no
+.BR \-\-out ,
+no
+.BR \-\-text\-out ,
+no manifest. The sources and Qualys are still queried.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-subject\-only
+Print the base subject line,
+.BR "Microsoft Patch Tuesday for \fIMonth YYYY\fP" ,
+and exit. Nothing is fetched, so the detection and host counts a full run
+adds to the subject are never included.
+Default:\~\fBfalse\fR.
+.TP
+.BI \-\-url\-qualys " URL"
+Read the Qualys review from
+.I URL
+instead of the computed address, for when the blog's URL pattern changes.
+Default:\~computed from the release date.
+.TP
+.BI \-\-url\-bleeping " URL"
+Read the BleepingComputer article from
+.I URL
+instead of discovering it.
+Default:\~discovered.
+.TP
+.BI \-\-provider " NAME"
+.B none
+(any case) skips Qualys entirely: source parsing only, exposure
+.BR "NOT MEASURED" .
+Any other value, including empty, queries Qualys.
+Default:\~empty.
+.TP
+.BI \-\-timeout " DURATION"
+Timeout for each HTTP request to the sources, as a Go duration. The whole run
+is bounded at five minutes regardless.
+Default:\~\fB45s\fR.
+.TP
+.BI \-\-max\-rows " N"
+Rows shown in the email's detection table, largest host count first.
+.B 0
+or less means 25. The full list is always in
+.BR \-\-json .
+Default:\~\fB0\fR (25).
+.TP
+.BI \-\-explain " CVE"
+After reading the sources, print every place
+.I CVE
+was found on them and whether it was scoped out, then exit. Qualys is not
+queried and nothing is written.
+Default:\~none.
+.TP
+.B \-\-mark\-sent
+Mark the month's manifest sent and exit, without fetching anything. Run only
+after the synopsis has been delivered; the daily digest then holds back the
+release's CVEs. Marking an already-sent manifest succeeds and changes
+nothing. Refused, exit 2, together with
+.BR \-\-dry\-run :
+a dry run writes nothing, and this is a write.
+Default:\~\fBfalse\fR.
+.SH ENVIRONMENT
+Read from the process environment, after
+.I fleet.env
+is loaded (existing environment variables win). Scanner settings are in
+section 2 of
+.IR fleet.env ,
+paths in section 3, content in section 4. Graph credentials are not needed.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+Required for correlation when
+.B LOOKUP_PROVIDER
+is
+.BR qualys .
+Missing values do not stop the synopsis; exposure is reported as
+.B NOT MEASURED
+with the reason.
+.TP
+.B LOOKUP_PROVIDER
+Default:\~\fBqualys\fR.
+.TP
+.B QUALYS_KB_CACHE
+The CVE-to-QID KnowledgeBase cache.
+Default:\~\fI./qualys_kb_cache.json\fR, relative to the working directory
+.RI ( /var/lib/cti\-agent
+under the units and the wrapper).
+.TP
+.B QUALYS_KB_MAX_AGE_HOURS
+How old the cache may be before it is rebuilt. Default:\~\fB168\fR.
+.TP
+.BR GRAPH_LOOKBACK_HOURS ", " MAILBOX_LOOKBACK_HOURS ", " MAILBOX_MIN_AGE_HOURS
+Not used here, but validated by the shared loader. An invalid value makes
+correlation fail and exposure
+.BR "NOT MEASURED" .
+.TP
+.B FLEET_HOME
+Where the manifest lives. Unset: no manifest is written (a note says so) and
+.B \-\-mark\-sent
+fails.
+.TP
+.B FLEET_ORG
+Organisation name in the report. Default:\~\fBSecurity\fR.
+.TP
+.BR FLEET_ATTRIBUTION ", " FLEET_REPO_URL
+The credit line at the foot of the email, linked to the URL. Only
+.B http://
+and
+.B https://
+URLs are used; anything else is reported and ignored. With only a URL, the
+line reads
+.IR "Correlated and published by the ORG Claude Code Agent Fleet" .
+.TP
+.B FLEET_ENV
+The
+.I fleet.env
+path. Default:\~\fI$FLEET_HOME/fleet.env\fR, else
+\fI/var/lib/cti\-agent/fleet.env\fR; the
+.B cti\-agent
+wrapper and the units set
+.IR /etc/cti\-agent/fleet.env .
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/state/patchtuesday\-YYYY\-MM.json
+The release manifest, 0600. Delete it, or leave it unsent, and the daily
+digest reports the release's CVEs as usual.
+.TP
+.I /var/lib/cti\-agent/reports/patchtuesday\-*.html
+.TQ
+.I /var/lib/cti\-agent/reports/patchtuesday\-*.txt
+The email written by
+.BR run\-patchtuesday ,
+0600.
+.TP
+.I /var/lib/cti\-agent/state/qualys_kb_cache.json
+The KnowledgeBase cache, as set in the shipped
+.IR fleet.env .
+.TP
+.I /etc/cti\-agent/fleet.env
+Settings and the Qualys credentials.
+.SH EXIT STATUS
+.TP
+.B 0
+The synopsis was produced, even from one source, even with exposure not
+measured, even if the manifest could not be written. Also: the subject or the
+.B \-\-explain
+report was printed, or the manifest was marked sent (or already was).
+.TP
+.B 1
+Nothing usable was produced:
+.B \-\-month
+is not
+.IR YYYY\-MM ;
+that month's Patch Tuesday is in the future; neither source could be read;
+or
+.B \-\-out
+or
+.B \-\-text\-out
+could not be written. For
+.BR \-\-mark\-sent :
+.B FLEET_HOME
+is unset, there is no manifest for the month, or it cannot be read, parsed
+or rewritten.
+.TP
+.B 2
+.B \-\-mark\-sent
+was given with
+.BR \-\-dry\-run ,
+or an unknown option or bad value (Go's flag package).
+.SH EXAMPLES
+Preview this month's synopsis without writing anything:
+.PP
+.EX
+sudo cti\-agent cti\-patchtuesday \-\-dry\-run | less
+.EE
+.PP
+Through the runner: it renders the report files and writes the manifest
+unsent, then calls the mailer with
+.B \-\-dry\-run
+and does not mark anything sent:
+.PP
+.EX
+sudo cti\-agent run\-patchtuesday \-\-dry\-run
+.EE
+.PP
+Replay August and compare it with the email that went out:
+.PP
+.EX
+sudo cti\-agent cti\-patchtuesday \-\-month 2026\-08 \-\-dry\-run
+.EE
+.PP
+Why is a CVE counted (or not) in this release?
+.PP
+.EX
+sudo cti\-agent cti\-patchtuesday \-\-explain CVE\-2026\-12345
+.EE
+.PP
+Source parsing only, when Qualys is down:
+.PP
+.EX
+sudo cti\-agent cti\-patchtuesday \-\-provider none \-\-dry\-run
+.EE
+.SH SEE ALSO
+.BR run\-patchtuesday (1),
+.BR run\-digest (1),
+.BR cti\-mailer (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11, "The monthly Patch Tuesday lane", and "The release
+manifest".
