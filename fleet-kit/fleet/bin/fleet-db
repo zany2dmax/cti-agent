@@ -310,7 +310,12 @@ def main(argv):
             fs = (r.get("first_seen") or "").replace("T", " ")[:19]
             r["is_new"] = bool(fs and fs >= first_cut)
 
-        counts = {}
+        # Every band present, zero or not, the same shape enrich.py writes.
+        # It used to hold only the bands that had findings, so a week with no
+        # Sev5 had no "Sev5" key and run-digest's log step died with KeyError
+        # AFTER the weekly had been sent - which left the send unrecorded, and
+        # a re-run of the failed unit would have mailed it again.
+        counts = {b: 0 for b in ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")}
         for r in rows:
             k = r.get("priority") or "unscored"
             counts[k] = counts.get(k, 0) + 1

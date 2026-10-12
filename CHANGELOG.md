@@ -50,10 +50,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `cti-kev`'s newest-file pick still finds the daily - and borrows the newest
   daily ticket map, since it never runs cti-jira itself.
 
+- **The weekly failed after sending, and the send went unrecorded.** The
+  rollup counted only the severity bands that had findings; a week with no
+  Sev5 had no `Sev5` key, and the log step after the send died with
+  `KeyError`. The unit showed failed, and because the send was never
+  recorded, restarting it would have mailed the weekly a second time. The
+  rollup now always lists all five bands, and the log step tolerates a
+  missing one.
+
 ### Upgrade
 
 Reinstall. Links return from the next daily; the weekly gets them from the
-following Monday.
+following Monday. If a weekly failed this way, it WAS sent: record it by hand
+rather than restarting the unit, which would send it again -
+`sudo cti-agent fleet-db sent <day> <S5> <S4> <S3> <S2> <S1> <request-id> weekly`
+with the numbers from the journal's `[brief] wrote ...` and `sent` lines.
 
 ## 1.2 — 2026-10-10
 
