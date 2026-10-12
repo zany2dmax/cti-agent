@@ -926,6 +926,7 @@ play.
 | `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository |
 | `GODADDY_PAT` | GoDaddy Personal Access Token, `domains.domain:read` only. Unset: registrar checks are skipped and the subject says so |
 | `DOMAINS_DKIM_SELECTORS` | DKIM selectors to probe; empty uses a built-in list. DKIM keys cannot be enumerated, so add your mail service's selector |
+| `DOMAINS_DNS_SERVERS` | DNS the domains lane asks. Empty = public resolvers, so internal split-horizon DNS cannot hide a domain's public records; `system` = this host's; or a list of IPs |
 | `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
 | `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
