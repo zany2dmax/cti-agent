@@ -71,7 +71,10 @@ is asked; if the tag was already sent the runner exits 0.
 writes the HTML, text and structured digest. It reads the two public
 wrap-ups and correlates the release with the scanner. Without
 .BR \-\-month ,
-the binary also writes the release manifest, unsent. Fatal if it exits
+the binary also writes the release manifest, unsent; not on a dry run,
+which passes
+.BR \-\-no\-manifest .
+Fatal if it exits
 non-zero or writes no HTML.
 .TP
 .B 4. Subject
@@ -130,13 +133,10 @@ A fatal step prints
 .B FAILED:
 and posts an ERROR line to the board before exiting 1.
 .PP
-A dry run still fetches the sources, queries the scanner, and writes every
-file of step 3, including, without
-.BR \-\-month ,
-the release manifest as unsent: a dry run after the real send resets the
-manifest, and the daily digest starts reporting the release's CVEs again
-until the next
-.BR \-\-mark\-sent .
+A dry run still fetches the sources, queries the scanner, and writes the
+HTML, text and structured digest of step 3. It does not write or change the
+release manifest
+.RB ( \-\-no\-manifest ).
 It does not send, mark anything sent, or record the send.
 .SH OPTIONS
 Shell arguments, matched exactly, in any order. Any other argument is
@@ -223,7 +223,7 @@ all 0600.
 .IR reports/patchtuesday\-TAG.html ", " reports/patchtuesday\-TAG.txt
 The rendered synopsis.
 .TP
-.I state/patchtuesday\-TAG.json
+.I reports/patchtuesday\-TAG.json
 The structured digest. Its
 .I exposure.PresentCVEs
 gives the count recorded with
@@ -238,8 +238,9 @@ With
 .BR \-\-month ,
 the tag is
 .B YYYY\-MM
-too, so the structured digest of a replay is written to this same path and
-replaces the manifest.
+too, which is why the structured digest lives in
+.I reports/
+and not here: a replay never writes or changes the manifest.
 .TP
 .I state/memory.db
 The digests table behind the already-sent check (kind
@@ -277,9 +278,9 @@ sudo cti\-agent run\-patchtuesday \-\-month 2026\-08
 sudo less /var/lib/cti\-agent/reports/patchtuesday\-2026\-08.txt
 .EE
 .PP
-The replay also rewrites
-.IR state/patchtuesday\-2026\-08.json ;
-see FILES.
+The replay leaves
+.I state/patchtuesday\-2026\-08.json
+alone; see FILES.
 .PP
 Send this month's synopsis after the timer's run failed; the already-sent
 check makes a repeat a no-op:

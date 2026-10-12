@@ -626,6 +626,18 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 
 	if len(existing) > 0 {
 		issue := existing[0]
+		// The write gate covers comments and attachments as well as new
+		// tickets. Before 1.3 only CreateIssue checked it, so an empty
+		// JIRA_ALLOW_CREATE - "do not write to Jira" - still let every run
+		// comment on and attach CSVs to the tickets that already existed.
+		if forReal {
+			if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
+				logf("WRITE GATE CLOSED - %s left unchanged: %s",
+					issue.Key, safelog.Line(err.Error()))
+				return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
+					Status: issue.Fields.Status.Name}, nil
+			}
+		}
 		if !forReal {
 			logf("DRY RUN %s: %s: %s", f.CVE, issue.Key, previewUpdate(ctx, c, issue, f, now))
 			return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),

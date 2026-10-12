@@ -105,10 +105,9 @@ line on the board. Inferred as above, or given explicitly.
 .TP
 .B ESCALATION
 Navy banner: the orchestrator needs a person and nothing is broken. On the
-board it is posted as an
-.B ERROR
-"failed" line, like
-.BR FAILED .
+board it is an
+.B INFO
+"escalated to the operator" line carrying the reason.
 .PP
 Any other word is uppercased and shown in the subject, and is otherwise
 treated as
@@ -164,12 +163,8 @@ is supplied.
 Default:\~empty.
 .TP
 .B \-\-dry\-run
-Print the subject, whether the board post worked, and the plain-text body,
-and send no email.
-The board line
-.B is still posted
-(as INFO for a test), because the board is written before this option is
-looked at.
+Print the subject, the board line that would be posted, and the plain-text
+body. Sends no email and posts nothing to the board.
 Default:\~off.
 .SH ENVIRONMENT
 .I fleet.env

@@ -54,10 +54,60 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   stopped at patchtuesday; the mailbox, appscan and domains timers stayed
   enabled, pointing at removed units. It now disables every installed
   `cti-agent-*.timer`.
+- **Anyone could get mail archived by setting `X-CTI-Agent-Sent`.** The header
+  was the mailbox name and its mere presence marked a message as the fleet's
+  own: the digest skipped it unread and cti-mailbox archived it. The value
+  now carries an HMAC keyed from the app's client secret; an unsigned or
+  forged header is ignored. cti-mailbox archives only signed mail (the sender
+  address alone is no longer enough); the digest still also skips mail from
+  its own mailbox.
+- **A failed heartbeat was never recorded.** Under errexit a non-zero
+  `claude` exit ended run-checkin before the budget record, so failures were
+  not counted, rate-limit backoff never engaged, and out-of-credit could not
+  reach the HOLD path.
+- **A digest that sent but failed to record could be sent twice.** The
+  post-send steps ran under errexit (the 1.2.1 weekly `KeyError`). Counts now
+  fall back to zero; a failed `fleet-db sent` exits 3 with the exact command
+  to record it by hand; a failed board post is a warning.
+- **Patch Tuesday replays overwrote the release manifest.** With `--month`,
+  the runner's `--json` path was `state/patchtuesday-YYYY-MM.json`, the
+  manifest's own name. The dump now goes to `reports/`, and
+  `cti-patchtuesday` refuses a `--json` path that is the manifest.
+- **`run-patchtuesday --dry-run` reset a sent manifest to unsent**, putting
+  the release's CVEs back into the next daily. New `--no-manifest` flag,
+  passed on dry runs.
+- **`cti-patchtuesday --dry-run --json` wrote the file.** A dry run now writes
+  nothing.
+- **`cti-alert --dry-run` posted a real line to the board.** It now prints
+  the line it would post. ESCALATION is posted as INFO "escalated", not
+  ERROR "failed".
+- **cti-jira commented on tickets with the write gate closed.** An empty
+  `JIRA_ALLOW_CREATE` stopped new tickets only; comments, CSV attachments and
+  exposure properties went ahead. Every write is gated now; with the gate
+  closed the follow-up runs read-only and the digest keeps its ticket links.
+- **Hand runs did not load `fleet.env`** for cti-kev, cti-budget, fleet-db
+  and the Python lanes. The `cti-agent` wrapper loads it as the service
+  account (keeping its own layout variables), and cti-budget loads it too.
+- **cti-budget panicked on an unreadable ledger.** It now reports the path
+  and exits 1, and `record` never overwrites a ledger it could not read.
+- **dev-run** read P1-P4 counts (a `KeyError` since the Sev rework), missed
+  `MISSING  Mail.Read` (two spaces), and reported both roles granted when
+  `mailer.py --check` stopped before the token.
 
 ### Upgrade
 
 Reinstall. `man cti-domains` works afterwards.
+
+Mail the fleet sent before this upgrade carries the old unsigned header, so
+cti-mailbox leaves it in the inbox instead of archiving it. It drops out of
+the 72-hour window by itself; archive it by hand if the backlog alarm fires
+in the meantime. Rotating the client secret has the same effect on mail
+already in the inbox.
+
+An old `state/patchtuesday-YYYY-MM.json` that a replay overwrote is not a
+valid manifest. Check `jq .sent /var/lib/cti-agent/state/patchtuesday-*.json`;
+a file that prints `null` was clobbered. Delete it; the daily then reports
+that month's CVEs again, which is the safe direction to be wrong in.
 
 ## 1.2.1 — 2026-10-12
 

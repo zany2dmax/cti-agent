@@ -785,11 +785,21 @@ export HOME=$STATE_DIR
 cd "$STATE_DIR"
 cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
+# fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
+# the command starts. Without this a hand run saw only the five layout
+# variables: cti-kev, the Python lanes, fleet-db and cti-budget ran on their
+# built-in defaults, and a hand run could disagree with the timer it was
+# meant to reproduce. The layout set here is restored afterwards, so a stale
+# FLEET_HOME in fleet.env cannot point a hand run at different files.
+LOADENV='_h="\$FLEET_HOME" _c="\$FLEET_CODE" _e="\$FLEET_ENV" _f="\$FLEET_FEEDS"
+set -a; if [ -r "\$FLEET_ENV" ]; then . "\$FLEET_ENV"; fi; set +a
+export FLEET_HOME="\$_h" FLEET_CODE="\$_c" FLEET_ENV="\$_e" FLEET_FEEDS="\$_f" HOME="\$_h"
+exec "\$@"'
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              /usr/bin/python3 "$CODE_DIR/lanes/\$cmd" "\$@" ;;
+              /bin/bash -c "\$LOADENV" cti-agent /usr/bin/python3 "$CODE_DIR/lanes/\$cmd" "\$@" ;;
   *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              "$CODE_DIR/bin/\$cmd" "\$@" ;;
+              /bin/bash -c "\$LOADENV" cti-agent "$CODE_DIR/bin/\$cmd" "\$@" ;;
 esac
 WRAP
   chmod 0755 /usr/local/bin/cti-agent

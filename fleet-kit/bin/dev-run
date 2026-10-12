@@ -13,7 +13,7 @@
 # Stages, each runnable on its own so you can see where it breaks:
 #   doctor   check tools, config, Graph token and permissions
 #   ingest   Go agent: mailbox -> CVEs -> scanner -> markdown
-#   enrich   NVD CVSS + EPSS + KEV -> P1-P4
+#   enrich   NVD CVSS + EPSS + KEV -> Sev5-Sev1
 #   brief    render the HTML digest
 #   send     mail the digest - DRY RUN unless you pass --for-real
 #   all      doctor -> ingest -> enrich -> brief, then open the digest
@@ -156,13 +156,19 @@ stage_doctor() {
         info "the client secret has expired (they are time-limited)."
         ;;
     esac
-  elif echo "$graph_out" | grep -q "MISSING Mail.Read"; then
+  elif ! echo "$graph_out" | grep -q "granted application roles:"; then
+    # --check stops before the token when, for example, FLEET_OPERATOR_EMAIL
+    # is unset. No roles line means nothing was checked - which used to fall
+    # through to "both granted".
+    bad "mailer.py --check did not report the token's roles - see its output above"
+    fail=1
+  elif echo "$graph_out" | grep -Eq "MISSING +Mail\.Read"; then
     bad "Mail.Read is not granted - ingest cannot read the mailbox"
     fail=1
     info "Entra ID > App registrations > your app > API permissions >"
     info "  Microsoft Graph > Application permissions > Mail.Read,"
     info "  then GRANT ADMIN CONSENT."
-  elif echo "$graph_out" | grep -q "MISSING Mail.Send"; then
+  elif echo "$graph_out" | grep -Eq "MISSING +Mail\.Send"; then
     ok "token acquired, Mail.Read granted"
     warn "Mail.Send is not granted - only the send stage needs it"
     info "Everything except 'dev-run send' works without it."
@@ -232,11 +238,14 @@ stage_enrich() {
   python3 - "$ENRICHED" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-c = d["counts"]
-print(f"  \033[32m✓\033[0m P1={c['P1']} P2={c['P2']} P3={c['P3']} P4={c['P4']}  (total {d['total']})")
+# Sev5-Sev1 since the scoring rework; P1-P4 here was a KeyError.
+c = d.get("counts") or {}
+bands = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
+print("  \033[32m✓\033[0m " + " ".join(f"{b}={c.get(b, 0)}" for b in bands)
+      + f"  (total {d.get('total', 0)})")
 if d.get("degraded"):
     print(f"    DEGRADED - unavailable this run: {', '.join(d['degraded'])}")
-top = [f for f in d["findings"] if f["priority"] in ("P1", "P2")][:8]
+top = [f for f in d.get("findings", []) if f.get("priority") in ("Sev5", "Sev4")][:8]
 if top:
     print("    top findings:")
     for f in top:
@@ -280,7 +289,7 @@ stage_send() {
   local roles
   roles=$(python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 || true)
   echo "$roles" | sed 's/^\[mailer\] /    /'
-  if echo "$roles" | grep -q "MISSING Mail.Send"; then
+  if echo "$roles" | grep -Eq "MISSING +Mail\.Send"; then
     bad "Mail.Send is not granted to this app registration"
     info "Entra ID > App registrations > your CTI app > API permissions >"
     info "  Add permission > Microsoft Graph > Application permissions >"

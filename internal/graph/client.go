@@ -40,8 +40,8 @@ func sameAddress(a, b string) bool {
 // SelfHeader marks mail this fleet sent. Graph requires custom header names
 // to start with "X-".
 //
-// Its value is the sending mailbox, so a shared tenant running two fleets can
-// tell whose report it is looking at rather than discarding both.
+// Its value names the sending mailbox and carries a signature only this fleet
+// can make; see selfsign.go. A header without a valid signature is ignored.
 const SelfHeader = "X-CTI-Agent-Sent"
 
 // Graph returns header names in whatever case the sender used, so the match
@@ -55,9 +55,18 @@ type Message struct {
 	From             string
 	BodyText         string
 
-	// SelfSent is true when this message carries SelfHeader - that is, when
-	// the fleet sent it. See the comment in SendMail for the loop this closes.
+	// SelfSent is true when the fleet sent this message: it carries a
+	// correctly signed SelfHeader, or it is from the mailbox being read (the
+	// backstop for mail sent before the header existed). See the comment in
+	// SendMail for the loop this closes. Used to keep our own reports out of
+	// the digest's input.
 	SelfSent bool
+
+	// SelfVerified is true only for a correctly signed SelfHeader. Anything
+	// that ACTS on a message because the fleet sent it - cti-mailbox
+	// archiving it - must use this, not SelfSent: a From address is a claim
+	// the sender makes, and an unsigned header was one anybody could add.
+	SelfVerified bool
 
 	// AutoSubmitted and AutoResponseSuppress carry the RFC 3834 and Microsoft
 	// headers that mark a message as machine-generated.
@@ -328,7 +337,10 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 				case "x-auto-response-suppress":
 					msg.AutoResponseSuppress = h.Value
 				case selfHeaderLower:
-					msg.SelfSent = true
+					if verifySelfHeader(c.clientSecret, h.Value) {
+						msg.SelfVerified = true
+						msg.SelfSent = true
+					}
 				}
 			}
 			// Mail we sent before SelfHeader existed carries no header, so the
@@ -505,7 +517,7 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailRes
 	// the backstop for mail already sitting in the mailbox from before this
 	// existed.
 	p.Message.Headers = append(p.Message.Headers, messageHeader{
-		Name: SelfHeader, Value: req.From,
+		Name: SelfHeader, Value: signSelfHeader(c.clientSecret, req.From),
 	})
 
 	p.SaveToSentItems = true

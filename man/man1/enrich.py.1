@@ -162,15 +162,16 @@ reads only its process environment and does not load
 .I fleet.env
 itself.
 .B run\-digest
-sources it first;
+sources it first, and so does
 .B sudo cti\-agent enrich.py
-does not, so
+(the wrapper loads it), so
 .B NVD_API_KEY
 and
 .B FLEET_USER_AGENT
 from
 .I fleet.env
-are not seen on a hand run unless exported.
+apply to a hand run too. Run directly, without the wrapper, they are unset
+unless exported.
 .TP
 .B NVD_API_KEY
 NVD API key, sent as the

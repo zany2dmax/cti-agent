@@ -55,7 +55,7 @@ func TestClassifyIsCaseInsensitive(t *testing.T) {
 // ─── the 24 September outage, as a test ─────────────────────────────────────
 
 func TestTheRealCreditExhaustionLineIsNotAScriptError(t *testing.T) {
-	// Verbatim from the journal, crscvmtest01, 2026-09-24 15:52:21. Classified
+	// Verbatim from the journal, host-a, 2026-09-24 15:52:21. Classified
 	// as OutcomeError, which told systemd the lane was broken, which produced
 	// a FAILED alert, which got the timer disabled for six days.
 	got := Classify(1, "Credit balance is too low")
