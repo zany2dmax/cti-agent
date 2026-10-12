@@ -328,7 +328,11 @@ func grouped(f []Finding) []group {
 
 func (r Report) text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n%s\n\n%s\n", r.Subject(), strings.Repeat("=", len(r.Subject())), r.leadLine())
+	fmt.Fprintf(&b, "%s\n%s\n\n%s\n%s\n", r.Subject(), strings.Repeat("=", len(r.Subject())),
+		r.leadLine(), r.websiteLine())
+	// Websites first: which domains have a live site is the question this
+	// lane was first built to answer.
+	r.websitesText(&b)
 
 	section := func(title string, f []Finding, tagSev bool) {
 		if len(f) == 0 {
@@ -432,9 +436,10 @@ func (r Report) html() string {
   <tr><td style="padding:16px 20px 0 20px">
     <table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
       <tr><td style="background:%s;border-left:4px solid %s;padding:12px 14px;
-                     font:400 14px/1.55 %s;color:#1a202c">%s</td></tr>
+                     font:400 14px/1.55 %s;color:#1a202c">%s
+        <div style="margin-top:6px">%s</div></td></tr>
     </table></td></tr>
-`, leadBg, leadFg, font, e(r.leadLine()))
+`, leadBg, leadFg, font, e(r.leadLine()), e(r.websiteLine()))
 
 	type tile struct {
 		label  string
@@ -487,6 +492,7 @@ func (r Report) html() string {
           </td></tr></table></td></tr>`, fg, bg, font, e(g.domain), font, lines.String())
 		}
 	}
+	r.websitesHTML(&b)
 	cards("NEEDS ACTION", "#b3001b", "#fdecee", r.high(), false)
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
 	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)
