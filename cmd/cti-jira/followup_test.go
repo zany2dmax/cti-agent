@@ -529,3 +529,40 @@ func TestTheUpgradeMorningStillSaysResolved(t *testing.T) {
 		t.Error("the all-clear was held on pre-upgrade state")
 	}
 }
+
+// The digest links a finding to its ticket on any day, not only the day the
+// CVE was back in the mail. So the follow-up hands back every fleet ticket it
+// saw - checked, already handled, unanswered by the scanner, or closed - and
+// never the setup test ticket.
+func TestFollowUpReturnsEveryFleetTicketForTheDigest(t *testing.T) {
+	fj, c := newFakeJira(t,
+		ticket("SEC-1", "CVE-2026-1111", "indeterminate"),
+		ticket("SEC-2", "CVE-2026-2222", "done"),
+		ticket("SEC-3", "CVE-2026-3333", "indeterminate"),
+		ticket("SEC-4", testCVE, "indeterminate"),
+	)
+	previously(fj, "SEC-1", "CVE-2026-1111", "host-a")
+	sc := &scanner{
+		answers: map[string]vulnlookup.Result{
+			"CVE-2026-1111": {CVE: "CVE-2026-1111", Status: vulnlookup.StatusPresent, Hosts: []string{"host-a"}},
+			"CVE-2026-2222": {CVE: "CVE-2026-2222", Status: vulnlookup.StatusNotPresent},
+		},
+		errs: map[string]error{"CVE-2026-3333": errors.New("scanner down")},
+	}
+	refs := followUp(context.Background(), c, testCfg, sc.look,
+		map[string]bool{"CVE-2026-2222": true}, time.Now(), false)
+
+	for cve, key := range map[string]string{
+		"CVE-2026-1111": "SEC-1", // checked
+		"CVE-2026-2222": "SEC-2", // closed, and already handled this run
+		"CVE-2026-3333": "SEC-3", // the scanner could not answer
+	} {
+		r, ok := refs[cve]
+		if !ok || r.Key != key || !strings.HasSuffix(r.URL, "/browse/"+key) || r.Status == "" {
+			t.Errorf("%s: ref = %+v, want %s with a browse URL and a status", cve, r, key)
+		}
+	}
+	if _, ok := refs[testCVE]; ok {
+		t.Error("the setup test ticket was handed to the digest")
+	}
+}

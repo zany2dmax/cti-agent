@@ -555,7 +555,14 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 	// on four open tickets was the first thing to notice. See
 	// TestTheFollowUpFlagReachesTheFollowUp.
 	if withFollowUp {
-		followUp(ctx, c, cfg, fill, done, now, forReal)
+		// Every fleet ticket, not just today's: the digest links a finding to
+		// its ticket whenever both appear. Today's references win - they were
+		// just filed or updated and carry the freshest status.
+		for cve, ref := range followUp(ctx, c, cfg, fill, done, now, forReal) {
+			if _, ok := tm.Tickets[cve]; !ok {
+				tm.Tickets[cve] = ref
+			}
+		}
 	}
 
 	if path == "" {
