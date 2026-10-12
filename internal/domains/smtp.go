@@ -28,10 +28,10 @@ type SMTPProber func(ctx context.Context, host string) SMTPResult
 // NetSMTPProber connects, reads the 220 greeting, sends EHLO, reads the
 // extensions, and QUITs. It never sends MAIL FROM: this is a greeting, not a
 // delivery attempt, and it is what any MTA would see before deciding.
-func NetSMTPProber(port int, timeout time.Duration) SMTPProber {
+func NetSMTPProber(port int, timeout time.Duration, resolver *net.Resolver) SMTPProber {
 	return func(ctx context.Context, host string) SMTPResult {
 		res := SMTPResult{Checked: true, Host: host, Port: port}
-		d := net.Dialer{Timeout: timeout}
+		d := net.Dialer{Timeout: timeout, Resolver: resolver}
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		conn, err := d.DialContext(cctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))

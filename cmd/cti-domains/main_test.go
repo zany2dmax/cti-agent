@@ -41,6 +41,7 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GODADDY_PAT", "test-pat")
+	t.Setenv("DOMAINS_DNS_SERVERS", "")
 	t.Setenv("FLEET_ENV", filepath.Join(dir, "absent.env"))
 	registrarFor = func(tok string) domains.Registrar {
 		if tok != "test-pat" {
@@ -87,6 +88,24 @@ func TestRunEndToEnd(t *testing.T) {
 		}
 		if fi.Mode().Perm() != 0o600 {
 			t.Errorf("%s mode %v, want 0600", p, fi.Mode().Perm())
+		}
+	}
+}
+
+func TestDNSResolverSpec(t *testing.T) {
+	if _, desc, err := dnsResolver(""); err != nil || !strings.Contains(desc, "1.1.1.1:53") {
+		t.Errorf("default = %q, %v; want the public resolvers", desc, err)
+	}
+	if r, _, err := dnsResolver("system"); err != nil || r != net.DefaultResolver {
+		t.Errorf("system did not select the host resolver: %v", err)
+	}
+	if _, desc, err := dnsResolver("10.0.0.53, 192.0.2.53:5353"); err != nil ||
+		!strings.Contains(desc, "10.0.0.53:53") || !strings.Contains(desc, "192.0.2.53:5353") {
+		t.Errorf("list = %q, %v", desc, err)
+	}
+	for _, bad := range []string{"dns.example.com", ",", "192.0.2.53:abc"} {
+		if _, _, err := dnsResolver(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
 		}
 	}
 }
