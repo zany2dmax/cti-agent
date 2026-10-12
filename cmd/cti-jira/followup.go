@@ -135,6 +135,17 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			"%d (oldest first) are re-checked this run", followUpMax, followUpMax)
 	}
 
+	// The write gate covers updates too. Closed, the pass still runs - it
+	// still returns every ticket's link for the digest - but only as the
+	// read-only preview, the same as a dry run.
+	if forReal {
+		if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
+			logf("WRITE GATE CLOSED - follow-up runs read-only, no ticket will be "+
+				"commented on: %s", safelog.Line(err.Error()))
+			forReal = false
+		}
+	}
+
 	var checked, already, nolabel, unanswered int
 	for _, issue := range issues {
 		cve := cveFromLabels(issue.Fields.Labels)

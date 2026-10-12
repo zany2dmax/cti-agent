@@ -12,6 +12,7 @@ cti-patchtuesday \- build the monthly Microsoft Patch Tuesday synopsis and corre
 .RB [ \-\-json
 .IR FILE ]
 .RB [ \-\-dry\-run ]
+.RB [ \-\-no\-manifest ]
 .RB [ \-\-provider
 .BR none ]
 .RB [ \-\-url\-qualys
@@ -136,16 +137,31 @@ mode 0600: the month, sources and parsed figures, exposure, the QQL used,
 every detecting QID (the full list, not capped by
 .BR \-\-max\-rows ),
 and the subject including the exposure counts. It carries host names.
-Written even with
-.BR \-\-dry\-run ,
-and a write failure is silently ignored.
+Not written with
+.BR \-\-dry\-run .
+Refused, exit 1, when
+.I FILE
+is the release manifest
+.RI ( $FLEET_HOME/state/patchtuesday\-YYYY\-MM.json ),
+which it would otherwise overwrite. Any other write failure is silently
+ignored.
 .TP
 .B \-\-dry\-run
 Print the text version to standard output and stop: no
 .BR \-\-out ,
 no
 .BR \-\-text\-out ,
+no
+.BR \-\-json ,
 no manifest. The sources and Qualys are still queried.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-no\-manifest
+Write the report files but not the release manifest.
+.B run\-patchtuesday \-\-dry\-run
+passes this, because a manifest is a statement about what was sent and a
+dry run that wrote one unsent over a sent one put the release's CVEs back
+into the daily digest.
 Default:\~\fBfalse\fR.
 .TP
 .B \-\-subject\-only

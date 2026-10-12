@@ -73,6 +73,9 @@ func main() {
 		"record that this month's synopsis was delivered, and exit. The daily "+
 			"digest holds back a release's CVEs only once this is set, so the "+
 			"runner calls it after the mailer succeeds and never before")
+	noManifest := flag.Bool("no-manifest", false,
+		"do not write the release manifest. run-patchtuesday --dry-run passes "+
+			"this, because a manifest is a statement about what was sent")
 	flag.Parse()
 
 	// fleet.env. The runner sources it in shell before calling this, so under
@@ -258,6 +261,24 @@ func main() {
 				"release's CVEs\n", n, patchtuesday.CVEsCovered(report.Patches))
 	}
 
+	if *dryRun {
+		fmt.Print(report.Text())
+		return
+	}
+
+	// --dry-run returned above, before --json: a dry run writes nothing, and
+	// the orchestrator is granted dry runs on the strength of that.
+	//
+	// --json must never be the release manifest. run-patchtuesday --month
+	// once built its --json path as state/patchtuesday-YYYY-MM.json, which is
+	// exactly the manifest's name, so a replay overwrote the manifest with
+	// a file the daily digest could not read as one.
+	if *jsonOut != "" && sameFile(*jsonOut,
+		patchtuesday.ManifestPath(os.Getenv("FLEET_HOME"), year, mon)) {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: refusing --json %s: that is the "+
+			"release manifest the daily digest reads\n", *jsonOut)
+		os.Exit(1)
+	}
 	if *jsonOut != "" {
 		// *jsonOut is an operator-supplied --json path; 0o600 because the
 		// structured digest carries the same host names as the email.
@@ -273,11 +294,6 @@ func main() {
 			})
 			_ = f.Close()
 		}
-	}
-
-	if *dryRun {
-		fmt.Print(report.Text())
-		return
 	}
 
 	// The manifest, so the daily digest can leave this release's CVEs to this
@@ -299,7 +315,10 @@ func main() {
 	// than unsafe, but a surprise with no visible cause, produced by an
 	// operation documented as read-only. A replay now reports what it would
 	// have written and leaves the file alone.
-	if *month != "" {
+	if *noManifest {
+		fmt.Fprintln(os.Stderr,
+			"cti-patchtuesday: --no-manifest - the release manifest was NOT written or changed")
+	} else if *month != "" {
 		fmt.Fprintf(os.Stderr,
 			"cti-patchtuesday: replay of %s - the release manifest was NOT written "+
 				"or changed, so this run cannot alter what the daily digest "+
@@ -538,4 +557,20 @@ func chunkInts(in []int, n int) [][]int {
 		out = append(out, uniq[i:j])
 	}
 	return out
+}
+
+// sameFile reports whether a and b name the same path, by absolute cleaned
+// name, or by inode when both exist. "" is never the same as anything.
+func sameFile(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA == nil && errB == nil && aa == bb {
+		return true
+	}
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }

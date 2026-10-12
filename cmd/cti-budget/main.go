@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/budget"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 )
 
 const (
@@ -41,7 +42,33 @@ const (
 )
 
 func main() {
+	// fleet.env, for the FLEET_BUDGET_* ceilings. run-checkin sources it in
+	// shell, but `sudo cti-agent cti-budget status` did not, so a hand run
+	// reported against the shipped defaults instead of the configured ones
+	// and could disagree with the heartbeat about whether it was allowed.
+	// Here rather than in run(), so the tests stay hermetic.
+	fleetenv.Load()
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// loadLedger reads the ledger, failing closed when it cannot be read at all.
+//
+// Load returns an empty ledger plus an error for a corrupt file - recoverable,
+// warned about, carried on - but nil plus an error for one it cannot read
+// (permissions, I/O). Every caller used the result regardless, so an
+// unreadable ledger was a nil-pointer panic in check, and in record would
+// have meant overwriting a file we could not read with an empty one.
+func loadLedger(s *budget.Store, stderr *os.File) (*budget.Ledger, bool) {
+	l, err := s.Load()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+	}
+	if l == nil {
+		_, _ = fmt.Fprintf(stderr, "cti-budget: cannot read the ledger at %s - "+
+			"refusing to guess; fix its ownership (ctiagent, 0600) or move it aside\n", s.Path)
+		return nil, false
+	}
+	return l, true
 }
 
 func run(args []string, stdout, stderr *os.File) int {
@@ -117,11 +144,11 @@ func cmdCheck(args []string, stdout, stderr *os.File) int {
 	}
 
 	s := storeFromEnv()
-	l, err := s.Load()
-	if err != nil {
-		// A corrupt ledger returns an empty one plus an error. Warn and carry
-		// on: failing closed here would stop the heartbeat over a counter.
-		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+	// A corrupt ledger is an empty one plus a warning: failing closed there
+	// would stop the heartbeat over a counter. An unreadable one fails.
+	l, ok := loadLedger(s, stderr)
+	if !ok {
+		return exitFailure
 	}
 
 	d := s.Check(l)
@@ -196,9 +223,9 @@ func cmdRecord(args []string, stdout, stderr *os.File) int {
 	}
 
 	s := storeFromEnv()
-	l, err := s.Load()
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+	l, ok := loadLedger(s, stderr)
+	if !ok {
+		return exitFailure
 	}
 	s.Record(l, o, *note)
 	if err := s.Save(l); err != nil {
@@ -230,9 +257,9 @@ func cmdStatus(args []string, stdout, stderr *os.File) int {
 	}
 
 	s := storeFromEnv()
-	l, err := s.Load()
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "cti-budget: %v\n", err)
+	l, ok := loadLedger(s, stderr)
+	if !ok {
+		return exitFailure
 	}
 	d := s.Check(l)
 

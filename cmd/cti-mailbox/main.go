@@ -139,7 +139,10 @@ func run() int {
 		candidates = append(candidates, mailbox.Candidate{
 			ID: m.ID, Subject: m.Subject,
 			Received: m.ReceivedDateTime, AutoReply: m.IsAutoReply(),
-			SelfSent: m.SelfSent,
+			// SelfVerified, not SelfSent: archiving is an action taken on
+			// the strength of "we sent this", so it needs the signature, not
+			// a From address or a header any sender could add.
+			SelfSent: m.SelfVerified,
 		})
 	}
 	plan := mailbox.Plan(candidates, l.Index(), now, cfg.MailboxMinAge)

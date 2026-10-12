@@ -292,9 +292,16 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(journalctl:*)"
 
 echo "[run-checkin $(date '+%F %H:%M:%S')] allowed tools: $ALLOWED_TOOLS"
 
+# errexit OFF around the beat. Under `set -euo pipefail` a non-zero claude exit
+# failed the pipeline and ended the script on this line, so rc was never read:
+# the budget never recorded the failure, rate-limit backoff never engaged, the
+# exit-4 HOLD path below was unreachable, and running out of credit failed the
+# unit and mailed FAILED - the outage the HOLD path exists to prevent.
+set +e
 "$CLAUDE" -p "/checkin" --permission-mode acceptEdits \
   --allowedTools "$ALLOWED_TOOLS" < /dev/null 2>&1 | tee "$beat_log"
 rc="${PIPESTATUS[0]}"
+set -e
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
 
 if [ -x "$BUDGET" ]; then

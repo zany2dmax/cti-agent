@@ -195,15 +195,39 @@ echo "$RESULT"
 
 # ── 5. log ───────────────────────────────────────────────────────────────────
 if [ -z "$DRY" ]; then
-  read -r S5 S4 S3 S2 S1 < <(python3 -c "
+  # THE MAIL HAS GONE. Nothing below may fail the way steps 1-4 do.
+  #
+  # Before 1.3 these lines ran under errexit like everything else, so a
+  # KeyError reading the counts (2026-10-12, weekly) killed the script after
+  # the send and before the record. The already-sent guard then had nothing
+  # to find, the failure alert said the digest had FAILED, and the obvious
+  # response - rerun it - would have mailed the team a second copy.
+  #
+  # Now: counts fall back to zero, a failed record prints the exact command
+  # that records it by hand and exits 3 so the failure alert carries that
+  # command, and a failed board post is a warning only.
+  S5=0 S4=0 S3=0 S2=0 S1=0
+  if COUNTS=$(python3 -c "
 import json,sys
-c=json.load(open('$ENRICHED'))['counts']
-print(*(c.get(k, 0) for k in ('Sev5','Sev4','Sev3','Sev2','Sev1')))")
+c=json.load(open('$ENRICHED')).get('counts') or {}
+print(*(int(c.get(k, 0) or 0) for k in ('Sev5','Sev4','Sev3','Sev2','Sev1')))" 2>&1); then
+    read -r S5 S4 S3 S2 S1 <<<"$COUNTS" || true
+  else
+    say "WARNING: could not read counts from $ENRICHED ($COUNTS) - recording zeros"
+  fi
   MID=$(printf '%s' "$RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" 2>/dev/null || echo unknown)
-  "$DB" sent "$DAY" "$S5" "$S4" "$S3" "$S2" "$S1" "$MID" "$KIND"
-  "$BOARD" post @brief @you INFO "$KIND digest sent: Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1 ($SUBJECT)"
+  if ! "$DB" sent "$DAY" "$S5" "$S4" "$S3" "$S2" "$S1" "$MID" "$KIND"; then
+    say "ERROR: the $KIND digest WAS SENT but the send was not recorded."
+    say "       Do NOT rerun run-digest $KIND: it would mail a second copy."
+    say "       Record it by hand:"
+    say "       sudo cti-agent fleet-db sent $DAY $S5 $S4 $S3 $S2 $S1 $MID $KIND"
+    "$BOARD" post @brief @you ERROR "$KIND digest SENT but not recorded - do not rerun; run: fleet-db sent $DAY $S5 $S4 $S3 $S2 $S1 $MID $KIND" || true
+    exit 3
+  fi
+  "$BOARD" post @brief @you INFO "$KIND digest sent: Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1 ($SUBJECT)" \
+    || say "WARNING: digest sent and recorded, but the board post failed"
   say "done - Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1"
 else
-  "$BOARD" post @brief @you INFO "DRY RUN $KIND digest ready at $HTML"
+  "$BOARD" post @brief @you INFO "DRY RUN $KIND digest ready at $HTML" || true
   say "dry run complete - $HTML"
 fi

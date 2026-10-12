@@ -85,17 +85,21 @@ func main() {
 	body := renderHTML(f)
 	subject := fmt.Sprintf("[CTI FLEET %s] %s on %s", f.Kind, f.Unit, f.Host)
 
-	// Board first: it needs nothing external, so it is the channel most
-	// likely to survive whatever caused the failure.
-	boardPosted := postToBoard(f)
-
+	// A dry run touches nothing, the board included. It used to post first
+	// and check the flag second, so rehearsing an alert put a real ERROR line
+	// on the board, which the orchestrator reads every beat and acts on.
 	if *dryRun {
-		fmt.Println("DRY RUN - nothing sent")
+		level, msg := boardLine(f)
+		fmt.Println("DRY RUN - nothing sent, nothing posted")
 		fmt.Printf("subject: %s\n", subject)
-		fmt.Printf("board:   %v\n", boardPosted)
+		fmt.Printf("board:   would post %s %s\n", level, msg)
 		fmt.Println(renderText(f))
 		return
 	}
+
+	// Board first: it needs nothing external, so it is the channel most
+	// likely to survive whatever caused the failure.
+	boardPosted := postToBoard(f)
 
 	if reqID, err := sendEmail(subject, body, f); err != nil {
 		// This is the bad case: the pipeline failed AND we cannot say so.
@@ -190,21 +194,33 @@ func postToBoard(f failure) bool {
 	if _, err := os.Stat(board); err != nil {
 		return false
 	}
-	// A hold is not an ERROR on the board either. The orchestrator reads these
-	// lines on its next beat and should not open an incident over its own brake.
-	level, msg := "ERROR", fmt.Sprintf("%s failed (result=%s exit=%s) on %s at %s",
-		f.Unit, f.Result, f.ExitCode, f.Host, f.When)
-	if f.isHold() {
-		level, msg = "INFO", fmt.Sprintf("%s is holding on %s at %s: %s",
-			f.Unit, f.Host, f.When, f.Reason)
-	} else if f.isTest() {
-		level, msg = "INFO", fmt.Sprintf("alert path tested against %s on %s at %s - %s is healthy, no incident",
-			f.Unit, f.Host, f.When, f.Unit)
-	}
+	level, msg := boardLine(f)
 	if _, err := run(10*time.Second, board, "post", "@systemd", "@operator", level, msg); err != nil {
 		return false
 	}
 	return true
+}
+
+// boardLine is the level and text cti-alert posts for f.
+//
+// A hold is not an ERROR on the board either. The orchestrator reads these
+// lines on its next beat and should not open an incident over its own brake.
+// Nor is an escalation: it is the orchestrator asking for a human, and
+// "failed (result= exit=)" described a unit that had not failed.
+func boardLine(f failure) (level, msg string) {
+	switch {
+	case f.isHold():
+		return "INFO", fmt.Sprintf("%s is holding on %s at %s: %s",
+			f.Unit, f.Host, f.When, f.Reason)
+	case f.isTest():
+		return "INFO", fmt.Sprintf("alert path tested against %s on %s at %s - %s is healthy, no incident",
+			f.Unit, f.Host, f.When, f.Unit)
+	case f.isEscalation():
+		return "INFO", fmt.Sprintf("%s escalated to the operator on %s at %s: %s",
+			f.Unit, f.Host, f.When, f.Reason)
+	}
+	return "ERROR", fmt.Sprintf("%s failed (result=%s exit=%s) on %s at %s",
+		f.Unit, f.Result, f.ExitCode, f.Host, f.When)
 }
 
 func sendEmail(subject, htmlBody string, f failure) (string, error) {

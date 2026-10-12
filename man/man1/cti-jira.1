@@ -51,20 +51,16 @@ the findings database. A run without it makes only read calls to Jira
 .B DRY RUN
 in its output.
 .TP
-.B Creating needs the allowlist too
-A new issue is created only when
+.B Every write needs the allowlist too
+Nothing is written to Jira - no new issue, no comment, no CSV attachment, no
+exposure property - unless
 .B JIRA_PROJECT_KEY
 appears in
 .B JIRA_ALLOW_CREATE
-(comma-separated, case-insensitive). Empty creates nothing. This gate is
-checked for
-.I creating
-only: with
-.BR \-\-for\-real ,
-comments, CSV attachments and exposure properties are still written to
-existing fleet tickets in
-.B JIRA_PROJECT_KEY
-even when the gate is closed.
+(comma-separated, case-insensitive). With the gate closed,
+.B \-\-for\-real
+runs read-only: existing tickets are still found and linked from the digest,
+and the follow-up pass prints what it would have said.
 .TP
 .B Non-KEV findings wait for a person
 A Sev5 that is not on CISA KEV is filed only with
@@ -260,7 +256,7 @@ The issue type name exactly as the project spells it. Required, no default.
 Section 9.
 .TP
 .B JIRA_ALLOW_CREATE
-The create allowlist. Optional; empty means create nothing.
+The write allowlist. Optional; empty means write nothing to Jira.
 Section 9.
 .TP
 .BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD

@@ -307,13 +307,20 @@ on an error outside those steps: a missing
 .B \-\-lookback
 value, an unset
 .BR GRAPH_MAILBOX ,
-a failing subject render, or a failure of
-.B fleet\-db sent
-or the closing board post. The last two happen after the mail has gone, so
-the digest is not recorded as sent and a re-run would send it again.
+or a failing subject render.
 .TP
 .B 2
 An unknown argument.
+.TP
+.B 3
+The digest WAS SENT, but
+.B fleet\-db sent
+failed, so it is not recorded and a re-run would mail a second copy. The
+journal and the board ERROR line give the exact
+.B fleet\-db sent
+command that records it by hand; run that, not the digest. A failure to
+read the counts after the send records zeros instead, and a failed closing
+board post is only a warning.
 .SH EXAMPLES
 Rehearse today's daily, then read what it would send:
 .PP

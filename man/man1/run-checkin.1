@@ -129,14 +129,14 @@ and sent through
 and the runner exits 0. Any other record result is ignored and the runner
 exits with Claude Code's status.
 .PP
-Because the runner uses
-.BR "set \-e \-o pipefail" ,
-a non-zero exit from
+A non-zero exit from
 .B claude
-in step 5 ends the runner at once with that status: step 6 does not run, the
-beat is not recorded with
+in step 5 does not end the runner: errexit is suspended around that one
+command, so step 6 always runs, every beat is recorded with
 .BR cti\-budget ,
-and the exit-4 HOLD is not reached for that beat.
+and an out-of-credit failure reaches the exit-4 HOLD. (Before 1.3 it ended
+the runner at once, so failed beats were never counted against the
+ceilings or backed off.)
 .PP
 Everything in
 .I fleet.env

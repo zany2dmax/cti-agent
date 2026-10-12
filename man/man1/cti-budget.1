@@ -69,27 +69,17 @@ if missing. A ledger that is not valid JSON is reported and replaced by an
 empty one; that loses the history, and the next write makes it permanent.
 .PP
 .B cti-budget
-does not load
-.IR fleet.env .
-Under
-.B cti\-agent\-checkin.service
-the settings arrive through
-.BR EnvironmentFile= ,
-but run through the
-.BR cti\-agent (1)
-wrapper it sees
-.B FLEET_HOME
-and none of the
-.B FLEET_BUDGET_*
-settings: every ceiling is at its built-in default and the ledger is
-.IR $FLEET_HOME/budget.json ,
-whatever
+loads
 .I fleet.env
-says. When the
+itself
+.RB ( $FLEET_ENV ,
+else the fleet default), with variables already in the environment taking
+precedence. So a hand run through the
+.BR cti\-agent (1)
+wrapper enforces and reports the same
 .B FLEET_BUDGET_*
-settings have been changed, a hand-run
-.B status
-reports the defaults, not what the timer is enforcing.
+ceilings as
+.BR cti\-agent\-checkin.service .
 .PP
 It does not call Claude, and it never stops or starts a unit.
 .SH COMMANDS
@@ -240,8 +230,9 @@ not on
 which a stopped fleet always satisfies.
 Default:\~off.
 .SH ENVIRONMENT
-Read from the process environment only; see DESCRIPTION for what that means
-under the wrapper. All in
+Read from the process environment after
+.I fleet.env
+is loaded (existing variables win). All in
 .I fleet.env
 section 8 except
 .BR FLEET_HOME .
@@ -295,17 +286,13 @@ an invalid
 .BR \-\-outcome ;
 or
 .B record
-could not save the ledger.
+could not save the ledger; or the ledger exists but cannot be read (for
+example, wrong owner), which is reported with its path and never
+overwritten.
 .B run\-checkin
 treats this from
 .B check
 as "the gate is broken" and proceeds with the beat.
-.TP
-.B 2
-The ledger exists but cannot be read (for example, wrong owner): the program
-stops with a Go runtime error rather than a message. As with 1,
-.B run\-checkin
-then proceeds with the beat unrationed.
 .TP
 .B 3
 .BR check :

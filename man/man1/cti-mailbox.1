@@ -47,9 +47,13 @@ within the last
 and decides each one by these rules, in this order:
 .TP
 .B 0. Sent by this fleet: archive
-The message carries the
+The message carries an
 .B X\-CTI\-Agent\-Sent
-header (any value), or its sender is the mailbox itself. The fleet's own
+header with a valid signature (an HMAC keyed from the app registration's
+client secret, which only this fleet holds). The sender address alone is not
+enough, and neither is an unsigned header: either can be set by anyone who
+can mail the inbox. Mail signed before a client secret rotation no longer
+verifies and is left for the operator. The fleet's own
 digests come back to the mailbox they are read from and are never recorded as
 processed, so this rule precedes rule 1 and is not subject to the archive
 grace.
