@@ -59,6 +59,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **The Qualys blog is optional.** It answers 403 to Azure addresses. It is
   still tried for its published QQL; when it fails it is listed as "optional,
   not read" and does not mark the report incomplete.
+- **The domains report leads with WEBSITES.** Which domains have a live
+  site - sitecheck.go's first use - was only in the inventory table at the
+  bottom. The report now opens with it, grouped as live (final host, status,
+  page title), redirecting to another domain, registrar-hosted, parked, DNS
+  but no working page, no website, and not checked, and the lead says it in
+  one sentence.
 - **The incomplete-sources banner says what the report was built from**
   ("Built from X only; could not read Y"), not just what failed.
 
