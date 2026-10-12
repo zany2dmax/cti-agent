@@ -1473,6 +1473,14 @@ class WeeklyRollsUpStoredFindings(unittest.TestCase):
                            env=self.env, capture_output=True, text=True, check=True)
         return json.loads(r.stdout)
 
+    def test_every_band_is_counted_even_when_empty(self):
+        """run-digest logs counts['Sev5'] etc. after the send. A week with no
+        Sev5 had no key, the step died with KeyError after the mail went out,
+        and the send was never recorded - so a re-run would mail it twice."""
+        counts = self.rollup()["counts"]
+        for band in ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1"):
+            self.assertIn(band, counts)
+
     def test_the_window_excludes_findings_nothing_has_touched(self):
         cves = {f["cve"] for f in self.rollup()["findings"]}
         self.assertEqual(cves, {"CVE-A", "CVE-B"},
