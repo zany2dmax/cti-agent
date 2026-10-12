@@ -29,7 +29,7 @@ func TestCreateIssueSendsTheShapeJiraExpects(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "svc@crhomeusa.com", "tok")
+	c := New(srv.URL, "svc@example.com", "tok")
 	got, err := c.CreateIssue(context.Background(), IssueRequest{
 		ProjectKey:  "CR",
 		IssueType:   "IT Support",
@@ -53,7 +53,7 @@ func TestCreateIssueSendsTheShapeJiraExpects(t *testing.T) {
 		t.Errorf("content-type = %q", gotCT)
 	}
 
-	wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("svc@crhomeusa.com:tok"))
+	wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("svc@example.com:tok"))
 	if gotAuth != wantAuth {
 		t.Error("Authorization header is not email:token basic auth")
 	}
@@ -296,8 +296,8 @@ func TestAnHTMLErrorPageIsBoundedNotDumped(t *testing.T) {
 func TestBrowseURLIsForHumansNotTheAPI(t *testing.T) {
 	// The API's "self" field points at the REST endpoint, which is useless in
 	// an email. The digest needs a link somebody can click.
-	c := New("https://crhomeusa.atlassian.net/", "a@b.c", "t")
-	if got := c.BrowseURL("CR-1234"); got != "https://crhomeusa.atlassian.net/browse/CR-1234" {
+	c := New("https://example.atlassian.net/", "a@b.c", "t")
+	if got := c.BrowseURL("CR-1234"); got != "https://example.atlassian.net/browse/CR-1234" {
 		t.Errorf("BrowseURL = %q", got)
 	}
 }

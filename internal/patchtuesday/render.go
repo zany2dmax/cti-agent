@@ -425,6 +425,12 @@ func (r *Report) HTML() string {
 		// used to say "the exposure figures come from Qualys and are
 		// unaffected" while listing the Qualys exposure query as one of the
 		// things that failed.
+		// Microsoft's own data is complete on its own; only without it are
+		// the counts at the mercy of whichever article loaded.
+		countCaveat := "Counts below may be missing or low."
+		if d.MSRC != nil {
+			countCaveat = "The counts below are Microsoft's own and complete."
+		}
 		tail := "The exposure figures come from Qualys Host Detection and are unaffected."
 		if !r.Exposure.Attempted {
 			tail = "The exposure figures are missing too &mdash; see the line below."
@@ -434,9 +440,8 @@ func (r *Report) HTML() string {
     <div style="background:#fffbe6;border:1px solid #d69e2e;border-radius:4px;
                 padding:10px 12px;font:400 13px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
                 color:#744210">
-      <b>Incomplete sources.</b> Could not read: %s. Counts below may be
-      missing or low. %s
-    </div></td></tr>`, e(strings.Join(deg, "; ")), tail)
+      <b>Incomplete sources.</b> %s %s %s
+    </div></td></tr>`, e(d.IncompleteSentence()), countCaveat, tail)
 	}
 
 	// The lead. Microsoft's numbers, then ours, then the query.
@@ -599,7 +604,10 @@ func (r *Report) HTML() string {
 	var links strings.Builder
 	for _, s := range d.Sources {
 		state := ""
-		if !s.Fetched {
+		switch {
+		case !s.Fetched && s.Optional:
+			state = fmt.Sprintf(" <span style='color:#718096'>(optional, not read: %s)</span>", e(s.Err))
+		case !s.Fetched:
 			state = fmt.Sprintf(" <span style='color:#b3001b'>(unavailable: %s)</span>", e(s.Err))
 		}
 		fmt.Fprintf(&links,
@@ -607,8 +615,10 @@ func (r *Report) HTML() string {
 			e(s.URL), e(s.Name), state)
 	}
 	countNote := ""
-	if n := d.CVECountNote(); n != "" {
-		countNote = e(n) + "<br>"
+	for _, n := range append([]string{d.CountBasis(), d.CVECountNote()}, d.CrossCheck...) {
+		if n != "" {
+			countNote += e(n) + "<br>"
+		}
 	}
 	fmt.Fprintf(&b, `
   <tr><td style="padding:16px 20px 18px 20px;border-top:1px solid #e2e8f0">
@@ -618,14 +628,14 @@ func (r *Report) HTML() string {
     <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#718096;margin-top:12px">
       %s
-      Counts above are Microsoft's, as reported by the sources. Presence in our
+      %s Presence in our
       environment is determined solely by Qualys Host Detection &mdash; the
       articles supply context, never proof of exposure.<br>
       %s
     </div></td></tr>
 
 </table></td></tr></table></body></html>`,
-		links.String(), countNote, r.creditHTML())
+		links.String(), countNote, footerCounts(d), r.creditHTML())
 
 	return b.String()
 }
@@ -644,7 +654,7 @@ func (r *Report) Text() string {
 	}
 	b.WriteString(r.Subject() + "\n" + strings.Repeat("=", 68) + "\n\n")
 	if deg := d.Degraded(); len(deg) > 0 {
-		b.WriteString("INCOMPLETE SOURCES: " + strings.Join(deg, "; ") + "\n\n")
+		b.WriteString("INCOMPLETE SOURCES: " + d.IncompleteSentence() + "\n\n")
 	}
 	fmt.Fprintf(&b, "Released %s\n\n", PatchTuesday(d.Year, d.Month).Format("Mon 2 Jan 2006"))
 	fmt.Fprintf(&b, "This month's release addresses %s vulnerabilities, including %s "+
@@ -719,15 +729,28 @@ func (r *Report) Text() string {
 	b.WriteString("Sources:\n")
 	for _, s := range d.Sources {
 		state := ""
-		if !s.Fetched {
+		switch {
+		case !s.Fetched && s.Optional:
+			state = " (optional, not read: " + s.Err + ")"
+		case !s.Fetched:
 			state = " (unavailable: " + s.Err + ")"
 		}
 		fmt.Fprintf(&b, "  %s%s\n  %s\n", s.Name, state, s.URL)
 	}
-	if note := d.CVECountNote(); note != "" {
-		b.WriteString("\n" + note + "\n")
+	for _, note := range append([]string{d.CountBasis(), d.CVECountNote()}, d.CrossCheck...) {
+		if note != "" {
+			b.WriteString("\n" + note + "\n")
+		}
 	}
 	b.WriteString("\nPresence determined solely by Qualys Host Detection.\n")
 	b.WriteString(r.creditText() + "\n")
 	return b.String()
+}
+
+// footerCounts says where the counts came from, for the footer.
+func footerCounts(d *Digest) string {
+	if d.MSRC != nil {
+		return "Counts above are Microsoft's own, from the Security Update Guide."
+	}
+	return "Counts above are Microsoft's, as reported by the sources."
 }
