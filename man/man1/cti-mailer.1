@@ -1,0 +1,612 @@
+.TH CTI-MAILER 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-mailer \- the fleet's single outbound mail channel, behind the recipient allowlist
+.SH SYNOPSIS
+.B cti-mailer
+.BI \-\-html " FILE"
+.RB [ \-\-text
+.IR FILE ]
+.RB [ \-\-subject
+.IR TEXT ]
+.RB [ \-\-to
+.IR LIST ]
+.RB [ \-\-cc
+.IR LIST ]
+.RB [ \-\-attach
+.IR FILE ]...
+.RI [ common ]
+.PP
+.B cti-mailer
+.B \-\-lane
+.I NAME
+.BI \-\-html " FILE"
+.RB [ \-\-text
+.IR FILE ]
+.RB [ \-\-to
+.IR LIST ]
+.RB [ \-\-subject
+.IR TEXT ]
+.RB [ \-\-attach
+.IR FILE ]...
+.RI [ common ]
+.PP
+.B cti-mailer
+.B \-\-to\-operator
+.BI \-\-message " TEXT"
+.RB [ \-\-board\-id
+.IR ID ]
+.RB [ \-\-subject
+.IR TEXT ]
+.RI [ common ]
+.PP
+.B cti-mailer \-\-check
+.RB [ \-\-from\-mailbox
+.IR ADDRESS ]
+.PP
+where
+.I common
+is
+.RB [ \-\-from\-mailbox
+.IR ADDRESS ]
+.RB [ \-\-dry\-run ]
+.RB [ \-\-require\-approval ]
+.RB [ \-\-approve ]
+.RB [ \-\-save\-to\-sent
+.IR BOOL ].
+.PP
+.B sudo cti\-agent cti\-mailer
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-mailer
+sends one message through Microsoft Graph
+.BR sendMail ,
+as the fleet mailbox. It is the Go port of
+.IR lanes/mailer.py ,
+flag for flag and output for output.
+.BR run\-appscan (1)
+calls it with
+.B \-\-lane was
+and
+.BR run\-domains (1)
+with
+.BR "\-\-lane dom" ;
+.B run\-digest
+and
+.B run\-patchtuesday
+still call
+.I mailer.py
+until the switch described in RUNBOOK.md section 11b.
+.PP
+It never guesses a recipient. Every address on To and Cc must pass a
+recipient gate, checked before anything is rendered, and the gate is the same
+with
+.B \-\-dry\-run
+as without, so a dry run that succeeds is a send that would be allowed.
+Every address must also look like
+.IB local @ domain . tld
+with no spaces, which
+.B \-\-approve
+never overrides.
+.SS The default gate (no \-\-lane)
+.TP
+.B To
+.B \-\-to
+if given, else
+.BR DIGEST_TO .
+With
+.BR \-\-to\-operator ,
+.B FLEET_OPERATOR_EMAIL
+instead, and
+.B \-\-to
+is refused.
+No recipients at all is refused: there is no default.
+.TP
+.B Cc
+.B \-\-cc
+if given, else
+.BR DIGEST_CC ,
+plus every address on
+.B FLEET_ALLOW_TO
+when
+.B DIGEST_CC_FROM_ALLOW_TO
+is true. Anyone already on To is dropped from Cc. An escalation
+.RB ( \-\-to\-operator )
+is never copied.
+.TP
+.B Allowlist
+.B FLEET_ALLOW_TO
+if set, else
+.BR DIGEST_TO ,
+plus
+.B FLEET_OPERATOR_EMAIL
+always, compared case-insensitively. It covers To
+.B and
+Cc. Any address outside it refuses the send, naming every such address,
+unless
+.B \-\-approve
+is given. An unconfigured install therefore fails closed: the scheduled
+digest to
+.B DIGEST_TO
+works and nothing else does.
+.SS Lane sends (\-\-lane NAME)
+A lane is a second audience with its own pair of variables, named from
+.I NAME
+in upper case:
+.B \-\-lane was
+reads
+.B WAS_TO
+and
+.BR WAS_ALLOW_TO ;
+.B \-\-lane dom
+reads
+.B DOM_TO
+and
+.BR DOM_ALLOW_TO .
+.TP
+.B No fallback
+.IB LANE _ALLOW_TO
+unset or empty refuses the send, and
+.B \-\-approve
+does not change that. Nothing falls back to
+.BR DIGEST_TO ,
+.B DIGEST_CC
+or
+.BR FLEET_ALLOW_TO :
+that is how a report reaches an audience nobody chose.
+.TP
+.B Recipients
+.B \-\-to
+if given, else
+.IB LANE _TO
+(unset is refused). There is no Cc on a lane send:
+.BR \-\-cc ,
+.B DIGEST_CC
+and
+.B \-\-to\-operator
+are ignored.
+Every recipient must be on the expanded
+.IB LANE _ALLOW_TO
+or be
+.BR FLEET_OPERATOR_EMAIL ,
+or the send is refused unless
+.B \-\-approve
+is given.
+.TP
+.B References
+.IB LANE _ALLOW_TO
+(and only a lane allowlist) may include another variable's value with
+.B $NAME
+or
+.BR ${NAME} ,
+for example
+.BR WAS_ALLOW_TO=$FLEET_ALLOW_TO,appdev@example.com .
+A name is letters, digits and underscores, not starting with a digit.
+References nest up to 5 deep; a cycle is refused; an address reached twice is
+kept once. A reference to a variable that is not in the environment at all is
+refused, naming it, rather than read as empty. A variable that is present but
+empty contributes nothing, and if the whole list expands to nothing the send
+is refused.
+.TP
+.B No wildcards
+Any token beginning with
+.B $
+that does not name exactly one variable
+.RB ( $ ,
+.BR ${} ,
+.BR $*_ALLOW_TO ,
+.BR ${*} )
+is refused. There is no way to say
+.IR "every allowlist" .
+.TP
+.B Cross-check
+When every lane recipient is also on
+.BR DIGEST_TO ,
+a note is logged suggesting the list was copied and not edited. It does not
+stop the send.
+.SS The message
+The body is the
+.B \-\-html
+file as given, or for
+.B \-\-message
+a short HTML page with the text (escaped, paragraphs split on blank lines)
+and reply instructions naming the
+.B [FLEET\~\fIID\fB]
+tag and the mailbox the orchestrator reads.
+The subject is
+.B \-\-subject
+or
+.BR "CTI Brief\~\fIYYYY\-MM\-DD\fR" ;
+in message mode with
+.B \-\-board\-id
+it is prefixed with
+.B [FLEET\~\fIID\fB]
+unless already present. Whitespace and newlines are collapsed to single
+spaces and the subject is cut to 255 bytes. A subject beginning
+.B [Sev5]
+is sent with high importance. Every message carries the header
+.B X\-CTI\-Agent\-Sent
+so the digest and
+.BR cti\-mailbox (1)
+can recognise the fleet's own mail when it comes back.
+.PP
+Progress goes to standard error as
+.B [mailer]
+lines: from, to, subject, size, any skipped attachment, and the HTTP status
+and Graph request-id of the send. Standard output carries exactly one JSON
+line for the runners to parse:
+.TP
+After a send
+.BR sent\~(true) ,
+.BR status ,
+.BR request_id ,
+.BR subject ,
+.BR to ,
+.B cc
+(always a list) and
+.B ts
+(UTC).
+.TP
+After \-\-dry\-run
+.BR dry_run\~(true) ,
+.BR subject ,
+.BR to ,
+.BR cc ,
+.B mode
+.RB ( html
+or
+.BR message ),
+and either
+.B html
+(the file's absolute path) or
+.B body
+(the rendered escalation).
+.PP
+.B \-\-check
+prints only standard-error lines.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-html ),
+and a value may follow
+.B =
+or a space.
+Exactly one of
+.B \-\-html
+and
+.B \-\-message
+is required for a send.
+.TP
+.BI \-\-html " FILE"
+The rendered digest to send as the HTML body. Must exist.
+Default:\~none.
+.TP
+.BI \-\-message " TEXT"
+A short plain-text body for an escalation or alert, wrapped in minimal HTML.
+Default:\~none.
+.TP
+.BI \-\-text " FILE"
+A plain-text alternative. Accepted because the runners pass it, and logged as
+.IR "recorded but not transmitted" :
+Graph sends one body. The file is not read.
+Default:\~none.
+.TP
+.BI \-\-subject " TEXT"
+The subject line; see
+.IR "The message" .
+Default:\~\fBCTI Brief \fIYYYY\-MM\-DD\fR (today, local time).
+.TP
+.BI \-\-to " LIST"
+Comma-separated recipients, replacing
+.B DIGEST_TO
+(or
+.IB LANE _TO
+with
+.BR \-\-lane ).
+They still have to pass the allowlist: with no
+.B FLEET_ALLOW_TO
+the allowlist is
+.BR DIGEST_TO ,
+not
+.BR \-\-to .
+Mutually exclusive with
+.BR \-\-to\-operator .
+Default:\~none.
+.TP
+.BI \-\-cc " LIST"
+Comma-separated Cc recipients, replacing
+.BR DIGEST_CC .
+Gated by
+.B FLEET_ALLOW_TO
+exactly like To. Ignored with
+.B \-\-lane
+and with
+.BR \-\-to\-operator .
+Default:\~none.
+.TP
+.BI \-\-lane " NAME"
+Send as the named lane, using only
+.IB NAME _TO
+and
+.IB NAME _ALLOW_TO
+(upper-cased); see
+.IR "Lane sends" .
+Default:\~none (the default gate).
+.TP
+.B \-\-to\-operator
+Send to
+.B FLEET_OPERATOR_EMAIL
+(refused if it is unset). Pre-approved: telling the operator something is not
+an outward-facing send. Never copied. Ignored with
+.BR \-\-lane .
+Default:\~\fBfalse\fR.
+.TP
+.BI \-\-from\-mailbox " ADDRESS"
+The sending mailbox. With
+.B \-\-check
+it is only the address printed on the last line.
+Default:\~\fB$GRAPH_MAILBOX\fR.
+.TP
+.BI \-\-board\-id " ID"
+The board line the escalation belongs to, so a reply can be matched back.
+Adds the
+.B [FLEET\~\fIID\fB]
+tag to the subject and the reply instructions. Has no effect with
+.BR \-\-html .
+Default:\~none.
+.TP
+.BI \-\-attach " FILE"
+Attach a file. Repeatable, once per file. A file that cannot be read, or is
+over 3,000,000 bytes, is skipped with a log line and the message is sent
+without it: the finding is not withheld for want of its evidence. The limit is
+per file; keep the total under about 3\~MB, because Graph rejects larger
+inline requests. Sent with type
+.B text/markdown
+for
+.I .md
+files and
+.B text/plain
+for everything else, under the file's base name.
+Default:\~none.
+.TP
+.B \-\-dry\-run
+Resolve and gate the recipients, render the body and subject, read the
+attachments, print the result JSON, and send nothing. No Graph call is made.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-require\-approval
+Mark this as an off-cycle send: it is refused unless
+.B \-\-approve
+is also given. Checked after the recipient gate.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-approve
+The operator has approved this specific send, normally after it was posted
+to the board tagged
+.BR [APPROVE] .
+It permits recipients outside the allowlist (default gate) or outside
+.IB LANE _ALLOW_TO
+(lane), and satisfies
+.BR \-\-require\-approval .
+It does not permit a malformed address, an unset or empty lane allowlist, an
+unresolvable or wildcard reference, or a send with no recipients.
+Default:\~\fBfalse\fR.
+.TP
+.BI \-\-save\-to\-sent " BOOL"
+Keep a copy in Sent Items. Only the word
+.B true
+(any case) keeps a copy; every other value, including
+.B 1
+and
+.BR yes ,
+means no copy.
+Default:\~\fBtrue\fR.
+.TP
+.B \-\-check
+Verify the configuration and the app registration, and send nothing.
+Prints the binary's version (with a warning when its commit differs from
+.IR /etc/cti\-agent/version ),
+the
+.I fleet.env
+path, then each required setting as
+.B OK
+or
+.B UNSET
+and each optional one as
+.B OK
+or
+.BR none .
+If any required setting is unset it stops there. Otherwise it requests a
+token and reports the tenant, the app ID and the granted application roles:
+.B Mail.Read
+or
+.B Mail.ReadWrite
+(read the mailbox) and
+.B Mail.Send
+are required and reported
+.B OK
+or
+.BR MISSING ;
+.B Mail.ReadWrite
+for
+.BR cti\-mailbox (1)
+is reported
+.B absent
+without failing; any other granted role is listed as
+.BR UNUSED .
+Of the lane variables only
+.BR WAS_TO ,
+.BR WAS_ALLOW_TO ,
+.B DOM_TO
+and
+.B DOM_ALLOW_TO
+are listed, and references in them are not expanded.
+Default:\~\fBfalse\fR.
+.SH ENVIRONMENT
+Read from the process environment, after
+.I fleet.env
+is loaded (existing environment variables win). Graph settings are in
+section 1 of
+.IR fleet.env ,
+recipients in section 4.
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET
+The app registration. Required for a send and for
+.BR \-\-check ;
+not read by
+.BR \-\-dry\-run .
+.TP
+.B GRAPH_MAILBOX
+The sending mailbox, unless
+.B \-\-from\-mailbox
+is given. Required.
+.TP
+.B FLEET_OPERATOR_EMAIL
+The escalation address. Always allowed by every gate. Required by
+.BR \-\-check .
+.TP
+.B DIGEST_TO
+Default recipients, and the allowlist when
+.B FLEET_ALLOW_TO
+is empty.
+.TP
+.B DIGEST_CC
+Default Cc recipients. Gated like To.
+.TP
+.B DIGEST_CC_FROM_ALLOW_TO
+.BR true ,
+.BR yes ,
+.B 1
+or
+.B on
+(any case): also copy every address on
+.BR FLEET_ALLOW_TO .
+Anything else is off. The operator is not added unless listed there.
+.TP
+.B FLEET_ALLOW_TO
+The default gate's allowlist, covering To and Cc. Literal addresses only;
+.B $NAME
+is not expanded here. Empty: falls back to
+.BR DIGEST_TO .
+.TP
+.IB LANE _TO ", " LANE _ALLOW_TO
+A lane's recipients and allowlist, for example
+.BR WAS_TO / WAS_ALLOW_TO
+and
+.BR DOM_TO / DOM_ALLOW_TO .
+No defaults, no fallback.
+.TP
+.I NAME
+Any variable referenced as
+.B $NAME
+from a lane allowlist.
+.TP
+.B CTI_REPLY_MAILBOX
+The mailbox named in an escalation's reply instructions.
+Default:\~the sending mailbox.
+.TP
+.BR NVD_API_KEY ", " CLAUDE_CODE_OAUTH_TOKEN
+Only reported by
+.BR \-\-check .
+.TP
+.BR FLEET_ENV ", " FLEET_HOME
+The
+.I fleet.env
+path:
+.B FLEET_ENV
+if set, else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env .
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Settings, recipients and the client secret;
+.B root:ctiagent
+0640.
+.TP
+.I /etc/cti\-agent/version
+The install record written by
+.BR install\-fedora.sh ;
+.B \-\-check
+compares its
+.B commit=
+line with the binary. Absent is not an error.
+.TP
+.I /opt/cti\-agent/bin/cti\-mailer
+The binary.
+.I /opt/cti\-agent/lanes/mailer.py
+is the Python original it replaces.
+.SH EXIT STATUS
+.TP
+.B 0
+The message was accepted by Graph; or
+.B \-\-dry\-run
+passed every check; or
+.B \-\-check
+found every required setting and role. Skipped attachments, unused roles and
+a missing cleanup role do not change this.
+.TP
+.B 1
+Nothing was sent: a setting is missing, the arguments conflict, the HTML file
+does not exist, an address is malformed, a recipient is outside the
+allowlist without
+.BR \-\-approve ,
+a lane allowlist is unset or does not resolve,
+.B \-\-require\-approval
+was given without
+.BR \-\-approve ,
+the token request failed, or Graph refused the send. With
+.BR \-\-check :
+a required setting or role is missing, or no token could be obtained.
+.TP
+.B 2
+Unknown option or bad value (Go's flag package).
+.SH EXAMPLES
+Check configuration and Graph roles:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \-\-check
+.EE
+.PP
+Preview today's digest send without sending:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \e
+  \-\-html /var/lib/cti\-agent/reports/digest\-daily\-$(date +%F).html \e
+  \-\-subject "CTI Brief $(date +%F)" \-\-dry\-run
+.EE
+.PP
+Preview the weekly domains report to its own audience:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \-\-lane dom \e
+  \-\-html /var/lib/cti\-agent/state/domains\-$(date \-u +%F).html \-\-dry\-run
+.EE
+.PP
+A one-off send to someone outside the allowlist, after approval on the board:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \-\-html report.html \e
+  \-\-to analyst@example.com \-\-require\-approval \-\-approve
+.EE
+.PP
+Ask the operator a question:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \-\-to\-operator \-\-board\-id q17 \e
+  \-\-subject "Approve off\-cycle send?" \-\-message "Draft is on the board."
+.EE
+.SH SEE ALSO
+.BR run\-appscan (1),
+.BR run\-domains (1),
+.BR run\-digest (1),
+.BR cti\-mailbox (1),
+.BR cti\-alert (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11b, "Switching the mailer"; sections 11f and 11g for the
+.B was
+and
+.B dom
+lanes;
+.IR fleet.env.example ,
+section 4.

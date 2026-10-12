@@ -1,0 +1,176 @@
+.TH SCOUT.PY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+scout.py \- the @scout lane: poll advisory feeds for CVE IDs the fleet has not seen
+.SH SYNOPSIS
+.B scout.py
+.BI \-\-out " FILE"
+.RB [ \-\-feeds
+.IR FILE ]
+.RB [ \-\-days
+.IR N ]
+.RB [ \-\-print\-new ]
+.RB [ \-\-no\-db ]
+.PP
+.B sudo cti\-agent scout.py
+.I options
+.br
+.B python3 $FLEET_CODE/lanes/scout.py
+.I options
+.SH DESCRIPTION
+.B scout.py
+reads every RSS 2.0 or Atom feed in the feed list, pulls CVE IDs out of each
+entry's title, description, summary and content, and reports the ones that
+are neither in the findings table nor already recorded by an earlier scout
+run. It is run by
+.B cti\-agent\-scout.timer
+every four hours, at 00:15, 04:15, 08:15, 12:15, 16:15 and 20:15, with
+.B \-\-days 3
+and its output in
+.IR /var/lib/cti\-agent/state/scout\-latest.json .
+.PP
+Entries older than the window are skipped; an entry whose date cannot be
+parsed (RFC 822 or ISO 8601, from
+.BR pubDate ,
+.BR published ,
+.B updated
+or
+.BR date )
+is kept. A feed counts as failed when it cannot be fetched (30-second
+timeout), returns an HTML page instead of XML (logged as
+.BR "NOT A FEED" ,
+usually a feed that has moved), is malformed XML, or contains no entries.
+Failed feeds are named on standard error at the end of the run, because a
+dead feed is a blind spot that otherwise looks like a quiet day.
+.PP
+Unless
+.B \-\-no\-db
+is given and
+.I memory.db
+exists, every CVE mentioned in the window, new or not, is recorded in the
+.B scout_items
+table with up to three of its sources (one row per CVE and feed; an existing
+row is left alone). That record is what makes a CVE not new on the next run.
+.PP
+This lane finds candidates. It never decides exposure, does not run the
+scanner, and sends no mail. Progress goes to standard error, prefixed
+.BR [scout] .
+.SH OPTIONS
+.TP
+.BI \-\-out " FILE"
+Required. Where to write the JSON result:
+.B new_cves
+(sorted),
+.B all_mentioned
+(every CVE seen in the window),
+.B detail
+(feed, title, link and date for each new CVE), and the feed counts and
+failed URLs. Missing directories are created.
+.TP
+.BI \-\-feeds " FILE"
+The feed list: one URL per line; blank lines and lines beginning with
+.B #
+in the first column are skipped.
+Default:\~\fB$FLEET_FEEDS\fR, else \fI$FLEET_HOME/lanes/feeds.txt\fR.
+.TP
+.BI \-\-days " N"
+Ignore entries published more than
+.I N
+days ago. An integer.
+Default:\~\fB3\fR.
+.TP
+.B \-\-print\-new
+Also print the new CVEs on standard output, comma-separated on one line
+(an empty line when there are none), ready for
+.BR "enrich.py \-\-cves" .
+.TP
+.B \-\-no\-db
+Do not open
+.I memory.db
+at all: every CVE mentioned counts as new, and nothing is recorded.
+.SH ENVIRONMENT
+.B scout.py
+does not load
+.I fleet.env
+itself; the systemd unit does. On a hand run through
+.BR cti\-agent (1)
+only the variables the wrapper sets are present.
+.TP
+.B FLEET_FEEDS
+Default for
+.BR \-\-feeds .
+.I fleet.env
+section 3, PATHS; set to
+.I /etc/cti\-agent/feeds.txt
+by the unit and the wrapper.
+.TP
+.B FLEET_HOME
+State directory; the database is
+.IR $FLEET_HOME/state/memory.db .
+Default:\~\fI~/fleet\fR. Section 3.
+.TP
+.B FLEET_USER_AGENT
+User-Agent sent to the feeds.
+Default:\~\fB\%cti\-agent\-scout/1.0\fR.
+Section 6, ENRICHMENT.
+.SH FILES
+.TP
+.I /etc/cti\-agent/feeds.txt
+The feed list.
+.TP
+.I /var/lib/cti\-agent/state/scout\-latest.json
+The timer's output.
+.TP
+.I /var/lib/cti\-agent/state/memory.db
+Read for known CVEs
+.RB ( findings
+and
+.B scout_items
+tables) and written
+.RB ( scout_items ).
+Never created by this lane: when it is missing, every CVE is new and
+nothing is recorded.
+.SH EXIT STATUS
+.TP
+.B 0
+The result was written, even if every feed failed. Read
+.B feeds_failed
+in the output or the log to tell a quiet day from a blind one.
+.TP
+.B 1
+The feed list does not exist; or the output could not be written (Python
+traceback).
+.TP
+.B 2
+Bad arguments: no
+.BR \-\-out ,
+or a non-integer
+.BR \-\-days .
+.SH EXAMPLES
+What the last sweep found, and which feeds failed:
+.PP
+.EX
+sudo journalctl \-u cti\-agent\-scout \-\-since today
+sudo python3 \-m json.tool /var/lib/cti\-agent/state/scout\-latest.json
+.EE
+.PP
+A wider look that records nothing, printing every CVE mentioned:
+.PP
+.EX
+sudo cti\-agent scout.py \-\-no\-db \-\-days 7 \-\-print\-new \e
+  \-\-out /var/lib/cti\-agent/state/scout\-test.json
+.EE
+.PP
+Test a candidate feed before adding it:
+.PP
+.EX
+echo https://feeds.example.com/advisories.xml > /tmp/feeds.txt
+python3 fleet\-kit/fleet/lanes/scout.py \-\-no\-db \e
+  \-\-feeds /tmp/feeds.txt \-\-out /tmp/scout.json
+.EE
+.SH SEE ALSO
+.BR enrich.py (1),
+.BR fleet\-db (1),
+.BR fleet\-board (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 9; fleet\-kit/README.md, "Troubleshooting" (dead feeds).

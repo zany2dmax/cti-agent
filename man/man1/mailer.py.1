@@ -1,0 +1,414 @@
+.TH MAILER.PY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+mailer.py \- send a digest or an escalation through Microsoft Graph, behind the recipient allowlist
+.SH SYNOPSIS
+.B mailer.py
+.BI \-\-html " FILE"
+.RB [ \-\-subject
+.IR TEXT ]
+.RB [ \-\-to
+.IR LIST ]
+.RB [ \-\-cc
+.IR LIST ]
+.RB [ \-\-attach
+.IR FILE ]...
+.RB [ \-\-text
+.IR FILE ]
+.RB [ \-\-dry\-run ]
+.RB [ \-\-require\-approval ]
+.RB [ \-\-approve ]
+.RB [ \-\-from\-mailbox
+.IR ADDRESS ]
+.RB [ \-\-save\-to\-sent
+.IR BOOL ]
+.br
+.B mailer.py \-\-to\-operator
+.BI \-\-message " TEXT"
+.RB [ \-\-subject
+.IR TEXT ]
+.RB [ \-\-board\-id
+.IR ID ]
+.RB [ \-\-dry\-run ]
+.br
+.B mailer.py \-\-check
+.RB [ \-\-from\-mailbox
+.IR ADDRESS ]
+.PP
+.B sudo cti\-agent mailer.py
+.I options
+.br
+.B python3 $FLEET_CODE/lanes/mailer.py
+.I options
+.SH DESCRIPTION
+.B mailer.py
+sends one message with Microsoft Graph
+.BR sendMail ,
+as the CTI mailbox, using the same Entra app registration the Go agent
+reads that mailbox with (application permission
+.BR Mail.Send ).
+There are no SMTP credentials on the box. It is called by
+.BR run\-digest (1)
+for the daily and weekly digests and by
+.BR run\-patchtuesday (1),
+and by an operator by hand. The orchestrator heartbeat is deliberately not
+allowed to run it; it escalates through
+.BR cti\-alert (1).
+Lanes never send mail.
+.BR cti\-mailer (1)
+is the Go port; the runners still call this one.
+.PP
+It sends either a rendered digest
+.RB ( \-\-html )
+or a short escalation
+.RB ( \-\-message ),
+exactly one of the two. An escalation is wrapped in plain HTML (paragraphs
+split on blank lines) with instructions to reply keeping the
+.BI "[FLEET " id ]
+tag in the subject, so the orchestrator can match the reply back to the
+board line.
+.SS Recipients
+.TP
+.B To
+With
+.BR \-\-to\-operator :
+.B FLEET_OPERATOR_EMAIL
+alone. Otherwise
+.BR \-\-to ,
+else
+.BR DIGEST_TO .
+There is no built-in default; with neither, nothing is sent.
+.TP
+.B Cc
+Never for
+.BR \-\-to\-operator .
+Otherwise
+.BR \-\-cc ,
+else
+.BR DIGEST_CC ;
+then, when
+.B DIGEST_CC_FROM_ALLOW_TO
+is true, every address in
+.B FLEET_ALLOW_TO
+as written (not the operator added below) that is not already there. Any
+Cc address that is also a To address is dropped, compared without regard
+to case.
+.TP
+.B Validation
+Every address must look like
+.IB local @ domain . tld
+with no spaces.
+.TP
+.B Allowlist
+The allowed set is
+.BR FLEET_ALLOW_TO ,
+or
+.B DIGEST_TO
+when that is unset, plus
+.BR FLEET_OPERATOR_EMAIL ,
+compared without regard to case. It covers To and Cc alike. Any recipient
+outside it refuses the send unless
+.B \-\-approve
+is given. So the scheduled digest to
+.B DIGEST_TO
+and escalations to the operator pass, and anything else needs an explicit
+approval for that one send.
+.PP
+The subject is
+.B \-\-subject
+or
+.BR "CTI Brief YYYY\-MM\-DD" ,
+local date. In
+.B \-\-message
+mode with
+.BR \-\-board\-id ,
+.BI "[FLEET " id "] "
+is prepended unless already present. Whitespace is collapsed and the
+subject cut to 255 characters. A subject starting
+.B [Sev5]
+is sent with high importance.
+.PP
+.I fleet.env
+is read first, without overriding variables already in the environment;
+lines are
+.IB KEY = value\fR,
+.B #
+comments are skipped, and surrounding quotes are stripped.
+.PP
+A refusal is final: the message names the variable or flag to change.
+Progress and errors go to standard error, prefixed
+.BR [mailer] ;
+the result goes to standard output as one JSON line.
+.SH OPTIONS
+.TP
+.BI \-\-html " FILE"
+Send this rendered HTML file as the body. The file must exist.
+.TP
+.BI \-\-message " TEXT"
+Send this short plain text, wrapped in minimal HTML. For escalations, not
+digests.
+.TP
+.BI \-\-text " FILE"
+Accepted for the plain-text alternative and ignored: Graph is sent one HTML
+body, and the file is neither read nor checked.
+.TP
+.BI \-\-subject " TEXT"
+The subject line.
+Default:\~\fBCTI Brief\fR and today's date.
+.TP
+.BI \-\-to " LIST"
+Comma-separated To addresses, replacing
+.BR DIGEST_TO .
+Cannot be combined with
+.BR \-\-to\-operator .
+.TP
+.BI \-\-cc " LIST"
+Comma-separated Cc addresses, replacing
+.BR DIGEST_CC .
+Subject to the allowlist like
+.BR \-\-to .
+Ignored with
+.BR \-\-to\-operator .
+.TP
+.B \-\-to\-operator
+Send to
+.B FLEET_OPERATOR_EMAIL
+only, with no Cc, whether the body is
+.B \-\-message
+or
+.BR \-\-html . Pre-approved, because telling the operator something is
+not an outward-facing send. Refused when that variable is unset.
+.TP
+.BI \-\-from\-mailbox " ADDRESS"
+The mailbox to send as; the Graph path is
+.BI /users/ ADDRESS /sendMail\fR.
+Default:\~\fB$GRAPH_MAILBOX\fR.
+.TP
+.BI \-\-attach " FILE"
+Attach a file; repeat for more. A missing file, or one over 3,000,000
+bytes, is skipped with a message and the send goes ahead. Files ending
+.I .md
+are sent as
+.BR text/markdown ,
+everything else as
+.BR text/plain .
+.TP
+.BI \-\-board\-id " ID"
+The board line id the escalation answers to, used in the
+.BI "[FLEET " ID ]
+subject tag and reply instructions.
+.TP
+.B \-\-dry\-run
+Do everything except request a token and send: the recipient rules and
+allowlist are applied, and a refusal is still a refusal. Prints
+.B {"dry_run": true, ...}
+with the mode, subject, To and Cc, and the HTML path, or in message mode
+the rendered body.
+.TP
+.B \-\-require\-approval
+Refuse unless
+.B \-\-approve
+is also given, whoever the recipients are. For off-cycle sends.
+.TP
+.B \-\-approve
+The operator approved this specific send. Lifts the allowlist refusal and
+satisfies
+.BR \-\-require\-approval .
+.TP
+.BI \-\-save\-to\-sent " BOOL"
+Keep a copy in the sending mailbox's Sent Items. Only
+.B true
+(any case) keeps it; any other value does not.
+Default:\~\fBtrue\fR.
+.TP
+.B \-\-check
+Preflight, then exit; every other option except
+.B \-\-from\-mailbox
+is ignored. Lists the
+.I fleet.env
+path, each required setting
+.RB ( TENANT_ID ,
+.BR CLIENT_ID ,
+.BR CLIENT_SECRET ,
+.BR GRAPH_MAILBOX ,
+.BR FLEET_OPERATOR_EMAIL )
+as
+.B OK
+or
+.BR UNSET ,
+and each optional one
+.RB ( DIGEST_TO ,
+.BR DIGEST_CC ,
+.BR DIGEST_CC_FROM_ALLOW_TO ,
+.BR FLEET_ALLOW_TO ,
+.BR NVD_API_KEY ,
+.BR CLAUDE_CODE_OAUTH_TOKEN )
+as
+.B OK
+or
+.BR none .
+If anything required is unset it stops there. Otherwise it requests a token
+and decodes its granted application roles:
+.B Mail.Read
+or
+.B Mail.ReadWrite
+(read the mailbox) and
+.B Mail.Send
+are required and reported
+.B MISSING
+when absent;
+.B Mail.ReadWrite
+for mailbox cleanup is reported
+.B absent
+but is not a failure; and any role the code never calls is listed as
+.B UNUSED
+with a recommendation to remove it. Sends nothing.
+.SH ENVIRONMENT
+Read from the process environment after
+.I fleet.env
+is loaded (existing environment variables win). Sections refer to
+.IR fleet.env .
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET
+The Entra app registration, for the client-credentials token. Required to
+send. Section 1, MICROSOFT GRAPH.
+.TP
+.B GRAPH_MAILBOX
+Default for
+.BR \-\-from\-mailbox ,
+and the reply address named in an escalation. Section 1.
+.TP
+.B CTI_REPLY_MAILBOX
+Overrides the reply address named in an escalation.
+Default:\~\fB$GRAPH_MAILBOX\fR. Section 1.
+.TP
+.B DIGEST_TO
+Default To list; the allowlist when
+.B FLEET_ALLOW_TO
+is unset. Section 4, RECIPIENTS AND THE SEND GATE.
+.TP
+.B DIGEST_CC
+Default Cc list. Section 4.
+.TP
+.B DIGEST_CC_FROM_ALLOW_TO
+.BR 1 ,
+.BR true ,
+.B yes
+or
+.B on
+(any case) adds
+.B FLEET_ALLOW_TO
+to the Cc. Anything else is off. Section 4.
+.TP
+.B FLEET_ALLOW_TO
+The recipient allowlist, comma-separated, covering To and Cc.
+Default:\~\fB$DIGEST_TO\fR. Section 4.
+.TP
+.B FLEET_OPERATOR_EMAIL
+Where
+.B \-\-to\-operator
+sends; always on the allowlist. Section 4.
+.TP
+.BR NVD_API_KEY ", " CLAUDE_CODE_OAUTH_TOKEN
+Only reported by
+.BR \-\-check .
+Sections 6 and 7.
+.TP
+.B FLEET_ENV
+Path of
+.IR fleet.env .
+Default:\~\fI$FLEET_HOME/fleet.env\fR; set to
+.I /etc/cti\-agent/fleet.env
+by the units and
+.BR cti\-agent (1).
+.TP
+.B FLEET_HOME
+Used only for the default
+.BR FLEET_ENV .
+Default:\~\fI~/fleet\fR.
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Credentials and recipients;
+.B root:ctiagent
+0640.
+.TP
+.I /var/lib/cti\-agent/reports/digest\-{daily,weekly}\-YYYY\-MM\-DD.html
+The digests
+.B run\-digest
+passes as
+.BR \-\-html .
+.SH EXIT STATUS
+.TP
+.B 0
+Sent (Graph accepted it), or a dry run passed every check, or
+.B \-\-check
+found every required setting and role.
+.TP
+.B 1
+Refused or failed: no sending mailbox; not exactly one of
+.B \-\-html
+and
+.BR \-\-message ;
+the HTML file is missing;
+.B \-\-to\-operator
+with
+.B \-\-to
+or with no
+.BR FLEET_OPERATOR_EMAIL ;
+no recipients; an invalid address; a recipient outside the allowlist
+without
+.BR \-\-approve ;
+.B \-\-require\-approval
+without
+.BR \-\-approve ;
+a token request that failed or a credential that is unset; Graph refused
+the send (a 403 is explained as a missing
+.B Mail.Send
+permission, missing admin consent or an Application Access Policy; 429 and
+503 are retried twice, honouring
+.BR Retry\-After );
+or
+.B \-\-check
+found a required setting unset or a required role missing.
+.TP
+.B 2
+Unknown option or a missing option value (argparse).
+.SH EXAMPLES
+Check the configuration and the token's permissions:
+.PP
+.EX
+sudo cti\-agent mailer.py \-\-check
+.EE
+.PP
+Validate today's digest against the gate without sending:
+.PP
+.EX
+sudo cti\-agent mailer.py \-\-dry\-run \e
+  \-\-html /var/lib/cti\-agent/reports/digest\-daily\-$(date +%F).html
+.EE
+.PP
+Escalate a question to the operator:
+.PP
+.EX
+sudo cti\-agent mailer.py \-\-to\-operator \-\-board\-id q17 \e
+  \-\-subject "Approve off\-cycle send?" \e
+  \-\-message "CVE\-2026\-1234 is on KEV and present on 30 hosts."
+.EE
+.PP
+A one-off send to someone not on the allowlist, after approval on the
+board:
+.PP
+.EX
+sudo cti\-agent mailer.py \-\-approve \-\-to someone@example.com \e
+  \-\-html /var/lib/cti\-agent/reports/digest\-daily\-$(date +%F).html
+.EE
+.SH SEE ALSO
+.BR cti\-mailer (1),
+.BR run\-digest (1),
+.BR brief.py (1),
+.BR fleet\-board (1),
+.BR cti\-alert (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md sections 1 and 11b; fleet\-kit/README.md, "Recipients and the
+send gate" and "Autonomy \- where the gates are".

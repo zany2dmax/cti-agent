@@ -35,6 +35,30 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased (1.3)
+
+### Added
+
+- **Man pages for every operator command** - the ten Go binaries, the six
+  `run-*` runners, `fleet-db`, `fleet-board`, the `cti-agent` wrapper, the
+  four Python lanes and `dev-run`: NAME, SYNOPSIS, DESCRIPTION, OPTIONS or
+  COMMANDS with every flag, ENVIRONMENT, FILES, EXIT STATUS, EXAMPLES and
+  SEE ALSO, in `man/man1/`. The installer copies them to
+  `/usr/local/share/man/man1`. A lane test fails if a flag, runner argument,
+  lane argument or subcommand is missing from its page; `task man:lint`
+  checks rendering.
+
+### Fixed
+
+- **Uninstall left three timers enabled.** It disabled a hand-kept list that
+  stopped at patchtuesday; the mailbox, appscan and domains timers stayed
+  enabled, pointing at removed units. It now disables every installed
+  `cti-agent-*.timer`.
+
+### Upgrade
+
+Reinstall. `man cti-domains` works afterwards.
+
 ## 1.2.1 — 2026-10-12
 
 ### Fixed

@@ -21,6 +21,22 @@ tasks:
     cmds:
       - gofmt -w .
 
+  man:lint:
+    desc: Check every man page renders without warnings
+    # mandoc ships with macOS; groff with Fedora. Either is enough. The drift
+    # test in fleet-kit/tests (every flag documented) runs with the lane tests.
+    cmds:
+      - |
+        if command -v mandoc >/dev/null 2>&1; then
+          mandoc -Tlint -Wwarning man/man1/*.1
+        elif command -v groff >/dev/null 2>&1; then
+          out="$(for f in man/man1/*.1; do groff -man -Tutf8 -ww -z "$f" 2>&1 | sed "s|^|$f: |"; done)"
+          if [ -n "$out" ]; then echo "$out" >&2; exit 1; fi
+        else
+          echo "neither mandoc nor groff installed - man pages not linted" >&2; exit 1
+        fi
+        echo "  ok  man pages clean"
+
   fmt:check:
     desc: Fail if anything is unformatted, rather than silently reformatting it
     # WHY ship USES THIS AND NOT fmt
