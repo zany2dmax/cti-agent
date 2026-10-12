@@ -559,18 +559,18 @@ func chunkInts(in []int, n int) [][]int {
 	return out
 }
 
-// sameFile reports whether a and b name the same path, by absolute cleaned
-// name, or by inode when both exist. "" is never the same as anything.
+// sameFile reports whether a and b name the same path, compared as cleaned
+// absolute names. "" is never the same as anything.
+//
+// By name only, not by os.Stat and os.SameFile: both paths come from the
+// operator and the environment, and the case this guards - run-patchtuesday
+// building the manifest's own name - is a name collision. A stat here was
+// flagged by gosec as G703 for no gain.
 func sameFile(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}
 	aa, errA := filepath.Abs(a)
 	bb, errB := filepath.Abs(b)
-	if errA == nil && errB == nil && aa == bb {
-		return true
-	}
-	fa, errA := os.Stat(a)
-	fb, errB := os.Stat(b)
-	return errA == nil && errB == nil && os.SameFile(fa, fb)
+	return errA == nil && errB == nil && aa == bb
 }
