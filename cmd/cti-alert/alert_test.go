@@ -8,7 +8,7 @@ import (
 // escalation is what the orchestrator sends: a healthy unit, a real message.
 func escalation() failure {
 	return failure{
-		Kind: "ESCALATION", Unit: "cti-agent-checkin.service", Host: "crscvmtest01",
+		Kind: "ESCALATION", Unit: "cti-agent-checkin.service", Host: "host-a",
 		Result: "success", ExitCode: "0", NRestarts: "0",
 		Reason: "3 KEV-listed CVEs PRESENT and overdue",
 	}
@@ -99,5 +99,22 @@ func TestAHealthyUnitIsRecognisedWhateverSystemctlSaid(t *testing.T) {
 	}
 	if (failure{ExitCode: "0", Result: "timeout"}).unitIsHealthy() {
 		t.Error("a timeout was reported healthy")
+	}
+}
+
+func TestBoardLineMatchesTheKind(t *testing.T) {
+	for kind, want := range map[string]string{
+		"FAILED":     "ERROR",
+		"HOLD":       "INFO",
+		"TEST":       "INFO",
+		"ESCALATION": "INFO",
+	} {
+		level, msg := boardLine(failure{Kind: kind, Unit: "u.service", Host: "host-a", Reason: "why"})
+		if level != want {
+			t.Errorf("%s: level %s, want %s", kind, level, want)
+		}
+		if kind != "FAILED" && strings.Contains(msg, "failed") {
+			t.Errorf("%s: board line says failed: %q", kind, msg)
+		}
 	}
 }

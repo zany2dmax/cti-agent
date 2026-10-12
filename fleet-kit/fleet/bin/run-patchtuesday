@@ -60,7 +60,10 @@ fi
 
 HTML="$FLEET_HOME/reports/patchtuesday-$TAG.html"
 TXT="$FLEET_HOME/reports/patchtuesday-$TAG.txt"
-JSON="$FLEET_HOME/state/patchtuesday-$TAG.json"
+# reports/, not state/: with --month, TAG is YYYY-MM and state/patchtuesday-
+# YYYY-MM.json is the release manifest the daily digest reads. The structured
+# dump used to land on top of it.
+JSON="$FLEET_HOME/reports/patchtuesday-$TAG.json"
 
 # Do not send twice for the same release. The guard is keyed on the month, so a
 # rerun after a failure is safe and a second timer firing is a no-op.
@@ -72,7 +75,12 @@ if [ -z "$DRY" ] && [ -z "$FOR_REAL" ] \
 fi
 
 say "building the $TAG synopsis"
-"$PT" "${MONTH_ARG[@]}" --out "$HTML" --text-out "$TXT" --json "$JSON" \
+# A dry run sends nothing, so it must not write the manifest either: written
+# unsent over one already marked sent, it put a release's CVEs back into the
+# next daily digest.
+NOMANIFEST=()
+[ -n "$DRY" ] && NOMANIFEST=(--no-manifest)
+"$PT" "${MONTH_ARG[@]}" "${NOMANIFEST[@]}" --out "$HTML" --text-out "$TXT" --json "$JSON" \
   || fail "cti-patchtuesday exited non-zero (check outbound 443 to blog.qualys.com and www.bleepingcomputer.com)"
 [ -s "$HTML" ] || fail "no HTML written to $HTML"
 

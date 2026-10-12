@@ -103,7 +103,7 @@ func (s *scanner) look(_ context.Context, cve string) (vulnlookup.Result, error)
 	return s.answers[cve], s.errs[cve]
 }
 
-var testCfg = config.Config{JiraProjectKey: "SEC"}
+var testCfg = config.Config{JiraProjectKey: "SEC", JiraAllowCreate: "SEC"}
 
 func previously(fj *fakeJira, key, cve string, hosts ...string) {
 	st := jira.StateFrom(jira.Finding{CVE: cve, Hosts: hosts}, key, time.Now().Add(-48*time.Hour))
@@ -229,6 +229,23 @@ func TestADryRunWritesNothing(t *testing.T) {
 	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), false)
 	if len(fj.comments["SEC-8"]) != 0 || fj.propPuts["SEC-8"] != 0 {
 		t.Error("a dry run wrote to Jira")
+	}
+}
+
+func TestAClosedWriteGateWritesNothing(t *testing.T) {
+	// JIRA_ALLOW_CREATE empty means "do not write to Jira". It used to stop
+	// new tickets only; comments and attachments on existing ones went ahead.
+	fj, c := newFakeJira(t, ticket("SEC-9", "CVE-2026-9999", "indeterminate"))
+	previously(fj, "SEC-9", "CVE-2026-9999", "host-a")
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-9999": {Status: vulnlookup.StatusNotPresent}}}
+	closed := config.Config{JiraProjectKey: "SEC"}
+	refs := followUp(context.Background(), c, closed, sc.look, map[string]bool{}, time.Now(), true)
+	if len(fj.comments["SEC-9"]) != 0 || fj.propPuts["SEC-9"] != 0 {
+		t.Error("a closed write gate still wrote to Jira")
+	}
+	if refs["CVE-2026-9999"].Key != "SEC-9" {
+		t.Errorf("the digest lost the ticket link: %+v", refs)
 	}
 }
 

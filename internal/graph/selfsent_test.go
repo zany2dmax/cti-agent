@@ -59,20 +59,22 @@ func fetch(t *testing.T, items string) []Message {
 }
 
 func TestOurOwnDigestIsRecognisedByItsHeader(t *testing.T) {
+	// From a forwarding address, so only the header can identify it.
 	msgs := fetch(t, `{
 		"id":"1",
 		"subject":"[Sev5] CTI Oct 03: 4 exploited vulns present in the environment",
 		"receivedDateTime":"2026-10-03T10:03:00Z",
-		"from":{"emailAddress":{"address":"`+fleetMailbox+`"}},
+		"from":{"emailAddress":{"address":"relay@example.com"}},
 		"body":{"contentType":"HTML","content":"CVE-2026-94127"},
-		"internetMessageHeaders":[{"name":"`+SelfHeader+`","value":"`+fleetMailbox+`"}]
+		"internetMessageHeaders":[{"name":"`+SelfHeader+`","value":"`+signSelfHeader("secret", fleetMailbox)+`"}]
 	}`)
 
 	if len(msgs) != 1 {
 		t.Fatalf("got %d messages", len(msgs))
 	}
-	if !msgs[0].SelfSent {
-		t.Error("the fleet's own digest was not recognised as self-sent")
+	if !msgs[0].SelfSent || !msgs[0].SelfVerified {
+		t.Errorf("the fleet's own signed digest: SelfSent=%v SelfVerified=%v",
+			msgs[0].SelfSent, msgs[0].SelfVerified)
 	}
 }
 
@@ -81,13 +83,61 @@ func TestTheHeaderMatchIsCaseInsensitive(t *testing.T) {
 	// and Exchange does not promise to preserve ours.
 	msgs := fetch(t, `{
 		"id":"1","subject":"s","receivedDateTime":"2026-10-03T10:03:00Z",
-		"from":{"emailAddress":{"address":"someone@vendor.example"}},
+		"from":{"emailAddress":{"address":"relay@example.com"}},
 		"body":{"contentType":"Text","content":""},
-		"internetMessageHeaders":[{"name":"x-cti-agent-SENT","value":"x"}]
+		"internetMessageHeaders":[{"name":"x-cti-agent-SENT","value":"`+signSelfHeader("secret", fleetMailbox)+`"}]
 	}`)
-	if !msgs[0].SelfSent {
+	if !msgs[0].SelfVerified {
 		t.Error("a lowercased header name was not matched")
 	}
+}
+
+func TestAForgedHeaderIsIgnored(t *testing.T) {
+	// The 1.2 header was the mailbox name and nothing else, and its mere
+	// presence was enough: anyone mailing the inbox could have their message
+	// skipped by the digest and archived by cti-mailbox.
+	swapped := strings.Replace(signSelfHeader("secret", fleetMailbox),
+		fleetMailbox, "other@example.com", 1)
+	for name, value := range map[string]string{
+		"the old bare form":     fleetMailbox,
+		"anything at all":       "x",
+		"a made-up signature":   fleetMailbox + "; n=00112233445566778899aabb; sig=deadbeef",
+		"signed with other key": signSelfHeader("not-our-secret", fleetMailbox),
+		"mailbox swapped":       swapped,
+		"empty":                 "",
+	} {
+		msgs := fetch(t, `{
+			"id":"1","subject":"Advisory","receivedDateTime":"2026-10-03T10:03:00Z",
+			"from":{"emailAddress":{"address":"attacker@vendor.example"}},
+			"body":{"contentType":"Text","content":"CVE-2026-1"},
+			"internetMessageHeaders":[{"name":"`+SelfHeader+`","value":`+jsonString(value)+`}]
+		}`)
+		if msgs[0].SelfSent || msgs[0].SelfVerified {
+			t.Errorf("%s: forged header accepted (SelfSent=%v SelfVerified=%v)",
+				name, msgs[0].SelfSent, msgs[0].SelfVerified)
+		}
+	}
+}
+
+func TestTheSenderBackstopIsNeverVerified(t *testing.T) {
+	// From is a claim the sender makes. It keeps old reports out of the
+	// digest, but it must not be enough for cti-mailbox to move a message.
+	msgs := fetch(t, `{
+		"id":"1","subject":"[Sev5] CTI Oct 03","receivedDateTime":"2026-10-03T10:03:00Z",
+		"from":{"emailAddress":{"address":"`+fleetMailbox+`"}},
+		"body":{"contentType":"HTML","content":"CVE-2026-94127"}
+	}`)
+	if !msgs[0].SelfSent {
+		t.Error("mail from our own mailbox was not caught by the sender check")
+	}
+	if msgs[0].SelfVerified {
+		t.Error("an unsigned message from our address was marked verified")
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func TestOlderSelfSentMailIsCaughtByTheSender(t *testing.T) {
@@ -179,8 +229,16 @@ func TestSendMailStampsTheHeaderOnEverythingItSends(t *testing.T) {
 	if found == "" {
 		t.Fatalf("outgoing mail carried no %s header: %+v", SelfHeader, got.Message.Headers)
 	}
-	if found != validReq().From {
-		t.Errorf("%s = %q, want the sending mailbox %q", SelfHeader, found, validReq().From)
+	if !strings.HasPrefix(found, validReq().From+"; n=") {
+		t.Errorf("%s = %q, want the sending mailbox %q first", SelfHeader, found, validReq().From)
+	}
+	// tokenAndSend's client is built with its own secret; it must verify
+	// against that and nothing else.
+	if !verifySelfHeader(c.clientSecret, found) {
+		t.Errorf("%s = %q does not verify with the sending client's secret", SelfHeader, found)
+	}
+	if verifySelfHeader(c.clientSecret+"x", found) {
+		t.Errorf("%s verified with the wrong secret", SelfHeader)
 	}
 }
 
