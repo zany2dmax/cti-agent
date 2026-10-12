@@ -58,6 +58,13 @@ FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 DAY=$(date +%F)
 RAW="$FLEET_HOME/reports/raw-$DAY.md"
 ENRICHED="$FLEET_HOME/state/enriched-$DAY.json"
+# THE WEEKLY GETS ITS OWN FILE. On a Monday the daily runs at 06:00 and the
+# weekly at 07:00, and both wrote enriched-$DAY.json - so the weekly's rollup
+# overwrote the daily's findings an hour after they were written, and anything
+# that reads "today's enriched file" afterwards (cti-kev picks the newest)
+# read the week instead of the day. Not prefixed enriched-, so cti-kev's
+# newest-by-name never picks it.
+[ "$KIND" = weekly ] && ENRICHED="$FLEET_HOME/state/weekly-enriched-$DAY.json"
 HTML="$FLEET_HOME/reports/digest-$KIND-$DAY.html"
 TXT="$FLEET_HOME/reports/digest-$KIND-$DAY.txt"
 BOARD="$FLEET_CODE/bin/fleet-board"
@@ -96,6 +103,23 @@ if [ "$KIND" = weekly ]; then
   "$DB" rollup --days "$DAYS" > "$ENRICHED" \
     || fail "fleet-db rollup failed - is the findings table populated?"
   [ -s "$ENRICHED" ] || fail "rollup produced nothing at $ENRICHED"
+
+  # TICKET LINKS FOR THE WEEKLY. The weekly does not run cti-jira (that would
+  # comment on every open ticket every Monday for nothing), so it has no ticket
+  # map of its own and rendered with no links at all. The newest daily map
+  # already lists every fleet ticket - cti-jira --follow-up puts them all in -
+  # so the weekly borrows it. Glob order is date order; no pipeline, so
+  # nothing here can fail the lane under pipefail.
+  LATEST_MAP=""
+  for m in "$FLEET_HOME"/state/enriched-[0-9]*-tickets.json; do
+    [ -f "$m" ] && LATEST_MAP="$m"
+  done
+  if [ -n "$LATEST_MAP" ]; then
+    cp "$LATEST_MAP" "${ENRICHED%.json}-tickets.json" && chmod 0600 "${ENRICHED%.json}-tickets.json"
+    say "tickets: links from $(basename "$LATEST_MAP")"
+  else
+    say "tickets: no daily ticket map yet - the weekly renders without ticket links"
+  fi
   say "rollup: $(python3 -c "import json,sys;print(json.load(open('$ENRICHED'))['total'])" 2>/dev/null || echo '?') finding(s) in the window"
 else
 

@@ -1974,6 +1974,22 @@ class TestFileShape(unittest.TestCase):
             "run-appscan alerts before it sends - a cti-alert failure would "
             "then take the report down with it")
 
+    def test_the_weekly_neither_clobbers_the_daily_nor_loses_ticket_links(self):
+        """On a Monday the daily (06:00) and weekly (07:00) both wrote
+        enriched-$DAY.json, so the weekly overwrote the day's findings, and it
+        rendered with no ticket links because it never runs cti-jira."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        text = (root / "fleet-kit" / "fleet" / "bin" / "run-digest").read_text(encoding="utf-8")
+        code = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))
+        self.assertIn('ENRICHED="$FLEET_HOME/state/weekly-enriched-$DAY.json"', code,
+                      "the weekly writes the same enriched file as the daily")
+        self.assertRegex(code, r'cp "\$LATEST_MAP" "\$\{ENRICHED%\.json\}-tickets\.json"',
+                         "the weekly does not borrow the daily ticket map")
+        main = (root / "cmd" / "cti-jira" / "main.go").read_text(encoding="utf-8")
+        self.assertRegex(main, r"range followUp\(",
+                         "cti-jira discards the follow-up's ticket references, so the "
+                         "digest links only tickets for CVEs in today's mail")
+
     def test_the_domains_lane_is_wired_and_read_only(self):
         """The weekly domains check: its own audience, a dry run that does not
         advance the baseline, and a registrar client that never asks for the

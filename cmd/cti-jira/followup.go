@@ -114,14 +114,21 @@ func followUpVerdict(res vulnlookup.Result, err error) (ok bool, why string) {
 // Every failure is a warning. This runs inside run-digest, before the email
 // is rendered, so a Jira or scanner problem must cost follow-up comments and
 // never the digest.
+//
+// It returns a reference for EVERY fleet ticket it found, checked or not, so
+// the digest can link a finding to its ticket on any day. The map used to hold
+// only the tickets the morning path filed or updated from that day's findings,
+// so a ticketed CVE showed its link only on a day it was back in the mail -
+// and the weekly, which skips ticketing, showed almost none.
 func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
-	look hostFiller, done map[string]bool, now time.Time, forReal bool) {
+	look hostFiller, done map[string]bool, now time.Time, forReal bool) map[string]TicketRef {
 
+	refs := map[string]TicketRef{}
 	issues, err := c.Search(ctx, followUpJQL(cfg.JiraProjectKey), followUpMax)
 	if err != nil {
 		logf("WARNING: follow-up: searching for the fleet's tickets failed: %s - "+
 			"no ticket was re-checked this run", safelog.Line(err.Error()))
-		return
+		return refs
 	}
 	if len(issues) >= followUpMax {
 		logf("WARNING: follow-up: %d or more fleet tickets matched; only the first "+
@@ -131,6 +138,11 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 	var checked, already, nolabel, unanswered int
 	for _, issue := range issues {
 		cve := cveFromLabels(issue.Fields.Labels)
+		if cve != "" && cve != testCVE {
+			// Oldest first, so if two tickets carry one CVE the newer wins.
+			refs[cve] = TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
+				Status: issue.Fields.Status.Name}
+		}
 		switch {
 		case cve == "":
 			nolabel++
@@ -184,4 +196,5 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 	logf("follow-up: %d fleet ticket(s) found, %d re-checked, %d already handled "+
 		"this run, %d with no CVE label, %d left alone because the scanner could "+
 		"not answer", len(issues), checked, already, nolabel, unanswered)
+	return refs
 }
