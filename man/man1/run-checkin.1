@@ -1,0 +1,366 @@
+.TH RUN-CHECKIN 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+run-checkin \- fire one orchestrator heartbeat: Claude Code runs /checkin under a fixed tool allowlist
+.SH SYNOPSIS
+.B run\-checkin
+.PP
+.B sudo cti\-agent run\-checkin
+.SH DESCRIPTION
+.B run-checkin
+runs one beat of the orchestrator: Claude Code, non-interactively, with the
+prompt
+.BR /checkin ,
+in
+.B FLEET_HOME
+so that the installed
+.I CLAUDE.md
+and
+.I .claude/skills/checkin
+load. The orchestrator does the judgment work (reading the board, noticing
+a disabled timer, escalating); the timers do the guaranteed work.
+.PP
+It takes no arguments. Any given are ignored, not refused.
+.PP
+It is run by
+.B cti\-agent\-checkin.service
+from
+.BR cti\-agent\-checkin.timer :
+5 minutes after boot, then 2 hours after each beat, with up to 5 minutes'
+random delay. The timer is deliberately not
+.BR Persistent ,
+so missed beats are not replayed after downtime. The unit runs as
+.B ctiagent
+in the
+.B systemd\-journal
+group (so
+.B journalctl
+returns something), with
+.BR UMask=0077 ,
+a 30-minute start timeout, and
+.B cti\-agent\-alert@.service
+on failure.
+.PP
+The steps, in order:
+.TP
+.B 1. Find claude
+.B CLAUDE_BIN
+if set, which must be executable. Otherwise the first executable of
+.IR $HOME/.local/bin/claude ,
+.IR /usr/bin/claude ,
+.IR /usr/local/bin/claude ,
+.IR /opt/homebrew/bin/claude ,
+.IR /snap/bin/claude ,
+then
+.B claude
+on
+.BR PATH .
+Not found: an ERROR board line and exit 1.
+.TP
+.B 2. Credentials
+Counts which of
+.BR ANTHROPIC_API_KEY ,
+.B ANTHROPIC_AUTH_TOKEN
+and
+.B CLAUDE_CODE_OAUTH_TOKEN
+are non-empty. More than one is refused (exit 1), because Claude Code would
+pick one and it may bill a different account from the one intended. None is
+accepted only if a stored login exists: a non-empty
+.I .credentials.json
+in
+.B CLAUDE_CONFIG_DIR
+(default
+.IR $HOME/.claude )
+on Linux, or the
+.B "Claude Code\-credentials"
+Keychain item on macOS. Otherwise exit 1. Each refusal posts an ERROR board
+line. The journal records which credential is in use, by name only, never
+any part of its value.
+.TP
+.B 3. Lock
+The directory
+.I $FLEET_HOME/.checkin.lock
+is created. If it already exists and is under 30 minutes old, the previous
+beat is still running: the runner logs it and exits 0. An older lock is
+taken over. The lock is removed on exit.
+.TP
+.B 4. Budget gate
+If
+.I $FLEET_CODE/bin/cti\-budget
+is executable, runs
+.BR "cti\-budget check \-\-print\-alert\-flag" ,
+which holds the rolling-window ceiling, the daily ceiling and the cooldown
+after a rate limit.
+Exit 3 means hold: the reason is logged and posted to the board as INFO;
+if the last output line is
+.B alert
+(the first beat of a distinct denial) and
+.I cti\-alert
+is executable,
+.B cti\-alert \-\-unit cti\-agent\-checkin.service \-\-kind HOLD
+mails the operator; then exit 0, because a working brake is not a failed
+unit. Any other non-zero status is logged and the beat proceeds (the gate
+fails open). If
+.B cti\-budget
+is absent there is no gate.
+.TP
+.B 5. Beat
+.EX
+claude \-p /checkin \-\-permission\-mode acceptEdits \e
+       \-\-allowedTools "$ALLOWED_TOOLS" </dev/null
+.EE
+.IP
+stdin is closed, so nothing can be approved interactively. Output goes to
+the journal and to a temporary file. The allowlist itself is printed to the
+journal before the beat.
+.TP
+.B 6. Record
+If
+.B cti\-budget
+is present,
+.B cti\-budget record \-\-exit
+.I rc
+.B \-\-output
+.I last\-4000\-bytes
+.B \-\-note checkin
+counts the beat against the ceilings and classifies its output. Exit 4 from
+the record means the account is out of credit: a HOLD, posted to the board
+and sent through
+.BR cti\-alert ,
+and the runner exits 0. Any other record result is ignored and the runner
+exits with Claude Code's status.
+.PP
+Because the runner uses
+.BR "set \-e \-o pipefail" ,
+a non-zero exit from
+.B claude
+in step 5 ends the runner at once with that status: step 6 does not run, the
+beat is not recorded with
+.BR cti\-budget ,
+and the exit-4 HOLD is not reached for that beat.
+.PP
+Everything in
+.I fleet.env
+is exported into Claude Code's environment, Graph and scanner credentials
+included.
+.SS What the orchestrator may run
+.B \-\-permission\-mode acceptEdits
+approves file edits only; every shell command needs a grant, and with no
+terminal anything not granted is denied. The grant is built in the runner,
+not in a settings file the agent could edit, from absolute paths under
+.I $FLEET_CODE/bin
+(shown here as
+.IR bin/ ).
+Each entry is a prefix: the command as written, then any further arguments.
+.TP
+.B bin/fleet\-board
+Any arguments.
+.TP
+.B bin/fleet\-db
+Only the subcommands
+.BR recent ,
+.BR findings ,
+.BR was\-sent ,
+.BR rollup ,
+.BR remember ,
+.BR task ,
+.BR mail ,
+.B ack
+and
+.BR vacuum .
+Not
+.B sent
+(it would mark a digest delivered and stop that day's real send),
+.B finding
+(it rewrites what the digest reports),
+.B note
+or
+.BR init .
+.TP
+.B bin/cti\-budget
+Any arguments, including
+.B record
+and
+.BR status .
+.TP
+.B bin/cti\-kev
+Any arguments.
+.TP
+.B bin/cti\-patchtuesday \-\-dry\-run
+Only with
+.B \-\-dry\-run
+as the first argument. That excludes
+.BR \-\-mark\-sent ,
+which the binary refuses alongside
+.BR \-\-dry\-run .
+.TP
+.B bin/cti\-mailbox
+Exactly that, with no arguments: the dry run. Not
+.BR \-\-for\-real .
+.TP
+.B systemctl list\-timers
+Any further arguments; the prefix cannot become stop or disable.
+.TP
+.B bin/cti\-alert
+Any arguments. The only mail the orchestrator can cause: there is no
+recipient flag, so it reaches
+.B FLEET_OPERATOR_EMAIL
+and nobody else.
+.TP
+.B journalctl
+Any arguments.
+.PP
+Nothing else is granted: not
+.B cti\-mailer
+or
+.BR mailer.py ,
+not any
+.B run\-*
+runner, not
+.BR cti\-jira ,
+.B cti\-appscan
+or
+.BR cti\-domains ,
+and no general shell.
+.B systemctl
+and
+.B journalctl
+are matched by bare name, not by path.
+.SH OPTIONS
+None.
+.B run\-checkin
+takes no arguments; any given are ignored, not refused.
+.SH ENVIRONMENT
+.I fleet.env
+is sourced with every assignment exported, and its values replace the
+process environment, except
+.BR FLEET_HOME ,
+.B FLEET_CODE
+and
+.BR FLEET_FEEDS ,
+which keep the value the unit or wrapper injected.
+.TP
+.BR FLEET_HOME ", " FLEET_CODE ", " FLEET_ENV ", " FLEET_FEEDS
+Fleet layout, as for
+.BR run\-digest (1).
+.B FLEET_HOME
+defaults to
+.IR $HOME/fleet ,
+.B FLEET_CODE
+to
+.BR $FLEET_HOME ,
+.B FLEET_ENV
+to
+.IR $FLEET_HOME/fleet.env .
+.TP
+.B HOME
+Where the default Claude Code locations are searched;
+.I /var/lib/cti\-agent
+under the unit and the wrapper.
+.TP
+.B CLAUDE_BIN
+Absolute path to
+.BR claude ;
+empty searches (section 7).
+.TP
+.BR ANTHROPIC_API_KEY ", " ANTHROPIC_AUTH_TOKEN ", " CLAUDE_CODE_OAUTH_TOKEN
+The credential. At most one may be set (section 7).
+.TP
+.B CLAUDE_CONFIG_DIR
+Where a stored login is looked for.
+Default:\~\fI$HOME/.claude\fR (section 7).
+.TP
+.BR FLEET_BUDGET_WINDOW_HOURS ", " FLEET_BUDGET_WINDOW_BEATS ", " FLEET_BUDGET_DAILY_BEATS ", " FLEET_BUDGET_BACKOFF_BASE_HOURS ", " FLEET_BUDGET_BACKOFF_MAX_HOURS ", " FLEET_BUDGET_FILE
+The ceilings, read by
+.B cti\-budget
+(section 8). Defaults: 4 beats per 5 hours, 14 a day, backoff from 0.5 to
+6 hours.
+.TP
+.B FLEET_OPERATOR_EMAIL
+Where
+.B cti\-alert
+sends a HOLD (section 4).
+.TP
+.B TMPDIR
+Directory for the beat's output copy.
+Default:\~\fI/tmp\fR (private to the unit).
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/.checkin.lock
+The overlap lock, a directory. A lock over 30 minutes old is taken over.
+.TP
+.I /var/lib/cti\-agent/CLAUDE.md
+The orchestrator's standing instructions, installed by the installer.
+.TP
+.I /var/lib/cti\-agent/.claude/skills/checkin/SKILL.md
+The
+.B /checkin
+skill, installed by the installer.
+.TP
+.I /var/lib/cti\-agent/.claude/.credentials.json
+A stored Claude Code login, when no credential variable is set.
+.TP
+.I /var/lib/cti\-agent/budget.json
+The
+.B cti\-budget
+ledger, unless
+.B FLEET_BUDGET_FILE
+names another.
+.TP
+.I /var/lib/cti\-agent/board.md
+The fleet board the runner and the orchestrator post to.
+.TP
+.I $TMPDIR/cti\-checkin.XXXXXX
+The beat's output, passed to
+.B cti\-budget record
+and removed on exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The beat ran and Claude Code exited 0; or it was skipped because the
+previous beat holds the lock; or
+.B cti\-budget
+held it (exit 3 from the check); or the record reported the account out of
+credit (exit 4). The last two post to the board and may alert, but are not
+unit failures.
+.TP
+.B 1
+.B claude
+was not found,
+.B CLAUDE_BIN
+is not executable, more than one credential is set, or none is set and no
+stored login exists.
+.TP
+.I other
+Claude Code's own exit status.
+.SH EXAMPLES
+Run one beat now and watch it:
+.PP
+.EX
+sudo cti\-agent run\-checkin
+.EE
+.PP
+See how much of the budget is left, and why a beat was held:
+.PP
+.EX
+sudo cti\-agent cti\-budget status
+journalctl \-u cti\-agent\-checkin.service \-n 100
+.EE
+.PP
+Check when the next beat is due:
+.PP
+.EX
+systemctl list\-timers cti\-agent\-checkin.timer
+.EE
+.SH SEE ALSO
+.BR cti\-budget (1),
+.BR cti\-alert (1),
+.BR fleet\-board (1),
+.BR fleet\-db (1),
+.BR cti\-kev (1),
+.BR cti\-patchtuesday (1),
+.BR cti\-mailbox (1),
+.BR cti\-agent (1),
+.BR claude (1)
+.PP
+RUNBOOK.md section 9; fleet\-kit/README.md, "Rationing the quota" and
+"Autonomy \(em where the gates are".

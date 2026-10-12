@@ -1998,6 +1998,91 @@ class TestFileShape(unittest.TestCase):
                          "cti-jira discards the follow-up's ticket references, so the "
                          "digest links only tickets for CVEs in today's mail")
 
+    # -- man pages -----------------------------------------------------------
+    #
+    # Every operator command has a page, and every flag or subcommand the code
+    # accepts appears in it. The pages are written from the source; this is
+    # what stops them drifting from it when a flag is added later.
+
+    MAN_GO_FLAG = re.compile(
+        r"\b\w+\.(?:String|Bool|Int|Int64|Uint|Float64|Duration|Var|Func|"
+        r"StringVar|BoolVar|IntVar|Int64Var|DurationVar|Float64Var)\("
+        r"(?:&[\w.\[\]]+,\s*)?\"([a-z][a-z0-9-]*)\"")
+
+    def _man(self, name):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        page = root / "man" / "man1" / (name + ".1")
+        self.assertTrue(page.exists(), f"no man page for {name}: {page}")
+        # roff escapes a hyphen as \-; compare in plain text.
+        return page.read_text(encoding="utf-8").replace("\\-", "-")
+
+    def _assert_documented(self, name, words, kind="flag"):
+        text = self._man(name)
+        missing = []
+        for w in sorted(set(words)):
+            needle = "--" + w if kind == "flag" else w
+            if not re.search(r"(?<![\w-])" + re.escape(needle) + r"(?![\w-])", text):
+                missing.append(needle)
+        self.assertEqual(missing, [], f"{name}.1 does not document: {missing}")
+
+    def test_every_go_command_flag_is_in_its_man_page(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        for d in sorted((root / "cmd").iterdir()):
+            flags = []
+            for f in d.glob("*.go"):
+                if f.name.endswith("_test.go"):
+                    continue
+                flags += self.MAN_GO_FLAG.findall(f.read_text(encoding="utf-8"))
+            with self.subTest(cmd=d.name):
+                self.assertTrue(flags or d.name == "cti-agent", f"no flags found in {d}")
+                self._assert_documented(d.name, flags)
+
+    def test_every_runner_argument_is_in_its_man_page(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        case_label = re.compile(r"^\s*((?:--)?[a-z][a-z0-9-]*(?:\|(?:--)?[a-z][a-z0-9-]*)*)\)", re.M)
+        scripts = sorted((root / "fleet-kit" / "fleet" / "bin").glob("run-*"))
+        scripts.append(root / "fleet-kit" / "bin" / "dev-run")
+        for script in scripts:
+            words = []
+            for label in case_label.findall(script.read_text(encoding="utf-8")):
+                words += [w for w in label.split("|") if w.startswith("--")]
+            with self.subTest(runner=script.name):
+                self._assert_documented(script.name, [w[2:] for w in words])
+
+    def test_every_lane_argument_is_in_its_man_page(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        arg = re.compile(r"add_argument\(\s*\"--([a-z][a-z0-9-]*)\"")
+        for lane in ("enrich.py", "scout.py", "brief.py", "mailer.py"):
+            src = (root / "fleet-kit" / "fleet" / "lanes" / lane).read_text(encoding="utf-8")
+            with self.subTest(lane=lane):
+                self._assert_documented(lane, arg.findall(src))
+
+    def test_every_fleet_tool_subcommand_is_in_its_man_page(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        db = (root / "fleet-kit" / "fleet" / "bin" / "fleet-db").read_text(encoding="utf-8")
+        subs = re.findall(r'^\s*(?:if|elif) cmd == "([a-z-]+)"', db, re.M)
+        self.assertGreater(len(subs), 5)
+        self._assert_documented("fleet-db", subs, kind="word")
+        board = (root / "fleet-kit" / "fleet" / "bin" / "fleet-board").read_text(encoding="utf-8")
+        self._assert_documented("fleet-board", re.findall(r"^\s{2}([a-z]+)\)", board, re.M), kind="word")
+
+    def test_man_pages_have_the_required_sections(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        pages = sorted((root / "man" / "man1").glob("*.1"))
+        self.assertGreaterEqual(len(pages), 20)
+        for page in pages:
+            text = page.read_text(encoding="utf-8")
+            with self.subTest(page=page.name):
+                for sec in ("NAME", "SYNOPSIS", "DESCRIPTION", "EXIT STATUS", "EXAMPLES", "SEE ALSO"):
+                    self.assertRegex(text, r"(?m)^\.SH \"?" + sec + r"\"?\s*$", f"no {sec}")
+                self.assertRegex(text, r"(?m)^\.SH \"?(OPTIONS|COMMANDS)",
+                                 "neither OPTIONS nor COMMANDS")
+
+    def test_the_installer_installs_the_man_pages(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/local/share/man/man1", inst)
+
     def test_the_domains_lane_is_wired_and_read_only(self):
         """The weekly domains check: its own audience, a dry run that does not
         advance the baseline, and a registrar client that never asks for the

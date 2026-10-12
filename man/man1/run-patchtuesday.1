@@ -1,0 +1,303 @@
+.TH RUN-PATCHTUESDAY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+run-patchtuesday \- the monthly Microsoft Patch Tuesday synopsis: build, send, mark the release sent
+.SH SYNOPSIS
+.B run\-patchtuesday
+.RB [ \-\-dry\-run ]
+.RB [ \-\-month
+.IR YYYY\-MM ]
+.RB [ \-\-for\-real ]
+.PP
+.B sudo cti\-agent run\-patchtuesday
+.RI [ options ]
+.SH DESCRIPTION
+.B run-patchtuesday
+builds the month's Patch Tuesday synopsis with
+.BR cti\-patchtuesday (1)
+and mails it to the digest audience. Plain shell, no model involved.
+.PP
+It is run by
+.B cti\-agent\-patchtuesday.service
+from
+.BR cti\-agent\-patchtuesday.timer :
+.B Wed *\-*\-09..15 07:30:00
+with up to 15 minutes' random delay, which is always the Wednesday after
+the second Tuesday.
+.B Persistent=true
+catches up a missed month at boot. The installer replaces the time with
+.B FLEET_PATCHTUESDAY_TIME
+when
+.B FLEET_TIMEZONE
+is set. The unit runs as
+.BR ctiagent ,
+with
+.B cti\-agent\-alert@.service
+on failure.
+.PP
+The steps, in order:
+.TP
+.B 1. Which month
+With
+.BR \-\-month ,
+the tag is the argument as given
+.RB ( 2026\-08 ).
+Without it, the tag comes from
+.B cti\-patchtuesday \-\-subject\-only
+("for October 2026" becomes
+.BR 2026\-October ),
+falling back to the current
+.B YYYY\-MM
+if that cannot be parsed. The tag names the report files and keys the
+already-sent check. The two forms differ, so a timer run and a
+.B \-\-month
+run for the same release use different file names and different keys.
+.TP
+.B 2. Already sent?
+Unless
+.B \-\-dry\-run
+or
+.B \-\-for\-real
+is given,
+.B fleet\-db was\-sent
+.I TAG
+.B patchtuesday
+is asked; if the tag was already sent the runner exits 0.
+.TP
+.B 3. Build
+.B cti\-patchtuesday
+.RB [ \-\-month
+.IR M ]
+.B \-\-out \-\-text\-out \-\-json
+writes the HTML, text and structured digest. It reads the two public
+wrap-ups and correlates the release with the scanner. Without
+.BR \-\-month ,
+the binary also writes the release manifest, unsent. Fatal if it exits
+non-zero or writes no HTML.
+.TP
+.B 4. Subject
+A second
+.B cti\-patchtuesday \-\-subject\-only
+call. That mode returns before exposure is measured, so the mailed subject is
+always the bare
+\(lqMicrosoft Patch Tuesday for \fIMonth Year\fR\(rq,
+without the detection counts the binary can otherwise add.
+.TP
+.B 5. Replay stop
+With
+.B \-\-month
+and neither
+.B \-\-for\-real
+nor
+.BR \-\-dry\-run :
+rendered, not sent. A board INFO line, exit 0. The mailer is not called.
+.TP
+.B 6. Back-dated send check
+With
+.B \-\-month
+and
+.B \-\-for\-real
+(and no
+.BR \-\-dry\-run ):
+if the month is not the most recent release, the send is refused, exit 1,
+with a WARN board line, unless
+.B FLEET_CONFIRM_RESEND
+equals the
+.B \-\-month
+value exactly. A confirmed back-dated send also posts a WARN line.
+.TP
+.B 7. Send
+.B python3 lanes/mailer.py
+with the HTML, text and subject, plus
+.B \-\-dry\-run
+on a dry run. Recipients are the digest audience
+.RB ( DIGEST_TO ,
+.BR DIGEST_CC ,
+gated by
+.BR FLEET_ALLOW_TO ).
+Fatal on failure.
+.TP
+.B 8. Record (not on a dry run)
+.B cti\-patchtuesday \-\-mark\-sent
+marks the release manifest sent, which is what lets the daily digest leave
+the release's CVEs to this email. Failure is a warning only: the daily keeps
+reporting them. Then
+.B fleet\-db sent
+.I TAG
+records the send with the number of present CVEs from the structured digest,
+and a board INFO line is posted. Neither of these can fail the run.
+.PP
+A fatal step prints
+.B FAILED:
+and posts an ERROR line to the board before exiting 1.
+.PP
+A dry run still fetches the sources, queries the scanner, and writes every
+file of step 3, including, without
+.BR \-\-month ,
+the release manifest as unsent: a dry run after the real send resets the
+manifest, and the daily digest starts reporting the release's CVEs again
+until the next
+.BR \-\-mark\-sent .
+It does not send, mark anything sent, or record the send.
+.SH OPTIONS
+Shell arguments, matched exactly, in any order. Any other argument is
+refused with a usage line and exit status 2.
+.TP
+.B \-\-dry\-run
+Build and pass
+.B \-\-dry\-run
+to the mailer; skips the already-sent check and step 8. Takes precedence
+over
+.BR \-\-for\-real .
+.TP
+.BI \-\-month " YYYY\-MM"
+Replay a past release instead of the most recent one. Passed to
+.BR cti\-patchtuesday ,
+which validates it; the runner does not. Never sends without
+.BR \-\-for\-real .
+The value is required: a bare
+.B \-\-month
+at the end of the line stops the runner with an unbound-variable error,
+exit status 1.
+.TP
+.B \-\-for\-real
+With
+.BR \-\-month ,
+allow the send (step 6 still applies). On its own or with
+.BR \-\-month ,
+it also skips the already-sent check, so
+.B run\-patchtuesday \-\-for\-real
+re-sends the current release even if it went out already.
+.SH ENVIRONMENT
+.I fleet.env
+is sourced with every assignment exported, and its values replace the
+process environment, except
+.B FLEET_HOME
+and
+.BR FLEET_CODE ,
+which keep the value the unit or wrapper injected.
+.TP
+.BR FLEET_HOME ", " FLEET_CODE ", " FLEET_ENV
+Fleet layout, as for
+.BR run\-digest (1).
+.TP
+.B FLEET_CONFIRM_RESEND
+Must equal the
+.B \-\-month
+value for a back-dated
+.B \-\-for\-real
+send (section 4). The
+.B cti\-agent
+wrapper keeps only
+.BR FLEET_HOME ,
+.BR FLEET_CODE ,
+.BR FLEET_ENV ,
+.B FLEET_FEEDS
+and
+.B HOME
+at its sudo hop, so a value put on the
+.B sudo
+command line, as the refusal message suggests, does not normally reach the
+runner. Setting it in
+.I fleet.env
+for the one run does.
+.TP
+.BR DIGEST_TO ", " DIGEST_CC ", " FLEET_ALLOW_TO
+Recipients and the send gate, read by
+.B mailer.py
+(section 4).
+.B DIGEST_TO
+is also named in both back-dated messages of step 6, and the runner stops
+with an unbound-variable error there if it is unset.
+.TP
+.B FLEET_ORG
+The organisation name in the report, read by
+.BR cti\-patchtuesday .
+.PP
+Scanner credentials and source URLs are read by
+.BR cti\-patchtuesday (1).
+.SH FILES
+Under
+.IR /var/lib/cti\-agent ,
+all 0600.
+.TP
+.IR reports/patchtuesday\-TAG.html ", " reports/patchtuesday\-TAG.txt
+The rendered synopsis.
+.TP
+.I state/patchtuesday\-TAG.json
+The structured digest. Its
+.I exposure.PresentCVEs
+gives the count recorded with
+.BR "fleet\-db sent" .
+.TP
+.I state/patchtuesday\-YYYY\-MM.json
+The release manifest, written unsent by a run without
+.B \-\-month
+and marked sent by
+.BR \-\-mark\-sent .
+With
+.BR \-\-month ,
+the tag is
+.B YYYY\-MM
+too, so the structured digest of a replay is written to this same path and
+replaces the manifest.
+.TP
+.I state/memory.db
+The digests table behind the already-sent check (kind
+.BR patchtuesday ).
+.TP
+.I board.md
+The fleet board.
+.SH EXIT STATUS
+.TP
+.B 0
+Sent; already sent; a
+.B \-\-month
+replay rendered and not sent; or a dry run completed.
+.TP
+.B 1
+.B cti\-patchtuesday
+is missing or failed, no HTML was written, the send failed, a back-dated
+send was not confirmed, or a
+.B \-\-month
+value is missing.
+.TP
+.B 2
+An unknown argument.
+.SH EXAMPLES
+Preview this month's synopsis without sending:
+.PP
+.EX
+sudo cti\-agent run\-patchtuesday \-\-dry\-run
+.EE
+.PP
+Replay a month already sent by hand and compare (never sends):
+.PP
+.EX
+sudo cti\-agent run\-patchtuesday \-\-month 2026\-08
+sudo less /var/lib/cti\-agent/reports/patchtuesday\-2026\-08.txt
+.EE
+.PP
+The replay also rewrites
+.IR state/patchtuesday\-2026\-08.json ;
+see FILES.
+.PP
+Send this month's synopsis after the timer's run failed; the already-sent
+check makes a repeat a no-op:
+.PP
+.EX
+sudo cti\-agent run\-patchtuesday
+.EE
+.SH SEE ALSO
+.BR cti\-patchtuesday (1),
+.BR fleet\-db (1),
+.BR fleet\-board (1),
+.BR run\-digest (1),
+.BR cti\-agent (1)
+.PP
+The mailer,
+.I lanes/mailer.py
+under
+.IR /opt/cti\-agent .
+.PP
+RUNBOOK.md section 11; fleet\-kit/README.md, "The monthly Patch Tuesday
+synopsis".

@@ -1,0 +1,281 @@
+.TH CTI-DOMAINS 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-domains \- weekly check of the organisation's domains: registrar, DNS, web, TLS and mail records
+.SH SYNOPSIS
+.B cti-domains
+.RB [ \-\-inventory
+.IR FILE ]
+.RB [ \-\-state
+.IR FILE ]
+.RB [ \-\-no\-state\-write ]
+.RB [ \-\-no\-registrar ]
+.RB [ \-\-out
+.IR FILE ]
+.RB [ \-\-text\-out
+.IR FILE ]
+.RB [ \-\-subject\-out
+.IR FILE ]
+.RB [ \-\-csv\-out
+.IR FILE ]
+.RB [ \-\-concurrency
+.IR N ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-retries
+.IR N ]
+.PP
+.B sudo cti\-agent cti\-domains
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-domains
+checks every domain in the inventory file and writes a report.
+It is normally run by
+.BR run\-domains (1)
+from
+.B cti\-agent\-domains.timer
+every Monday at 08:00, and mailed to the security team through
+.BR cti\-mailer (1)
+.BR \-\-lane\ dom .
+.PP
+For each domain it checks:
+.TP
+.B Registrar
+Whether the domain is in the GoDaddy account and whether the account holds
+domains the inventory does not list; status, expiry (30 and 60 days, worse
+with auto-renew off), the transfer lock, and whether the registrar's
+nameservers match DNS.
+Read-only: one call to
+.BR "GET /v1/domains" .
+The auth code that authorises a transfer is never requested.
+.TP
+.B DNS
+A and AAAA records, CNAME, and dangling CNAMEs (a name pointing at a target
+that no longer resolves, which anyone able to claim the target can take over).
+.TP
+.B Web
+HTTPS and HTTP for the domain and its
+.BR www .
+name, following redirects: status, final URL, response time. Live means a
+2xx or 3xx answer. Parked pages are recognised by lander and for-sale
+markers; GoDaddy hosting markers are reported separately as
+.IR registrar-hosted ,
+because real Website Builder sites carry them too.
+.TP
+.B TLS
+The certificate is fetched and verified separately from whether a page
+loaded: verification failures, expiry within 14 or 30 days, issuer and names.
+.TP
+.B Mail
+MX records and whether every MX host resolves; SPF (present, single, not
+.BR +all ,
+at most 10 DNS lookups); DMARC (present, enforcing,
+.BR pct=100 ,
+with
+.BR rua= );
+DKIM keys at the configured selectors, including key size; and the SMTP
+greeting and STARTTLS on the first answering MX.
+A domain marked
+.B send
+in the inventory must be able to send; every other domain must say in DNS
+that it does not
+.RB ( "v=spf1 \-all" ,
+.BR p=reject ),
+and one that publishes senders anyway is reported as a question.
+.TP
+.B Changes
+Nameservers, MX, SPF, DMARC, CNAMEs, live and parked state, certificate
+issuer, registrar fields, and any domain that left the account, compared
+with the previous run's state file.
+.PP
+A lookup that fails is reported as
+.IR "not checked" ,
+never as a missing record, and is never reported as a change.
+.PP
+.B cti-domains
+does not send mail and changes nothing it checks.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-out ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-inventory " FILE"
+The domain inventory: one domain per line,
+.B send
+(or a comma and
+.BR send )
+after a domain that sends mail,
+.B #
+for comments. Names are normalised (scheme, path, port and case removed);
+lines that are not hostnames, duplicates and unknown markers are listed in
+the report under INVENTORY FILE PROBLEMS rather than silently dropped.
+Default:\~\fB$DOMAINS_FILE\fR, else \fI/etc/cti\-agent/domains.txt\fR.
+.TP
+.BI \-\-state " FILE"
+Last run's observations, read for the week-over-week comparison and then
+replaced.
+Default:\~\fI$FLEET_HOME/state/domains\-state.json\fR.
+.TP
+.B \-\-no\-state\-write
+Read the state file but do not replace it. Used by
+.B run\-domains \-\-dry\-run
+so a preview does not become the baseline the next real run compares with.
+.TP
+.B \-\-no\-registrar
+Skip GoDaddy. DNS, web, TLS and mail checks still run; the subject says
+.BR "[REGISTRAR NOT CHECKED]" .
+.TP
+.BI \-\-out " FILE"
+Write the HTML report to
+.IR FILE ,
+mode 0600.
+.TP
+.BI \-\-text\-out " FILE"
+Write the plain-text report to
+.IR FILE ,
+mode 0600. If neither
+.B \-\-out
+nor
+.B \-\-text\-out
+is given, the text report goes to standard output.
+.TP
+.BI \-\-subject\-out " FILE"
+Write the subject line to
+.IR FILE ,
+so the runner does not probe every domain a second time to build it.
+.TP
+.BI \-\-csv\-out " FILE"
+Write every probed host as CSV, mode 0600. The first 28 columns are the
+original
+.B sitecheck.go
+columns in its order and under its names; the lane's additions follow.
+Cells beginning with
+.BR = ,
+.BR + ,
+.B \-
+or
+.B @
+are prefixed with
+.B '
+so a spreadsheet does not execute them.
+.TP
+.BI \-\-concurrency " N"
+Domains probed at once.
+Default:\~\fB8\fR.
+.TP
+.BI \-\-timeout " DURATION"
+Timeout for one web request, TLS handshake or SMTP greeting, as a Go
+duration
+.RB ( 10s ,
+.BR 1m ).
+Each domain's whole probe is bounded at six times this.
+Default:\~\fB10s\fR.
+.TP
+.BI \-\-retries " N"
+How many times a web request that got no response at all is repeated. A
+response of any status is an answer and is never retried.
+Default:\~\fB1\fR.
+.SH ENVIRONMENT
+Read from the process environment, after
+.I fleet.env
+is loaded (existing environment variables win).
+.TP
+.B DOMAINS_FILE
+Inventory path when
+.B \-\-inventory
+is not given.
+.TP
+.B GODADDY_PAT
+GoDaddy Personal Access Token, scope
+.B domains.domain:read
+only. Unset: registrar checks are skipped and the subject says so.
+.TP
+.B DOMAINS_DNS_SERVERS
+DNS servers to ask, as IPs with optional ports, comma- or space-separated.
+Empty: the public resolvers 1.1.1.1 and 8.8.8.8, because a box on the
+corporate network may resolve the organisation's own domains through an
+internal zone without SPF or DMARC.
+.B system
+uses this host's resolver. The web and SMTP probes connect to the addresses
+these servers return.
+.TP
+.B DOMAINS_DKIM_SELECTORS
+DKIM selectors to probe, comma- or space-separated. Empty: selector1,
+selector2, google, default, mail, s1, s2, k1, k2, k3, dkim. A key at any
+other selector is invisible to the check.
+.TP
+.B DOMAINS_DMARC_RUA
+When set, every sending domain's DMARC
+.B rua=
+must include this address. Empty: any
+.B rua=
+satisfies the check.
+.TP
+.B DOMAINS_SMTP
+.B off
+disables the SMTP greeting and STARTTLS probe. When every probe fails to
+connect, the report says once that outbound port 25 appears blocked.
+.TP
+.B DOMAINS_SMTP_PORT
+Port for the SMTP probe. Default:\~\fB25\fR.
+.TP
+.BR FLEET_HOME ", " FLEET_ENV ", " FLEET_ORG
+Fleet layout, the
+.I fleet.env
+path, and the organisation name in the report banner.
+.SH FILES
+.TP
+.I /etc/cti\-agent/domains.txt
+The inventory. Kept outside the repository, which is public;
+.B root:ctiagent
+0640.
+.TP
+.I /etc/cti\-agent/fleet.env
+Settings and the GoDaddy token.
+.TP
+.I /var/lib/cti\-agent/state/domains\-state.json
+Last run's observations, 0600. Delete it to start a fresh baseline.
+.TP
+.I /var/lib/cti\-agent/state/domains\-YYYY\-MM\-DD.{html,txt,csv,subject}
+The report files written by
+.BR run\-domains ,
+0600.
+.SH EXIT STATUS
+.TP
+.B 0
+The report was written. A registrar that could not be reached is not a
+failure; the report says it was not checked.
+.TP
+.B 1
+Nothing usable was produced: the inventory is missing, unreadable or empty;
+.B DOMAINS_DNS_SERVERS
+or
+.B DOMAINS_SMTP_PORT
+is invalid; the state file is corrupt (move it aside to start over); or a
+report file could not be written.
+.SH EXAMPLES
+Preview this week's report without sending or moving the baseline:
+.PP
+.EX
+sudo cti\-agent run\-domains \-\-dry\-run
+sudo less /var/lib/cti\-agent/state/domains\-$(date \-u +%F).txt
+.EE
+.PP
+Check DNS and mail only, printing the text report:
+.PP
+.EX
+sudo cti\-agent cti\-domains \-\-no\-registrar \-\-no\-state\-write
+.EE
+.PP
+Start a fresh baseline after changing resolvers:
+.PP
+.EX
+sudo rm /var/lib/cti\-agent/state/domains\-state.json
+.EE
+.SH SEE ALSO
+.BR run\-domains (1),
+.BR cti\-mailer (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11g; fleet\-kit/README.md, "The weekly domains check".

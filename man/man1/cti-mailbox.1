@@ -1,0 +1,281 @@
+.TH CTI-MAILBOX 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-mailbox \- daily tidy of the shared CTI mailbox: archive processed advisories, delete auto-replies, leave the rest
+.SH SYNOPSIS
+.B cti-mailbox
+.RB [ \-\-for\-real ]
+.RB [ \-\-json
+.IR FILE ]
+.RB [ \-\-backlog\-threshold
+.IR N ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.PP
+.B sudo cti\-agent cti\-mailbox
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-mailbox
+is the only command in the fleet that modifies the mailbox. It is run by
+.BR run\-mailbox\-cleanup (1)
+from
+.B cti\-agent\-mailbox.timer
+every day at 07:00, an hour after the digest; the unit passes
+.B \-\-for\-real
+explicitly.
+.PP
+.B Without
+.B \-\-for\-real
+.B nothing is moved.
+The plan is computed and printed in full, and the output says
+.BR "DRY RUN" .
+.PP
+Before looking at the mailbox it checks the processed-message log, which the
+digest writes as it reads mail. It refuses to act, and exits 0, when no
+message carrying a CVE was recorded as read today (in
+.BR FLEET_TIMEZONE );
+a day on which the agent read nothing is a day to leave the inbox alone.
+A missing log counts as empty. A log that does not parse, or no way to locate it (neither
+.B FLEET_HOME
+nor
+.BR FLEET_PROCESSED_LOG ),
+stops the run.
+.PP
+It then reads every message received in
+.B GRAPH_FOLDER
+within the last
+.B MAILBOX_LOOKBACK_HOURS
+and decides each one by these rules, in this order:
+.TP
+.B 0. Sent by this fleet: archive
+The message carries the
+.B X\-CTI\-Agent\-Sent
+header (any value), or its sender is the mailbox itself. The fleet's own
+digests come back to the mailbox they are read from and are never recorded as
+processed, so this rule precedes rule 1 and is not subject to the archive
+grace.
+.TP
+.B 1. No processing record: leave
+Absolute. Nothing the agent has no record of reading is ever moved.
+.TP
+.B 2. Carried a CVE: archive, never delete
+But only once it has been in the mailbox for
+.BR MAILBOX_MIN_AGE_HOURS ;
+until then it is left, with the reason stated.
+.TP
+.B 3. Declared an automatic reply: Deleted Items
+Only on headers:
+.B Auto\-Submitted: auto\-replied
+or
+.BR auto\-notified ,
+or
+.B X\-Auto\-Response\-Suppress: All
+together with an
+.B Auto\-Submitted
+value containing
+.BR auto .
+Subject text is never used.
+.B auto\-generated
+mail (vendor advisories) is not an auto-reply. Not subject to the grace.
+.TP
+.B 4. Anything else: leave
+Read by the agent but carrying no CVE: a reported phish, an alert or a
+colleague's mail. Somebody else's job.
+.PP
+Every line of the plan states the action, the subject (sanitised and cut to
+60 characters, because subjects are attacker-controlled) and the reason.
+The summary splits the leave count into
+.I never read
+and
+.IR "not CTI mail" ;
+only the first can indicate a fault.
+.PP
+Nothing here can permanently delete mail. The Graph client implements
+move-to-Archive and move-to-Deleted-Items and nothing else; emptying Deleted
+Items is a person's job. Processing records older than 14 days are pruned by
+the digest, after which a message can no longer be moved on their strength.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-for\-real ),
+and a value may follow
+.B =
+or a space.
+.TP
+.B \-\-for\-real
+Actually move the messages in the plan. Archive goes to the well-known
+.B archive
+folder, delete to
+.BR deleteditems .
+Each move prints the new message ID, or
+.B FAILED
+with the Graph error, and a final
+.B moved\~N, failed\~N, left\~N
+line follows.
+Default:\~\fBfalse\fR (dry run).
+.TP
+.BI \-\-json " FILE"
+Also write the plan to
+.IR FILE ,
+mode 0600, as JSON:
+.BR mailbox ,
+.BR at ,
+.B applied
+(whether
+.B \-\-for\-real
+was given),
+.BR moved ,
+.BR failed ,
+.B counts
+and every decision. Written after the moves, so it records what happened.
+A write failure is reported on standard error and does not change the exit
+status. Not written when the run refuses for want of a processed message.
+.TP
+.BI \-\-backlog\-threshold " N"
+Warn on standard error when at least
+.I N
+messages in the window have no processing record. A growing backlog is what
+an agent that has stopped reading the mailbox looks like from outside.
+Mail the agent read and left is not counted.
+.B 0
+or less disables the warning.
+.B run\-mailbox\-cleanup
+passes
+.B FLEET_MAILBOX_BACKLOG_THRESHOLD
+here when it is set.
+Default:\~\fB25\fR.
+.TP
+.BI \-\-timeout " DURATION"
+One deadline for the whole Graph conversation, reading and every move, as a
+Go duration
+.RB ( 90s ,
+.BR 5m ).
+Default:\~\fB2m0s\fR.
+.SH ENVIRONMENT
+Read from the process environment, after
+.I fleet.env
+is loaded (existing environment variables win).
+Graph settings are in section 1 of
+.IR fleet.env ,
+the cleanup window in section 10, the rest under
+.IR "mailbox cleanup" .
+Qualys settings are not needed.
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET ", " GRAPH_MAILBOX
+Required. The app registration needs
+.B Mail.ReadWrite
+(application, admin-consented) for the moves; without it every move fails
+with 403 and the run exits 1.
+.TP
+.B GRAPH_FOLDER
+The folder read. Default:\~\fBinbox\fR.
+.TP
+.B MAILBOX_LOOKBACK_HOURS
+How far back to look, in whole hours. Must exceed the time between runs.
+Default:\~\fB72\fR.
+.TP
+.B MAILBOX_MIN_AGE_HOURS
+How long a processed advisory stays in the inbox before it is archived.
+Must be less than
+.BR MAILBOX_LOOKBACK_HOURS ,
+and, unless it is
+.BR 0 ,
+at least
+.B GRAPH_LOOKBACK_HOURS
+so the digest has finished with a message before it is filed; the command
+refuses to start otherwise.
+.B 0
+disables the grace and archives on sight.
+Default:\~\fB48\fR.
+.TP
+.BR GRAPH_LOOKBACK_HOURS ", " QUALYS_KB_MAX_AGE_HOURS
+Not used by this command, but validated by the shared loader: each must be a
+positive integer or the run fails. Defaults:\~\fB24\fR and \fB168\fR.
+.TP
+.B FLEET_PROCESSED_LOG
+Path of the processed-message log.
+Default:\~\fI$FLEET_HOME/state/processed\-messages.json\fR.
+.TP
+.B FLEET_TIMEZONE
+IANA zone that decides what
+.I today
+means for the processed-today check. Empty or unknown: the system zone (an
+unknown name is reported).
+.TP
+.BR FLEET_HOME ", " FLEET_ENV
+Fleet layout and the
+.I fleet.env
+path. With neither
+.B FLEET_HOME
+nor
+.B FLEET_PROCESSED_LOG
+set the command refuses to run.
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Settings and the Graph client secret;
+.B root:ctiagent
+0640.
+.TP
+.I /var/lib/cti\-agent/state/processed\-messages.json
+Which messages a completed digest run read, whether each carried a CVE, and
+whether the sender declared it an auto-reply. 0600. The lane's entire
+authority to move anything: no entry, no move. If it is corrupt, delete it;
+the next digest rebuilds it and the inbox is not tidied until then.
+.TP
+.I /var/lib/cti\-agent/state/mailbox\-cleanup\-YYYY\-MM\-DD.json
+The plan written by
+.B run\-mailbox\-cleanup
+through
+.BR \-\-json ,
+0600.
+.SH EXIT STATUS
+.TP
+.B 0
+The plan was printed (dry run), or every move in it succeeded, or the run
+refused because no CTI email was processed today. The refusal is deliberate:
+a non-zero exit would mark the unit failed and send an alert about a lane
+that behaved correctly. A backlog warning does not change the status.
+.TP
+.B 1
+Configuration is missing or invalid; neither
+.B FLEET_HOME
+nor
+.B FLEET_PROCESSED_LOG
+is set; the processed-message log cannot be read or does not parse;
+the mailbox could not be read; or at least one move failed (usually a missing
+.B Mail.ReadWrite
+grant).
+.TP
+.B 2
+Unknown option or bad value (Go's flag package).
+.SH EXAMPLES
+Show what today's cleanup would do, moving nothing:
+.PP
+.EX
+sudo cti\-agent cti\-mailbox
+.EE
+.PP
+The same through the runner, which also posts the summary to the board:
+.PP
+.EX
+sudo cti\-agent run\-mailbox\-cleanup
+.EE
+.PP
+Apply it, keeping the plan:
+.PP
+.EX
+sudo cti\-agent cti\-mailbox \-\-for\-real \e
+  \-\-json /var/lib/cti\-agent/state/mailbox\-cleanup\-$(date +%F).json
+.EE
+.PP
+Check the Graph roles before the first real run:
+.PP
+.EX
+sudo cti\-agent cti\-mailer \-\-check
+.EE
+.SH SEE ALSO
+.BR run\-mailbox\-cleanup (1),
+.BR run\-digest (1),
+.BR cti\-mailer (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 10, "Rolling out mailbox cleanup".

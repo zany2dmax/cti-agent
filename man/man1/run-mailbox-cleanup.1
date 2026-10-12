@@ -1,0 +1,164 @@
+.TH RUN-MAILBOX-CLEANUP 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+run-mailbox-cleanup \- daily tidy of the CTI mailbox: archive what was processed, delete auto-replies
+.SH SYNOPSIS
+.B run\-mailbox\-cleanup
+.RB [ \-\-for\-real ]
+.PP
+.B sudo cti\-agent run\-mailbox\-cleanup
+.RB [ \-\-for\-real ]
+.SH DESCRIPTION
+.B run-mailbox-cleanup
+runs
+.BR cti\-mailbox (1)
+against the shared CTI mailbox and reports the result on the board.
+.B cti\-mailbox
+moves advisories the digest has a record of reading to Archive, moves
+header-confirmed out-of-office replies to Deleted Items, and leaves
+everything else where it is. It refuses to act on a day with no processed
+CTI email, and that refusal is a success.
+.PP
+It is a dry run unless
+.B \-\-for\-real
+is given. This is the only lane that changes the mailbox, so the effect has
+to be asked for: a unit file that loses its argument does nothing.
+.PP
+It is run by
+.B cti\-agent\-mailbox.service
+as
+.B run\-mailbox\-cleanup \-\-for\-real
+from
+.BR cti\-agent\-mailbox.timer ,
+every day at 07:00, an hour after the digest that writes the
+processed-message log it depends on. The timer is not
+.BR Persistent :
+a cleanup missed while the box was off is not run at boot. The unit runs as
+.BR ctiagent ,
+with a 10-minute start timeout and
+.B cti\-agent\-alert@.service
+on failure.
+.PP
+The steps, in order:
+.TP
+.B 1.
+Checks that
+.I $FLEET_CODE/bin/cti\-mailbox
+is executable; fatal if not.
+.TP
+.B 2.
+Runs
+.B cti\-mailbox
+.RB [ \-\-for\-real ]
+.RB [ \-\-backlog\-threshold
+.IR N ]
+.B \-\-json
+.IR plan ,
+capturing its standard output and standard error together. The output is
+printed once the binary finishes. A non-zero exit is fatal; it usually means
+the app registration lacks
+.B Mail.ReadWrite
+with admin consent.
+.TP
+.B 3.
+Posts the binary's summary line (archive, delete and leave counts), or
+"nothing to do", to the board for
+.BR @you ,
+marked
+.B DRY RUN
+when it was one.
+.TP
+.B 4.
+If the binary reported an unread backlog at or above the threshold (mail
+with no processing record), posts that line as a separate WARN: it is the
+sign that the digest stopped reading the mailbox.
+.PP
+A fatal step prints
+.B FAILED:
+and posts an ERROR line to the board before exiting 1.
+.PP
+The dry run reads the mailbox, writes the plan file and posts the board
+line. It moves and deletes nothing.
+.SH OPTIONS
+A shell argument, matched exactly. Any other argument is refused with a
+usage line and exit status 2.
+.TP
+.B \-\-for\-real
+Pass
+.B \-\-for\-real
+to
+.BR cti\-mailbox ,
+which then moves the mail its plan lists. Without it nothing is moved.
+.SH ENVIRONMENT
+.I fleet.env
+is sourced with every assignment exported, and its values replace the
+process environment, except
+.B FLEET_HOME
+and
+.BR FLEET_CODE ,
+which keep the value the unit or wrapper injected.
+.TP
+.BR FLEET_HOME ", " FLEET_CODE ", " FLEET_ENV
+Fleet layout, as for
+.BR run\-digest (1).
+.TP
+.B FLEET_MAILBOX_BACKLOG_THRESHOLD
+When set and non-empty, passed as
+.BR \-\-backlog\-threshold ;
+when empty, the binary's own default applies (section 4, "mailbox
+cleanup").
+Default:\~\fB25\fR.
+.PP
+Graph credentials and the cleanup window (sections 1 and 10) are read by
+.BR cti\-mailbox (1).
+.SH FILES
+Under
+.IR /var/lib/cti\-agent/state .
+.TP
+.I mailbox\-cleanup\-DATE.json
+The plan:
+what was archived, deleted and left, and why. 0600. Written on dry and real
+runs alike, but not when the binary refuses because no CTI email was
+processed today; the board line names the path either way.
+.I DATE
+is the local date, so a later run the same day replaces it.
+.TP
+.I processed\-messages.json
+The digest's record of which messages it read, and the only authority
+.B cti\-mailbox
+has to move one.
+.TP
+.I /var/lib/cti\-agent/board.md
+The fleet board.
+.SH EXIT STATUS
+.TP
+.B 0
+.B cti\-mailbox
+succeeded, including when it decided to do nothing.
+.TP
+.B 1
+.B cti\-mailbox
+is missing or exited non-zero, for example on a failed move or an
+unreadable processed-message log.
+.TP
+.B 2
+An unknown argument.
+.SH EXAMPLES
+See what tomorrow's cleanup would move:
+.PP
+.EX
+sudo cti\-agent run\-mailbox\-cleanup
+sudo less /var/lib/cti\-agent/state/mailbox\-cleanup\-$(date +%F).json
+.EE
+.PP
+Run the real cleanup by hand:
+.PP
+.EX
+sudo cti\-agent run\-mailbox\-cleanup \-\-for\-real
+.EE
+.SH SEE ALSO
+.BR cti\-mailbox (1),
+.BR run\-digest (1),
+.BR fleet\-board (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 10; fleet\-kit/README.md, "Mailbox cleanup".

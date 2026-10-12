@@ -1,0 +1,343 @@
+.TH CTI-BUDGET 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-budget \- ration the heartbeat's share of the Claude subscription
+.SH SYNOPSIS
+.B cti-budget check
+.RB [ \-\-quiet ]
+.RB [ \-\-print\-alert\-flag ]
+.PP
+.B cti-budget record
+.RB [ \-\-outcome
+.IR OUTCOME ]
+.RB [ \-\-exit
+.IR N ]
+.RB [ \-\-output
+.IR TEXT ]
+.RB [ \-\-note
+.IR TEXT ]
+.PP
+.B cti-budget status
+.RB [ \-\-json ]
+.PP
+.B sudo cti\-agent cti\-budget status
+.SH DESCRIPTION
+The fleet's heartbeat and its operator draw on the same Claude quota, from
+different machines, and nothing reports how much is left. So the fleet
+takes a fixed slice and stops itself at the edge of it.
+.B cti-budget
+keeps the ledger that enforces this: a JSON file of recent beats with their
+outcomes, a cooldown deadline, and a record of which denial was last
+alerted on.
+.PP
+It is called by
+.BR run\-checkin (1)
+on every beat:
+.B check
+before invoking Claude Code (exit 3 means skip this beat), then
+.B record
+afterwards with the invocation's exit status and output. The orchestrator
+may also run it (it is on its tool allowlist), and the operator runs
+.B status
+by hand.
+.PP
+A beat is allowed unless, in this order:
+.IP 1. 4
+a cooldown is in force (set after a rate limit or an exhausted balance);
+.IP 2. 4
+the rolling window already holds
+.B FLEET_BUDGET_WINDOW_BEATS
+charged beats; or
+.IP 3. 4
+today (from local midnight) already holds
+.B FLEET_BUDGET_DAILY_BEATS
+charged beats.
+.PP
+Outcomes
+.B ok
+and
+.B ratelimit
+are charged; beats that ended in
+.B error
+or
+.B exhausted
+are stored but do not count against the ceilings, since they did not spend
+quota.
+.PP
+Beats older than 48 hours are pruned whenever the ledger is written. The
+ledger is written atomically, mode 0600, and its directory is created 0750
+if missing. A ledger that is not valid JSON is reported and replaced by an
+empty one; that loses the history, and the next write makes it permanent.
+.PP
+.B cti-budget
+does not load
+.IR fleet.env .
+Under
+.B cti\-agent\-checkin.service
+the settings arrive through
+.BR EnvironmentFile= ,
+but run through the
+.BR cti\-agent (1)
+wrapper it sees
+.B FLEET_HOME
+and none of the
+.B FLEET_BUDGET_*
+settings: every ceiling is at its built-in default and the ledger is
+.IR $FLEET_HOME/budget.json ,
+whatever
+.I fleet.env
+says. When the
+.B FLEET_BUDGET_*
+settings have been changed, a hand-run
+.B status
+reports the defaults, not what the timer is enforcing.
+.PP
+It does not call Claude, and it never stops or starts a unit.
+.SH COMMANDS
+.TP
+.BR check " [" \-\-quiet "] [" \-\-print\-alert\-flag ]
+Decide whether the next beat may run. Allowed: prints
+.I "budget ok: N/M in window, N/M today"
+(unless
+.BR \-\-quiet )
+and exits 0. Denied: prints
+.I "budget denied: REASON"
+and, when known,
+.IR "next attempt viable after TIME" ,
+and exits 3. Reads the ledger and writes it only with
+.BR \-\-print\-alert\-flag .
+.TP
+.BR record " [" \-\-outcome " \fIOUTCOME\fR] [" \-\-exit " \fIN\fR] [" \-\-output " \fITEXT\fR] [" \-\-note " \fITEXT\fR]"
+Add one beat to the ledger and save it. Prints
+.IR "recorded OUTCOME" ,
+and
+.I "cooling off until TIME"
+when a cooldown is in force. The outcome's effect:
+.RS
+.TP
+.B ok
+Clears the cooldown and the alert memory.
+.TP
+.B ratelimit
+Cooldown of
+.B FLEET_BUDGET_BACKOFF_BASE_HOURS
+doubled for each consecutive rate limit before it, capped at
+.BR FLEET_BUDGET_BACKOFF_MAX_HOURS .
+.TP
+.B exhausted
+The account is out of credit. Cooldown of
+.BR FLEET_BUDGET_BACKOFF_MAX_HOURS ,
+a line saying waiting will not fix it (add credit or repoint
+.BR CLAUDE_CODE_OAUTH_TOKEN ),
+and exit 4.
+.TP
+.B error
+Stored, nothing else changes.
+.RE
+.TP
+.BR status " [" \-\-json ]
+Report without changing anything: the ledger path, the limits, beats stored,
+beats in the last 48 hours and how many of those were charged (the
+difference errored without spending quota), the newest beat and its age,
+and whether the next beat would run
+.RB ( ready
+or
+.BR holding ).
+.B NOT BEATING
+is printed when the newest beat is more than six hours old: the timer or
+the lane is broken, not the budget. Always exits 0.
+.SH OPTIONS
+Each command has its own options, given after the command name. Go's flag
+syntax: each option may also be written with a single dash
+.RB ( \-quiet ),
+and a value may follow
+.B =
+or a space. An unknown option, or
+.BR \-\-help ,
+prints the command's usage and exits 1.
+.SS check
+.TP
+.B \-\-quiet
+Print nothing when the beat is allowed. A denial is always printed.
+Default:\~off.
+.TP
+.B \-\-print\-alert\-flag
+On a denial, print
+.B alert
+or
+.B silent
+as the last line of standard output:
+.B alert
+the first time a given denial (identified by its retry time) is seen,
+.B silent
+after that. The ledger is saved so the next beat remembers. This is how
+.B run\-checkin
+sends one
+.BR "cti\-alert \-\-kind HOLD"
+per denial rather than one per beat. If that line cannot be written the
+exit status is still 3: the brake matters more than the alert.
+Default:\~off.
+.SS record
+.TP
+.BI \-\-outcome " OUTCOME"
+.BR ok ,
+.BR ratelimit ,
+.B error
+or
+.BR exhausted ;
+anything else exits 1. When omitted, the outcome is classified from
+.B \-\-exit
+and
+.BR \-\-output :
+exit status 0 is
+.BR ok ;
+otherwise output mentioning a credit balance, payment or billing (or 402)
+is
+.BR exhausted ,
+output mentioning a rate, usage or quota limit, 429, overload or
+capacity is
+.BR ratelimit ,
+and anything else is
+.BR error .
+Default:\~empty (classify).
+.TP
+.BI \-\-exit " N"
+Exit status of the Claude Code invocation, used to classify. Because it
+defaults to 0, a bare
+.B cti-budget record
+records a charged
+.B ok
+beat.
+Default:\~\fB0\fR.
+.TP
+.BI \-\-output " TEXT"
+The invocation's standard output and error, searched case-insensitively to
+classify.
+Default:\~empty.
+.TP
+.BI \-\-note " TEXT"
+Short free text stored with the beat.
+Default:\~empty.
+.SS status
+.TP
+.B \-\-json
+Print one JSON object instead:
+.BR ledger ,
+.BR allow ,
+.BR reason ,
+.B retry_after
+(the zero time when there is none),
+.BR beats_stored ,
+.BR beats_recent ,
+.BR beats_charged ,
+.BR not_beating ,
+.B last_beat
+(null when there is none) and
+.BR limits .
+Alert on
+.BR not_beating ,
+not on
+.BR allow ,
+which a stopped fleet always satisfies.
+Default:\~off.
+.SH ENVIRONMENT
+Read from the process environment only; see DESCRIPTION for what that means
+under the wrapper. All in
+.I fleet.env
+section 8 except
+.BR FLEET_HOME .
+A value that is not a positive number is reported on standard error and the
+default is used.
+.TP
+.B FLEET_BUDGET_WINDOW_HOURS
+Length of the rolling window, in hours (fractions allowed).
+Default:\~\fB5\fR.
+.TP
+.B FLEET_BUDGET_WINDOW_BEATS
+Charged beats allowed per window. Default:\~\fB4\fR.
+.TP
+.B FLEET_BUDGET_DAILY_BEATS
+Charged beats allowed per calendar day, local time.
+Default:\~\fB14\fR.
+.TP
+.B FLEET_BUDGET_BACKOFF_BASE_HOURS
+First cooldown after a rate limit, in hours. Default:\~\fB0.5\fR.
+.TP
+.B FLEET_BUDGET_BACKOFF_MAX_HOURS
+Longest cooldown, and the cooldown after an exhausted balance.
+Default:\~\fB6\fR.
+.TP
+.B FLEET_BUDGET_FILE
+The ledger. Default:\~\fI$FLEET_HOME/budget.json\fR.
+.TP
+.B FLEET_HOME
+Directory for the default ledger. Unset means the current directory.
+Section 3.
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/budget.json
+The ledger,
+.B ctiagent
+0600. Delete it to clear every ceiling and cooldown at once.
+.SH EXIT STATUS
+.TP
+.B 0
+.BR check :
+the beat may run.
+.BR record :
+recorded.
+.BR status :
+always.
+.TP
+.B 1
+No command or an unknown one; an unknown option or
+.BR \-\-help ;
+an invalid
+.BR \-\-outcome ;
+or
+.B record
+could not save the ledger.
+.B run\-checkin
+treats this from
+.B check
+as "the gate is broken" and proceeds with the beat.
+.TP
+.B 2
+The ledger exists but cannot be read (for example, wrong owner): the program
+stops with a Go runtime error rather than a message. As with 1,
+.B run\-checkin
+then proceeds with the beat unrationed.
+.TP
+.B 3
+.BR check :
+denied, skip this beat. Distinct from 1 so a working brake is never
+reported as a failed unit.
+.TP
+.B 4
+.BR record :
+the outcome was
+.BR exhausted .
+The caller should hold and escalate; waiting will not help.
+.SH EXAMPLES
+Is the heartbeat being rationed, and when did it last run?
+.PP
+.EX
+sudo cti\-agent cti\-budget status
+.EE
+.PP
+For a monitor:
+.PP
+.EX
+sudo cti\-agent cti\-budget status \-\-json
+.EE
+.PP
+Clear a cooldown after adding credit:
+.PP
+.EX
+sudo rm /var/lib/cti\-agent/budget.json
+.EE
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR cti\-alert (1),
+.BR cti\-agent (1)
+.PP
+fleet\-kit/README.md, "Rationing the quota"; RUNBOOK.md section 15.

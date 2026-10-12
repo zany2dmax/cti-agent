@@ -1,0 +1,468 @@
+.TH CTI-AGENT 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-agent \- run a fleet command by hand as the service account; and the daily mailbox ingest binary
+.SH SYNOPSIS
+.B sudo cti\-agent
+.I command
+.RI [ args ...]
+.PP
+.B sudo cti\-agent
+.IB lane .py
+.RI [ args ...]
+.PP
+.I /opt/cti\-agent/agent/cti\-agent
+.RB [ \-\-lookback
+.IR DURATION ]
+.SH DESCRIPTION
+Two programs share this name.
+.SS The operator wrapper
+.I /usr/local/bin/cti\-agent
+is a short bash script written by
+.B install\-fedora.sh
+(root-owned, mode 0755). It is the single supported way to run a fleet
+command by hand on the Fedora layout, with the same paths the systemd units
+set. Run it with
+.BR sudo :
+it hops to the service account itself, which needs no password only when the
+caller is already root.
+.PP
+In order, it:
+.IP 1. 4
+Sets
+.B set \-euo pipefail
+and exports exactly five variables:
+.RS
+.EX
+FLEET_HOME=/var/lib/cti\-agent
+FLEET_CODE=/opt/cti\-agent
+FLEET_ENV=/etc/cti\-agent/fleet.env
+FLEET_FEEDS=/etc/cti\-agent/feeds.txt
+HOME=/var/lib/cti\-agent
+.EE
+.RE
+.IP 2. 4
+Changes to
+.IR /var/lib/cti\-agent ,
+as the units do with
+.BR WorkingDirectory= ,
+so a relative path in
+.I fleet.env
+resolves to the same file for a hand run and a timer run.
+.IP 3. 4
+Takes the first argument as the command name (exiting with a usage message
+if there is none) and passes the rest through unchanged.
+.IP 4. 4
+Replaces itself
+.RB ( exec )
+with the command described under COMMANDS, run through
+.RS
+.EX
+sudo \-u ctiagent \e
+  \-\-preserve\-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME
+.EE
+.RE
+.PP
+Only those five variables cross the
+.B sudo
+boundary; everything else in the caller's environment is reset by sudo.
+.B GRAPH_LOOKBACK_HOURS=168 sudo cti\-agent ...
+therefore runs with the configured value, not 168. Use a command's own flag
+(for example
+.BR "run\-digest \-\-lookback" )
+for one-off overrides.
+.PP
+The wrapper does
+.B not
+read
+.IR fleet.env .
+Each command loads it itself: the runners source it in shell, the Go
+commands through their shared loader, and
+.B mailer.py
+in Python. The one exception is
+.BR cti\-budget (1),
+which reads only its own environment.
+.PP
+The wrapper does not check the name against a list. The usage message names
+the common commands, but any file in
+.I /opt/cti\-agent/bin
+or
+.I /opt/cti\-agent/lanes
+can be run. It is a convenience, not a security boundary: the caller is
+already root.
+.SS The ingest binary
+.I /opt/cti\-agent/agent/cti\-agent
+is built from
+.B cmd/cti\-agent
+in the source clone at
+.B $CTI_AGENT_DIR
+.RI ( /opt/cti\-agent/agent ).
+Unlike every other Go command it is
+.B not
+installed in
+.IR /opt/cti\-agent/bin ,
+so
+.B sudo cti\-agent cti\-agent
+fails with
+.IR "command not found" .
+It is run by
+.BR run\-digest (1)
+step 1 for the daily digest (the weekly does not read the mailbox), from
+.B $CTI_AGENT_DIR
+as the working directory, with
+.B REPORT_PATH
+set to
+.IR $FLEET_HOME/reports/raw\-YYYY\-MM\-DD.md .
+If the compiled binary is missing,
+.B run\-digest
+falls back to
+.BR "go run ./cmd/cti\-agent" .
+.PP
+One run:
+.TP
+.B Reads the mailbox
+Every message in
+.B GRAPH_FOLDER
+of
+.B GRAPH_MAILBOX
+received in the last
+.B GRAPH_LOOKBACK_HOURS
+(or
+.BR \-\-lookback ),
+through Microsoft Graph.
+.TP
+.B Skips its own mail
+A message carrying the
+.B X\-CTI\-Agent\-Sent
+header, or sent from
+.B GRAPH_MAILBOX
+itself, is the fleet's own report coming back and is dropped before
+anything else sees it. The count of skipped messages is logged.
+.TP
+.B Extracts CVEs
+CVE identifiers in each subject and body, deduplicated and sorted.
+.TP
+.B Holds back Patch Tuesday CVEs
+CVEs named in this month's or last month's Patch Tuesday manifest
+.RI ( $FLEET_HOME/state/patchtuesday\-YYYY\-MM.json )
+are left out of the table, but only when that manifest is marked
+.IR sent .
+No manifest, an unsent one, or an unreadable one (logged as a WARNING)
+means every CVE is reported.
+.TP
+.B Looks each CVE up
+With
+.BR LOOKUP_PROVIDER :
+.B qualys
+asks the KnowledgeBase and Host Detection APIs whether the CVE is present;
+.BR none ,
+.B noop
+or empty reports every CVE as UNKNOWN;
+.B crowdstrike
+is a stub that also reports UNKNOWN. A lookup that fails becomes an UNKNOWN
+row with the reason, not a failed run.
+.TP
+.B Writes the report
+Markdown, to
+.BR REPORT_PATH ,
+mode 0600. Its header gives the mailbox, the window, the message counts and
+the held CVEs, and says
+.B CATCH-UP RUN
+when
+.B \-\-lookback
+was used. Hostnames appear as
+.B REPORT_HOSTNAMES
+says.
+.TP
+.B Records what it read
+After the report is written, and only then, every message it read is added
+to the processed-message log, which is
+.BR cti\-mailbox (1)'s
+only authority to move mail. A failure to write the log is a WARNING, not a
+failure; with neither
+.B FLEET_PROCESSED_LOG
+nor
+.B FLEET_HOME
+set, nothing is recorded and a NOTE says cleanup will move nothing.
+.PP
+It prints one line on standard output:
+.IR "No CVEs found. Wrote PATH" ,
+.IR "All N CVE(s) found were held for the monthly Patch Tuesday synopsis..." ,
+or
+.IR "Wrote PATH" .
+Progress goes to standard error.
+.PP
+The ingest binary does not send mail and does not move, flag or delete any
+message.
+.SH COMMANDS
+The wrapper's command forms. Arguments after the command are passed through
+untouched.
+.TP
+.IB name .py " \fR[\fIargs\fR...]"
+A name ending in
+.B .py
+runs
+.B /usr/bin/python3
+.IR /opt/cti\-agent/lanes/name .py
+as
+.BR ctiagent .
+Installed lanes:
+.BR enrich.py ,
+.BR scout.py ,
+.BR brief.py ,
+.BR mailer.py .
+.TP
+.IR name " [" args ...]
+Any other name runs
+.IR /opt/cti\-agent/bin/name
+as
+.BR ctiagent .
+That directory holds the runners
+.RB ( run\-digest ,
+.BR run\-checkin ,
+.BR run\-patchtuesday ,
+.BR run\-appscan ,
+.BR run\-domains ,
+.BR run\-mailbox\-cleanup ),
+the board and database tools
+.RB ( fleet\-db ,
+.BR fleet\-board ),
+and the Go commands
+.RB ( cti\-alert ,
+.BR cti\-budget ,
+.BR cti\-kev ,
+.BR cti\-patchtuesday ,
+.BR cti\-mailbox ,
+.BR cti\-mailer ,
+.BR cti\-jira ,
+.BR cti\-appscan ,
+.BR cti\-domains ).
+.SH OPTIONS
+These are the ingest binary's. The wrapper has none of its own; anything
+after the command name belongs to that command.
+.PP
+Go's flag syntax: the option may also be written with a single dash
+.RB ( \-lookback ),
+and the value may follow
+.B =
+or a space.
+.TP
+.BI \-\-lookback " DURATION"
+Read this far back for this run only, instead of
+.BR GRAPH_LOOKBACK_HOURS ,
+as a Go duration
+.RB ( 168h ,
+.BR 72h ).
+For the morning after the lane was off. The run logs a
+.B CATCH-UP RUN
+line and the report header says so; findings an earlier digest reported
+appear again. A positive value longer than 90 days
+.RB ( 2160h )
+is refused as a probable typo. Zero, or any negative value, is treated as
+not given and the configured window is used without comment.
+Normally passed through
+.BR "run\-digest \-\-lookback" .
+Default:\~\fB0\fR (use \fBGRAPH_LOOKBACK_HOURS\fR).
+.SH ENVIRONMENT
+The wrapper sets
+.BR FLEET_HOME ,
+.BR FLEET_CODE ,
+.BR FLEET_ENV ,
+.B FLEET_FEEDS
+and
+.B HOME
+as described above, and reads nothing else.
+.PP
+The ingest binary loads
+.B FLEET_ENV
+(else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env )
+into its environment at start; variables already set win, so under
+.B run\-digest
+(which has sourced the file) this changes nothing. It then reads:
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET
+The Entra app registration. Required.
+.I fleet.env
+section 1.
+.TP
+.B GRAPH_MAILBOX
+The mailbox read. Required, no default. Section 1.
+.TP
+.B GRAPH_FOLDER
+Folder within it, by display name. Default:\~\fBinbox\fR. Section 1.
+.TP
+.B GRAPH_LOOKBACK_HOURS
+The ingest window, a positive integer number of hours.
+Default:\~\fB24\fR. Section 1.
+.TP
+.B LOOKUP_PROVIDER
+.BR qualys ,
+.BR none ,
+.B noop
+or
+.BR crowdstrike ;
+anything else is an error.
+Default:\~\fBqualys\fR. Section 2.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+The Qualys API pod and a read-only account. Required when
+.B LOOKUP_PROVIDER
+is
+.BR qualys .
+Section 2.
+.TP
+.B QUALYS_KB_CACHE
+The CVE-to-QID cache, 0600. A relative path resolves against the working
+directory, which under
+.B run\-digest
+is
+.BR $CTI_AGENT_DIR ;
+keep it absolute.
+Default:\~\fI./qualys_kb_cache.json\fR. Section 3.
+.TP
+.B QUALYS_KB_MAX_AGE_HOURS
+How long the cache is trusted before it is refreshed, a positive integer.
+Default:\~\fB168\fR. Section 3.
+.TP
+.B REPORT_PATH
+Where the Markdown report goes.
+.B run\-digest
+sets it per day.
+Default:\~\fI./cti\-agent\-report.md\fR. Section 3.
+.TP
+.B REPORT_HOSTNAMES
+.B full
+(real hostnames),
+.B redact
+(salted pseudonyms
+.BR host\-xxxxxxxx )
+or
+.B count
+(counts only). Anything else means
+.BR full .
+Default:\~\fBfull\fR. Section 5.
+.TP
+.B REPORT_REDACTION_SALT
+Salt for
+.B redact
+mode. Empty makes the pseudonyms guessable. Section 5.
+.TP
+.BR MAILBOX_LOOKBACK_HOURS ", " MAILBOX_MIN_AGE_HOURS
+The cleanup lane's window and grace (defaults
+.B 72
+and
+.BR 48 ).
+Not used by the ingest, but validated by it: the run refuses to start if
+.B MAILBOX_MIN_AGE_HOURS
+is non-zero and less than
+.BR GRAPH_LOOKBACK_HOURS ,
+or is not less than
+.BR MAILBOX_LOOKBACK_HOURS .
+Section 10.
+.TP
+.B FLEET_PROCESSED_LOG
+Where the processed-message log goes.
+Default:\~\fI$FLEET_HOME/state/processed\-messages.json\fR. Section 4, mailbox cleanup.
+.TP
+.B FLEET_HOME
+Locates the Patch Tuesday manifests and the default processed-message log.
+Section 3.
+.TP
+.B CTI_AGENT_DIR
+Read by
+.BR run\-digest ,
+not by the binary: the directory holding the source clone and the compiled
+.BR cti\-agent .
+Section 3.
+.SH FILES
+.TP
+.I /usr/local/bin/cti\-agent
+The wrapper, rewritten on every install.
+.TP
+.I /opt/cti\-agent/agent/cti\-agent
+The ingest binary, rebuilt on every install from the clone in the same
+directory.
+.TP
+.IR /opt/cti\-agent/bin/ ", " /opt/cti\-agent/lanes/
+What the wrapper can run; root:root 0755, read-only to the service.
+.TP
+.I /etc/cti\-agent/fleet.env
+Settings and credentials;
+.B root:ctiagent
+0640.
+.TP
+.I /var/lib/cti\-agent/
+The service account's home and working directory, 0750.
+.TP
+.I /var/lib/cti\-agent/reports/raw\-YYYY\-MM\-DD.md
+The ingest report for that day, 0600. It can name real hosts.
+.TP
+.I /var/lib/cti\-agent/state/processed\-messages.json
+Messages the ingest read, kept 14 days, 0600.
+.TP
+.I /var/lib/cti\-agent/state/patchtuesday\-YYYY\-MM.json
+Patch Tuesday manifests, read to decide what to hold back.
+.TP
+.I /var/lib/cti\-agent/state/qualys_kb_cache.json
+The KnowledgeBase cache, 0600.
+.SH EXIT STATUS
+The wrapper exits with the status of the command it ran. It exits
+.B 1
+itself when no command is given or
+.I /var/lib/cti\-agent
+cannot be entered (run without
+.BR sudo );
+.B sudo
+exits 1 when the named command does not exist.
+.PP
+The ingest binary:
+.TP
+.B 0
+The report was written. Individual lookups that failed are UNKNOWN rows in
+it; an unreadable manifest or an unwritten processed-message log is a
+WARNING, not a failure.
+.TP
+.B 1
+No report: configuration missing or invalid (the message names the
+variables); an out-of-range
+.BR \-\-lookback ;
+the Graph read failed; an unsupported
+.BR LOOKUP_PROVIDER ;
+or the report could not be written.
+.TP
+.B 2
+An unknown option or an unparseable duration.
+.B \-\-help
+prints the usage and exits 0.
+.SH EXAMPLES
+Rehearse today's digest. It sends nothing, but the ingest still runs: the
+raw report is written and the messages read are recorded as processed:
+.PP
+.EX
+sudo cti\-agent run\-digest daily \-\-dry\-run
+.EE
+.PP
+Catch up after the timer was off for a week:
+.PP
+.EX
+sudo cti\-agent run\-digest daily \-\-lookback 168h
+.EE
+.PP
+Other commands through the wrapper:
+.PP
+.EX
+sudo cti\-agent fleet\-db recent
+sudo cti\-agent cti\-budget status
+sudo cti\-agent mailer.py \-\-check
+.EE
+.SH SEE ALSO
+.BR run\-digest (1),
+.BR cti\-mailbox (1),
+.BR cti\-patchtuesday (1),
+.BR cti\-budget (1),
+.BR cti\-alert (1),
+.BR sudo (8)
+.PP
+RUNBOOK.md sections 5, 8 and 11a; fleet\-kit/README.md, "Command reference".

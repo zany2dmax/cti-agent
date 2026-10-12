@@ -1,0 +1,357 @@
+.TH DEV-RUN 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+dev-run \- run the CTI pipeline from a repository checkout, stage by stage, for testing and debugging
+.SH SYNOPSIS
+.B fleet\-kit/bin/dev\-run
+.RI [ stage ]
+.RB [ \-\-provider
+.IR NAME ]
+.RB [ \-\-to
+.IR ADDRESS ]
+.RB [ \-\-for\-real ]
+.PP
+.I stage
+is one of
+.BR doctor ,
+.BR ingest ,
+.BR enrich ,
+.BR brief ,
+.BR send ,
+.BR all .
+.SH DESCRIPTION
+.B dev\-run
+runs the daily pipeline on a developer's Mac or Linux machine, from a
+checkout, with no root, no service account and no systemd. It answers one
+question: does this read the mailbox and produce believable threat intel?
+It is run by a developer, never by a timer, and is not installed on the
+fleet box.
+.PP
+It finds the repository from its own location, reads the Go agent's
+.I .env
+at the repository root (exported with
+.BR "set \-a" ),
+and keeps everything it generates in
+.I .fleet\-local/
+inside the repository, which is gitignored: the report, the enriched JSON,
+the digest, logs, the findings database, the NVD and KEV caches and the
+built agent. Hostnames are written in full unless
+.B REPORT_HOSTNAMES
+says otherwise.
+.PP
+Nothing is sent except by the
+.B send
+stage, and that is a dry run unless
+.B \-\-for\-real
+is given. Every other stage is read-only toward the outside world, apart
+from the API queries enrichment makes.
+.SH COMMANDS
+Each stage can be run on its own, to see where the pipeline breaks; a stage
+reads the previous stage's output for today's date. With no stage,
+.B all
+is run.
+.TP
+.B doctor
+Checks that
+.B go
+and
+.B python3
+are installed; that
+.BR TENANT_ID ,
+.BR CLIENT_ID ,
+.B CLIENT_SECRET
+and
+.B GRAPH_MAILBOX
+are set (the secret's length is shown, never its value); the Qualys
+credentials when the provider is
+.BR qualys ;
+and then runs
+.B "mailer.py \-\-check"
+and interprets it: no token is a hard failure, with a hint telling a network
+or TLS-inspecting proxy problem apart from rejected credentials; a missing
+.B Mail.Read
+is a hard failure; a missing
+.B Mail.Send
+is a warning, because only
+.B send
+needs it. Ends with
+.B ready
+or
+.BR "fix the above before continuing" .
+.IP
+The role test matches
+.B "MISSING Mail.Read"
+and
+.B "MISSING Mail.Send"
+with one space, and
+.B "mailer.py \-\-check"
+prints two, so a missing role is not caught and the stage reports both
+granted. It reports the same when
+.B FLEET_OPERATOR_EMAIL
+is unset, because
+.B \-\-check
+then stops before requesting a token. Read the
+.B \-\-check
+lines it prints above the verdict.
+.TP
+.B ingest
+Always rebuilds the Go agent
+.RB ( "go build ./cmd/cti\-agent" ,
+near-instant when nothing changed) into
+.IR .fleet\-local/cti\-agent\-dev ,
+says which commit it was built from and whether uncommitted
+.I .go
+changes were included, runs it with its report directed to
+.IR .fleet\-local/reports/raw\-YYYY\-MM\-DD.md ,
+and summarises the CVE rows by status. The
+.B "emails inspected"
+line looks for a label the agent no longer writes and shows
+.BR ? .
+When no CVE was extracted it lists
+what to check, in order.
+.TP
+.B enrich
+Runs
+.BR enrich.py (1)
+on today's report into
+.IR .fleet\-local/state/enriched\-YYYY\-MM\-DD.json ,
+which also upserts the findings into
+.IR .fleet\-local/state/memory.db ,
+then tries to print the band counts and the top findings. That summary
+reads counts named
+.BR P1 \(en P4 ,
+which
+.B enrich.py
+no longer writes, so it fails with a Python
+.B KeyError
+after the enriched file is written, and the run ends with status 1; under
+.B all
+the brief stage is never reached. Run
+.B brief
+on its own afterwards.
+.TP
+.B brief
+Runs
+.BR brief.py (1)
+.B \-\-daily
+into
+.I .fleet\-local/reports/digest\-YYYY\-MM\-DD.html
+and
+.IR .txt ,
+prints the subject and the first 28 lines of the text version. Sends
+nothing.
+.TP
+.B send
+Mails today's digest with
+.BR mailer.py (1),
+to
+.BR \-\-to ,
+else
+.BR DIGEST_TO .
+It first runs
+.B "mailer.py \-\-check"
+and stops if
+.B Mail.Send
+is reported missing. The allowlist is set to exactly the recipient
+.RB ( FLEET_ALLOW_TO
+is exported as that address), so the real gate runs rather than being
+bypassed with
+.BR \-\-approve .
+The raw report is attached. Without
+.B \-\-for\-real
+the mailer is run with
+.BR \-\-dry\-run .
+.TP
+.B all
+.BR doctor ,
+whose failure does not stop the run, then
+.BR ingest ,
+.B enrich
+and
+.BR brief ,
+then opens the digest with
+.BR open (1)
+on macOS or
+.BR xdg\-open (1)
+on Linux, or prints its path. Never sends.
+.SH OPTIONS
+Options follow the stage.
+.TP
+.BI \-\-provider " NAME"
+Exported as
+.B LOOKUP_PROVIDER
+for this run, overriding
+.IR .env .
+.B none
+skips the scanner and proves Graph access and CVE extraction alone;
+.B qualys
+uses Qualys.
+.TP
+.BI \-\-to " ADDRESS"
+Recipient for
+.BR send .
+Ignored by every other stage.
+.TP
+.B \-\-for\-real
+Make
+.B send
+actually send.
+.SH ENVIRONMENT
+Values in
+.I .env
+are exported and replace variables of the same name already in the
+environment.
+.TP
+.B FLEET_HOME
+Where generated files go.
+Default:\~\fI<repo>/.fleet\-local\fR. Set before
+.I .env
+is read, and the output paths are fixed from it then. A
+.B FLEET_HOME=
+line in
+.I .env
+(as in
+.IR .env.example )
+still replaces it with an empty value for the lanes, which then put their
+caches and
+.I memory.db
+under
+.I ./state
+in the current directory.
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET ", " GRAPH_MAILBOX
+Required by
+.BR doctor ;
+used by the agent and the mailer.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+Required by
+.B doctor
+when the provider is
+.BR qualys .
+.TP
+.B LOOKUP_PROVIDER
+Scanner. Default:\~\fBqualys\fR.
+.TP
+.B GRAPH_LOOKBACK_HOURS
+Mailbox window, shown by
+.B doctor
+and
+.BR ingest .
+Default:\~\fB24\fR.
+.TP
+.B GRAPH_FOLDER
+Mailbox folder, read by the agent.
+.TP
+.B REPORT_PATH
+Always set to today's
+.I raw
+report in
+.IR .fleet\-local/reports ,
+whatever
+.I .env
+says.
+.TP
+.B REPORT_HOSTNAMES
+.BR full ,
+.B redact
+or
+.BR count .
+Default:\~\fBfull\fR.
+.TP
+.B QUALYS_KB_CACHE
+Default:\~\fI$FLEET_HOME/state/qualys_kb_cache.json\fR.
+.TP
+.B NVD_API_KEY
+Passed to
+.BR enrich.py ;
+unset, the enrich stage warns that it may take minutes.
+.TP
+.B DIGEST_TO
+Recipient for
+.B send
+when
+.B \-\-to
+is not given.
+.SH FILES
+.TP
+.I <repo>/.env
+The Go agent's settings, required; copy
+.I .env.example
+to start.
+.TP
+.I <repo>/.fleet\-local/reports/raw\-YYYY\-MM\-DD.md
+The agent's report.
+.TP
+.I <repo>/.fleet\-local/state/enriched\-YYYY\-MM\-DD.json
+Enriched findings.
+.TP
+.I <repo>/.fleet\-local/reports/digest\-YYYY\-MM\-DD.{html,txt}
+The rendered digest.
+.TP
+.I <repo>/.fleet\-local/logs/ingest.log
+The agent's output from the last
+.BR ingest .
+.TP
+.I <repo>/.fleet\-local/cti\-agent\-dev
+The binary
+.B ingest
+built.
+.TP
+.I <repo>/.fleet\-local/state/memory.db
+Findings history, written by the enrich stage.
+.SH EXIT STATUS
+.TP
+.B 0
+The stage, or every stage of
+.BR all ,
+finished. A dry-run
+.B send
+that passed the gate is 0.
+.TP
+.B 1
+.I .env
+is missing; a stage failed (doctor found a problem, the build failed, no
+report or enriched file was produced, the enrich summary failed, a
+needed earlier output is missing,
+no recipient for
+.BR send ,
+Mail.Send missing, or the mailer refused); or an option was given without
+its value.
+.TP
+.B 2
+Unknown option or unknown stage; a usage line is printed.
+.SH EXAMPLES
+Start with configuration and permissions, then prove mail reading without
+the scanner:
+.PP
+.EX
+fleet\-kit/bin/dev\-run doctor
+fleet\-kit/bin/dev\-run ingest \-\-provider none
+.EE
+.PP
+The full pipeline, opening the digest at the end:
+.PP
+.EX
+fleet\-kit/bin/dev\-run all
+.EE
+.PP
+Send the digest to yourself: first the dry run, then for real:
+.PP
+.EX
+fleet\-kit/bin/dev\-run send \-\-to you@example.com
+fleet\-kit/bin/dev\-run send \-\-to you@example.com \-\-for\-real
+.EE
+.PP
+Widen the window when nothing was extracted:
+.PP
+.EX
+GRAPH_LOOKBACK_HOURS=168 fleet\-kit/bin/dev\-run ingest
+.EE
+.SH SEE ALSO
+.BR enrich.py (1),
+.BR brief.py (1),
+.BR mailer.py (1),
+.BR fleet\-db (1),
+.BR run\-digest (1)
+.PP
+RUNBOOK.md section 6; fleet\-kit/README.md, "Test it locally first".

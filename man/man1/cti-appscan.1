@@ -1,0 +1,248 @@
+.TH CTI-APPSCAN 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-appscan \- weekly application-security report from the web-application scan notifications in the CTI mailbox
+.SH SYNOPSIS
+.B cti-appscan
+.RB [ \-\-since
+.IR DURATION ]
+.RB [ \-\-no\-detail ]
+.RB [ \-\-out
+.IR FILE ]
+.RB [ \-\-text\-out
+.IR FILE ]
+.RB [ \-\-auth\-fail\-out
+.IR FILE ]
+.PP
+.B cti-appscan
+.RB [ \-\-since
+.IR DURATION ]
+.RB [ \-\-no\-detail ]
+.B \-\-subject\-only
+.PP
+.B sudo cti\-agent cti\-appscan
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-appscan
+reads the Qualys WAS scan-completion notifications that arrived in the CTI
+mailbox and builds the weekly AppSec report for the application-development
+audience. It is normally run by
+.BR run\-appscan (1)
+from
+.B cti\-agent\-appscan.timer
+every Monday at 07:30, and the report is mailed by
+.BR cti\-mailer (1)
+.BR "\-\-lane was" ,
+which resolves
+.B WAS_TO
+against
+.B WAS_ALLOW_TO
+and refuses if either is unset.
+.PP
+One run:
+.TP
+.B Reads the notifications
+Every message in
+.B GRAPH_FOLDER
+of
+.B GRAPH_MAILBOX
+received within
+.BR \-\-since .
+Mail the fleet sent itself is skipped. Each message is offered to the known
+scanners (Qualys WAS only, today); one that is recognised is parsed for the
+scan's counts and authentication status. Notifications are deduplicated by
+scan reference; one with no reference is kept and logged as not
+deduplicated. Parse problems are logged as warnings.
+.TP
+.B Reconciles with the scan list
+Unless
+.B \-\-no\-detail
+is given and when Qualys credentials are set, the WAS scan list for the
+window is fetched and joined to the notifications. This supplies the real
+application name and id, the portal link, and scans the scanner ran but
+sent no email for (listed without counts). If the list cannot be read, the
+report is built from the notifications alone and a warning says so.
+.TP
+.B Keeps the newest scan per application
+Keyed by the scanner's application id, or by the whitespace-collapsed,
+lower-cased name when there is no id.
+.TP
+.B Adds per-finding detail
+Again unless
+.BR \-\-no\-detail ,
+the WAS Findings API is asked for the detail behind each notified scan's
+counts. Any failure is a warning and costs only that application's detail.
+.TP
+.B Writes the report
+HTML and plain text, both mode 0600: they say which applications have open
+Urgent findings and which are scanned without authentication. Links point
+only at known Qualys portal hosts; anything else is rendered as plain text.
+.PP
+A scan whose configured credential failed to authenticate is logged as
+.B AUTH FAILED
+and, with
+.BR \-\-auth\-fail\-out ,
+written to a file for
+.B run\-appscan
+to pass to
+.BR cti\-alert (1).
+That is the fleet operator's problem rather than the report audience's, and
+this command does not send mail.
+.PP
+.B cti-appscan
+sends nothing, changes nothing in the mailbox, and only reads from Qualys.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-out ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-since " DURATION"
+How far back to read notifications, as a Go duration
+.RB ( 168h ,
+.BR 336h ).
+Also the start of the scan-list and findings window. Not
+.BR GRAPH_LOOKBACK_HOURS .
+Default:\~\fB168h0m0s\fR (seven days).
+.TP
+.B \-\-no\-detail
+Do not call the Qualys WAS API at all: no scan list, no findings. The
+report carries the counts from the notifications only.
+Default:\~off.
+.TP
+.BI \-\-out " FILE"
+Write the HTML report to
+.IR FILE ,
+mode 0600.
+Default:\~empty.
+.TP
+.BI \-\-text\-out " FILE"
+Write the plain-text report to
+.IR FILE ,
+mode 0600. If neither
+.B \-\-out
+nor
+.B \-\-text\-out
+is given, the text report goes to standard output.
+Default:\~empty.
+.TP
+.B \-\-subject\-only
+Print the subject line on standard output and exit. The mailbox is read,
+and the API called, exactly as for a full run; nothing is written, including
+the
+.B \-\-auth\-fail\-out
+file.
+Default:\~off.
+.TP
+.BI \-\-auth\-fail\-out " FILE"
+Write one tab-separated line per scan whose configured credential failed:
+application, authentication record, status. Mode 0600, and written on every
+run, empty when nothing failed, so that an empty file ("checked, none
+failed") can be told from an absent one ("not checked"). A failure to write
+it is a warning, not a failed run.
+Default:\~empty (not written).
+.SH ENVIRONMENT
+.I fleet.env
+is loaded at start from
+.B FLEET_ENV
+(else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env );
+variables already in the environment win.
+.TP
+.BR TENANT_ID ", " CLIENT_ID ", " CLIENT_SECRET ", " GRAPH_MAILBOX
+Microsoft Graph, to read the mailbox. Required.
+.I fleet.env
+section 1.
+.TP
+.B GRAPH_FOLDER
+Folder to read. Default:\~\fBinbox\fR. Section 1.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+The WAS API. Optional here: with
+.B QUALYS_BASE_URL
+or
+.B QUALYS_USERNAME
+empty the API is skipped, as with
+.BR \-\-no\-detail ,
+and a note says so. A
+.B QUALYS_BASE_URL
+that does not map to a known Qualys portal leaves report links as plain
+text. Section 2.
+.TP
+.B FLEET_ORG
+Organisation name in the report banner. Default:\~\fBSecurity\fR.
+Section 4.
+.TP
+.BR GRAPH_LOOKBACK_HOURS ", " QUALYS_KB_MAX_AGE_HOURS ", " MAILBOX_LOOKBACK_HOURS ", " MAILBOX_MIN_AGE_HOURS
+Not used, but validated by the shared configuration loader: a
+non-integer value, or a mailbox window that breaks its rules (see
+.BR cti\-agent (1)),
+stops the run before anything is read.
+.TP
+.BR FLEET_ENV ", " FLEET_HOME
+Locate
+.IR fleet.env .
+.PP
+.BR WAS_TO " and " WAS_ALLOW_TO
+are read by
+.BR cti\-mailer (1),
+not by this command.
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Graph and Qualys credentials.
+.TP
+.I /var/lib/cti\-agent/state/appscan\-YYYY\-MM\-DD.{html,txt}
+The report files written by
+.BR run\-appscan ,
+0600.
+.TP
+.I /var/lib/cti\-agent/state/appscan\-authfail\-YYYY\-MM\-DD.tsv
+The authentication-failure file written for
+.BR run\-appscan ,
+0600. The runner deletes it before each run, so its absence afterwards
+means the check did not happen.
+.SH EXIT STATUS
+.TP
+.B 0
+The report (or the subject) was produced. A scan list, findings lookup or
+authentication-failure file that failed is a warning, not a failure;
+authentication failures in the scans themselves do not change the exit
+status either.
+.TP
+.B 1
+Configuration missing or invalid (the message names the variables); the
+mailbox could not be read; or a report file could not be written.
+.TP
+.B 2
+An unknown option or an unparseable duration.
+.B \-\-help
+prints the usage and exits 0.
+.SH EXAMPLES
+Preview the week's report without sending it:
+.PP
+.EX
+sudo cti\-agent run\-appscan \-\-dry\-run
+.EE
+.PP
+Counts only, from the notifications, printed to the terminal:
+.PP
+.EX
+sudo cti\-agent cti\-appscan \-\-no\-detail
+.EE
+.PP
+Two weeks instead of one:
+.PP
+.EX
+sudo cti\-agent cti\-appscan \-\-since 336h \e
+    \-\-text\-out /var/lib/cti\-agent/state/appscan\-two\-weeks.txt
+.EE
+.SH SEE ALSO
+.BR run\-appscan (1),
+.BR cti\-mailer (1),
+.BR cti\-alert (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11f; fleet\-kit/README.md, "The weekly AppSec report".

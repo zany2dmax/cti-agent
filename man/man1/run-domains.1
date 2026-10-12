@@ -1,0 +1,171 @@
+.TH RUN-DOMAINS 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+run-domains \- weekly domains check: run cti-domains, then mail the report to the domains audience
+.SH SYNOPSIS
+.B run\-domains
+.RB [ \-\-dry\-run ]
+.PP
+.B sudo cti\-agent run\-domains
+.RB [ \-\-dry\-run ]
+.SH DESCRIPTION
+.B run-domains
+runs
+.BR cti\-domains (1)
+over the domain inventory and mails the result through
+.BR cti\-mailer (1)
+.BR "\-\-lane dom" .
+No model is involved: every line of the report is a DNS answer, an HTTP
+response, a certificate or a registrar field.
+.PP
+It is run by
+.B cti\-agent\-domains.service
+from
+.B cti\-agent\-domains.timer
+every Monday at 08:00
+.RB ( Persistent=true ),
+after the weekly rollup and the AppSec report. The unit runs as
+.BR ctiagent ,
+with
+.B cti\-agent\-alert@.service
+on failure.
+.PP
+The steps, in order:
+.TP
+.B 1. Prepare
+Checks that
+.I $FLEET_CODE/bin/cti\-domains
+and
+.I $FLEET_CODE/bin/cti\-mailer
+are executable (fatal if not), sets
+.I $FLEET_HOME/state
+to 0700, creates today's HTML, text and CSV files empty at 0600, and
+deletes today's subject file so a stale one cannot be mistaken for this
+run's.
+.TP
+.B 2. Check
+.B cti\-domains \-\-out \-\-text\-out \-\-subject\-out \-\-csv\-out
+probes every domain and writes all four files, comparing with last week's
+state and then replacing it. Fatal on a non-zero exit.
+.TP
+.B 3. Subject
+The first line of the subject file. Fatal, and nothing is sent, if the
+file is missing, empty, or its first line is blank.
+.TP
+.B 4. Send
+.B cti\-mailer \-\-lane dom
+with the HTML, text and subject and the CSV attached, plus
+.B \-\-dry\-run
+on a dry run. The lane resolves
+.B DOM_TO
+against
+.B DOM_ALLOW_TO
+and refuses if either is unset; there is no fallback to the digest audience.
+Fatal on failure.
+.PP
+A dry run passes
+.B \-\-no\-state\-write
+to
+.BR cti\-domains ,
+so it still probes every domain and queries the registrar, and overwrites
+today's report files, but leaves last week's baseline in place: the real run
+still reports this week's changes. It sends nothing.
+.SH OPTIONS
+A single shell argument.
+.TP
+.B \-\-dry\-run
+Probe, render and print the subject; do not send and do not advance the
+baseline.
+.PP
+Anything else, or more than one argument, is refused with exit status 1.
+.SH ENVIRONMENT
+.I fleet.env
+is sourced with every assignment exported, and its values replace the
+process environment, except
+.B FLEET_HOME
+and
+.BR FLEET_CODE ,
+which keep the value the unit or wrapper injected.
+.B cti\-domains
+loads it again itself.
+.TP
+.B FLEET_HOME
+State directory.
+Default:\~\fB$HOME\fR (not \fI$HOME/fleet\fR); the unit sets
+\fI/var/lib/cti\-agent\fR.
+.TP
+.B FLEET_CODE
+Code directory.
+Default:\~\fB$FLEET_HOME\fR; the unit sets \fI/opt/cti\-agent\fR.
+.TP
+.B FLEET_ENV
+The config file.
+Default:\~\fI$FLEET_HOME/fleet.env\fR.
+.TP
+.BR DOM_TO ", " DOM_ALLOW_TO
+The audience and its allowlist, read by
+.B cti\-mailer
+(section 4, "the weekly domains check"). No fallback.
+.PP
+.BR DOMAINS_FILE ,
+.B GODADDY_PAT
+and the
+.B DOMAINS_*
+probe settings are read by
+.BR cti\-domains (1).
+.SH FILES
+Under
+.IR /var/lib/cti\-agent/state ,
+directory mode 0700.
+.I DATE
+is the UTC date.
+.TP
+.IR domains\-DATE.html ", " domains\-DATE.txt ", " domains\-DATE.csv
+The report and the per-host CSV, 0600. A second run on the same day
+replaces them.
+.TP
+.I domains\-DATE.subject
+The subject line, written by
+.BR cti\-domains .
+.TP
+.I domains\-state.json
+Last week's observations; replaced by a real run, untouched by a dry run.
+.TP
+.I /etc/cti\-agent/domains.txt
+The inventory.
+.SH EXIT STATUS
+.TP
+.B 0
+The report was sent (or rendered, on a dry run).
+.TP
+.B 1
+An unknown or extra argument;
+.B cti\-domains
+or
+.B cti\-mailer
+is missing;
+.B cti\-domains
+failed (often an inventory the service account cannot read); no subject; or
+the send failed, including the mailer's refusal when
+.B DOM_TO
+or
+.B DOM_ALLOW_TO
+is unset.
+.SH EXAMPLES
+Preview this week's report without sending or moving the baseline:
+.PP
+.EX
+sudo cti\-agent run\-domains \-\-dry\-run
+sudo less /var/lib/cti\-agent/state/domains\-$(date \-u +%F).txt
+.EE
+.PP
+Send it now instead of waiting for Monday:
+.PP
+.EX
+sudo cti\-agent run\-domains
+.EE
+.SH SEE ALSO
+.BR cti\-domains (1),
+.BR cti\-mailer (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11g; fleet\-kit/README.md, "The weekly domains check".

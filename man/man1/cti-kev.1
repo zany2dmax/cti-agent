@@ -1,0 +1,206 @@
+.TH CTI-KEV 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-kev \- CISA KEV remediation deadlines for vulnerabilities the scanner found here
+.SH SYNOPSIS
+.B cti-kev
+.RB [ \-\-enriched
+.IR FILE ]
+.RB [ \-\-horizon
+.IR DAYS ]
+.RB [ \-\-hosts ]
+.RB [ \-\-json ]
+.RB [ \-\-quiet ]
+.RB [ \-\-fail\-if\-overdue ]
+.PP
+.B sudo cti\-agent cti\-kev
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-kev
+reads one enriched findings file written by the daily digest's enrich step
+and reports the CISA Known Exploited Vulnerabilities deadlines (BOD 22\-01
+due dates) that apply to this estate.
+It is run by hand, by the orchestrator during a heartbeat, or from
+.BR "task kev" ;
+no timer runs it. The daily digest carries the same deadlines itself.
+.PP
+Only findings the scanner actually detected count: status
+.B PRESENT
+with at least one host. Each such finding with a
+.B kev_due
+date is placed in one band:
+.TP
+.B Overdue
+The due date has passed.
+.TP
+.B Due soon
+Due today or within
+.B \-\-horizon
+days.
+.TP
+.B Later
+Due further out. Counted, not listed.
+.PP
+Within a band, rows are sorted by days remaining (most overdue first), then
+by host count. Each listed row shows the CVE, due date, days remaining
+.RB ( today
+for zero), host count, Sev rating (with a ransomware marker when CISA lists
+known ransomware use) and QIDs.
+.PP
+KEV entries with a deadline that are not present are counted, not dropped:
+those with status
+.B UNKNOWN
+as
+.I coverage UNVERIFIED
+(the scanner was not asked, which is not a clean result), everything else as
+.IR "not detected here" .
+Findings with no usable due date are ignored.
+Days are counted in calendar days in UTC.
+.PP
+When the enrich run recorded a degraded source whose name contains
+.BR kev ,
+a warning goes to standard error: the catalogue download failed, and a short
+overdue list may only mean the deadlines are missing.
+.PP
+.B cti-kev
+reads one file and writes only to standard output and standard error.
+It does not contact the scanner, CISA or any mailbox, and does not read
+.IR fleet.env .
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-json ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-enriched " FILE"
+The enriched JSON file to read.
+Default: the newest
+.I enriched\-*.json
+in
+.IR $FLEET_HOME/state ,
+chosen by file name (the names carry an ISO date), not by modification time.
+The weekly run's
+.I weekly\-enriched\-*.json
+is never picked.
+.TP
+.BI \-\-horizon " DAYS"
+The
+.I due soon
+window in days. Not validated; a negative value leaves nothing due soon.
+Default:\~\fB14\fR.
+.TP
+.B \-\-hosts
+Add a column of sample host names to the overdue and due-soon tables.
+The output then names vulnerable machines; treat it accordingly.
+Has no effect with
+.BR \-\-json .
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-json
+Print one indented JSON object instead of markdown:
+.BR source ,
+.BR enriched_generated ,
+.BR now ,
+.BR horizon_days ,
+counts
+.BR overdue ,
+.BR due_soon ,
+.BR later ,
+.BR worst_overdue_days ,
+.BR ransomware_present ,
+.BR not_detected_here ,
+.BR coverage_unverified ,
+and the CVE lists
+.B overdue_cves
+and
+.BR due_soon_cves .
+No host names.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-quiet
+Print nothing when nothing is overdue and nothing is due within the horizon,
+so a clean day is silent. Applies to the markdown report only:
+.B \-\-json
+always prints. The degraded-KEV warning on standard error is never
+suppressed.
+Default:\~\fBfalse\fR.
+.TP
+.B \-\-fail\-if\-overdue
+Exit 2 when at least one present finding is overdue. Due-soon findings do not
+trigger it. For CI and scripts; do not use it in a systemd unit, where it
+would mark a working report as a failed unit.
+Default:\~\fBfalse\fR.
+.SH ENVIRONMENT
+.TP
+.B FLEET_HOME
+Fleet state root; the default file is looked for in
+.IR $FLEET_HOME/state .
+Required unless
+.B \-\-enriched
+is given. Set by the
+.B cti\-agent
+wrapper and by the systemd units, not read from
+.IR fleet.env .
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/state/enriched\-YYYY\-MM\-DD.json
+The daily enrich output, written by
+.BR run\-digest .
+It carries host names; 0600 under the units'
+.BR UMask=0077 .
+.SH EXIT STATUS
+.TP
+.B 0
+The report was printed, or suppressed by
+.BR \-\-quiet .
+Overdue findings do not change this unless
+.B \-\-fail\-if\-overdue
+is given: being late on a patch is not a failure of this program.
+.TP
+.B 1
+No report: neither
+.B \-\-enriched
+nor
+.B FLEET_HOME
+was given, the state directory cannot be read or holds no
+.IR enriched\-*.json ,
+or the file cannot be read or is not valid JSON.
+.TP
+.B 2
+.B \-\-fail\-if\-overdue
+was given and something is overdue. Also returned by Go's flag package for an
+unknown option or a bad value, so a script relying on 2 should pass only
+options it knows are valid.
+.SH EXAMPLES
+Today's deadlines, as markdown:
+.PP
+.EX
+sudo cti\-agent cti\-kev
+.EE
+.PP
+A month's window, with sample hosts:
+.PP
+.EX
+sudo cti\-agent cti\-kev \-\-horizon 30 \-\-hosts
+.EE
+.PP
+A specific day's file, as JSON:
+.PP
+.EX
+sudo cti\-agent cti\-kev \e
+  \-\-enriched /var/lib/cti\-agent/state/enriched\-2026\-10\-01.json \-\-json
+.EE
+.PP
+In CI, fail the job on anything overdue:
+.PP
+.EX
+cti\-kev \-\-enriched enriched.json \-\-quiet \-\-fail\-if\-overdue
+.EE
+.SH SEE ALSO
+.BR run\-digest (1),
+.BR cti\-jira (1),
+.BR cti\-agent (1)
+.PP
+README.md, "KEV deadline tracking"; fleet\-kit/README.md, the
+.B cti\-kev
+section.

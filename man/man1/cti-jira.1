@@ -1,0 +1,382 @@
+.TH CTI-JIRA 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.SH NAME
+cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
+.SH SYNOPSIS
+.B cti-jira \-\-check
+.PP
+.B cti-jira \-\-test\-ticket
+.RB [ \-\-for\-real ]
+.PP
+.B cti-jira \-\-from\-enriched
+.I FILE
+.RB [ \-\-follow\-up ]
+.RB [ \-\-approve ]
+.RB [ \-\-for\-real ]
+.PP
+.B cti-jira \-\-follow\-up
+.RB [ \-\-for\-real ]
+.PP
+.B sudo cti\-agent cti\-jira
+.I mode
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-jira
+turns confirmed exposure into tracked work: one ticket per CVE, carrying
+every affected QID and host, kept current until the scanner stops finding
+it. It is run by
+.BR run\-digest (1)
+for the daily digest only, after enrichment and before the brief, as
+.PP
+.EX
+cti\-jira \-\-from\-enriched $FLEET_HOME/state/enriched\-YYYY\-MM\-DD.json \e
+    \-\-for\-real \-\-follow\-up
+.EE
+.PP
+and, under
+.BR "run\-digest \-\-dry\-run" ,
+the same without
+.BR \-\-for\-real .
+The operator runs
+.B \-\-check
+and
+.B \-\-test\-ticket
+by hand when setting the lane up.
+.SS Safety
+.TP
+.B Nothing is written without \-\-for\-real
+No issue is created, and no comment, attachment or issue property is
+written; the ticket map is left untouched and no remediation note goes to
+the findings database. A run without it makes only read calls to Jira
+(search, and reading the stored exposure property) and says
+.B DRY RUN
+in its output.
+.TP
+.B Creating needs the allowlist too
+A new issue is created only when
+.B JIRA_PROJECT_KEY
+appears in
+.B JIRA_ALLOW_CREATE
+(comma-separated, case-insensitive). Empty creates nothing. This gate is
+checked for
+.I creating
+only: with
+.BR \-\-for\-real ,
+comments, CSV attachments and exposure properties are still written to
+existing fleet tickets in
+.B JIRA_PROJECT_KEY
+even when the gate is closed.
+.TP
+.B Non-KEV findings wait for a person
+A Sev5 that is not on CISA KEV is filed only with
+.BR \-\-approve .
+That is a command-line flag, never a setting, and the scheduled run does
+not pass it, so the automatic path files KEV entries only.
+.TP
+.B Never transitions
+It never closes, reopens, assigns or transitions a ticket. Remediation, and
+deciding it is done, belong to the people working the ticket.
+.TP
+.B One ticket per CVE
+Every fleet ticket carries the label
+.B cti\-cve\-YYYY\-NNNN
+and the search for it is scoped to the project but not to status, so a
+closed ticket still counts as filed and is never duplicated.
+.TP
+.B The digest cannot be broken
+After the configuration loads,
+.B \-\-from\-enriched
+and
+.B \-\-follow\-up
+turn every failure into a WARNING and exit 0.
+.SS What it files
+A finding from the enriched file earns a ticket when it is on CISA KEV or
+rated Sev5 (the old P1 also counts as Sev5) and its status is PRESENT.
+Its full host list is then fetched from Qualys; a lookup that fails drops
+that finding with a warning. Findings are handled worst first.
+.PP
+A new ticket gets a summary (prefixed
+.B [OVERDUE]
+once a KEV due date has passed) and description, the labels
+.BR cti\-cve\-... ,
+.BR cti\-agent ,
+.B cisa\-kev
+(when on KEV) and
+.BR sev N,
+a CSV of every host
+.RI ( cve\-yyyy\-nnnn\-hosts\-YYYY\-MM\-DD.csv ,
+never truncated), and an issue property
+.B cti\-agent\-exposure
+recording what was reported.
+.SS What it says on an existing ticket
+The same rules apply whether the ticket was reached from today's findings
+or by the follow-up, and the dry run prints the same decision the real run
+acts on:
+.TP
+.B Closed, still detected
+One comment saying so, the first time only. The ticket is not reopened.
+.TP
+.B No stored state
+The current exposure is recorded and nothing is said: an older ticket, not
+a discovery.
+.TP
+.B No detections remain
+A comment that the ticket can be closed.
+.TP
+.B A new QID
+A comment, at once.
+.TP
+.B New hosts
+A comment naming up to 20 of them, with the full CSV attached, at most once
+every seven days per ticket; growth in between is held for the next weekly
+comment. Detections returning after an all-clear are reported at once.
+.TP
+.B Anything else
+Including a shrinking count: recorded, no comment.
+.SS The follow-up
+.B \-\-follow\-up
+starts from Jira rather than from the mail: every ticket in
+.B JIRA_PROJECT_KEY
+labelled
+.B cti\-agent
+that is open or was updated in the last 30 days, oldest first, at most 200
+(a warning says when there were more). Tickets already handled from today's
+findings, tickets without a
+.B cti\-cve\-
+label, and the setup test ticket are skipped. Each is looked up in Qualys,
+and only a PRESENT or NOT_PRESENT answer is compared with it: an UNKNOWN or
+a failed lookup leaves the ticket alone, so an outage can never post a
+false all-clear.
+.PP
+Every fleet ticket found is added to the ticket map, so the digest links a
+CVE to its ticket on any day.
+.SH OPTIONS
+At least one of
+.BR \-\-check ,
+.BR \-\-test\-ticket ,
+.B \-\-from\-enriched
+or
+.B \-\-follow\-up
+is required; with none, the usage is printed and the exit status is 1.
+.B \-\-check
+runs first when combined with another mode, and a failed check stops the
+run.
+.B \-\-test\-ticket
+takes precedence over
+.B \-\-from\-enriched
+and
+.BR \-\-follow\-up ,
+which are then ignored.
+.PP
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-check ),
+and a value may follow
+.B =
+or a space.
+.TP
+.B \-\-check
+Read-only preflight: authenticate and print the account the API token
+belongs to; say whether the write gate is open for
+.B JIRA_PROJECT_KEY
+(a closed gate is reported, not fatal); resolve
+.B JIRA_ISSUE_TYPE
+in the project; list the create screen's required fields, marking with
+.B <\-
+any this command does not set (each would fail a create); and run the
+duplicate-detection search once.
+Default:\~off.
+.TP
+.B \-\-test\-ticket
+Build an obviously synthetic ticket for
+.B CVE\-1900\-00000
+with hosts under
+.BR .invalid .
+Without
+.BR \-\-for\-real ,
+print it as one JSON object on standard output (mode, project, issue type,
+summary, labels, search JQL, attachment name, description, CSV) and call
+nothing. With
+.BR \-\-for\-real ,
+check the write gate, then file it (or update it, if it already exists),
+attach the CSV and record its state. Its labels replace
+.B cti\-agent
+with
+.BR cti\-agent\-test ,
+so the follow-up never treats it as a real ticket. Afterwards, check by hand
+that it appears in the queue your team works from.
+Default:\~off.
+.TP
+.B \-\-for\-real
+Actually write to Jira, the ticket map and the findings database. Without
+it every mode is a dry run. Has no effect on
+.BR \-\-check .
+Default:\~off.
+.TP
+.BI \-\-from\-enriched " FILE"
+File and update tickets for the findings in this enriched JSON, the file
+the digest's enrich step writes. A missing or unparseable file is a
+warning: nothing is filed from it, and
+.B \-\-follow\-up
+still runs. With
+.BR \-\-for\-real ,
+the ticket map is written beside it (see FILES) and every ticketed CVE gets
+a remediation note through
+.BR "fleet\-db note" .
+Default:\~empty.
+.TP
+.B \-\-approve
+Also file new tickets for Sev5 findings that are not on CISA KEV. Without
+it they are logged as held for approval. Only affects new tickets.
+Default:\~off.
+.TP
+.B \-\-follow\-up
+Re-check every open fleet ticket against the scanner as described above,
+after today's findings. On its own (no
+.BR \-\-from\-enriched )
+no ticket map is written. Raises the run's time limit from two minutes to
+fifteen.
+Default:\~off.
+.SH ENVIRONMENT
+.I fleet.env
+is loaded at start from
+.B FLEET_ENV
+(else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env );
+variables already in the environment win.
+.TP
+.BR JIRA_BASE_URL ", " JIRA_EMAIL ", " JIRA_API_TOKEN
+The Jira site and the account the token belongs to; the token carries all
+of that account's permissions. Required.
+.I fleet.env
+section 9.
+.TP
+.B JIRA_PROJECT_KEY
+The project tickets are searched for and filed in. Required, no default.
+Section 9.
+.TP
+.B JIRA_ISSUE_TYPE
+The issue type name exactly as the project spells it. Required, no default.
+Section 9.
+.TP
+.B JIRA_ALLOW_CREATE
+The create allowlist. Optional; empty means create nothing.
+Section 9.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+The scanner the host lists come from. Required when
+.B LOOKUP_PROVIDER
+is
+.B qualys
+(the default); the lookups always use Qualys. Section 2.
+.TP
+.B QUALYS_KB_CACHE
+The CVE-to-QID cache. With
+.B \-\-from\-enriched
+or
+.B \-\-follow\-up
+it is loaded (or built) before any finding or ticket is looked at; if that
+fails, nothing is filed and no ticket is
+re-checked; the run warns and exits 0. A relative path resolves against the
+working directory.
+Default:\~\fI./qualys_kb_cache.json\fR. Section 3.
+.TP
+.B QUALYS_KB_MAX_AGE_HOURS
+How long the cache is trusted. Default:\~\fB168\fR. Section 3.
+.TP
+.B FLEET_CODE
+Where
+.B bin/fleet\-db
+is found for the remediation note. Unset: no note, silently (off the fleet
+host). Not absolute, or no regular file named
+.B fleet\-db
+there: a warning.
+.TP
+.BR GRAPH_LOOKBACK_HOURS ", " MAILBOX_LOOKBACK_HOURS ", " MAILBOX_MIN_AGE_HOURS
+Not used, but validated by the shared configuration loader; an invalid
+value stops the run. See
+.BR cti\-agent (1).
+.TP
+.BR FLEET_ENV ", " FLEET_HOME
+Locate
+.IR fleet.env .
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Jira and Qualys credentials.
+.TP
+.I /var/lib/cti\-agent/state/enriched\-YYYY\-MM\-DD.json
+The day's enriched findings, written by the digest's enrich step.
+.TP
+.I /var/lib/cti\-agent/state/enriched\-YYYY\-MM\-DD\-tickets.json
+The CVE-to-ticket map
+.BR brief.py
+reads to link findings to tickets. Written atomically, 0600, only with
+.BR \-\-for\-real ;
+named after the
+.B \-\-from\-enriched
+file, so replaying an old day reads that day's tickets.
+.TP
+.I /var/lib/cti\-agent/state/qualys_kb_cache.json
+The KnowledgeBase cache, 0600.
+.TP
+.I /opt/cti\-agent/bin/fleet\-db
+Called as
+.B fleet\-db note
+.I CVE
+.I "KEY URL (filed YYYY-MM-DD)"
+so the findings table stops reporting a ticketed CVE as un-actioned.
+.SH EXIT STATUS
+.TP
+.B 0
+Success. With
+.B \-\-from\-enriched
+or
+.BR \-\-follow\-up ,
+always once the configuration has loaded: a missing enriched file, an
+unavailable scanner cache, failed searches, creates, comments or
+attachments, and an unwritten ticket map are all warnings.
+.TP
+.B 1
+No mode was given; configuration missing or invalid (the message names the
+variables);
+.B \-\-check
+failed (credentials rejected, issue type not found, fields or search
+unavailable); or
+.B \-\-test\-ticket \-\-for\-real
+failed (write gate closed, search, create or comment failed).
+.TP
+.B 2
+An unknown option.
+.B \-\-help
+prints the usage and exits 0.
+.SH EXAMPLES
+Set-up, in order: read-only checks, the ticket as it would be filed, then
+one real test ticket:
+.PP
+.EX
+sudo cti\-agent cti\-jira \-\-check
+sudo cti\-agent cti\-jira \-\-test\-ticket
+sudo cti\-agent cti\-jira \-\-test\-ticket \-\-for\-real
+.EE
+.PP
+What tomorrow's run would say to every open ticket, writing nothing:
+.PP
+.EX
+sudo cti\-agent cti\-jira \-\-follow\-up
+.EE
+.PP
+File today's held non-KEV Sev5 findings after reviewing them:
+.PP
+.EX
+sudo cti\-agent cti\-jira \-\-approve \e
+    \-\-from\-enriched /var/lib/cti\-agent/state/enriched\-$(date +%F).json
+sudo cti\-agent cti\-jira \-\-approve \-\-for\-real \e
+    \-\-from\-enriched /var/lib/cti\-agent/state/enriched\-$(date +%F).json
+.EE
+.SH SEE ALSO
+.BR run\-digest (1),
+.BR fleet\-db (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11c.

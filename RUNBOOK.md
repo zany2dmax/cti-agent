@@ -1176,6 +1176,24 @@ domain's `rua=` must include it.
 
 ---
 
+## 11h. Man pages
+
+Every operator command has a page: the ten Go binaries, the `run-*` runners,
+`fleet-db`, `fleet-board`, the `cti-agent` wrapper, the Python lanes and
+`dev-run`. The installer puts them in `/usr/local/share/man/man1`:
+
+```bash
+man cti-domains
+man run-digest
+man -k cti        # list them all (after mandb has indexed them)
+```
+
+They are written from the source. `fleet-kit/tests/test_lanes.py` fails if a
+command gains a flag, argument or subcommand its page does not document, and
+`task man:lint` checks they render cleanly. Conventions are in `man/STYLE.md`.
+
+---
+
 ## 12. Verifying a run
 
 A lane that exits 0 is not the same as a lane that did something. These are the
