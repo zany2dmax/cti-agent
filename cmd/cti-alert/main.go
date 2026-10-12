@@ -161,7 +161,12 @@ func systemctlShow(unit, prop string) string {
 func journal(unit string) string {
 	out, err := run(10*time.Second, "journalctl", "-u", unit, "-n", journalLines, "--no-pager")
 	if err != nil || strings.TrimSpace(out) == "" {
-		return "(journal unavailable: " + errText(err) + ")"
+		// The alert unit runs with SupplementaryGroups=systemd-journal; a hand
+		// run through `sudo cti-agent` does not, and journalctl exits 1. Say
+		// which, so a test run does not read as a second fault.
+		return "(journal unavailable: " + errText(err) + " - the service account " +
+			"can read the journal only under cti-agent-alert@.service, which adds " +
+			"the systemd-journal group; a hand run does not)"
 	}
 	return strings.TrimSpace(out)
 }
@@ -311,7 +316,7 @@ func renderText(f failure) string {
 	reason := ""
 
 	if f.isTest() {
-		verb = "alert path tested against"
+		verb = "is healthy - alert path tested"
 		consequence = "This is a test. The unit is healthy and nothing failed. " +
 			"Receiving this confirms the alert path works end to end: systemd " +
 			"started the alerter, it read the journal, and Graph delivered the mail."
@@ -410,7 +415,7 @@ func renderHTML(f failure) string {
 
 	if f.isTest() {
 		banner, accent, tint = "CTI fleet alert test", "#1f6f43", "#e9f7ef"
-		verb = "alert path tested against"
+		verb = "is healthy - alert path tested"
 		consequence = "<b>This is a test.</b> The unit is healthy and nothing " +
 			"failed. Receiving this confirms the alert path works end to end."
 	} else if f.isHold() {

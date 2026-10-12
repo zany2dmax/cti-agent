@@ -906,20 +906,20 @@ func TestQQLFallsBackToCVEsWhenThereAreNoQIDsAtAll(t *testing.T) {
 func TestHTMLCarriesTheThingsTheReaderCameFor(t *testing.T) {
 	h := report(t).HTML()
 	for _, want := range []string{
-		"Example Org",                                // whose it is
+		"Example Org", // whose it is
 		"~1510 new vulnerabilities across 777 hosts", // the exposure line
-		"qid: 110531",                                // the QQL, pasteable
-		"CVE-2026-1111",                              // present here
-		">110531",                                    // the QID, which is the row
-		"95",                                         // its QDS, from Host Detection
-		"2026-08-14",                                 // when it was last seen
-		"Qualys Detection Score",                     // the legend for the column
-		"no Qualys QID mapping",                      // the coverage caveat
-		"Present in our environment",                 // the section that makes it ours
-		"421",                                        // Microsoft's count, per Qualys
-		"Windows HTTP.sys",                           // the product list, dots intact
-		"Spoofing Vulnerability",                     // category table
-		"Adobe",                                      // Adobe section
+		"qid: 110531",                // the QQL, pasteable
+		"CVE-2026-1111",              // present here
+		">110531",                    // the QID, which is the row
+		"95",                         // its QDS, from Host Detection
+		"2026-08-14",                 // when it was last seen
+		"Qualys Detection Score",     // the legend for the column
+		"no Qualys QID mapping",      // the coverage caveat
+		"Present in our environment", // the section that makes it ours
+		"421",                        // Microsoft's count, per Qualys
+		"Windows HTTP.sys",           // the product list, dots intact
+		"Spoofing Vulnerability",     // category table
+		"Adobe",                      // Adobe section
 		"determined solely by Qualys Host Detection", // the standing caveat
 	} {
 		if !strings.Contains(h, want) {
