@@ -47,6 +47,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `/usr/local/share/man/man1`. A lane test fails if a flag, runner argument,
   lane argument or subcommand is missing from its page; `task man:lint`
   checks rendering.
+- **Patch Tuesday reads Microsoft's own release data.** The Security Update
+  Guide's CVRF API (`api.msrc.microsoft.com`, public, no key) is now the
+  primary source for the counts, severities, exploited and publicly disclosed
+  CVEs, the by-impact table, product families and the CVE list correlated
+  with Qualys. The release is the CVEs Microsoft assigned, first published on
+  Patch Tuesday, that need customer action; cloud-only fixes are counted
+  separately. New `--url-msrc URL|none`.
+- **BleepingComputer is the cross-check.** A total that differs from
+  Microsoft's is stated in the email with the likely reason.
+- **The Qualys blog is optional.** It answers 403 to Azure addresses. It is
+  still tried for its published QQL; when it fails it is listed as "optional,
+  not read" and does not mark the report incomplete.
+- **The incomplete-sources banner says what the report was built from**
+  ("Built from X only; could not read Y"), not just what failed.
 
 ### Fixed
 

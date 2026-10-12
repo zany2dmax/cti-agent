@@ -68,8 +68,9 @@ is asked; if the tag was already sent the runner exits 0.
 .RB [ \-\-month
 .IR M ]
 .B \-\-out \-\-text\-out \-\-json
-writes the HTML, text and structured digest. It reads the two public
-wrap-ups and correlates the release with the scanner. Without
+writes the HTML, text and structured digest. It reads Microsoft's release
+data, cross-checks the public write-ups, and correlates the release with the
+scanner. Without
 .BR \-\-month ,
 the binary also writes the release manifest, unsent; not on a dry run,
 which passes

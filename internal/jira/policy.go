@@ -3,7 +3,7 @@
 // This file is the policy: what a ticket says, how duplicates are recognised,
 // and which project may be written to. It is pure - no network, no files, no
 // environment reads - so the ticket shape and the duplicate-suppression key
-// can be tested against a table rather than against crhomeusa.atlassian.net.
+// can be tested against a table rather than against example.atlassian.net.
 //
 // # WHY DUPLICATE SUPPRESSION IS THE HARD PART
 //

@@ -60,6 +60,8 @@ func main() {
 	jsonOut := flag.String("json", "", "write the structured digest here, for inspection")
 	dryRun := flag.Bool("dry-run", false, "print the text version to stdout, write nothing")
 	subjectOnly := flag.Bool("subject-only", false, "print the subject line and exit")
+	urlMSRC := flag.String("url-msrc", "",
+		"override Microsoft's release-document URL (the CVRF API); 'none' to skip it")
 	urlQualys := flag.String("url-qualys", "", "override the Qualys review URL")
 	urlBleeping := flag.String("url-bleeping", "", "override the BleepingComputer URL")
 	provider := flag.String("provider", "", "'none' to skip Qualys entirely")
@@ -167,13 +169,17 @@ func main() {
 	defer cancel()
 	client := &http.Client{Timeout: *timeout}
 
-	qURL := *urlQualys
-	if qURL == "" {
-		qURL = patchtuesday.QualysURL(year, mon)
+	// Microsoft's own release document first: it is the primary source for
+	// the counts, severities, zero-days and CVE list. See msrc.go.
+	if !strings.EqualFold(*urlMSRC, "none") {
+		mURL := *urlMSRC
+		if mURL == "" {
+			mURL = patchtuesday.MSRCAPIURL(year, mon)
+		}
+		ms, rel := patchtuesday.FetchMSRC(ctx, client, mURL, year, mon)
+		d.Sources = append(d.Sources, ms)
+		d.MSRC = rel
 	}
-	qs := patchtuesday.Fetch(ctx, client, "Qualys security update review", qURL)
-	qs.Role = patchtuesday.RoleQualysBlog
-	d.Sources = append(d.Sources, qs)
 
 	bURL := *urlBleeping
 	if bURL == "" {
@@ -183,6 +189,18 @@ func main() {
 	bs.Role = patchtuesday.RoleBleeping
 	d.Sources = append(d.Sources, bs)
 
+	// The Qualys blog is optional. It answers 403 to Azure addresses, and
+	// everything it supplied is now Microsoft's except its published QQL,
+	// which the lane rebuilds from our own detections when it is missing.
+	qURL := *urlQualys
+	if qURL == "" {
+		qURL = patchtuesday.QualysURL(year, mon)
+	}
+	qs := patchtuesday.Fetch(ctx, client, "Qualys blog", qURL)
+	qs.Role = patchtuesday.RoleQualysBlog
+	qs.Optional = true
+	d.Sources = append(d.Sources, qs)
+
 	patchtuesday.Parse(d)
 
 	anyFetched := false
@@ -190,18 +208,31 @@ func main() {
 		if s.Fetched {
 			anyFetched = true
 		}
-		if s.Err != "" {
+		switch {
+		case s.Err != "" && s.Optional:
+			fmt.Fprintf(os.Stderr, "cti-patchtuesday: optional source %s not read (%s): %s\n",
+				s.Name, s.Err, s.URL)
+		case s.Err != "":
 			fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s unavailable (%s): %s\n",
 				s.Name, s.Err, s.URL)
 		}
 	}
 	if !anyFetched {
 		fmt.Fprintln(os.Stderr,
-			"cti-patchtuesday: neither source could be read - not sending a synopsis "+
-				"built from nothing. Check outbound 443 to blog.qualys.com and "+
-				"www.bleepingcomputer.com, then retry with --url-qualys / --url-bleeping "+
-				"if the URL pattern has changed.")
+			"cti-patchtuesday: no source could be read - not sending a synopsis "+
+				"built from nothing. Check outbound 443 to api.msrc.microsoft.com, "+
+				"www.bleepingcomputer.com and blog.qualys.com, then retry with "+
+				"--url-msrc / --url-bleeping / --url-qualys if a URL has changed.")
 		os.Exit(1)
+	}
+	if d.MSRC != nil {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: Microsoft %s: %d CVE(s) needing action "+
+			"(%d critical), %d cloud-only, %d exploited, %d publicly disclosed\n",
+			d.MSRC.ID, d.MSRC.Total, d.MSRC.Critical, d.MSRC.CloudOnly,
+			len(d.MSRC.Exploited), len(d.MSRC.Disclosed))
+	}
+	for _, c := range d.CrossCheck {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday:   cross-check: %s\n", c)
 	}
 	fmt.Fprintf(os.Stderr, "cti-patchtuesday: %s - %d CVE(s) in the sources, "+
 		"%d QID(s) published in the review\n",
@@ -221,7 +252,7 @@ func main() {
 	// Provenance. The August replay reported a total of 400 while the Qualys
 	// post said 421, and nothing in the output said which page each figure had
 	// come from, so the discrepancy could only be investigated by reading code.
-	for _, k := range []string{"total", "critical", "important", "zero_days", "products", "qql"} {
+	for _, k := range []string{"total", "critical", "important", "zero_days", "products", "categories", "qql"} {
 		if v := d.From[k]; v != "" {
 			fmt.Fprintf(os.Stderr, "cti-patchtuesday:   %-10s <- %s\n", k, v)
 		}

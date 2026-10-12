@@ -523,10 +523,10 @@ class Attribution(unittest.TestCase):
         self.assertNotIn("Claude Code Agent Fleet", html)
 
     def test_a_url_alone_is_enough_and_names_the_org(self):
-        os.environ["FLEET_ORG"] = "Construction Resources"
+        os.environ["FLEET_ORG"] = "Example Org"
         os.environ["FLEET_REPO_URL"] = "https://github.com/example/cti-agent"
         text, url = brief.attribution()
-        self.assertIn("Construction Resources Claude Code Agent Fleet", text)
+        self.assertIn("Example Org Claude Code Agent Fleet", text)
         self.assertEqual(url, "https://github.com/example/cti-agent")
 
     def test_explicit_text_wins_and_reaches_both_renderings(self):

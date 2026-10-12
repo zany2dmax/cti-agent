@@ -26,9 +26,14 @@ type Source struct {
 	Err     string // why it failed, for the DEGRADED banner
 	Text    string // tags stripped, entities decoded
 	RawHTML string
+	// Optional sources are used when they load and never make the report
+	// "incomplete" when they do not. The Qualys blog is one: it answers 403
+	// to the Azure address the fleet runs from, and Microsoft's own data
+	// covers everything it supplied except its published QQL.
+	Optional bool
 }
 
-// Source roles.
+// Source roles. RoleMSRC is in msrc.go.
 const (
 	RoleQualysBlog = "qualys-blog"
 	RoleBleeping   = "bleepingcomputer"
@@ -78,6 +83,14 @@ type Digest struct {
 	// there was no way to tell from the output which page had been believed.
 	// A number that might be wrong should name its own source.
 	From map[string]string
+
+	// MSRC is Microsoft's own release data, when the API answered. When it
+	// is present it supplies the counts, severities, zero-days, categories
+	// and the CVE list, and the articles become the cross-check.
+	MSRC *Release `json:",omitempty"`
+	// CrossCheck holds a sentence for every article whose total disagrees
+	// with Microsoft's, so a difference is explained rather than hidden.
+	CrossCheck []string `json:",omitempty"`
 }
 
 // PublishedQIDs are the QIDs Qualys itself lists in the review's QQL. These
@@ -477,6 +490,69 @@ func Parse(d *Digest) {
 	}
 
 	collectCVEs(d)
+	applyMSRC(d, qualys, bleeping)
+}
+
+// applyMSRC puts Microsoft's own figures in place of the articles' where it
+// has them, and records where an article disagrees. The article-derived
+// values above are kept when the API did not answer, so a missing MSRC
+// document degrades the report rather than emptying it.
+func applyMSRC(d *Digest, qualys, bleeping *Source) {
+	rel := d.MSRC
+	if rel == nil {
+		return
+	}
+	from := MSRCName
+	d.Total, d.From["total"] = rel.Total, from
+	d.Critical, d.From["critical"] = rel.Critical, from
+	d.Important, d.From["important"] = rel.Important, from
+	d.ZeroDayText, d.From["zero_days"] = rel.ZeroDaySentence(), from
+	if cats := rel.Categories(); len(cats) > 0 {
+		d.Categories, d.From["categories"] = cats, from
+	}
+	if prods := rel.TopProducts(20); len(prods) > 0 {
+		d.Products, d.From["products"] = prods, from
+	}
+
+	// The CVE list is Microsoft's. The scraped sightings stay in CVEWhere,
+	// so --explain can still say where an article mentioned one.
+	d.CVEs = append([]string(nil), rel.CVEs...)
+	d.ExcludedCVEs = nil
+	d.ExcludedWhy = map[string]string{}
+
+	d.CrossCheck = nil
+	for _, s := range []*Source{bleeping, qualys} {
+		if s == nil || !s.Fetched {
+			continue
+		}
+		n := firstNumber(s.Text, reTotal)
+		if n == 0 || n == rel.Total || n == rel.Total+rel.CloudOnly {
+			continue
+		}
+		note := fmt.Sprintf("%s counts %d vulnerabilities; Microsoft's release lists %d "+
+			"that need customer action", s.Name, n, rel.Total)
+		if rel.CloudOnly > 0 {
+			note += fmt.Sprintf(", plus %d already fixed in Microsoft's cloud", rel.CloudOnly)
+		}
+		d.CrossCheck = append(d.CrossCheck, note+". Publishers count differently; "+
+			"the figures above are Microsoft's.")
+	}
+}
+
+// CountBasis says what the headline count is a count of, when it is
+// Microsoft's. Empty otherwise.
+func (d *Digest) CountBasis() string {
+	if d.MSRC == nil {
+		return ""
+	}
+	s := fmt.Sprintf("Counts are Microsoft's own (Security Update Guide, %s): CVEs "+
+		"Microsoft assigned and first published on Patch Tuesday that need "+
+		"customer action.", d.MSRC.ID)
+	if d.MSRC.CloudOnly > 0 {
+		s += fmt.Sprintf(" %d more were fixed in Microsoft's cloud the same day "+
+			"and need nothing installed.", d.MSRC.CloudOnly)
+	}
+	return s
 }
 
 var (
@@ -617,10 +693,25 @@ func excerptAround(block, cve string) string {
 func (d *Digest) Explain(cve string) string {
 	cve = strings.ToUpper(strings.TrimSpace(cve))
 	where := d.CVEWhere[cve]
-	if len(where) == 0 {
+	var b strings.Builder
+	if d.MSRC != nil {
+		if t, ok := d.MSRC.Titles[cve]; ok {
+			fmt.Fprintf(&b, "%s is in Microsoft's release (%s): %s\n", cve, d.MSRC.ID, t)
+		} else if contains(d.MSRC.CloudCVEs, cve) {
+			fmt.Fprintf(&b, "%s is in Microsoft's release (%s) but was fixed in "+
+				"Microsoft's cloud with nothing to install, so it is not correlated.\n",
+				cve, d.MSRC.ID)
+		} else {
+			fmt.Fprintf(&b, "%s is NOT in Microsoft's release (%s), so it is not "+
+				"correlated.\n", cve, d.MSRC.ID)
+		}
+		if len(where) == 0 {
+			b.WriteString("  Neither article mentions it.\n")
+			return b.String()
+		}
+	} else if len(where) == 0 {
 		return fmt.Sprintf("%s does not appear on either source page.", cve)
 	}
-	var b strings.Builder
 	fmt.Fprintf(&b, "%s was found in %d place(s):\n", cve, len(where))
 	for _, w := range where {
 		fmt.Fprintf(&b, "  - %s\n", w)
@@ -634,7 +725,9 @@ func (d *Digest) Explain(cve string) string {
 			return b.String()
 		}
 	}
-	b.WriteString("  Correlated as part of this release.\n")
+	if d.MSRC == nil {
+		b.WriteString("  Correlated as part of this release.\n")
+	}
 	return b.String()
 }
 
@@ -746,13 +839,43 @@ func parseCategoryTable(raw string) []Category {
 	return out
 }
 
-// Degraded lists the sources that did not load, for the banner.
+// Degraded lists the required sources that did not load, for the banner.
+// An optional source that did not load is not a degradation; it is shown in
+// the source list as "not read" instead.
 func (d *Digest) Degraded() []string {
 	var out []string
 	for _, s := range d.Sources {
-		if !s.Fetched {
+		if !s.Fetched && !s.Optional {
 			out = append(out, fmt.Sprintf("%s (%s)", s.Name, s.Err))
 		}
 	}
 	return out
+}
+
+// BuiltFrom names the release sources that did load, for the banner: "built
+// from X only" tells the reader more than a list of what failed.
+func (d *Digest) BuiltFrom() []string {
+	var out []string
+	for _, s := range d.Sources {
+		if s.Fetched && s.Role != RoleExposure {
+			out = append(out, s.Name)
+		}
+	}
+	return out
+}
+
+// IncompleteSentence is the banner's text: what the report WAS built from,
+// then what could not be read. "Could not read X" alone left the reader to
+// work out that everything above came from one news article.
+func (d *Digest) IncompleteSentence() string {
+	deg := d.Degraded()
+	if len(deg) == 0 {
+		return ""
+	}
+	used := d.BuiltFrom()
+	if len(used) == 0 {
+		return "No release source could be read: " + strings.Join(deg, "; ") + "."
+	}
+	return "Built from " + strings.Join(used, " and ") + " only; could not read " +
+		strings.Join(deg, "; ") + "."
 }

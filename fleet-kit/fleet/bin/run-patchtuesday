@@ -81,7 +81,7 @@ say "building the $TAG synopsis"
 NOMANIFEST=()
 [ -n "$DRY" ] && NOMANIFEST=(--no-manifest)
 "$PT" "${MONTH_ARG[@]}" "${NOMANIFEST[@]}" --out "$HTML" --text-out "$TXT" --json "$JSON" \
-  || fail "cti-patchtuesday exited non-zero (check outbound 443 to blog.qualys.com and www.bleepingcomputer.com)"
+  || fail "cti-patchtuesday exited non-zero (check outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com)"
 [ -s "$HTML" ] || fail "no HTML written to $HTML"
 
 SUBJECT="$("$PT" "${MONTH_ARG[@]}" --subject-only)"
