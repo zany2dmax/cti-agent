@@ -198,7 +198,7 @@ if [ -z "$DRY" ]; then
   read -r S5 S4 S3 S2 S1 < <(python3 -c "
 import json,sys
 c=json.load(open('$ENRICHED'))['counts']
-print(c['Sev5'],c['Sev4'],c['Sev3'],c['Sev2'],c['Sev1'])")
+print(*(c.get(k, 0) for k in ('Sev5','Sev4','Sev3','Sev2','Sev1')))")
   MID=$(printf '%s' "$RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" 2>/dev/null || echo unknown)
   "$DB" sent "$DAY" "$S5" "$S4" "$S3" "$S2" "$S1" "$MID" "$KIND"
   "$BOARD" post @brief @you INFO "$KIND digest sent: Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1 ($SUBJECT)"
