@@ -222,12 +222,44 @@ func selectForTicketing(ctx context.Context, rows []enrichedRow, fill hostFiller
 	return out
 }
 
-// TicketRef is what the digest needs to render a link.
+// TicketRef is what the digest needs to render a link, and the FLEET
+// TICKETS section: every fleet ticket, where Jira says it is, how many hosts
+// the scanner sees today, and what this run did about it.
+//
+// The section exists because a ticket used to appear in the email only on a
+// day its CVE was back in the mail. The follow-up re-checked all of them and
+// commented in Jira, and none of that reached the person reading the digest.
 type TicketRef struct {
 	Key     string `json:"key"`
 	URL     string `json:"url"`
 	Status  string `json:"status,omitempty"`
 	Created bool   `json:"created"`
+	CVE     string `json:"cve,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Done    bool   `json:"done,omitempty"`    // Jira status category is done
+	Checked bool   `json:"checked,omitempty"` // the scanner answered this run
+	Hosts   int    `json:"hosts"`             // today's count, when Checked
+	Outcome string `json:"outcome,omitempty"` // what this run did, in words
+}
+
+// refFor builds the reference for an existing issue.
+func refFor(c *jira.Client, issue jira.Issue, cve string) TicketRef {
+	return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
+		Status: issue.Fields.Status.Name, CVE: cve,
+		Summary: issue.Fields.Summary, Done: issue.IsDone()}
+}
+
+// pastTense turns a plan's preview ("WOULD COMMENT: ...") into what a real
+// run did, so the digest and the dry run use the same words.
+func pastTense(s string) string {
+	for _, r := range [][2]string{
+		{"WOULD COMMENT ONCE: ", "commented once: "},
+		{"WOULD COMMENT: ", "commented: "},
+		{"would record", "recorded"},
+	} {
+		s = strings.Replace(s, r[0], r[1], 1)
+	}
+	return s
 }
 
 // TicketMap is written beside the enriched file for brief.py to read.

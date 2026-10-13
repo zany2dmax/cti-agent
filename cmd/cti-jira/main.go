@@ -285,7 +285,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 		return die("searching for an existing ticket: %s", safelog.Line(err.Error()))
 	}
 	if len(existing) > 0 {
-		_, rc := updateExisting(ctx, c, existing[0], f, csvBody, now)
+		_, _, rc := updateExisting(ctx, c, existing[0], f, csvBody, now)
 		return rc
 	}
 
@@ -349,16 +349,20 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 // spreading from 441 hosts to 500 looked exactly like one that had not moved.
 // A ticket that snapshots a single morning and never updates is worse than no
 // ticket, because it looks current.
+//
+// It returns the ticket key, what it did in words (for the digest's FLEET
+// TICKETS section, "" when it failed), and the exit status.
 func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
-	f jira.Finding, csvBody []byte, now time.Time) (string, int) {
+	f jira.Finding, csvBody []byte, now time.Time) (key, outcome string, rc int) {
 
-	key := issue.Key
+	key = issue.Key
 	logf("ticket for %s already exists: %s (%s)", f.CVE, key, c.BrowseURL(key))
 
 	// Decided by planUpdate, the same function a dry run prints - so what a
 	// preview says and what a real run does cannot drift apart.
 	prev, found := storedState(ctx, c, key)
 	plan := planUpdate(issue, prev, f, now)
+	outcome = pastTense(plan.describe(f))
 
 	switch plan.kind {
 	case planClosedNoted:
@@ -366,11 +370,11 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 			f.Count(), plan.notedAt.Format("2006-01-02"))
 		emit(map[string]any{"mode": "for-real", "created": false,
 			"reason": "closed-but-detected-already-noted", "key": key})
-		return key, exitOK
+		return key, outcome, exitOK
 
 	case planClosedComment:
 		if err := c.AddComment(ctx, key, jira.ClosedButDetectedComment(f, now)); err != nil {
-			return key, die("commenting on %s: %s", key, safelog.Line(err.Error()))
+			return key, "", die("commenting on %s: %s", key, safelog.Line(err.Error()))
 		}
 		st := jira.StateFrom(f, key, now)
 		st.ClosedButDetectedAt = now
@@ -385,7 +389,7 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		logf("closed ticket still has detections - noted once, not reopened")
 		emit(map[string]any{"mode": "for-real", "created": false,
 			"reason": "closed-but-detected", "key": key, "commented": true})
-		return key, exitOK
+		return key, outcome, exitOK
 	}
 
 	d := plan.drift
@@ -423,12 +427,12 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		emit(map[string]any{"mode": "for-real", "created": false,
 			"reason": "no-material-change", "key": key,
 			"hosts": f.Count(), "commented": false})
-		return key, exitOK
+		return key, outcome, exitOK
 	}
 
 	csvName := jira.CSVName(f.CVE, now)
 	if err := c.AddComment(ctx, key, jira.DriftComment(d, f, csvName, now)); err != nil {
-		return key, die("commenting on %s: %s", key, safelog.Line(err.Error()))
+		return key, "", die("commenting on %s: %s", key, safelog.Line(err.Error()))
 	}
 	logf("commented on %s: %d -> %d hosts, +%d new, +%d new QID(s)",
 		key, d.CountBefore, d.CountAfter, len(d.NewHosts), len(d.NewQIDs))
@@ -464,7 +468,10 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		"new_hosts": len(d.NewHosts), "new_qids": len(d.NewQIDs),
 		"resolved": d.Resolved,
 	})
-	return key, exitOK
+	if !attached {
+		outcome += " (the host CSV did not attach)"
+	}
+	return key, outcome, exitOK
 }
 
 func emit(v map[string]any) {
@@ -630,25 +637,27 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 		// tickets. Before 1.3 only CreateIssue checked it, so an empty
 		// JIRA_ALLOW_CREATE - "do not write to Jira" - still let every run
 		// comment on and attach CSVs to the tickets that already existed.
+		ref := refFor(c, issue, f.CVE)
+		ref.Checked, ref.Hosts = true, f.Count()
 		if forReal {
 			if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
 				logf("WRITE GATE CLOSED - %s left unchanged: %s",
 					issue.Key, safelog.Line(err.Error()))
-				return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
-					Status: issue.Fields.Status.Name}, nil
+				ref.Outcome = "not updated: the Jira write gate is closed (JIRA_ALLOW_CREATE)"
+				return ref, nil
 			}
 		}
 		if !forReal {
-			logf("DRY RUN %s: %s: %s", f.CVE, issue.Key, previewUpdate(ctx, c, issue, f, now))
-			return TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
-				Status: issue.Fields.Status.Name}, nil
+			ref.Outcome = previewUpdate(ctx, c, issue, f, now)
+			logf("DRY RUN %s: %s: %s", f.CVE, issue.Key, ref.Outcome)
+			return ref, nil
 		}
-		key, rc := updateExisting(ctx, c, issue, f, csvBody, now)
+		key, outcome, rc := updateExisting(ctx, c, issue, f, csvBody, now)
 		if rc != exitOK {
 			return TicketRef{}, fmt.Errorf("updating %s", key)
 		}
-		return TicketRef{Key: key, URL: c.BrowseURL(key),
-			Status: issue.Fields.Status.Name}, nil
+		ref.Outcome = outcome
+		return ref, nil
 	}
 
 	// A non-KEV Sev5 is the fleet's own judgement rather than an external
@@ -700,5 +709,7 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 		logf("WARNING: could not record exposure state on %s: %s",
 			res.Key, safelog.Line(err.Error()))
 	}
-	return TicketRef{Key: res.Key, URL: c.BrowseURL(res.Key), Created: true}, nil
+	return TicketRef{Key: res.Key, URL: c.BrowseURL(res.Key), Created: true,
+		CVE: f.CVE, Summary: jira.Summary(f, now), Checked: true, Hosts: f.Count(),
+		Outcome: "filed today"}, nil
 }

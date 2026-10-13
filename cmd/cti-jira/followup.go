@@ -151,8 +151,7 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		cve := cveFromLabels(issue.Fields.Labels)
 		if cve != "" && cve != testCVE {
 			// Oldest first, so if two tickets carry one CVE the newer wins.
-			refs[cve] = TicketRef{Key: issue.Key, URL: c.BrowseURL(issue.Key),
-				Status: issue.Fields.Status.Name}
+			refs[cve] = refFor(c, issue, cve)
 		}
 		switch {
 		case cve == "":
@@ -180,15 +179,29 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			unanswered++
 			logf("note   : follow-up: %s (%s): %s - ticket left alone; a lookup "+
 				"that did not answer is not a fix", issue.Key, cve, safelog.Line(why))
+			if r, ok := refs[cve]; ok && r.Key == issue.Key {
+				r.Outcome = "not re-checked: " + safelog.Line(why)
+				refs[cve] = r
+			}
 			continue
 		}
 		f := findingFromLookup(cve, res)
+		// Record what the scanner said and what this run did, on the ref the
+		// digest will render. With two tickets for one CVE the newer one's
+		// iteration runs later and overwrites, so it owns the line.
+		note := func(outcome string) {
+			if r, ok := refs[cve]; ok && r.Key == issue.Key {
+				r.Checked, r.Hosts, r.Outcome = true, f.Count(), outcome
+				refs[cve] = r
+			}
+		}
 
 		if !forReal {
 			// The same decision the real run acts on, read-only: whether IT
 			// gets a comment, and why - not just a host count to interpret.
-			logf("DRY RUN follow-up: %s (%s): %s", issue.Key, cve,
-				previewUpdate(ctx, c, issue, f, now))
+			preview := previewUpdate(ctx, c, issue, f, now)
+			logf("DRY RUN follow-up: %s (%s): %s", issue.Key, cve, preview)
+			note(preview)
 			checked++
 			continue
 		}
@@ -198,10 +211,13 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 				issue.Key, safelog.Line(err.Error()))
 			continue
 		}
-		if _, rc := updateExisting(ctx, c, issue, f, csvBody, now); rc != exitOK {
+		_, outcome, rc := updateExisting(ctx, c, issue, f, csvBody, now)
+		if rc != exitOK {
 			logf("WARNING: follow-up: %s was not updated", issue.Key)
+			note("re-checked, but the Jira update failed - see the run log")
 			continue
 		}
+		note(outcome)
 		checked++
 	}
 	logf("follow-up: %d fleet ticket(s) found, %d re-checked, %d already handled "+

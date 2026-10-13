@@ -583,3 +583,41 @@ func TestFollowUpReturnsEveryFleetTicketForTheDigest(t *testing.T) {
 		t.Error("the setup test ticket was handed to the digest")
 	}
 }
+
+func TestTheFollowUpTellsTheDigestWhatItDid(t *testing.T) {
+	// The FLEET TICKETS section renders these. Before it, the digest showed a
+	// ticket only on a day its CVE was in the mail, and what the re-check
+	// found reached Jira and nobody reading the email.
+	fj, c := newFakeJira(t,
+		ticket("SEC-1", "CVE-2026-1111", "indeterminate"),
+		ticket("SEC-2", "CVE-2026-2222", "indeterminate"))
+	previously(fj, "SEC-1", "CVE-2026-1111", "host-a", "host-b")
+	sc := &scanner{
+		answers: map[string]vulnlookup.Result{
+			"CVE-2026-1111": {CVE: "CVE-2026-1111", Status: vulnlookup.StatusNotPresent}},
+		errs: map[string]error{"CVE-2026-2222": errors.New("scanner down")},
+	}
+	refs := followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+
+	got := refs["CVE-2026-1111"]
+	if !got.Checked || got.Hosts != 0 || got.CVE != "CVE-2026-1111" ||
+		!strings.HasPrefix(got.Outcome, "commented: no detections remain") {
+		t.Errorf("resolved ref = %+v", got)
+	}
+	left := refs["CVE-2026-2222"]
+	if left.Checked || !strings.HasPrefix(left.Outcome, "not re-checked: the scanner lookup failed") {
+		t.Errorf("unanswered ref = %+v", left)
+	}
+}
+
+func TestPastTense(t *testing.T) {
+	for in, want := range map[string]string{
+		"WOULD COMMENT: no detections remain (was 3)":  "commented: no detections remain (was 3)",
+		"WOULD COMMENT ONCE: closed, but ...":          "commented once: closed, but ...",
+		"no stored state yet - would record 4 host(s)": "no stored state yet - recorded 4 host(s)",
+	} {
+		if got := pastTense(in); got != want {
+			t.Errorf("pastTense(%q) = %q", in, got)
+		}
+	}
+}

@@ -377,6 +377,108 @@ def subjects_section(data):
   </td></tr>"""
 
 
+def _fleet_tickets(data):
+    """Split the ticket map into (open, recently closed), each sorted by key.
+
+    Every fleet ticket cti-jira found this run, not only those whose CVE is
+    in today's mail. Before this a ticket appeared only on a day its CVE was
+    back in the news; the daily re-check of every ticket commented in Jira
+    and told the reader of the digest nothing.
+    """
+    tickets = data.get("_tickets") or {}
+    rows = []
+    for cve, t in tickets.items():
+        if not isinstance(t, dict) or not t.get("key"):
+            continue
+        rows.append(dict(t, cve=t.get("cve") or cve))
+
+    def sort_key(t):
+        k = str(t.get("key"))
+        prefix, _, num = k.rpartition("-")
+        return (prefix, int(num) if num.isdigit() else 0, k)
+    open_ = sorted((t for t in rows if not t.get("done")), key=sort_key)
+    closed = sorted((t for t in rows if t.get("done")), key=sort_key)
+    return open_, closed
+
+
+def _ticket_hosts(t):
+    if not t.get("checked"):
+        return "not re-checked"
+    n = t.get("hosts") or 0
+    return "no hosts" if n == 0 else f"{n} host{'s' if n != 1 else ''}"
+
+
+def fleet_tickets_section(data):
+    """FLEET TICKETS: every open fleet ticket and what today's re-check found."""
+    open_, closed = _fleet_tickets(data)
+    if not open_ and not closed:
+        return ""
+
+    def row(t):
+        key = esc(t["key"])
+        url = t.get("url") or ""
+        if url.startswith(("http://", "https://")):
+            key = f'<a href="{esc(url)}" style="color:#12203a;font-weight:700">{key}</a>'
+        else:
+            key = f"<b>{key}</b>"
+        status = esc(t.get("status") or "")
+        outcome = esc(t.get("outcome") or "")
+        if outcome:
+            outcome = f'<br><span style="color:#718096">{outcome}</span>'
+        return (
+            "<tr><td style=\"padding:5px 8px 5px 0;vertical-align:top;white-space:nowrap\">"
+            f"{key}</td>"
+            "<td style=\"padding:5px 8px 5px 0;vertical-align:top;white-space:nowrap;"
+            f"color:#4a5568\">{esc(t.get('cve') or '')}<br>{status}</td>"
+            "<td style=\"padding:5px 0;vertical-align:top;color:#2d3748\">"
+            f"<b>{esc(_ticket_hosts(t))}</b>"
+            f"{outcome}"
+            "</td></tr>")
+
+    parts = []
+    if open_:
+        parts.append(''.join(row(t) for t in open_))
+    if closed:
+        parts.append(
+            "<tr><td colspan=\"3\" style=\"padding:10px 0 2px 0;color:#718096;"
+            "font-weight:700\">Closed in the last 30 days</td></tr>"
+            + ''.join(row(t) for t in closed))
+    return f"""
+  <tr><td style="padding:4px 20px 14px 20px;border-top:1px solid #e2e8f0">
+    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
+                color:#4a5568;margin:12px 0 8px 0;letter-spacing:.5px">
+      FLEET TICKETS &mdash; {len(open_)} open, re-checked against the scanner today</div>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+           style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+      {''.join(parts)}
+    </table>
+  </td></tr>"""
+
+
+def fleet_tickets_text(data):
+    open_, closed = _fleet_tickets(data)
+    if not open_ and not closed:
+        return []
+    lines = [f"FLEET TICKETS - {len(open_)} open, re-checked against the scanner today",
+             "-" * 68]
+
+    def add(t):
+        lines.append(f"  {t['key']:<10} {t.get('cve') or '':<16} "
+                     f"{t.get('status') or '':<14} {_ticket_hosts(t)}")
+        if t.get("outcome"):
+            lines.append(f"    {t['outcome']}")
+        if t.get("url"):
+            lines.append(f"    {t['url']}")
+    for t in open_:
+        add(t)
+    if closed:
+        lines.append("  Closed in the last 30 days:")
+        for t in closed:
+            add(t)
+    lines.append("")
+    return lines
+
+
 def render(data, kind):
     c, meta = data["counts"], data.get("source_meta", {})
     findings = data["findings"]
@@ -583,7 +685,7 @@ def render(data, kind):
       {degraded}{''.join(sections)}
     </table></td></tr>
 
-{subjects_section(data)}
+{fleet_tickets_section(data)}{subjects_section(data)}
   <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
     <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#718096">
@@ -693,6 +795,7 @@ def render_text(data, kind):
         if len(group) > limits[p]:
             lines.append(f"  +{len(group) - limits[p]} more {p} in the full report.")
         lines.append("")
+    lines += fleet_tickets_text(data)
     lines.append("Presence determined solely by the vulnerability lookup provider.")
     lines.append("UNKNOWN means the scanner had no mapping - not that we are clean.")
     attr_text, attr_url = attribution()

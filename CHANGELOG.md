@@ -59,6 +59,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **The Qualys blog is optional.** It answers 403 to Azure addresses. It is
   still tried for its published QQL; when it fails it is listed as "optional,
   not read" and does not mark the report incomplete.
+- **FLEET TICKETS in the daily.** Every fleet ticket cti-jira re-checks is
+  listed - key and link, CVE, Jira status, hosts the scanner sees today, and
+  what the re-check did ("commented: no detections remain", "no change - no
+  comment", "not re-checked: the scanner lookup failed") - with tickets closed
+  in the last 30 days below. A ticket used to appear only on a day its CVE was
+  back in the mail, so the daily follow-up reached Jira and not the reader.
 - **The domains report leads with WEBSITES.** Which domains have a live
   site - sitecheck.go's first use - was only in the inventory table at the
   bottom. The report now opens with it, grouped as live (final host, status,
