@@ -1218,6 +1218,67 @@ class DigestTicketLinks(unittest.TestCase):
         self.assertIn("https://x/browse/CR-9", line)
 
 
+class DigestFleetTickets(unittest.TestCase):
+    """Every fleet ticket appears in the digest, not only today's CVEs'.
+
+    A ticket used to show only on a day its CVE was back in the mail. The
+    follow-up re-checked all of them and commented in Jira, and the reader of
+    the digest heard nothing - "today's daily still didn't include ticket
+    status".
+    """
+
+    TICKETS = {
+        "CVE-2026-1": {"key": "CR-10", "url": "https://x/browse/CR-10", "status": "In Progress",
+                       "cve": "CVE-2026-1", "checked": True, "hosts": 0,
+                       "outcome": "commented: no detections remain (was 12) - this ticket can be closed"},
+        "CVE-2026-2": {"key": "CR-9", "url": "https://x/browse/CR-9", "status": "Open",
+                       "cve": "CVE-2026-2", "checked": True, "hosts": 227,
+                       "outcome": "no change since the last report (227 host(s)) - no comment"},
+        "CVE-2026-3": {"key": "CR-11", "url": "https://x/browse/CR-11", "status": "Done",
+                       "done": True, "cve": "CVE-2026-3", "checked": True, "hosts": 0},
+        "CVE-2026-4": {"key": "CR-12", "url": "javascript:alert(1)", "status": "<b>New</b>",
+                       "outcome": "not re-checked: the scanner lookup failed"},
+    }
+
+    def data(self, tickets=None):
+        return {"findings": [], "counts": {}, "total": 0, "generated": "now",
+                "_tickets": self.TICKETS if tickets is None else tickets}
+
+    def test_every_ticket_is_listed_open_first_in_key_order(self):
+        open_, closed = brief._fleet_tickets(self.data())
+        self.assertEqual([t["key"] for t in open_], ["CR-9", "CR-10", "CR-12"])
+        self.assertEqual([t["key"] for t in closed], ["CR-11"])
+
+    def test_the_html_says_what_the_recheck_found(self):
+        html = brief.fleet_tickets_section(self.data())
+        self.assertIn("FLEET TICKETS &mdash; 3 open", html)
+        self.assertIn("no detections remain", html)
+        self.assertIn("227 hosts", html)
+        self.assertIn("not re-checked", html)
+        self.assertIn("Closed in the last 30 days", html)
+        self.assertNotIn("javascript:", html)
+        self.assertNotIn("<b>New</b>", html)
+
+    def test_it_reaches_the_rendered_daily_even_with_no_findings(self):
+        html = brief.render(self.data(), "daily")
+        self.assertIn("FLEET TICKETS", html)
+        txt = brief.render_text(self.data(), "daily")
+        self.assertIn("FLEET TICKETS - 3 open", txt)
+        self.assertIn("CR-9", txt)
+        self.assertIn("227 hosts", txt)
+
+    def test_no_tickets_no_section(self):
+        self.assertEqual(brief.fleet_tickets_section(self.data({})), "")
+        self.assertNotIn("FLEET TICKETS", brief.render_text(self.data({}), "daily"))
+
+    def test_an_old_map_without_the_new_fields_still_renders(self):
+        old = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9", "status": "Open"}}
+        html = brief.fleet_tickets_section(self.data(old))
+        self.assertIn("CR-9", html)
+        self.assertIn("CVE-1", html)
+        self.assertIn("not re-checked", html)
+
+
 class RemediationNote(unittest.TestCase):
     """A ticketed finding must stop reporting as un-actioned.
 
