@@ -59,6 +59,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **The Qualys blog is optional.** It answers 403 to Azure addresses. It is
   still tried for its published QQL; when it fails it is listed as "optional,
   not read" and does not mark the report incomplete.
+- **CHEATSHEET.md** - the operator's one-page view of the box: health check,
+  installed version, timers, dry runs, logs, troubleshooting. `task
+  cheatsheet:pdf` renders it to a PDF (needs `pip3 install reportlab`).
 - **FLEET TICKETS in the daily.** Every fleet ticket cti-jira re-checks is
   listed - key and link, CVE, Jira status, hosts the scanner sees today, and
   what the re-check did ("commented: no detections remain", "no change - no

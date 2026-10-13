@@ -37,6 +37,21 @@ tasks:
         fi
         echo "  ok  man pages clean"
 
+  cheatsheet:pdf:
+    desc: Build CHEATSHEET.pdf from CHEATSHEET.md (needs reportlab)
+    # The PDF is generated, so it is gitignored: CHEATSHEET.md is the source.
+    sources:
+      - CHEATSHEET.md
+      - scripts/cheatsheet-pdf.py
+    generates:
+      - CHEATSHEET.pdf
+    cmds:
+      - |
+        if ! python3 -c 'import reportlab' 2>/dev/null; then
+          echo "reportlab is not installed: pip3 install --user reportlab" >&2; exit 1
+        fi
+        python3 scripts/cheatsheet-pdf.py CHEATSHEET.md CHEATSHEET.pdf
+
   fmt:check:
     desc: Fail if anything is unformatted, rather than silently reformatting it
     # WHY ship USES THIS AND NOT fmt
