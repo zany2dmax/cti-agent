@@ -26,7 +26,8 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 | Programs | `/opt/cti-agent/bin`, `/opt/cti-agent/lanes` |
 | State, reports, memory database | `/var/lib/cti-agent/{state,reports}` |
 | Message board | `sudo cti-agent fleet-board tail 30` |
-| Source checkout used by the installer | `~/cti-agent` (the operator's clone) |
+| Go source the installer builds from (root's clone) | `/opt/cti-agent/agent` |
+| Kit you install from (runners, units, lanes) | any operator's own clone, e.g. `~/cti-agent` |
 
 ## 2. The one-minute health check
 
@@ -44,16 +45,17 @@ no recent `ERROR` lines, and the budget says `ready` or `denied` with a reason.
 
 ## 3. What version is installed?
 
+None of these need anyone's home directory.
+
 ```bash
-sudo cat /etc/cti-agent/version              # tag, commit, build and install time
-cd ~/cti-agent && git log --oneline -3       # what the checkout is at
-cd ~/cti-agent && git status --short         # local changes (should be none)
-cd ~/cti-agent && git fetch -q && git status -sb   # behind the remote?
-sudo cti-agent cti-mailer --check            # also logs its version and checks Graph
+sudo cat /etc/cti-agent/version                         # tag, commit, build and install time
+sudo git -C /opt/cti-agent/agent log --oneline -3       # the source it was built from
+git ls-remote https://github.com/zany2dmax/cti-agent.git HEAD   # latest published commit
+sudo cti-agent cti-mailer --check                       # also logs its version and checks Graph
 ```
 
-If the `commit=` in `/etc/cti-agent/version` is not the checkout's latest
-commit, the box is running older code than the checkout. Reinstall (section 11).
+If the `commit=` in `/etc/cti-agent/version` is not the latest published
+commit, the box is behind. Update it (section 11).
 
 ## 4. When does everything run?
 
@@ -182,6 +184,15 @@ sudo cti-agent cti-kev --horizon 30            # KEV deadlines due in 30 days
 ```
 
 ## 11. Updating the box
+
+Run the installer from your own clone. Make one the first time
+(the repository is public, so no key is needed):
+
+```bash
+git clone https://github.com/zany2dmax/cti-agent.git ~/cti-agent   # once
+```
+
+Then, each update:
 
 ```bash
 cd ~/cti-agent && git pull
