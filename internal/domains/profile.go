@@ -279,7 +279,7 @@ func dmarcRecord(existing, policy, rua string) string {
 func ActionsHash(a []Action) string {
 	h := sha256.New()
 	for _, x := range a {
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%t\n", x.Domain, x.Type, x.Host, x.Set, x.Delete)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%t\n", x.Domain, x.Type, x.Host, x.Set, x.Delete)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
