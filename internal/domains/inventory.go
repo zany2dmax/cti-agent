@@ -31,15 +31,31 @@ type Entry struct {
 	// expected NOT to, and is checked for the records that stop anybody else
 	// sending as it.
 	Sends bool
+	// Receives marks a domain whose MX must keep delivering mail. Without it
+	// the domain should publish a null MX ("MX 0 .").
+	Receives bool
+	// SaaS: the domain's mail is sent by an application or service rather
+	// than our mail platform (implies Sends).
+	SaaS bool
+	// Unknown: nobody can yet say what sends as this domain. Reported, never
+	// tightened - a DMARC reject on a domain with unknown senders drops real
+	// mail.
+	Unknown bool
+	// Legacy: an old brand. With Receives and no Sends, its outbound has moved
+	// to the main domain and it only keeps its inbound path.
+	Legacy bool
 	// Line is where it came from, for error messages.
 	Line int
 }
 
 // ParseInventory reads the inventory file.
 //
-//	example.com send     # sends mail: needs SPF, DKIM, DMARC
-//	example.org,send     # comma works too (a spreadsheet export)
-//	example.net          # does not send: must be locked down
+//	example.com send receive    # active mail domain (chart row 1)
+//	example.org,send            # send-only, comma works too (row 2)
+//	example.info receive legacy # old brand, outbound moved (row 9)
+//	example.app send saas       # an application sends as it (row 6)
+//	example.biz unknown         # senders not known yet: report, never tighten (row 7)
+//	example.net                 # no mail at all: must be locked down (rows 4 and 5)
 //	# comments and blank lines are ignored
 //
 // Problems are returned, not fatal: one malformed line must not cost the
@@ -77,11 +93,19 @@ func ParseInventory(r io.Reader) ([]Entry, []string, error) {
 			switch strings.ToLower(marker) {
 			case "send", "sends":
 				e.Sends = true
+			case "receive", "receives":
+				e.Receives = true
+			case "saas":
+				e.SaaS, e.Sends = true, true
+			case "unknown":
+				e.Unknown = true
+			case "legacy":
+				e.Legacy = true
 			default:
 				// Unknown is a problem, not a silent no-op. "sned" read as
 				// "does not send" would lock down the checks the wrong way.
 				problems = append(problems, fmt.Sprintf(
-					"line %d: unknown marker %q on %s (only \"send\" is understood)",
+					"line %d: unknown marker %q on %s (understood: send, receive, saas, unknown, legacy)",
 					n, marker, name))
 			}
 		}

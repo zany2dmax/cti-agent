@@ -91,6 +91,8 @@ func run() int {
 	timeout := flag.Duration("timeout", 10*time.Second, "per-request web timeout")
 	retries := flag.Int("retries", 1, "retries for a web request that got no response at all")
 	csvOut := flag.String("csv-out", "", "write every probed host as CSV (sitecheck.go's columns first)")
+	actionsOut := flag.String("actions-out", "",
+		"write the DNS changes each domain needs as JSON, for cti-jira --domains-actions")
 	flag.Parse()
 
 	f, err := os.Open(*inventory)
@@ -201,14 +203,17 @@ func run() int {
 	cur := domains.Snap(opt.Now, results, cmp, regs, prev)
 	changes := domains.Diff(prev, cur, cmp != nil, opt.Registrar)
 
+	actions := domains.Actions(results, opt.ExpectRUA)
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
-		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode}
+		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions}
 	block := rep.Render()
+	af := domains.NewActionsFile(opt.Now, actions)
+	logf("actions: %d exact DNS change(s), %d to review, on %d domain(s)", af.Exact, af.Review, af.Domains)
 
 	for _, w := range []struct{ path, body string }{
 		{*out, block.HTML}, {*textOut, block.Text}, {*subjectOut, block.Subject + "\n"},
-		{*csvOut, string(domains.CSV(results))},
+		{*csvOut, string(domains.CSV(results))}, {*actionsOut, string(af.JSON())},
 	} {
 		if w.path == "" {
 			continue

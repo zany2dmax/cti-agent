@@ -16,6 +16,10 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
 .B cti-jira \-\-follow\-up
 .RB [ \-\-for\-real ]
 .PP
+.B cti-jira \-\-domains\-actions
+.I FILE
+.RB [ \-\-for\-real ]
+.PP
 .B sudo cti\-agent cti\-jira
 .I mode
 .RI [ options ]
@@ -149,9 +153,10 @@ CVE to its ticket on any day.
 At least one of
 .BR \-\-check ,
 .BR \-\-test\-ticket ,
-.B \-\-from\-enriched
-or
+.BR \-\-from\-enriched ,
 .B \-\-follow\-up
+or
+.B \-\-domains\-actions
 is required; with none, the usage is printed and the exit status is 1.
 .B \-\-check
 runs first when combined with another mode, and a failed check stops the
@@ -223,6 +228,27 @@ Default:\~empty.
 Also file new tickets for Sev5 findings that are not on CISA KEV. Without
 it they are logged as held for approval. Only affects new tickets.
 Default:\~off.
+.TP
+.BI \-\-domains\-actions " FILE"
+File the DNS changes in this
+.B cti\-domains \-\-actions\-out
+file as ONE lock-down ticket for IT (labels
+.B cti\-agent
+and
+.BR cti\-domains\-lockdown ),
+because every change needs the same registrar admin access. When a
+lock-down ticket is already open, add the new list as a comment only if it
+differs from the last one posted (its hash is kept on the ticket); file a
+new ticket only when none is open; and when nothing is left to change, say
+so once on the open ticket. The ticket separates exact records from items
+to review and attaches the list as CSV. Without
+.B \-\-for\-real
+it prints what it would do and the ticket text. Subject to the
+.B JIRA_ALLOW_CREATE
+write gate. Run by
+.BR run\-domains (1)
+after the weekly email.
+Default:\~empty.
 .TP
 .B \-\-follow\-up
 Re-check every open fleet ticket against the scanner as described above,
