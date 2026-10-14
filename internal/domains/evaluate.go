@@ -119,10 +119,16 @@ func Evaluate(results []Result, cmp *Comparison, opt Options) []Finding {
 			evalWeb(d, w, opt.Now, ours, add)
 		}
 		evalMailCommon(d, res.Mail, opt, add)
-		if res.Entry.Sends {
-			evalSender(d, res.Mail, opt, add)
-		} else {
+		// The chart row decides which mail rules apply; see profile.go.
+		switch p := ProfileOf(res.Entry); {
+		case p == ProfileUnknown:
+			add(d, Info, "mail", "senders are not fully known (chart row 7): inventory and monitor "+
+				"before tightening anything - nothing here is filed for change")
+		case res.Entry.Sends:
+			evalSender(d, res.Mail, opt, res.Entry.Receives, add)
+		default:
 			evalNonSender(d, res.Mail, add)
+			evalLockedMX(d, res.Mail, p, add)
 		}
 	}
 	SortFindings(out)
@@ -267,14 +273,17 @@ func evalMailCommon(d string, m Mail, opt Options, add adder) {
 	}
 }
 
-func evalSender(d string, m Mail, opt Options, add adder) {
+func evalSender(d string, m Mail, opt Options, receives bool, add adder) {
+	// A send-only domain (chart row 2) needs no MX, and may publish a null
+	// one; only a domain that is meant to receive is held to having one.
 	switch {
+	case !receives:
 	case !m.MX.Known():
 		add(d, Medium, "mail", "MX lookup failed (%s)", m.MX.Err)
 	case !m.MX.Present():
-		add(d, Medium, "mail", "sends mail but has no MX - replies and bounces have nowhere to go")
-	case len(m.MX.Values) == 1 && m.MX.Values[0] == ".":
-		add(d, High, "mail", "marked as sending but publishes a null MX, declaring it accepts no mail")
+		add(d, Medium, "mail", "marked as receiving mail but has no MX - mail to it has nowhere to go")
+	case isNullMX(m.MX):
+		add(d, High, "mail", "marked as receiving mail but publishes a null MX, declaring it accepts none")
 	}
 
 	switch {
@@ -388,6 +397,25 @@ func evalNonSender(d string, m Mail, add adder) {
 		}
 	default:
 		add(d, Medium, "mail", "%d DMARC records - receivers ignore them all", len(m.DMARC.Values))
+	}
+}
+
+// evalLockedMX holds the MX to the row: kept for a receive-only domain
+// (rows 3 and 9), a null MX preferred for one that receives nothing (4/5).
+func evalLockedMX(d string, m Mail, p Profile, add adder) {
+	if !m.MX.Known() {
+		return
+	}
+	switch p {
+	case ProfileReceiveOnly, ProfileLegacyReceive:
+		if !m.MX.Present() || isNullMX(m.MX) {
+			add(d, Medium, "mail", "marked as receiving mail but has no working MX")
+		}
+	case ProfileNoMail:
+		if m.MX.Present() && !isNullMX(m.MX) {
+			add(d, Medium, "mail", "receives no mail per the inventory, but publishes MX %s - "+
+				"prefer a null MX (\"MX 0 .\"), or mark it \"receive\" if it does", strings.Join(m.MX.Values, ", "))
+		}
 	}
 }
 

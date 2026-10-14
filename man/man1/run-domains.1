@@ -38,7 +38,7 @@ and
 .I $FLEET_CODE/bin/cti\-mailer
 are executable (fatal if not), sets
 .I $FLEET_HOME/state
-to 0700, creates today's HTML, text and CSV files empty at 0600, and
+to 0700, creates today's HTML, text, CSV and actions files empty at 0600, and
 deletes today's subject file so a stale one cannot be mistaken for this
 run's.
 .TP
@@ -61,6 +61,18 @@ against
 .B DOM_ALLOW_TO
 and refuses if either is unset; there is no fallback to the digest audience.
 Fatal on failure.
+.TP
+.B 5. Lock-down ticket
+.B cti\-jira \-\-domains\-actions
+with the day's actions file and
+.BR \-\-for\-real :
+one Jira ticket for IT listing the DNS changes, or a comment on the one
+already open when the list has changed (see
+.BR cti\-jira (1)).
+After the send, and never fatal: a Jira failure is logged and the run still
+succeeds. On a dry run it runs without
+.B \-\-for\-real
+and only prints the ticket it would file.
 .PP
 A dry run passes
 .B \-\-no\-state\-write
@@ -122,6 +134,13 @@ is the UTC date.
 .IR domains\-DATE.html ", " domains\-DATE.txt ", " domains\-DATE.csv
 The report and the per-host CSV, 0600. A second run on the same day
 replaces them.
+.TP
+.I domains\-DATE\-actions.json
+The DNS changes for IT, written by
+.B cti\-domains \-\-actions\-out
+and read by
+.BR "cti\-jira \-\-domains\-actions" ,
+0600.
 .TP
 .I domains\-DATE.subject
 The subject line, written by

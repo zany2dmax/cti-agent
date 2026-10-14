@@ -67,11 +67,15 @@ func run() int {
 		"with --from-enriched: also re-check every open fleet ticket against "+
 			"the scanner, whether or not its CVE is in today's mail, and comment "+
 			"on spread, on reaching zero, or once on closed-but-still-detected")
+	domainsActions := flag.String("domains-actions", "",
+		"file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down "+
+			"ticket, or comment on the one already open when the list has changed")
 	flag.Parse()
 
-	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag {
+	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" {
 		flag.Usage()
-		return die("nothing to do - pass --check, --test-ticket, --from-enriched or --follow-up")
+		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up " +
+			"or --domains-actions")
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A
@@ -105,6 +109,9 @@ func run() int {
 	}
 	if *testTicket {
 		return doTestTicket(ctx, c, cfg, *forReal)
+	}
+	if *domainsActions != "" {
+		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now())
 	}
 	// --follow-up on its own is allowed: re-checking the open tickets needs
 	// the scanner and Jira, not today's findings.

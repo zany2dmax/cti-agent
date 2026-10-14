@@ -59,6 +59,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **The Qualys blog is optional.** It answers 403 to Azure addresses. It is
   still tried for its published QQL; when it fails it is listed as "optional,
   not read" and does not mark the report incomplete.
+- **Domains lane follows the security team's decision chart.** New
+  inventory markers `receive`, `saas`, `unknown`, `legacy` (with `send`)
+  choose each domain's row; no marker is "no mail at all". Each row says what
+  MX, SPF, DKIM and DMARC the domain should publish, and the difference is
+  listed as DNS CHANGES FOR IT: exact records for the lock-down rows (`v=spf1
+  -all`, DMARC `p=reject`, null MX `0 .`, DKIM keys deleted), a starting
+  `p=none` DMARC for senders with none, review items otherwise. `unknown` is
+  never tightened; broken SPF is fixed before DMARC enforcement.
+  **`send` alone now means send-only** - mark mail domains `send receive`.
+- **One Jira lock-down ticket per domains run.** `cti-domains --actions-out`
+  writes the changes; `cti-jira --domains-actions` files them as one ticket
+  (every change needs the same GoDaddy access), or comments on the open one
+  only when the list changed, and says once when nothing is left.
 - **CHEATSHEET.md** - the operator's one-page view of the box: health check,
   installed version, timers, dry runs, logs, troubleshooting. `task
   cheatsheet:pdf` renders it to a PDF (needs `pip3 install reportlab`).
@@ -126,6 +139,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 ### Upgrade
 
 Reinstall. `man cti-domains` works afterwards.
+
+Patch Tuesday is paused: both article sources refuse the Azure box. Disable
+its timer (`sudo systemctl disable --now cti-agent-patchtuesday.timer`); the
+installer never re-enables timers, so it stays off across reinstalls. With no
+synopsis marked sent, the daily keeps reporting the release's CVEs itself.
+
+Update `/etc/cti-agent/domains.txt`: change `send` to `send receive` on every
+domain that also receives mail, and add `receive`, `legacy`, `saas` or
+`unknown` where they apply. Run `sudo cti-agent run-domains --dry-run` and
+read DNS CHANGES FOR IT before the Monday run files the ticket - every
+unmarked domain gets a null MX in it.
 
 Mail the fleet sent before this upgrade carries the old unsigned header, so
 cti-mailbox leaves it in the inbox instead of archiving it. It drops out of

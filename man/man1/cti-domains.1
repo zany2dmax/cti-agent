@@ -17,6 +17,8 @@ cti-domains \- weekly check of the organisation's domains: registrar, DNS, web, 
 .IR FILE ]
 .RB [ \-\-csv\-out
 .IR FILE ]
+.RB [ \-\-actions\-out
+.IR FILE ]
 .RB [ \-\-concurrency
 .IR N ]
 .RB [ \-\-timeout
@@ -80,13 +82,61 @@ with
 .BR rua= );
 DKIM keys at the configured selectors, including key size; and the SMTP
 greeting and STARTTLS on the first answering MX.
-A domain marked
-.B send
-in the inventory must be able to send; every other domain must say in DNS
-that it does not
+Which rules apply depends on the domain's
+.B profile
+(below): a sending domain must be able to send; a domain that sends nothing
+must say so in DNS
 .RB ( "v=spf1 \-all" ,
 .BR p=reject ),
 and one that publishes senders anyway is reported as a question.
+.TP
+.B Profiles
+The security team's decision chart, one row per profile, chosen by the
+inventory markers:
+.BR "send receive" :
+1, active mail domain;
+.BR send :
+2, send-only (no MX needed);
+.BR receive :
+3, receive-only;
+no marker: 4/5, no mail at all (null MX preferred);
+.BR saas :
+6, an application or service sends as it;
+.BR unknown :
+7, senders not known \(em reported, never tightened;
+.BR "send receive legacy" :
+8;
+.BR "receive legacy" :
+9, outbound moved to the main domain.
+SPF that is broken (over 10 lookups, several records,
+.BR +all )
+is row 10: fix it first, and no DMARC enforcement is asked for until then.
+.TP
+.B DNS changes
+The difference between each domain's profile and its DNS, as records for IT.
+For rows 3, 4/5 and 9 they are exact:
+.B TXT @ v=spf1 \-all
+(replacing any other SPF),
+.B TXT _dmarc
+with
+.B p=reject
+(existing tags such as
+.B rua=
+kept,
+.B pct=
+dropped),
+deletion of any DKIM key, and for 4/5 a null MX
+.RB ( "MX 0 ." ).
+For sending rows the only exact record is a missing DMARC, started at
+.B p=none
+with
+.BR DOMAINS_DMARC_RUA ;
+the rest are review items. A failed lookup never produces a change. The
+report lists them under DNS CHANGES FOR IT, and
+.B \-\-actions\-out
+writes them for
+.BR cti\-jira (1)
+.BR \-\-domains\-actions .
 .TP
 .B Changes
 Nameservers, MX, SPF, DMARC, CNAMEs, live and parked state, certificate
@@ -107,11 +157,14 @@ and a value may follow
 or a space.
 .TP
 .BI \-\-inventory " FILE"
-The domain inventory: one domain per line,
-.B send
-(or a comma and
-.BR send )
-after a domain that sends mail,
+The domain inventory: one domain per line, followed by any of the markers
+.BR send ,
+.BR receive ,
+.BR saas ,
+.B unknown
+and
+.B legacy
+(space- or comma-separated) that choose its profile,
 .B #
 for comments. Names are normalised (scheme, path, port and case removed);
 lines that are not hostnames, duplicates and unknown markers are listed in
@@ -150,6 +203,15 @@ is given, the text report goes to standard output.
 Write the subject line to
 .IR FILE ,
 so the runner does not probe every domain a second time to build it.
+.TP
+.BI \-\-actions\-out " FILE"
+Write the DNS changes (see DESCRIPTION) as JSON, mode 0600: each change's
+domain, profile, record type and host, the value to set, the current value
+and why, plus counts and a hash of the list.
+.B run\-domains
+passes it to
+.BR "cti\-jira \-\-domains\-actions" .
+Default:\~not written.
 .TP
 .BI \-\-csv\-out " FILE"
 Write every probed host as CSV, mode 0600. The first 28 columns are the

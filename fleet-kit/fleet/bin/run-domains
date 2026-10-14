@@ -13,9 +13,14 @@
 #
 # USAGE
 #   run-domains              probe, render, send, advance last week's baseline
-#   run-domains --dry-run    probe, render, print the subject; send nothing and
-#                            leave the baseline alone, so the real run still
-#                            reports this week's changes
+#   run-domains --dry-run    probe, render, print the subject; send nothing,
+#                            leave the baseline alone, and only PREVIEW the
+#                            Jira lock-down ticket
+#
+# After the mail goes, cti-jira --domains-actions files the week's DNS
+# changes as ONE lock-down ticket for IT, or comments on the one already open
+# when the list has changed. Non-fatal: Jira trouble costs the ticket, never
+# the report.
 set -euo pipefail
 
 # Sourced here AND loaded by the binary: see run-appscan for why both.
@@ -53,12 +58,15 @@ HTML="$STATE/domains-$STAMP.html"
 TXT="$STATE/domains-$STAMP.txt"
 SUBJ="$STATE/domains-$STAMP.subject"
 CSV="$STATE/domains-$STAMP.csv"
+ACTIONS="$STATE/domains-$STAMP-actions.json"
+JIRA="$FLEET_CODE/bin/cti-jira"
 
 # Mode before content: the report lists every domain we own and which of them
 # can be spoofed.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
 : > "$CSV";  chmod 0600 "$CSV"
+: > "$ACTIONS"; chmod 0600 "$ACTIONS"
 # The subject file is deleted, not pre-created: an empty one left over from a
 # failed run must not read as this run's subject.
 rm -f "$SUBJ"
@@ -67,7 +75,8 @@ NOSTATE=""
 [ -n "$DRY" ] && NOSTATE="--no-state-write"
 
 # shellcheck disable=SC2086
-"$DOMAINS" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" --csv-out "$CSV" $NOSTATE \
+"$DOMAINS" $NOSTATE --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" \
+  --csv-out "$CSV" --actions-out "$ACTIONS" \
   || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
 
 [ -s "$SUBJ" ] || fail "no subject written - refusing to send"
@@ -80,6 +89,20 @@ log "subject: $SUBJECT"
 # shellcheck disable=SC2086
 "$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $DRY \
   || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
+
+# The lock-down ticket. After the send, so the email goes out whatever Jira
+# does; || so a Jira failure is logged, not fatal.
+if [ ! -x "$JIRA" ]; then
+  log "cti-jira not installed - no lock-down ticket"
+elif [ ! -s "$ACTIONS" ]; then
+  log "no actions file written - no lock-down ticket"
+elif [ -n "$DRY" ]; then
+  log "ticket: dry run, previewing the lock-down ticket only"
+  "$JIRA" --domains-actions "$ACTIONS" || log "WARNING: lock-down ticket preview failed"
+else
+  "$JIRA" --domains-actions "$ACTIONS" --for-real \
+    || log "WARNING: lock-down ticket not filed or updated - see the lines above"
+fi
 
 if [ -n "$DRY" ]; then
   log "dry run - nothing was sent and the baseline was not advanced. Report: $HTML"
