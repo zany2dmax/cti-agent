@@ -33,6 +33,9 @@ type Report struct {
 	// SMTP is "off" when the probe was disabled, "blocked" when every
 	// connection failed (port 25 closed outbound from this host), else "".
 	SMTP string
+	// Actions are the DNS changes each domain needs to match its chart row,
+	// filed for IT as one Jira ticket per run.
+	Actions []Action
 }
 
 // NotChecked is said in every report, because a check that is silently
@@ -293,11 +296,55 @@ func mailState(r Result) string {
 	return strings.Join(p, " · ")
 }
 
-func role(en Entry) string {
-	if en.Sends {
-		return "sends"
+func role(en Entry) string { return ProfileOf(en).String() }
+
+// actionsText is the DNS CHANGES section: the same list the Jira ticket
+// carries, so the email says what IT is being asked to do.
+func (r Report) actionsText(b *strings.Builder) {
+	if len(r.Actions) == 0 {
+		return
 	}
-	return "no mail"
+	f := NewActionsFile(r.Now, r.Actions)
+	fmt.Fprintf(b, "\nDNS CHANGES FOR IT (%d exact, %d to review, on %d domains)\n%s\n",
+		f.Exact, f.Review, f.Domains, strings.Repeat("-", 40))
+	last := ""
+	for _, x := range r.Actions {
+		if x.Domain != last {
+			fmt.Fprintf(b, "  %s  (%s)\n", x.Domain, x.Profile)
+			last = x.Domain
+		}
+		fmt.Fprintf(b, "    - %s\n", ActionLine(x))
+	}
+}
+
+func (r Report) actionsHTML(b *strings.Builder) {
+	if len(r.Actions) == 0 {
+		return
+	}
+	f := NewActionsFile(r.Now, r.Actions)
+	sectionHTML(b, fmt.Sprintf("DNS CHANGES FOR IT (%d EXACT, %d TO REVIEW, ON %d DOMAINS)",
+		f.Exact, f.Review, f.Domains), "#12203a")
+	var cur []string
+	flush := func(d, prof string) {
+		if d == "" {
+			return
+		}
+		fmt.Fprintf(b, `
+      <tr><td style="padding:0 0 8px 0">
+        <div style="font:700 13px %s;color:#1a202c">%s <span style="font-weight:400;color:#718096">%s</span></div>
+        <div style="font:400 12px/1.5 %s;color:#4a5568;word-break:break-all">%s</div>
+      </td></tr>`, font, e(d), e(prof), font, strings.Join(cur, ""))
+		cur = nil
+	}
+	last, lastProf := "", ""
+	for _, x := range r.Actions {
+		if x.Domain != last {
+			flush(last, lastProf)
+			last, lastProf = x.Domain, x.Profile
+		}
+		cur = append(cur, `<div style="margin-top:3px">`+e(ActionLine(x))+`</div>`)
+	}
+	flush(last, lastProf)
 }
 
 // ─── grouping ───────────────────────────────────────────────────────────────
@@ -354,6 +401,7 @@ func (r Report) text() string {
 	section("CHANGED SINCE LAST WEEK", r.changes(), true)
 	section("REVIEW", r.medium(), false)
 	section("NOTES", r.info(), false)
+	r.actionsText(&b)
 
 	if len(r.Problems) > 0 {
 		fmt.Fprintf(&b, "\nINVENTORY FILE PROBLEMS (%d)\n", len(r.Problems))
@@ -364,7 +412,7 @@ func (r Report) text() string {
 
 	fmt.Fprintf(&b, "\nINVENTORY (%d domains, %d live)\n", len(r.Results), r.live())
 	for _, x := range sortedResults(r.Results) {
-		fmt.Fprintf(&b, "  %-32s %-8s %s\n      %s\n", x.Entry.Name, role(x.Entry), webState(x), mailState(x))
+		fmt.Fprintf(&b, "  %-32s %s\n      %s\n      %s\n", x.Entry.Name, role(x.Entry), webState(x), mailState(x))
 		if d := webDetail(x); d != "" {
 			fmt.Fprintf(&b, "      %s\n", d)
 		}
@@ -497,6 +545,7 @@ func (r Report) html() string {
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
 	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)
 	cards("NOTES", "#4a5568", "#f4f5f7", r.info(), false)
+	r.actionsHTML(&b)
 
 	if len(r.Problems) > 0 {
 		sectionHTML(&b, fmt.Sprintf("INVENTORY FILE PROBLEMS (%d)", len(r.Problems)), "#b25000")
