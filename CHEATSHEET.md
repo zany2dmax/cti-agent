@@ -70,7 +70,7 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Mailbox cleanup | `cti-agent-mailbox` | every day 07:00 | nobody (moves mail) |
 | AppSec weekly | `cti-agent-appscan` | Mondays 07:30 | App Dev audience |
 | Domains weekly | `cti-agent-domains` | Mondays 08:00 | domains audience |
-| Patch Tuesday | `cti-agent-patchtuesday` | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
+| Patch Tuesday (paused: sources block Azure) | `cti-agent-patchtuesday` | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
 
@@ -157,6 +157,14 @@ sudo cti-agent cti-jira --check                         # account, project, writ
 E=/var/lib/cti-agent/state/enriched-$(date +%F).json
 sudo cti-agent cti-jira --from-enriched "$E" --follow-up           # preview, changes nothing
 sudo python3 -m json.tool "${E%.json}-tickets.json" | less   # today's ticket list (no jq here)
+```
+
+The domains lane's weekly lock-down ticket for IT (one per run, or a comment
+on the open one when the list changed):
+
+```bash
+A=/var/lib/cti-agent/state/domains-$(date -u +%F)-actions.json
+sudo cti-agent cti-jira --domains-actions "$A"        # preview the ticket, changes nothing
 ```
 
 `WRITE GATE CLOSED` in the output means `JIRA_ALLOW_CREATE` does not list the
