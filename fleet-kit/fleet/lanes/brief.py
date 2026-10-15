@@ -402,6 +402,8 @@ def _fleet_tickets(data):
 
 
 def _ticket_hosts(t):
+    if t.get("kind") == "domains-lockdown":
+        return "DNS changes for IT"
     if not t.get("checked"):
         return "not re-checked"
     n = t.get("hosts") or 0
