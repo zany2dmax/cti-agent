@@ -621,3 +621,28 @@ func TestPastTense(t *testing.T) {
 		}
 	}
 }
+
+func TestTheDomainsLockDownTicketIsListedNotRechecked(t *testing.T) {
+	// It carries the cti-agent label, so the follow-up search finds it. It
+	// used to be counted as "no CVE label" with a note that read like a fault.
+	lock := map[string]any{
+		"key": "SEC-50",
+		"fields": map[string]any{
+			"summary": "Domain DNS lock-down",
+			"status": map[string]any{"name": "Open",
+				"statusCategory": map[string]any{"key": "new"}},
+			"labels": []string{"cti-agent", domainsLabel},
+		},
+	}
+	_, c := newFakeJira(t, lock)
+	sc := &scanner{}
+	refs := followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+
+	got, ok := refs[lockdownRefKey]
+	if !ok || got.Key != "SEC-50" || got.Kind != "domains-lockdown" {
+		t.Fatalf("lock-down ref = %+v (present %v)", got, ok)
+	}
+	if len(sc.calls) != 0 {
+		t.Errorf("the scanner was asked about the lock-down ticket: %v", sc.calls)
+	}
+}

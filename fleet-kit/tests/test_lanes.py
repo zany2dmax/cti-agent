@@ -1267,6 +1267,15 @@ class DigestFleetTickets(unittest.TestCase):
         self.assertIn("CR-9", txt)
         self.assertIn("227 hosts", txt)
 
+    def test_the_domains_lock_down_ticket_is_shown_as_such(self):
+        t = {"DNS lock-down": {"key": "CR-50", "url": "https://x/browse/CR-50", "status": "Open",
+                               "kind": "domains-lockdown",
+                               "outcome": "the weekly domains lock-down ticket"}}
+        html = brief.fleet_tickets_section(self.data(t))
+        self.assertIn("DNS lock-down", html)
+        self.assertIn("DNS changes for IT", html)
+        self.assertNotIn("not re-checked", html)
+
     def test_no_tickets_no_section(self):
         self.assertEqual(brief.fleet_tickets_section(self.data({})), "")
         self.assertNotIn("FLEET TICKETS", brief.render_text(self.data({}), "daily"))

@@ -146,8 +146,21 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 	}
 
-	var checked, already, nolabel, unanswered int
+	var checked, already, nolabel, unanswered, lockdown int
 	for _, issue := range issues {
+		// The domains lane's lock-down ticket carries the cti-agent label
+		// too. It is not about a CVE and is kept current by run-domains
+		// (--domains-actions), so it is listed for the digest and left alone
+		// here - it used to be counted as "no CVE label" with a note saying
+		// it could not be matched, which read like a fault.
+		if hasLabel(issue.Fields.Labels, domainsLabel) {
+			lockdown++
+			r := refFor(c, issue, "")
+			r.Outcome = "the weekly domains lock-down ticket - updated by the Monday domains run"
+			r.Kind = "domains-lockdown"
+			refs[lockdownRefKey] = r
+			continue
+		}
 		cve := cveFromLabels(issue.Fields.Labels)
 		if cve != "" && cve != testCVE {
 			// Oldest first, so if two tickets carry one CVE the newer wins.
@@ -221,7 +234,20 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		checked++
 	}
 	logf("follow-up: %d fleet ticket(s) found, %d re-checked, %d already handled "+
-		"this run, %d with no CVE label, %d left alone because the scanner could "+
-		"not answer", len(issues), checked, already, nolabel, unanswered)
+		"this run, %d domains lock-down, %d with no CVE label, %d left alone because "+
+		"the scanner could not answer", len(issues), checked, already, lockdown, nolabel, unanswered)
 	return refs
+}
+
+// lockdownRefKey is the domains lock-down ticket's key in the ticket map,
+// which is otherwise keyed by CVE. The digest shows it under FLEET TICKETS.
+const lockdownRefKey = "DNS lock-down"
+
+func hasLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if strings.EqualFold(strings.TrimSpace(l), want) {
+			return true
+		}
+	}
+	return false
 }

@@ -240,6 +240,7 @@ type TicketRef struct {
 	Checked bool   `json:"checked,omitempty"` // the scanner answered this run
 	Hosts   int    `json:"hosts"`             // today's count, when Checked
 	Outcome string `json:"outcome,omitempty"` // what this run did, in words
+	Kind    string `json:"kind,omitempty"`    // "domains-lockdown"; "" for a CVE ticket
 }
 
 // refFor builds the reference for an existing issue.
