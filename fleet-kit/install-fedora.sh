@@ -783,7 +783,7 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-domains|cti-appscan|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
@@ -1038,11 +1038,12 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
 
      sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
 
-6. The monthly Patch Tuesday synopsis. Replay a month you already sent by hand
-   and compare before enabling it - a replay cannot send:
+6. The monthly Patch Tuesday synopsis. Run by HAND for now - both article
+   sites block Azure addresses, so save the two articles into
+   /var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/ first (CHEATSHEET 7a).
+   Leave its timer disabled. A replay cannot send:
 
-     sudo cti-agent run-patchtuesday --dry-run --month 2026-08
-     sudo systemctl enable --now cti-agent-patchtuesday.timer
+     sudo cti-agent run-patchtuesday --month 2026-10
 
    Needs outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com
    (blog.qualys.com is optional; it refuses Azure addresses).

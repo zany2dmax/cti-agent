@@ -17,19 +17,28 @@ paste into Qualys to see it myself.
 
 ## You do not normally run this
 
-`cti-agent-patchtuesday.timer` runs `bin/run-patchtuesday` on the morning after
-Patch Tuesday, without involving you. Same reason the digest is a timer: the
-deliverable must not depend on a model being available, and the team expects
-this email on a known morning.
+`cti-agent-patchtuesday.timer` is meant to run `bin/run-patchtuesday` on the
+morning after Patch Tuesday, without involving you. Same reason the digest is a
+timer: the deliverable must not depend on a model being available.
 
-What you owe it is a check, on the beat after it should have run:
+**For now the timer is disabled and the operator runs the lane by hand.** Both
+article sites (Cloudflare bot checks; the Qualys blog answers 403) refuse the
+box, so each month the operator saves the Qualys review and the
+BleepingComputer article in a browser into
+`/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing `qualys` /
+`bleeping`, `.html` or `.txt`), dry-runs, previews with `cti-mailer --to-dev`,
+and sends. The lane reads the saved copies instead of fetching
+(`cti-patchtuesday --drop-dir`). CHEATSHEET.md section 7a is the procedure. Do
+not report the disabled timer as a fault.
+
+What you owe it is a check, from the Thursday after Patch Tuesday:
 
 ```
 $FLEET_CODE/bin/fleet-db was-sent <YYYY-MM> patchtuesday
 ```
 
-If it did not go out, look for a `cti-alert` line first — the cause is
-probably already on the board — then run it by hand.
+If it did not go out, look for a `cti-alert` line first, then remind the
+operator once, naming the month.
 
 ## Running it by hand
 
@@ -47,13 +56,14 @@ distribution list is not a test.
 
 In this order, because this is the shape the team already reads:
 
-1. **Microsoft's numbers** — total, critical, important. From the sources.
+1. **Microsoft's numbers** — total, critical, important. From Microsoft's
+   release data, with BleepingComputer's total as the cross-check.
 2. **Our exposure** — "The Exposure for <org> is ~N new vulnerabilities across
    M hosts." From Qualys Host Detection, never from the articles.
 3. **The QQL.** The single most-used thing in the email. Someone pastes it into
    the console to see the same set themselves. Two blocks: the query Qualys
-   published for this release, verbatim, then ours narrowed to the QIDs with
-   assets here.
+   published for this release, verbatim (when the review was read), then ours
+   narrowed to the QIDs with assets here.
 4. **The patches present here, one row per QID** — host count, QDS, last-seen
    date, and the CVEs each fixes. Not one row per CVE: a cumulative update
    carries hundreds, and keyed by CVE the table states one fact hundreds of
@@ -116,11 +126,13 @@ Related: a host figure prefixed `>=`, or an exposure line saying "at least N
 hosts", means the scanner truncated its host lists and the number is a lower
 bound. Do not restate it as a count.
 
-**A synopsis from one source is still worth sending, labelled.** If
-BleepingComputer is unreachable the counts may be missing and the banner says
-so. If *both* fail the lane exits non-zero and sends nothing — a synopsis
-assembled from nothing is worse than a missing email, because it looks like a
-quiet month.
+**A synopsis from one source is still worth sending, labelled.** With
+Microsoft's data loaded, a missing article is commentary lost, not an
+incomplete report. If Microsoft's data cannot be read the figures fall back to
+the articles and an *Incomplete sources* banner says what the report was built
+from. If *nothing* can be read the lane exits non-zero and sends nothing — a
+synopsis assembled from nothing is worse than a missing email, because it
+looks like a quiet month.
 
 ## Re-sending a past month
 
