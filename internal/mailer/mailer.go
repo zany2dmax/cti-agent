@@ -67,6 +67,8 @@ func Truthy(s string) bool {
 // Audience is the inputs needed to work out who receives a message.
 type Audience struct {
 	ToOperator bool   // escalation: goes to Operator, never CC'd
+	ToDev      bool   // development test: goes to Dev only, never CC'd
+	Dev        string // FLEET_DEV_EMAIL
 	ToFlag     string // --to
 	CCFlag     string // --cc
 	DigestTo   string // DIGEST_TO
@@ -87,6 +89,12 @@ type Audience struct {
 // every address, then remove from Cc anyone already in To.
 func (a Audience) Resolve() (to, cc []string, err error) {
 	switch {
+	case a.ToDev && (a.ToOperator || a.ToFlag != ""):
+		return nil, nil, fmt.Errorf("--to-dev cannot be combined with --to or --to-operator")
+	case a.ToDev && strings.TrimSpace(a.Dev) == "":
+		return nil, nil, fmt.Errorf("FLEET_DEV_EMAIL is not set in fleet.env - --to-dev has nobody to send to")
+	case a.ToDev:
+		to = SplitList(a.Dev)
 	case a.ToOperator && a.ToFlag != "":
 		return nil, nil, fmt.Errorf("--to-operator and --to are mutually exclusive")
 	case a.ToOperator && strings.TrimSpace(a.Operator) == "":
@@ -127,8 +135,9 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 	}
 
 	// Escalations are never CC'd: a question addressed to one person should
-	// not become a thread.
-	if !a.ToOperator {
+	// not become a thread. Nor are development test sends: a preview for
+	// the developer must not reach DIGEST_CC.
+	if !a.ToOperator && !a.ToDev {
 		raw := a.CCFlag
 		if raw == "" {
 			raw = a.DigestCC
