@@ -17,6 +17,8 @@ cti-patchtuesday \- build the monthly Microsoft Patch Tuesday synopsis and corre
 .BR none ]
 .RB [ \-\-url\-msrc
 .IR URL | none ]
+.RB [ \-\-drop\-dir
+.IR DIR ]
 .RB [ \-\-url\-qualys
 .IR URL ]
 .RB [ \-\-url\-bleeping
@@ -202,6 +204,23 @@ instead of the API address, or skip it with
 in which case the figures come from the articles as before 1.3.
 Default:\~\fIhttps://api.msrc.microsoft.com/cvrf/v3.0/cvrf/YYYY\-Mon\fR.
 .TP
+.BI \-\-drop\-dir " DIR"
+Folder of saved copies of the two articles, used instead of fetching them.
+Both publishers' bot checks refuse the fleet's address, so the operator saves
+the pages in a browser (Save As, web page or text) and places them here: a
+file whose name contains
+.B qualys
+is the Qualys review, one containing
+.B bleeping
+the BleepingComputer article,
+.BR .html ,
+.B .htm
+or
+.BR .txt .
+The newest match wins. A source with no saved copy is fetched as before, and
+when that fails its line in the email says where to save it.
+Default:\~\fI$FLEET_HOME/inbox/patchtuesday/YYYY\-MM\fR.
+.TP
 .BI \-\-url\-qualys " URL"
 Read the Qualys review from
 .I URL
@@ -308,6 +327,14 @@ path. Default:\~\fI$FLEET_HOME/fleet.env\fR, else
 wrapper and the units set
 .IR /etc/cti\-agent/fleet.env .
 .SH FILES
+.TP
+.I /var/lib/cti\-agent/inbox/patchtuesday/YYYY\-MM/
+Saved copies of the release's articles (see
+.BR \-\-drop\-dir ).
+Owned by
+.BR ctiagent ;
+place files with
+.BR "sudo install \-o ctiagent \-g ctiagent \-m 0600 \-D" .
 .TP
 .I /var/lib/cti\-agent/state/patchtuesday\-YYYY\-MM.json
 The release manifest, 0600. Delete it, or leave it unsent, and the daily
