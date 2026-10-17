@@ -71,7 +71,15 @@ the domains in the account but not in
 them), then the domains in
 .I domains.txt
 that are not in the account (another registrar or account, lapsed, or no
-longer ours). The lead says the counts in one sentence; the subject still
+longer ours), then the domains in
+.I domains.txt
+whose registration was cancelled, expired or transferred out more than 45
+days ago. Those are not probed at all, and such registrations that are not
+in
+.I domains.txt
+either are ignored: GoDaddy keeps them in the account listing for years. A
+registration that lapsed within 45 days is still checked and reported, as
+it may be recoverable. The lead says the counts in one sentence; the subject still
 counts them as Medium findings.
 .PP
 After it comes a

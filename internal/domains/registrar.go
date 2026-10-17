@@ -45,6 +45,71 @@ type Comparison struct {
 	// account owns them and nobody is checking them - which is the gap this
 	// list exists to close.
 	NotInInventory []Registration
+	// Lapsed are inventory entries whose registration was cancelled or ran
+	// out long ago (see Registration.Lapsed): no longer ours, so they are
+	// listed once for removal from domains.txt and not probed at all.
+	Lapsed []LapsedEntry
+	// LapsedUnlisted counts lapsed registrations the inventory does not list
+	// either: account history, not work, so they are not reported.
+	LapsedUnlisted int
+}
+
+// LapsedEntry is an inventory line whose registration is gone.
+type LapsedEntry struct {
+	Entry Entry
+	Reg   Registration
+}
+
+// lapsedAfter is how long past expiry a cancelled or expired registration
+// must be before it is history rather than an emergency. Inside it the
+// domain may still be in the registrar's grace or redemption period, and a
+// domain that lapsed by accident last week is exactly what this lane is for.
+const lapsedAfter = 45 * 24 * time.Hour
+
+// Lapsed reports whether the registration is gone for good: cancelled,
+// expired or transferred out, and (when the expiry is known) more than
+// lapsedAfter ago. GoDaddy keeps such registrations in the account listing
+// for years; reporting "no nameservers" and "expired 2013" on them every
+// week is noise nobody can act on.
+func (r Registration) Lapsed(now time.Time) bool {
+	s := strings.ToUpper(strings.TrimSpace(r.Status))
+	gone := strings.HasPrefix(s, "CANCELLED") || s == "EXPIRED" || s == "TRANSFERRED_OUT"
+	if !gone {
+		return false
+	}
+	return r.Expires.IsZero() || now.Sub(r.Expires) > lapsedAfter
+}
+
+// SetAsideLapsed moves lapsed registrations out of the comparison: inventory
+// entries they cover go to Lapsed (and out of Covered), and unlisted ones are
+// only counted. It returns the names of the lapsed inventory entries, which
+// the caller leaves out of the probe.
+func (c *Comparison) SetAsideLapsed(now time.Time) map[string]bool {
+	gone := map[string]bool{}
+	names := make([]string, 0, len(c.Covered))
+	for n := range c.Covered {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		reg := c.Covered[n]
+		if !reg.Lapsed(now) {
+			continue
+		}
+		c.Lapsed = append(c.Lapsed, LapsedEntry{Entry: Entry{Name: n}, Reg: reg})
+		delete(c.Covered, n)
+		gone[n] = true
+	}
+	var keep []Registration
+	for _, r := range c.NotInInventory {
+		if r.Lapsed(now) {
+			c.LapsedUnlisted++
+			continue
+		}
+		keep = append(keep, r)
+	}
+	c.NotInInventory = keep
+	return gone
 }
 
 // Compare matches the inventory with the account.

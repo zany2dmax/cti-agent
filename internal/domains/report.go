@@ -41,6 +41,7 @@ type Report struct {
 	// are both empty, domains.txt is not the list of what we own.
 	RegistrarOnly []Registration // in the account, not in domains.txt
 	InventoryOnly []Entry        // in domains.txt, not in the account
+	Lapsed        []LapsedEntry  // in domains.txt, cancelled or long expired
 }
 
 // NotChecked is said in every report, because a check that is silently
@@ -638,7 +639,7 @@ func (r Report) Render() Block {
 // ─── inventory vs registrar ─────────────────────────────────────────────────
 
 func (r Report) inventoryMismatch() bool {
-	return len(r.RegistrarOnly) > 0 || len(r.InventoryOnly) > 0
+	return len(r.RegistrarOnly) > 0 || len(r.InventoryOnly) > 0 || len(r.Lapsed) > 0
 }
 
 // inventoryLine is the lead's sentence about the mismatch.
@@ -646,9 +647,12 @@ func (r Report) inventoryLine() string {
 	if r.Registrar == "" || !r.inventoryMismatch() {
 		return ""
 	}
-	return fmt.Sprintf("Inventory: %d domain(s) in the %s account are missing from domains.txt, "+
-		"and %d in domains.txt are not in the account - see INVENTORY vs %s.",
-		len(r.RegistrarOnly), r.Registrar, len(r.InventoryOnly), strings.ToUpper(r.Registrar))
+	s := fmt.Sprintf("Inventory: %d domain(s) in the %s account are missing from domains.txt, "+
+		"and %d in domains.txt are not in the account", len(r.RegistrarOnly), r.Registrar, len(r.InventoryOnly))
+	if n := len(r.Lapsed); n > 0 {
+		s += fmt.Sprintf("; %d in domains.txt lapsed long ago and were not checked", n)
+	}
+	return s + " - see INVENTORY vs " + strings.ToUpper(r.Registrar) + "."
 }
 
 func regDetail(g Registration, now time.Time) string {
@@ -688,6 +692,21 @@ func (r Report) inventoryText(b *strings.Builder) {
 			fmt.Fprintf(b, "    %s\n", en.Name)
 		}
 	}
+	if n := len(r.Lapsed); n > 0 {
+		fmt.Fprintf(b, "  In domains.txt but lapsed at %s (%d) - cancelled or expired long ago, not\n"+
+			"  checked; remove them from domains.txt:\n", r.Registrar, n)
+		for _, l := range r.Lapsed {
+			fmt.Fprintf(b, "    %-36s %s\n", l.Entry.Name, lapsedDetail(l.Reg))
+		}
+	}
+}
+
+func lapsedDetail(g Registration) string {
+	s := g.Status
+	if !g.Expires.IsZero() {
+		s += ", expired " + g.Expires.Format("2006-01-02")
+	}
+	return s
 }
 
 func (r Report) inventoryHTML(b *strings.Builder) {
@@ -718,5 +737,14 @@ func (r Report) inventoryHTML(b *strings.Builder) {
 		}
 		block(fmt.Sprintf("In domains.txt but not in the %s account (%d) - another registrar or account, "+
 			"lapsed, or no longer ours", r.Registrar, n), rows)
+	}
+	if n := len(r.Lapsed); n > 0 {
+		var rows []string
+		for _, l := range r.Lapsed {
+			rows = append(rows, fmt.Sprintf(`<div style="margin-top:3px"><b>%s</b> &nbsp;%s</div>`,
+				e(l.Entry.Name), e(lapsedDetail(l.Reg))))
+		}
+		block(fmt.Sprintf("In domains.txt but lapsed at %s (%d) - cancelled or expired long ago, "+
+			"not checked; remove them from domains.txt", r.Registrar, n), rows)
 	}
 }
