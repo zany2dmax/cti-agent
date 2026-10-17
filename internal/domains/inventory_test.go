@@ -106,3 +106,34 @@ func TestCompareMostSpecificRegistration(t *testing.T) {
 		t.Errorf("NotInInventory = %+v", c.NotInInventory)
 	}
 }
+
+func TestLapsedRegistrationsAreSetAside(t *testing.T) {
+	now := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
+	inv := []Entry{{Name: "live.example"}, {Name: "old.example"}, {Name: "recent.example"}}
+	regs := []Registration{
+		{Domain: "live.example", Status: "ACTIVE", Expires: now.AddDate(1, 0, 0)},
+		{Domain: "old.example", Status: "CANCELLED", Expires: time.Date(2020, 9, 8, 0, 0, 0, 0, time.UTC)},
+		// Lapsed last week: maybe an accident, still recoverable - keep it.
+		{Domain: "recent.example", Status: "EXPIRED", Expires: now.AddDate(0, 0, -7)},
+		{Domain: "history.example", Status: "CANCELLED", Expires: time.Date(2013, 1, 11, 0, 0, 0, 0, time.UTC)},
+		{Domain: "unlisted.example", Status: "ACTIVE", Expires: now.AddDate(1, 0, 0)},
+	}
+	c := Compare("godaddy", inv, regs)
+	gone := c.SetAsideLapsed(now)
+
+	if !gone["old.example"] || len(gone) != 1 {
+		t.Errorf("gone = %v", gone)
+	}
+	if _, ok := c.Covered["old.example"]; ok {
+		t.Error("a lapsed domain is still compared with the registrar")
+	}
+	if _, ok := c.Covered["recent.example"]; !ok {
+		t.Error("a domain that lapsed last week was set aside - it may still be recoverable")
+	}
+	if len(c.Lapsed) != 1 || c.Lapsed[0].Entry.Name != "old.example" {
+		t.Errorf("Lapsed = %+v", c.Lapsed)
+	}
+	if len(c.NotInInventory) != 1 || c.NotInInventory[0].Domain != "unlisted.example" || c.LapsedUnlisted != 1 {
+		t.Errorf("NotInInventory = %+v, LapsedUnlisted = %d", c.NotInInventory, c.LapsedUnlisted)
+	}
+}

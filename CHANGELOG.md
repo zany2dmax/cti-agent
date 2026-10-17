@@ -71,6 +71,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **`cti-mailer --to-dev`** sends a report only to `FLEET_DEV_EMAIL`, never
   CC'd, subject prefixed `[DEV TEST]`: a preview in a real mail client
   without mailing the team.
+- **Long-lapsed registrations are not reported as problems.** A domain
+  cancelled, expired or transferred out more than 45 days ago is listed once
+  under INVENTORY for removal from `domains.txt` and not probed; unlisted
+  ones are ignored. They used to produce "no nameservers", "status CANCELLED"
+  and "expired 2013" every week.
 - **INVENTORY vs GODADDY at the top of the domains report.** Domains in the
   registrar account but missing from `domains.txt` (with status, expiry and
   auto-renew) and domains in `domains.txt` that the account does not hold,

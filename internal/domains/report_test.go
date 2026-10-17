@@ -90,3 +90,20 @@ func TestTheInventoryMismatchHasItsOwnSectionNearTheTop(t *testing.T) {
 		t.Error("HTML lacks the section")
 	}
 }
+
+func TestLapsedDomainsAreListedOnceForRemoval(t *testing.T) {
+	rep := Report{Now: now, Registrar: "godaddy",
+		Lapsed: []LapsedEntry{{Entry: Entry{Name: "old.example"},
+			Reg: Registration{Domain: "old.example", Status: "CANCELLED",
+				Expires: now.AddDate(-6, 0, 0)}}}}
+	txt := rep.Render().Text
+	for _, want := range []string{
+		"lapsed long ago and were not checked",
+		"In domains.txt but lapsed at godaddy (1)",
+		"old.example", "CANCELLED, expired",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("text missing %q:\n%s", want, txt)
+		}
+	}
+}
