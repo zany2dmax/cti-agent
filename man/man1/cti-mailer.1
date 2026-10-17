@@ -339,6 +339,21 @@ an outward-facing send. Never copied. Ignored with
 .BR \-\-lane .
 Default:\~\fBfalse\fR.
 .TP
+.B \-\-to\-dev
+Send ONLY to
+.B FLEET_DEV_EMAIL
+(refused if it is unset), never copied, with
+.B [DEV TEST]
+prefixed to the subject: for seeing a report rendered in a real mail client
+while developing, without the team or
+.B DIGEST_CC
+receiving it. Pre-approved like the operator's address. Refused with
+.BR \-\-to ,
+.B \-\-to\-operator
+or
+.BR \-\-lane .
+Default:\~\fBfalse\fR.
+.TP
 .BI \-\-from\-mailbox " ADDRESS"
 The sending mailbox. With
 .B \-\-check

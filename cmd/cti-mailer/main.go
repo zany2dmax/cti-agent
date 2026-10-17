@@ -93,6 +93,9 @@ func run() int {
 	toOperator := flag.Bool("to-operator", false,
 		"send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the operator "+
 			"something is not an outward-facing send.")
+	toDev := flag.Bool("to-dev", false,
+		"send ONLY to FLEET_DEV_EMAIL, never CC'd, subject prefixed [DEV TEST]: "+
+			"for previewing a report in a real mail client during development")
 	fromMailbox := flag.String("from-mailbox", "", "sending mailbox; defaults to GRAPH_MAILBOX")
 	boardID := flag.String("board-id", "",
 		"board line id, so your reply can be matched back to the question")
@@ -143,6 +146,9 @@ func run() int {
 	operator := strings.TrimSpace(os.Getenv("FLEET_OPERATOR_EMAIL"))
 
 	var recipients, copies []string
+	if *toDev && *lane != "" {
+		return die("--to-dev cannot be combined with --lane: a test send goes to FLEET_DEV_EMAIL only")
+	}
 	if *lane != "" {
 		// A lane send uses its OWN recipient list and its OWN allowlist, and
 		// refuses if either is unset.
@@ -182,6 +188,8 @@ func run() int {
 		var err error
 		recipients, copies, err = mailer.Audience{
 			ToOperator:  *toOperator,
+			ToDev:       *toDev,
+			Dev:         strings.TrimSpace(os.Getenv("FLEET_DEV_EMAIL")),
 			ToFlag:      *to,
 			CCFlag:      *cc,
 			DigestTo:    os.Getenv("DIGEST_TO"),
@@ -194,9 +202,16 @@ func run() int {
 			return die("%s", safelog.Line(err.Error()))
 		}
 
+		// The developer's own address is pre-approved the way the
+		// operator's is: it is set in root-owned fleet.env, and a test send
+		// goes there and nowhere else.
+		preapproved := operator
+		if *toDev {
+			preapproved = strings.TrimSpace(os.Getenv("FLEET_DEV_EMAIL"))
+		}
 		if err := mailer.CheckAllowed(recipients, copies,
 			os.Getenv("FLEET_ALLOW_TO"), os.Getenv("DIGEST_TO"),
-			operator, *approve); err != nil {
+			preapproved, *approve); err != nil {
 			return die("%s", safelog.Line(err.Error()))
 		}
 	}
@@ -222,6 +237,9 @@ func run() int {
 	}
 
 	subj := mailer.Subject(*subject, *boardID, *message != "", time.Now())
+	if *toDev {
+		subj = "[DEV TEST] " + subj
+	}
 	attachments, skipped := loadAttachments(attach)
 	for _, s := range skipped {
 		logf("%s", s)
