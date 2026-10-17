@@ -245,6 +245,57 @@ come back as normalised `ExternalIDs`.
 4. Add the provider to `buildLookupProvider()` in `cmd/cti-agent/main.go`.
 5. Add provider-specific config to `internal/config` only if needed.
 
+### The application-security boundary
+
+The weekly AppSec lane is built the same way, around `internal/appscan`. The
+rest of the lane works with normalised `appscan.ScanResult` and
+`appscan.Finding` values - application, scan, authentication state, counts by
+severity, per-finding detail - and does not know which web-application
+scanner produced them. Two interfaces, deliberately separate:
+
+```go
+// Provider parses one vendor's scan-completion notification email.
+// No credentials needed: a new scanner is useful the day its email arrives.
+type Provider interface {
+    Name() string
+    Recognises(sender, subject string) bool
+    Parse(body string) (ScanResult, []string) // result, plus problems worth reporting
+}
+
+// DetailFetcher is the optional half, for providers with an API:
+// per-finding detail for a scan's application.
+type DetailFetcher interface {
+    Findings(ctx context.Context, s ScanResult, since time.Time) ([]Finding, error)
+}
+```
+
+Keeping them apart means the counts in the report come from the email alone
+and survive an API outage, an expired credential, or a scanner that has no API
+at all; detail is added when it can be fetched and its absence is stated, never
+read as "nothing found".
+
+| Provider | State |
+|---|---|
+| **Qualys TotalAppSec (Web Application Scanning)** | Implemented in `internal/appscan/qualys`. `Provider` parses the WAS completion notification (`qualys-was`); `*qualys.API` implements `DetailFetcher` from the WAS Findings API, and adds a scan-list reconciliation that supplies the application's stable ID and flags scans whose notification never arrived |
+| **Others** (Invicti, Burp, ...) | Not yet. `ScanResult.Provider` is already a free-form key, and the renderer is provider-neutral |
+
+What is still Qualys-specific: `cmd/cti-appscan` calls the Qualys scan-list
+reconciliation and detail fetch directly, for scans whose provider is
+`qualys-was`. A second scanner's detail would go through `DetailFetcher` the
+same way; reconciliation against a scan list is an optional extra a provider
+with such an API can add.
+
+#### Adding another scanner
+
+1. Create `internal/appscan/<provider>` and implement `Provider` against the
+   vendor's completion email: `Recognises` from sender and subject, `Parse`
+   returning a normalised `ScanResult` with `Provider` set to its key.
+2. Add it to the `providers` list in `cmd/cti-appscan/main.go`. The email path
+   is complete at this point - counts, authentication state, attention.
+3. If the vendor has an API, implement `DetailFetcher` for per-finding detail
+   and call it in `attachDetail` for that provider's scans.
+4. Credentials, if any, go in `internal/config` and `fleet.env`.
+
 ---
 
 ## The design pattern
