@@ -207,6 +207,9 @@ func run() int {
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
 		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions}
+	if cmp != nil {
+		rep.RegistrarOnly, rep.InventoryOnly = cmp.NotInInventory, cmp.NotAtRegistrar
+	}
 	block := rep.Render()
 	af := domains.NewActionsFile(opt.Now, actions)
 	logf("actions: %d exact DNS change(s), %d to review, on %d domain(s)", af.Exact, af.Review, af.Domains)

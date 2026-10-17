@@ -68,6 +68,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `p=none` DMARC for senders with none, review items otherwise. `unknown` is
   never tightened; broken SPF is fixed before DMARC enforcement.
   **`send` alone now means send-only** - mark mail domains `send receive`.
+- **INVENTORY vs GODADDY at the top of the domains report.** Domains in the
+  registrar account but missing from `domains.txt` (with status, expiry and
+  auto-renew) and domains in `domains.txt` that the account does not hold,
+  as one section and one sentence in the lead, instead of 40-odd separate
+  review cards.
 - **One Jira lock-down ticket per domains run.** `cti-domains --actions-out`
   writes the changes; `cti-jira --domains-actions` files them as one ticket
   (every change needs the same GoDaddy access), or comments on the open one

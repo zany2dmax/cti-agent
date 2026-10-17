@@ -36,6 +36,11 @@ type Report struct {
 	// Actions are the DNS changes each domain needs to match its chart row,
 	// filed for IT as one Jira ticket per run.
 	Actions []Action
+	// The two halves of the inventory-vs-registrar comparison, nil when the
+	// registrar was not consulted. Shown together, near the top: until they
+	// are both empty, domains.txt is not the list of what we own.
+	RegistrarOnly []Registration // in the account, not in domains.txt
+	InventoryOnly []Entry        // in domains.txt, not in the account
 }
 
 // NotChecked is said in every report, because a check that is silently
@@ -56,9 +61,9 @@ func orgName() string {
 
 func e(s string) string { return html.EscapeString(s) }
 
-func (r Report) high() []Finding    { return bySev(r.Findings, High) }
-func (r Report) medium() []Finding  { return bySev(r.Findings, Medium) }
-func (r Report) info() []Finding    { return bySev(r.Findings, Info) }
+func (r Report) high() []Finding    { return withoutInventory(bySev(r.Findings, High)) }
+func (r Report) medium() []Finding  { return withoutInventory(bySev(r.Findings, Medium)) }
+func (r Report) info() []Finding    { return withoutInventory(bySev(r.Findings, Info)) }
 func (r Report) changes() []Finding { return r.Changes }
 
 func bySev(f []Finding, s Severity) []Finding {
@@ -71,8 +76,21 @@ func bySev(f []Finding, s Severity) []Finding {
 	return out
 }
 
+// withoutInventory drops the inventory findings, which have their own section.
+func withoutInventory(f []Finding) []Finding {
+	var out []Finding
+	for _, x := range f {
+		if x.Area != "inventory" {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 func (r Report) counts() (high, medium, changed int) {
-	high, medium = len(r.high()), len(r.medium())
+	// Counted from every finding, inventory ones included: the subject must
+	// not get quieter because a finding moved to its own section.
+	high, medium = len(bySev(r.Findings, High)), len(bySev(r.Findings, Medium))
 	for _, c := range r.Changes {
 		switch c.Sev {
 		case High:
@@ -377,8 +395,13 @@ func (r Report) text() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n%s\n\n%s\n%s\n", r.Subject(), strings.Repeat("=", len(r.Subject())),
 		r.leadLine(), r.websiteLine())
-	// Websites first: which domains have a live site is the question this
-	// lane was first built to answer.
+	if l := r.inventoryLine(); l != "" {
+		fmt.Fprintf(&b, "%s\n", l)
+	}
+	// The inventory first: until it matches the account, every other section
+	// is about the wrong list. Then websites, the question this lane was
+	// first built to answer.
+	r.inventoryText(&b)
 	r.websitesText(&b)
 
 	section := func(title string, f []Finding, tagSev bool) {
@@ -474,6 +497,10 @@ func (r Report) html() string {
     <div style="font:400 12px %s;color:#9fb0cc;margin-top:3px">Week of %s</div></td></tr>
 `, e(r.Subject()), font, e(orgName()), font, font, e(r.Now.Format("Monday 2 January 2006")))
 
+	invLead := ""
+	if l := r.inventoryLine(); l != "" {
+		invLead = `<div style="margin-top:6px;font-weight:700">` + e(l) + `</div>`
+	}
 	leadFg, leadBg := "#2f855a", "#f0fff4"
 	if h > 0 {
 		leadFg, leadBg = "#b3001b", "#fdecee"
@@ -485,9 +512,9 @@ func (r Report) html() string {
     <table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
       <tr><td style="background:%s;border-left:4px solid %s;padding:12px 14px;
                      font:400 14px/1.55 %s;color:#1a202c">%s
-        <div style="margin-top:6px">%s</div></td></tr>
+        <div style="margin-top:6px">%s</div>%s</td></tr>
     </table></td></tr>
-`, leadBg, leadFg, font, e(r.leadLine()), e(r.websiteLine()))
+`, leadBg, leadFg, font, e(r.leadLine()), e(r.websiteLine()), invLead)
 
 	type tile struct {
 		label  string
@@ -540,6 +567,7 @@ func (r Report) html() string {
           </td></tr></table></td></tr>`, fg, bg, font, e(g.domain), font, lines.String())
 		}
 	}
+	r.inventoryHTML(&b)
 	r.websitesHTML(&b)
 	cards("NEEDS ACTION", "#b3001b", "#fdecee", r.high(), false)
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
@@ -605,4 +633,90 @@ func itemHTML(b *strings.Builder, s string) {
 // Render builds both forms.
 func (r Report) Render() Block {
 	return Block{Subject: r.Subject(), Text: r.text(), HTML: r.html()}
+}
+
+// ─── inventory vs registrar ─────────────────────────────────────────────────
+
+func (r Report) inventoryMismatch() bool {
+	return len(r.RegistrarOnly) > 0 || len(r.InventoryOnly) > 0
+}
+
+// inventoryLine is the lead's sentence about the mismatch.
+func (r Report) inventoryLine() string {
+	if r.Registrar == "" || !r.inventoryMismatch() {
+		return ""
+	}
+	return fmt.Sprintf("Inventory: %d domain(s) in the %s account are missing from domains.txt, "+
+		"and %d in domains.txt are not in the account - see INVENTORY vs %s.",
+		len(r.RegistrarOnly), r.Registrar, len(r.InventoryOnly), strings.ToUpper(r.Registrar))
+}
+
+func regDetail(g Registration, now time.Time) string {
+	var p []string
+	if g.Status != "" {
+		p = append(p, g.Status)
+	}
+	if !g.Expires.IsZero() {
+		d := int(g.Expires.Sub(now).Hours() / 24)
+		p = append(p, fmt.Sprintf("expires %s (%d days)", g.Expires.Format("2006-01-02"), d))
+	}
+	if g.AutoRenew {
+		p = append(p, "auto-renew on")
+	} else {
+		p = append(p, "auto-renew OFF")
+	}
+	return strings.Join(p, ", ")
+}
+
+func (r Report) inventoryText(b *strings.Builder) {
+	if r.Registrar == "" || !r.inventoryMismatch() {
+		return
+	}
+	title := "INVENTORY vs " + strings.ToUpper(r.Registrar)
+	fmt.Fprintf(b, "\n%s\n%s\n", title, strings.Repeat("-", len(title)))
+	if n := len(r.RegistrarOnly); n > 0 {
+		fmt.Fprintf(b, "  In the %s account but not in domains.txt (%d) - nothing else in this report checks them;\n"+
+			"  add each to domains.txt with its markers, or let it lapse:\n", r.Registrar, n)
+		for _, g := range r.RegistrarOnly {
+			fmt.Fprintf(b, "    %-36s %s\n", g.Domain, regDetail(g, r.Now))
+		}
+	}
+	if n := len(r.InventoryOnly); n > 0 {
+		fmt.Fprintf(b, "  In domains.txt but not in the %s account (%d) - another registrar or account,\n"+
+			"  lapsed, or no longer ours; remove it from domains.txt if it is not ours:\n", r.Registrar, n)
+		for _, en := range r.InventoryOnly {
+			fmt.Fprintf(b, "    %s\n", en.Name)
+		}
+	}
+}
+
+func (r Report) inventoryHTML(b *strings.Builder) {
+	if r.Registrar == "" || !r.inventoryMismatch() {
+		return
+	}
+	sectionHTML(b, "INVENTORY vs "+strings.ToUpper(r.Registrar), "#b25000")
+	block := func(head string, rows []string) {
+		fmt.Fprintf(b, `
+      <tr><td style="padding:0 0 10px 0">
+        <div style="font:700 13px %s;color:#1a202c">%s</div>
+        <div style="font:400 12px/1.5 %s;color:#4a5568;word-break:break-all">%s</div>
+      </td></tr>`, font, e(head), font, strings.Join(rows, ""))
+	}
+	if n := len(r.RegistrarOnly); n > 0 {
+		var rows []string
+		for _, g := range r.RegistrarOnly {
+			rows = append(rows, fmt.Sprintf(`<div style="margin-top:3px"><b>%s</b> &nbsp;%s</div>`,
+				e(g.Domain), e(regDetail(g, r.Now))))
+		}
+		block(fmt.Sprintf("In the %s account but not in domains.txt (%d) - nothing else in this report "+
+			"checks them; add each with its markers, or let it lapse", r.Registrar, n), rows)
+	}
+	if n := len(r.InventoryOnly); n > 0 {
+		var rows []string
+		for _, en := range r.InventoryOnly {
+			rows = append(rows, `<div style="margin-top:3px"><b>`+e(en.Name)+`</b></div>`)
+		}
+		block(fmt.Sprintf("In domains.txt but not in the %s account (%d) - another registrar or account, "+
+			"lapsed, or no longer ours", r.Registrar, n), rows)
+	}
 }
