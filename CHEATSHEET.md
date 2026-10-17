@@ -72,7 +72,7 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Mailbox cleanup | `cti-agent-mailbox` | every day 07:00 | nobody (moves mail) |
 | AppSec weekly | `cti-agent-appscan` | Mondays 07:30 | App Dev audience |
 | Domains weekly | `cti-agent-domains` | Mondays 08:00 | domains audience |
-| Patch Tuesday (paused: sources block Azure) | `cti-agent-patchtuesday` | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
+| Patch Tuesday | `cti-agent-patchtuesday` | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
 
@@ -143,6 +143,26 @@ sudo cti-agent run-digest daily                    # refuses if today's already 
 - **Never re-run a digest that exited 3.** It was sent but not recorded; the
   journal prints the exact `fleet-db sent ...` command to record it instead.
 - `run-mailbox-cleanup --for-real` **WRITES**: it moves mail in the mailbox.
+
+## 7a. Patch Tuesday: save the two articles first
+
+Both publishers block the box, so their commentary only gets in if you save
+the pages. After Microsoft's release (Tuesday afternoon US time) and before
+Wednesday 07:30: open the Qualys "Microsoft Patch Tuesday" review and the
+BleepingComputer Patch Tuesday article, save each (File > Save As, web page
+or text), copy them to the box, then:
+
+```bash
+M=$(date +%Y-%m)
+sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/qualys.html \
+  /var/lib/cti-agent/inbox/patchtuesday/$M/qualys.html
+sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/bleeping.html \
+  /var/lib/cti-agent/inbox/patchtuesday/$M/bleeping.html
+sudo cti-agent run-patchtuesday --dry-run          # check they were read
+```
+
+The run log says "from saved copy". Without them the synopsis still goes out
+from Microsoft's data and the scanner, and says where to save them.
 
 ## 8. Is a send recorded?
 

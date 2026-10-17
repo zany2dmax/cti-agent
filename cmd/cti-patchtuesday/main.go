@@ -62,6 +62,10 @@ func main() {
 	subjectOnly := flag.Bool("subject-only", false, "print the subject line and exit")
 	urlMSRC := flag.String("url-msrc", "",
 		"override Microsoft's release-document URL (the CVRF API); 'none' to skip it")
+	dropDir := flag.String("drop-dir", "",
+		"folder holding saved copies of the two articles (a file named *qualys* "+
+			"and one named *bleeping*, .html or .txt), used instead of fetching; "+
+			"default $FLEET_HOME/inbox/patchtuesday/YYYY-MM")
 	urlQualys := flag.String("url-qualys", "", "override the Qualys review URL")
 	urlBleeping := flag.String("url-bleeping", "", "override the BleepingComputer URL")
 	provider := flag.String("provider", "", "'none' to skip Qualys entirely")
@@ -181,12 +185,42 @@ func main() {
 		d.MSRC = rel
 	}
 
-	bURL := *urlBleeping
-	if bURL == "" {
-		bURL = discoverBleeping(ctx, client, year, mon)
+	// Saved copies first. Both publishers' bot checks refuse this box, so the
+	// operator can save the articles in a browser into the release's drop
+	// folder; a saved copy is used instead of a fetch. See saved.go.
+	drop := *dropDir
+	if drop == "" {
+		drop = patchtuesday.DropDir(os.Getenv("FLEET_HOME"), year, mon)
 	}
-	bs := patchtuesday.Fetch(ctx, client, "BleepingComputer Patch Tuesday", bURL)
+	savedQ := patchtuesday.FindSaved(drop, "qualys")
+	savedB := patchtuesday.FindSaved(drop, "bleeping")
+	if savedQ == "" && savedB == "" {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: no saved articles in %s - fetching instead\n", drop)
+	}
+
+	var bs patchtuesday.Source
+	if savedB != "" {
+		bURL := *urlBleeping
+		if bURL == "" {
+			bURL = patchtuesday.BleepingURLCandidates(year, mon)[0]
+		}
+		bs = patchtuesday.LoadSaved(savedB, "BleepingComputer Patch Tuesday", bURL)
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: BleepingComputer from saved copy %s\n", savedB)
+	} else {
+		bURL := *urlBleeping
+		if bURL == "" {
+			bURL = discoverBleeping(ctx, client, year, mon)
+		}
+		bs = patchtuesday.Fetch(ctx, client, "BleepingComputer Patch Tuesday", bURL)
+		if !bs.Fetched {
+			bs.Err += " - save the article to " + filepath.Join(drop, "bleeping.html") + " to include it"
+		}
+	}
 	bs.Role = patchtuesday.RoleBleeping
+	// With Microsoft's own data loaded the article is commentary, not the
+	// source of the figures, so a missing one does not make the report
+	// "incomplete". Without it, it is required.
+	bs.Optional = d.MSRC != nil
 	d.Sources = append(d.Sources, bs)
 
 	// The Qualys blog is optional. It answers 403 to Azure addresses, and
@@ -196,7 +230,16 @@ func main() {
 	if qURL == "" {
 		qURL = patchtuesday.QualysURL(year, mon)
 	}
-	qs := patchtuesday.Fetch(ctx, client, "Qualys blog", qURL)
+	var qs patchtuesday.Source
+	if savedQ != "" {
+		qs = patchtuesday.LoadSaved(savedQ, "Qualys blog", qURL)
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: Qualys blog from saved copy %s\n", savedQ)
+	} else {
+		qs = patchtuesday.Fetch(ctx, client, "Qualys blog", qURL)
+		if !qs.Fetched {
+			qs.Err += " - save the review to " + filepath.Join(drop, "qualys.html") + " to include it"
+		}
+	}
 	qs.Role = patchtuesday.RoleQualysBlog
 	qs.Optional = true
 	d.Sources = append(d.Sources, qs)

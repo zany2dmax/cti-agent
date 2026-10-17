@@ -71,6 +71,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **`cti-mailer --to-dev`** sends a report only to `FLEET_DEV_EMAIL`, never
   CC'd, subject prefixed `[DEV TEST]`: a preview in a real mail client
   without mailing the team.
+- **Patch Tuesday reads saved copies of the articles.** Both publishers'
+  bot checks refuse the Azure box. Save the Qualys review and the
+  BleepingComputer article in a browser into
+  `/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing
+  `qualys` / `bleeping`, `.html` or `.txt`) before the Wednesday run and the
+  lane reads them instead of fetching (`--drop-dir`). Without them it sends
+  from Microsoft's data and says where to save them. With Microsoft's data
+  loaded, a missing article no longer marks the report incomplete.
 - **Long-lapsed registrations are not reported as problems.** A domain
   cancelled, expired or transferred out more than 45 days ago is listed once
   under INVENTORY for removal from `domains.txt` and not probed; unlisted
@@ -153,10 +161,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 Reinstall. `man cti-domains` works afterwards.
 
-Patch Tuesday is paused: both article sources refuse the Azure box. Disable
-its timer (`sudo systemctl disable --now cti-agent-patchtuesday.timer`); the
-installer never re-enables timers, so it stays off across reinstalls. With no
-synopsis marked sent, the daily keeps reporting the release's CVEs itself.
+Patch Tuesday: if you disabled its timer, re-enable it
+(`sudo systemctl enable --now cti-agent-patchtuesday.timer`). Microsoft's
+data loads from the box; save the two articles into the release's inbox
+folder before the Wednesday run to include their commentary (CHEATSHEET 7a).
 
 Update `/etc/cti-agent/domains.txt`: change `send` to `send receive` on every
 domain that also receives mail, and add `receive`, `legacy`, `saas` or
