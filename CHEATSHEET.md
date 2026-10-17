@@ -72,7 +72,7 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Mailbox cleanup | `cti-agent-mailbox` | every day 07:00 | nobody (moves mail) |
 | AppSec weekly | `cti-agent-appscan` | Mondays 07:30 | App Dev audience |
 | Domains weekly | `cti-agent-domains` | Mondays 08:00 | domains audience |
-| Patch Tuesday | `cti-agent-patchtuesday` | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
+| Patch Tuesday (by hand for now, section 7a) | `cti-agent-patchtuesday` (disabled) | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
 
@@ -144,25 +144,71 @@ sudo cti-agent run-digest daily                    # refuses if today's already 
   journal prints the exact `fleet-db sent ...` command to record it instead.
 - `run-mailbox-cleanup --for-real` **WRITES**: it moves mail in the mailbox.
 
-## 7a. Patch Tuesday: save the two articles first
+## 7a. Patch Tuesday, run by hand (monthly)
 
-Both publishers block the box, so their commentary only gets in if you save
-the pages. After Microsoft's release (Tuesday afternoon US time) and before
-Wednesday 07:30: open the Qualys "Microsoft Patch Tuesday" review and the
-BleepingComputer Patch Tuesday article, save each (File > Save As, web page
-or text), copy them to the box, then:
+The timer is off for now: both article sites block the box, so each month you
+save the two articles, put them on the box, preview, then send. Microsoft
+releases on the second Tuesday, around 13:00 US Eastern; both articles are
+usually up within a few hours.
+
+**1. Find the two articles** (in your own browser, not on the box):
+
+| Source | Where |
+|---|---|
+| Qualys review | `https://blog.qualys.com/vulnerabilities-threat-research/YYYY/MM/DD/microsoft-patch-tuesday-<month>-<year>-security-update-review` (DD is the Tuesday, month in words, e.g. `.../2026/11/10/microsoft-patch-tuesday-november-2026-security-update-review`) |
+| BleepingComputer | the newest "Microsoft <Month> <Year> Patch Tuesday fixes ..." article at `https://www.bleepingcomputer.com/tag/patch-tuesday/` |
+
+**2. Save each page as HTML.** Chrome or Edge: File > Save Page As >
+"Webpage, HTML Only". Safari: File > Save As > Format "Page Source". Name
+them `qualys.html` and `bleeping.html`. (Copying the article text into
+`qualys.txt` / `bleeping.txt` also works.)
+
+**3. Copy them to the box** (from your Mac; replace `<fedora-box>`):
 
 ```bash
-M=$(date +%Y-%m)
-sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/qualys.html \
-  /var/lib/cti-agent/inbox/patchtuesday/$M/qualys.html
-sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/bleeping.html \
-  /var/lib/cti-agent/inbox/patchtuesday/$M/bleeping.html
-sudo cti-agent run-patchtuesday --dry-run          # check they were read
+scp ~/Downloads/qualys.html ~/Downloads/bleeping.html <fedora-box>:/tmp/
 ```
 
-The run log says "from saved copy". Without them the synopsis still goes out
-from Microsoft's data and the scanner, and says where to save them.
+**4. Put them in the release's folder** (on the box). The folder is
+`/var/lib/cti-agent/inbox/patchtuesday/<year>-<month as two digits>/`,
+e.g. `2026-11` for November:
+
+```bash
+M=2026-11
+D=/var/lib/cti-agent/inbox/patchtuesday/$M
+sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/qualys.html   $D/qualys.html
+sudo install -o ctiagent -g ctiagent -m 0600 -D /tmp/bleeping.html $D/bleeping.html
+rm /tmp/qualys.html /tmp/bleeping.html
+sudo ls -l $D
+```
+
+**5. Preview** - sends nothing. The log must say "from saved copy" for both:
+
+```bash
+sudo cti-agent run-patchtuesday --dry-run 2>&1 | grep -E 'saved copy|subject|FAILED'
+sudo less "$(sudo ls -t /var/lib/cti-agent/reports/patchtuesday-*.txt | head -1)"
+```
+
+To see it rendered in Outlook, send the preview to yourself only
+(`FLEET_DEV_EMAIL`, subject prefixed `[DEV TEST]`):
+
+```bash
+sudo cti-agent cti-mailer --to-dev \
+  --html "$(sudo ls -t /var/lib/cti-agent/reports/patchtuesday-*.html | head -1)" \
+  --subject "Patch Tuesday preview"
+```
+
+**6. Send it** (SENDS MAIL to the digest audience; records the send, so a
+second run does nothing):
+
+```bash
+sudo cti-agent run-patchtuesday
+sudo cti-agent fleet-board tail 5        # "sent" line, or the reason it was not
+```
+
+Without the saved pages the synopsis still goes out from Microsoft's data and
+the scanner, and its sources line says where to save them. To replay a past
+month (never sends): `sudo cti-agent run-patchtuesday --month 2026-10`.
 
 ## 8. Is a send recorded?
 
@@ -255,7 +301,7 @@ permission or admin consent.
 | A unit shows failed | `systemctl status <unit>`, then its journal |
 | Heartbeat not running | `sudo cti-agent cti-budget status` (cooldown or ceiling?) |
 | "journal unavailable" in a hand-run alert | Expected: only the alert unit can read the journal |
-| Patch Tuesday sources show 403 | The Qualys blog refuses Azure addresses; it is optional |
+| Patch Tuesday sources show 403 | Both article sites block the box: save the pages by hand (section 7a) |
 | Domains report says lookups failed | `DOMAINS_DNS_SERVERS` in fleet.env; outbound UDP/TCP 53 |
 | Tickets missing from the daily | Section 9; look for `WRITE GATE CLOSED` |
 | SELinux suspicion | `sudo ausearch -m avc -ts recent` |
