@@ -1,22 +1,51 @@
-# CTI CVE Agent
+# CTI Agent Fleet
 
-A threat-intel agent fleet in Go, with Python only where a standard-library
-SQL driver is needed — [why that split is a security
+**An always-on junior analyst for a security team.** It does the recurring,
+tedious work that has to happen every day, every week or every month - read
+the mail, check the scanner, chase the tickets, look over the domains, write up
+Patch Tuesday - on schedule, without being reminded, and without a sick day, a
+vacation or a Friday afternoon. It started as a counter-threat-intelligence
+digest, which is where the name comes from; it is now a general way to hand
+routine security chores to software and get a report a person can act on.
+
+Each chore is a **lane**: a small, deterministic program on a systemd timer
+that gathers facts, decides what matters, and writes it up for the right
+people. Today's lanes:
+
+- **Threat intel, daily and weekly** - reads the CTI advisories that land in a
+  shared Microsoft 365 mailbox, pulls out the CVEs, asks the vulnerability
+  scanner which are *actually present* here, and mails a prioritised digest
+  with CISA KEV deadlines.
+- **Jira follow-through** - files one ticket per confirmed KEV or critical
+  exposure, re-checks every open ticket against the scanner each morning, says
+  when the hosts are clean, and lists every ticket's status in the daily.
+- **Patch Tuesday** - a monthly synopsis of Microsoft's release from
+  Microsoft's own data, measured against what the scanner sees on our machines.
+- **Application security** - a weekly roll-up of the web-application scanner's
+  findings for the people who own the code.
+- **Domains** - a weekly check of every domain we own: registrar expiry and
+  locks, what is in the registrar account but not on our list, which domains
+  have a live website, TLS, and whether each domain's mail records match what
+  it is for - with the exact DNS changes filed for IT as one ticket.
+- **Housekeeping** - keeps the shared mailbox tidy, alerts the operator when
+  any lane fails, and an orchestrator heartbeat that watches the lanes and
+  escalates what it cannot settle on its own.
+
+Adding a lane for the next tedious thing is the point:
+[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) is the recipe.
+
+It behaves like a careful junior analyst rather than an autonomous one.
+**Every claim has a source**: presence comes only from the scanner, registration
+only from the registrar, a release's contents only from Microsoft, and the
+report says plainly what it could not check - because a report that cannot
+tell "we looked and found nothing" from "we never looked" will publish the
+reassuring one. **It does the legwork; people make the calls**: email goes only
+to allowlisted audiences, tickets only to an allowlisted project, anything else
+waits for a human's approval. No lane needs a model to write its report, and
+the AI orchestrator that watches them can read and escalate but is not given
+the runners or the mailer. Go throughout, with Python only where a standard-library SQL
+driver is needed - [why that split is a security
 decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
-
-It reads CTI advisories from a shared Microsoft 365 mailbox, extracts CVEs,
-asks a vulnerability scanner which of them are *actually present in the
-estate*, and mails a prioritised digest every morning — plus a monthly Microsoft
-Patch Tuesday synopsis, a weekly application-security report from the web app
-scanner to the people who own the code, CISA KEV deadline tracking, and a
-cleanup lane that keeps the mailbox tidy without touching anything a human still
-needs to see.
-
-The organising principle: **presence is determined only by the scanner.** CTI
-email text provides urgency and context, never proof that a vulnerability
-exists here. A report that cannot tell "we looked and found nothing" from "we
-never looked" will publish the reassuring one, and most of the design exists to
-prevent exactly that.
 
 ---
 
