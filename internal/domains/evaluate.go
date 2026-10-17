@@ -61,13 +61,15 @@ func Evaluate(results []Result, cmp *Comparison, opt Options) []Finding {
 	}
 
 	if cmp != nil {
+		// Area "inventory": rendered as its own INVENTORY vs REGISTRAR
+		// section near the top of the report, not among the review cards.
 		for _, e := range cmp.NotAtRegistrar {
-			add(e.Name, Medium, "registrar",
+			add(e.Name, Medium, "inventory",
 				"not in the %s account: held at another registrar, lapsed, or not ours - "+
 					"somebody should be able to say which", cmp.Registrar)
 		}
 		for _, r := range cmp.NotInInventory {
-			add(r.Domain, Medium, "registrar",
+			add(r.Domain, Medium, "inventory",
 				"in the %s account but not in the inventory, so nothing else in this report "+
 					"checked it - add it to domains.txt (with \"send\" if it sends mail)", cmp.Registrar)
 		}

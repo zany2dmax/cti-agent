@@ -62,7 +62,19 @@ name, following redirects: status, final URL, response time. Live means a
 markers; GoDaddy hosting markers are reported separately as
 .IR registrar-hosted ,
 because real Website Builder sites carry them too.
-The report opens with a
+When the registrar was consulted and the account and the inventory
+disagree, the report opens with
+.BR "INVENTORY vs GODADDY" :
+the domains in the account but not in
+.I domains.txt
+(with status, expiry and auto-renew \(em nothing else in the report checks
+them), then the domains in
+.I domains.txt
+that are not in the account (another registrar or account, lapsed, or no
+longer ours). The lead says the counts in one sentence; the subject still
+counts them as Medium findings.
+.PP
+After it comes a
 .B WEBSITES
 section that answers "which domains have a live site" directly, one group
 each for: live website (final host, status, page title), redirects to
