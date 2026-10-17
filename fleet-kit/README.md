@@ -168,7 +168,7 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:clean` | — | Wipe `.fleet-local/` | no |
 | `task kev` | `cti-kev` | CISA KEV deadlines for findings present in the estate | no |
 | `task test:kev` | — | Deadline bands, sign convention, present-only filtering | no |
-| `task patchtuesday` | `run-patchtuesday --dry-run` | Build the monthly Patch Tuesday synopsis | **dry run** |
+| `task patchtuesday` | `run-patchtuesday --dry-run` | Build the monthly Patch Tuesday synopsis. Never writes the release manifest | **dry run** |
 | `task patchtuesday MONTH=2026-08` | `--month 2026-08` | Replay a past month to check the lane | never sends |
 | `task test:patchtuesday` | — | Date maths, source parsing, exposure, QQL | no |
 
@@ -242,6 +242,8 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task gosec` | Insecure code patterns. Deliberate exceptions carry an inline `#nosec <RULE> -- reason` beside the code, never a blanket exclusion in config: a suppression whose justification lives elsewhere is one nobody re-examines |
 | `task govulncheck` | stdlib and dependencies against the Go vulnerability database. `go.mod` has no third-party dependencies, so this is about the stdlib — and the agent parses untrusted HTML and XML off the public internet through `encoding/xml` and `net/http`, so an advisory in either is a live finding here |
 | `task ship` | fmt, build, all tests, lint, scan, gosec, govulncheck, **then** push. Task stops at the first failure, so the push cannot outrun a red gate — which it did once, when `task test` and `git push` were separate lines in the same paste |
+| `task man:lint` | Every man page in `man/man1/` renders without warnings (mandoc or groff). The drift test that every flag is documented runs with the lane tests |
+| `task cheatsheet:pdf` | Render `CHEATSHEET.md` to `CHEATSHEET.pdf` (needs `pip3 install reportlab`) |
 | `task clean` / `task clean:all` | Build artifacts / also local state |
 
 ### Production — Fedora/RHEL layout
@@ -256,7 +258,9 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent run-checkin` | One orchestrator heartbeat |
 | `sudo cti-agent run-appscan --dry-run` | The weekly AppSec report, rendered to `state/`, sent nowhere |
 | `sudo cti-agent cti-appscan --since 336h --out FILE` | The report over any window, by hand. Sends nothing; chain it to `cti-mailer --lane was` |
-| `sudo cti-agent run-domains --dry-run` | The weekly domains check, rendered to `state/`, sent nowhere, baseline not advanced |
+| `sudo cti-agent run-domains --dry-run` | The weekly domains check, rendered to `state/`, sent nowhere, baseline not advanced, Jira lock-down ticket only previewed |
+| `sudo cti-agent run-patchtuesday --dry-run` | The monthly synopsis, sent nowhere, manifest untouched. **Run by hand for now** - see [The monthly Patch Tuesday synopsis](#the-monthly-patch-tuesday-synopsis) |
+| `sudo cti-agent cti-mailer --to-dev --html FILE --subject S` | Send a rendered report to `FLEET_DEV_EMAIL` only, subject `[DEV TEST] ...`, to see it in a real mail client without mailing the team |
 | `sudo cti-agent mailer.py --check` | Decode the token, list granted app roles |
 | `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |
 | `sudo cti-agent fleet-board tail 30` | Recent board lines |
@@ -408,7 +412,7 @@ only the copy inside `/opt/cti-agent/agent`. Put it somewhere tied to the
 machine rather than to whoever happened to deploy last.
 
 The installer is idempotent, keeps an existing `/etc/cti-agent/fleet.env`,
-rebuilds all seven binaries, rewrites the units, runs `daemon-reload` and
+rebuilds all ten binaries, installs the man pages, rewrites the units, runs `daemon-reload` and
 `restorecon`, and refuses to report success if a path or a timezone is wrong.
 
 ```bash
@@ -442,7 +446,8 @@ sudo cti-agent run-domains --dry-run             # needs domains.txt, DOM_TO, DO
 sudo systemctl enable --now cti-agent-digest.timer
 sudo systemctl enable --now cti-agent-checkin.timer
 sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
-sudo systemctl enable --now cti-agent-patchtuesday.timer
+# cti-agent-patchtuesday.timer stays OFF for now: the lane is run by hand
+# each month (CHEATSHEET.md section 7a)
 sudo systemctl enable --now cti-agent-appscan.timer      # a different audience
 sudo systemctl enable --now cti-agent-domains.timer
 sudo systemctl enable --now cti-agent-mailbox.timer      # last: see below
@@ -580,7 +585,7 @@ sudo -u ctiagent python3 /home/ctiagent/fleet/lanes/mailer.py --check
 # 6. Dry run the whole pipeline — renders and validates, sends nothing
 sudo -u ctiagent /home/ctiagent/fleet/bin/run-digest daily --dry-run
 
-# 7. Enable ONE timer. Not all four.
+# 7. Enable ONE timer first - the digest - not all of them.
 sudo systemctl enable --now cti-agent-digest.timer
 systemctl list-timers 'cti-agent-*'
 ```
@@ -923,7 +928,7 @@ play.
 | `WAS_ALLOW_TO` | allowlist for `WAS_TO`. **Fail-closed:** unset means `cti-mailer --lane was` refuses, naming the variable, and `--approve` does not override an empty list. May reference another list by name - `WAS_ALLOW_TO=$FLEET_ALLOW_TO,appdev@example.com` - with cycles caught; wildcards such as `$*_ALLOW_TO` are refused |
 | `DOM_TO` | domains-check recipients - the security team. **No default, no fallback** |
 | `DOM_ALLOW_TO` | allowlist for `DOM_TO`. Fail-closed, same rules as `WAS_ALLOW_TO` |
-| `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository |
+| `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository. One domain per line plus markers `send`, `receive`, `saas`, `unknown`, `legacy`; no marker means no mail, and `send` alone means send-only |
 | `GODADDY_PAT` | GoDaddy Personal Access Token, `domains.domain:read` only. Unset: registrar checks are skipped and the subject says so |
 | `DOMAINS_DKIM_SELECTORS` | DKIM selectors to probe; empty uses a built-in list. DKIM keys cannot be enumerated, so add your mail service's selector |
 | `DOMAINS_DNS_SERVERS` | DNS the domains lane asks. Empty = public resolvers, so internal split-horizon DNS cannot hide a domain's public records; `system` = this host's; or a list of IPs |
@@ -931,6 +936,7 @@ play.
 | `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
+| `FLEET_DEV_EMAIL` | development only: your own address, for `cti-mailer --to-dev`, which sends a report **only** there (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
 | `FLEET_ATTRIBUTION` | footer credit on both emails. Unset keeps `Generated by the <FLEET_ORG> CTI agent fleet` |
 | `FLEET_REPO_URL` | makes the credit a link. Setting this alone is enough — the text then defaults to `Correlated and published by the <FLEET_ORG> Claude Code Agent Fleet`. **Only `http://` and `https://` are rendered**; anything else is refused and logged, because the value lands in an `href` in Outlook. Read the caveat below before pointing it at a public repository |
@@ -1304,6 +1310,19 @@ fleet run-patchtuesday                    # send to DIGEST_TO
 fleet run-patchtuesday --month 2026-08    # replay a past month, never sends
 ```
 
+### Run by hand for now
+
+Both article sites refuse the Azure box (Cloudflare bot checks; the Qualys
+blog answers 403), so `cti-agent-patchtuesday.timer` is **disabled** and the
+operator runs the lane each month: save the Qualys review and the
+BleepingComputer article in a browser, copy them to
+`/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing `qualys` /
+`bleeping`, `.html` or `.txt`), dry-run, preview with `cti-mailer --to-dev`,
+then send. The lane reads the saved copies instead of fetching
+(`cti-patchtuesday --drop-dir`, default that folder). Without them it still
+sends from Microsoft's data, and its sources line says where to save them.
+Step by step: [CHEATSHEET.md section 7a](../CHEATSHEET.md#7a-patch-tuesday-run-by-hand-monthly).
+
 ### Why it is a lane and not part of @scout
 
 `@scout` polls feeds continuously for CVE IDs and dedupes them. It has no
@@ -1326,8 +1345,8 @@ In this order, matching the format the team already reads:
    unioned**, because the same machine appears under many QIDs and summing
    them produces a host count larger than the estate.
 3. **The QQL** — the most-used line in the whole email. Two of them: the
-   query Qualys published for the release, verbatim, and then ours narrowed to
-   the QIDs with assets here.
+   query Qualys published for the release, verbatim (when the review was
+   read), and then ours narrowed to the QIDs with assets here.
 4. **The patches present here — one row per QID**, with host count, QDS and the
    date it was last seen, and the CVEs each one fixes.
 5. Zero-days, Edge, products covered, the category table, Adobe.
@@ -1404,8 +1423,10 @@ top of `--month`.
 
 | Situation | Behaviour |
 |---|---|
-| One source unreachable | Sends, with a banner naming which and warning counts may be low. The banner says the exposure figures are unaffected — but only when they actually are |
-| Both sources unreachable | **Sends nothing**, exits non-zero, `cti-alert` fires. A synopsis assembled from nothing looks like a quiet month |
+| Qualys blog unreachable | Listed as "optional, not read". Not a degradation: only its published QQL is lost, and the lane builds one from our detections |
+| BleepingComputer unreachable, Microsoft's data loaded | Sends from Microsoft's data; the article is commentary, so the report is not marked incomplete. The sources line says where to save a copy |
+| Microsoft's data unreachable | Figures fall back to the articles. Sends with an *Incomplete sources* banner saying what it was built from and what could not be read. The banner says the exposure figures are unaffected — but only when they actually are |
+| No source at all | **Sends nothing**, exits non-zero, `cti-alert` fires. A synopsis assembled from nothing looks like a quiet month |
 | Qualys correlation fails | Sends the public synopsis. Exposure reads *"was **NOT MEASURED** in this run: <reason>"* and names the reason. It must not say anything about the KnowledgeBase, which it never reached |
 | KnowledgeBase cache unavailable, review published QIDs | Correlates on the published QIDs alone and marks the coverage note stale. Losing the mapping degrades the measurement; it no longer cancels it |
 | No QID from *either* route | Exposure reads *"not yet measurable"*, never *"0"*. Normal within a day or two of a release, and not a clean result |
@@ -1482,10 +1503,11 @@ The lane reads `api.msrc.microsoft.com` (Microsoft's release data, the primary
 source) and `www.bleepingcomputer.com` (the cross-check) over 443, and tries
 `blog.qualys.com` as an optional extra. All three are in the installer's
 connectivity preflight. The Qualys blog answers `HTTP 403` to Azure addresses
-whatever the request looks like, so on an Azure box expect it to be listed as
-"optional, not read"; that does not mark the report incomplete. Losing it
-costs only its published QQL, which the lane rebuilds from our own
-detections.
+whatever the request looks like, and BleepingComputer's Cloudflare check
+refuses the box too; that is why the articles are saved by hand into the
+release's inbox folder (above). A missing Qualys copy is listed as "optional,
+not read" and costs only its published QQL, which the lane rebuilds from our
+own detections.
 
 ---
 
@@ -1556,9 +1578,13 @@ Operating detail is in
 ### What it reads
 
 - **The inventory** - `DOMAINS_FILE`, default `/etc/cti-agent/domains.txt`.
-  An operator file, never in this repository: one domain per line, `send`
-  after the ones that send mail. Unknown markers and duplicates are reported
-  in the email, not ignored.
+  An operator file, never in this repository: one domain per line, then the
+  markers that choose its row in the security team's decision chart - `send
+  receive` (active mail domain), `send` (send-only), `receive`, `saas`,
+  `unknown`, `legacy`; no marker means no mail at all. **`send` alone is
+  send-only**, so mail domains must be `send receive`. Unknown markers and
+  duplicates are reported in the email, not ignored. The chart is in
+  `man cti-domains` and [RUNBOOK 11g](../RUNBOOK.md#1-the-inventory-not-in-the-repository).
 - **The GoDaddy account** - `GET /v1/domains` with a read-only Personal Access
   Token (`domains.domain:read`). The client never requests `authCode`; a test
   fails if it ever does. Unset or failing: the report still runs, and its
@@ -1570,11 +1596,12 @@ Operating detail is in
 
 | Area | Checks |
 |---|---|
-| Registrar | every inventory domain is in the account; every account domain is in the inventory; status ACTIVE; expiry (30/60 days, worse with auto-renew off); transfer lock on; registrar nameservers match DNS |
-| Web | **The report opens with WEBSITES: which domains have a live site, which redirect to another domain, which are parked, which have DNS but no working page, and which have no website.** Underneath, everything `sitecheck.go` reported - A/AAAA, CNAME, status, final URL, response time, TLS issuer and names - for the apex and `www.`, one retry on no response. Live means 2xx/3xx, as sitecheck's `active`; a 5xx is a finding. Parked by lander and for-sale markers; sitecheck's GoDaddy markers are kept as **registrar-hosted**, because a real Website Builder site matches them too. Dangling CNAME (takeover); certificate rejected by browsers; HTTP only; `http://` not redirecting to `https://`; a redirect off our domains; certificate expiry 14/30 days |
+| Registrar | every inventory domain is in the account; every account domain is in the inventory - both shown together as **INVENTORY vs GODADDY** at the top of the report when they disagree; a listed registration cancelled, expired or transferred out more than 45 days ago is set aside there for removal and not probed; status ACTIVE; expiry (30/60 days, worse with auto-renew off); transfer lock on; registrar nameservers match DNS |
+| Web | **After INVENTORY vs GODADDY (when present) the report opens with WEBSITES: which domains have a live site, which redirect to another domain, which are parked, which have DNS but no working page, and which have no website.** Underneath, everything `sitecheck.go` reported - A/AAAA, CNAME, status, final URL, response time, TLS issuer and names - for the apex and `www.`, one retry on no response. Live means 2xx/3xx, as sitecheck's `active`; a 5xx is a finding. Parked by lander and for-sale markers; sitecheck's GoDaddy markers are kept as **registrar-hosted**, because a real Website Builder site matches them too. Dangling CNAME (takeover); certificate rejected by browsers; HTTP only; `http://` not redirecting to `https://`; a redirect off our domains; certificate expiry 14/30 days |
 | Mail delivery (every domain) | sitecheck's `-mxstrict` (every MX host resolves) and `-smtp` (greet the first answering MX, record the banner) plus whether it offers STARTTLS. Each MX host is dialled once per run however many domains share it. If no MX answers at all, outbound port 25 is reported once as blocked rather than 93 times. DKIM key size: under 1024-bit High, 1024 Medium |
-| Sending domains | SPF present, single, not `+all`, under 10 lookups; a DKIM key at a known selector; DMARC present, `quarantine`/`reject`, `pct=100`, with `rua=`; an MX |
-| Non-sending domains | `v=spf1 -all`; DMARC `p=reject`; and anything that suggests it **is** sending - an authorising SPF or a DKIM key - asked as a question |
+| Sending domains | SPF present, single, not `+all`, under 10 lookups; a DKIM key at a known selector; DMARC present, `quarantine`/`reject`, `pct=100`, with `rua=`; an MX unless the domain is send-only |
+| Non-sending domains | `v=spf1 -all`; DMARC `p=reject`; a null MX (`0 .`) when it receives nothing either; and anything that suggests it **is** sending - an authorising SPF or a DKIM key - asked as a question. `unknown` domains are reported, never tightened; broken SPF is fixed before any DMARC enforcement is asked for |
+| DNS CHANGES FOR IT | the difference between each domain's profile and its DNS: exact records for the lock-down rows (`v=spf1 -all`, DMARC `p=reject`, null MX, DKIM keys deleted), a starting `p=none` DMARC for a sender with none, review items otherwise. A failed lookup never produces a change |
 | Week over week | nameservers, MX, SPF, DMARC, CNAMEs, live/parked, certificate issuer, registrar status/lock/auto-renew, and any domain that left the account. Not A records: CDNs churn them |
 
 A lookup that **failed** is reported as not checked, never as a missing
@@ -1595,10 +1622,21 @@ DKIM key size, DMARC policy and rua). A cell starting with `=`, `+`, `-` or
 `@` is prefixed with `'`: page titles and banners come from the remote end, and
 Excel executes formulas when the file is opened.
 
+### The lock-down ticket
+
+`cti-domains --actions-out` writes the DNS changes as JSON. After the email
+has gone, `run-domains` passes that file to `cti-jira --domains-actions`,
+which files **one** Jira lock-down ticket for IT (every change needs the same
+registrar access); when one is already open it comments only if the list has
+changed, and says once when nothing is left. The daily's FLEET TICKETS
+section lists it. Subject to the `JIRA_ALLOW_CREATE` write gate; a Jira
+failure is logged and never costs the report.
+
 ### Dry run
 
 `run-domains --dry-run` probes and renders but passes `--no-state-write`, so
-the Monday run still reports the week's changes.
+the Monday run still reports the week's changes, and it only previews the
+lock-down ticket.
 
 ---
 
@@ -1679,10 +1717,10 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
 | Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
-| Wed after the 2nd Tuesday, 07:30 | Microsoft Patch Tuesday synopsis | `cti-agent-patchtuesday.timer` |
+| Wed after the 2nd Tuesday, 07:30 | Microsoft Patch Tuesday synopsis. **Run by hand for now**; the timer is disabled | `cti-agent-patchtuesday.timer` (disabled) |
 | Mon 07:30 | AppSec report to `WAS_TO` | `cti-agent-appscan.timer` |
 | 07:00 daily | mailbox cleanup | `cti-agent-mailbox.timer` |
-| Mon 08:00 | domains check to `DOM_TO`, CSV attached | `cti-agent-domains.timer` |
+| Mon 08:00 | domains check to `DOM_TO`, CSV attached; then the Jira lock-down ticket | `cti-agent-domains.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then
@@ -1750,6 +1788,10 @@ grouped by priority. Each carries KEV / ransomware / CVSS / EPSS / status
 badges, a plain-English "why it ranks here," the NVD description, and
 deduplicated sample hostnames. Table-based layout with inline CSS, because
 Outlook. The raw markdown report is attached for anyone who wants every row.
+With Jira configured, a **FLEET TICKETS** section lists every fleet ticket the
+morning's follow-up re-checked - key and link, CVE, Jira status, hosts the
+scanner sees today, and what the re-check did - with tickets closed in the last
+30 days below it, and the domains lane's lock-down ticket.
 
 Sev1 is suppressed from the daily and appears in the weekly. Sev4 and Sev2 are capped
 at 12 and 10 items on the daily, sorted by host count, with a "+N more in the
@@ -1827,9 +1869,11 @@ on a Fedora box gets you "no such file or directory" for every one of them.
 | Default `FLEET_HOME` | `/home/ctiagent/fleet` | `/var/lib/cti-agent` |
 
 `install-fedora.sh` installs `/usr/local/bin/cti-agent`, a wrapper that exports
-`FLEET_HOME`, `FLEET_CODE`, `FLEET_ENV`, `FLEET_FEEDS` and `HOME` and then drops
-to the service account. That is why the Fedora commands are shorter: the paths
-are already set. Define `fleet` for your layout and the rest of this section is
+`FLEET_HOME`, `FLEET_CODE`, `FLEET_ENV`, `FLEET_FEEDS` and `HOME`, drops to the
+service account, and loads `fleet.env` there before starting the command
+(keeping its own layout variables), so a hand run of any command - Python
+lanes, `fleet-db` and `cti-budget` included - sees the same settings as its
+timer. That is why the Fedora commands are shorter: the paths are already set. Define `fleet` for your layout and the rest of this section is
 copy-pasteable as written.
 
 ```bash
@@ -1914,12 +1958,14 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what Sev5s are open and unremedi
 | Today's advisory was archived hours after it arrived | A manual run after the digest, rather than the timer which fires before it | Expected before `MAILBOX_MIN_AGE_HOURS` existed. With the grace set (24h default) the outcome no longer depends on what time the lane runs |
 | Heartbeat reports tools "require approval", but edits files fine | No `--allowedTools` list. `acceptEdits` approves edits ONLY; every Bash call is denied with nobody present to approve | Not SELinux and not sudo. Check `journalctl -u cti-agent-checkin \| grep "allowed tools"` — if that line is absent, the box is running a build from before the allowlist existed |
 | `Credit balance is too low`, but you configured a subscription token | A stale `ANTHROPIC_API_KEY` is also set, and claude prefers it — so the beat bills a Console balance, not your seat | `sudo grep -E '^(export )?(ANTHROPIC_API_KEY\|ANTHROPIC_AUTH_TOKEN\|CLAUDE_CODE_OAUTH_TOKEN)=' /etc/cti-agent/fleet.env \| sed 's/=.*/=<set>/'` — blank all but one. run-checkin now refuses when more than one is set, and prints `auth: <NAME>` on every beat |
+| `digest WAS SENT but the send was not recorded`, run-digest exit 3 | `fleet-db sent` failed after the mail went | **Do not rerun run-digest** - it would mail a second copy. Run the exact `sudo cti-agent fleet-db sent ...` command the log and the board line print |
+| `cti-budget: cannot read the ledger at ...`, exit 1 | The ledger file exists but cannot be read, e.g. wrong owner or mode | Fix the path it names. `record` never overwrites a ledger it could not read; a corrupt but readable one is only warned about |
 | Heartbeat alert says `HOLD: the account is out of credit` | The balance is empty. Waiting will not clear it | Add credit, or repoint `CLAUDE_CODE_OAUTH_TOKEN` at an account that has some. The unit exits 0 deliberately — a correctly reported hold is not a failed unit, so do **not** disable the timer. It resumes on its own once credit is back |
 | `cti-budget status` says `NOT BEATING` | The timer is off or the lane is broken. `state: ready` only means quota is left, which a stopped fleet always has | `systemctl list-timers 'cti-agent-*' --all` — an empty LAST column means never ran. Then `sudo journalctl -u cti-agent-checkin -S -3d` |
 | `cti-budget status` shows beats stored but few charged | The lanes are failing, not the budget | Errored beats are recorded and do **not** count against the ceilings. "24 recorded, 0 charged" means the heartbeat ran 24 times and reached the model none of them — a code or environment fault. Read the journal, do not raise the ceiling |
 | *You* got rate-limited, not the fleet | The fleet's slice is too large for how you work | Lower `FLEET_BUDGET_DAILY_BEATS`, or widen the timer past 2h. The fleet cannot see your usage, so this is tuned by hand |
 | Holds emailed repeatedly for one outage | `AlertedFor` state lost with the ledger | Expected after deleting `budget.json`. One email per distinct cooldown otherwise |
-| `missing required environment variables: [...]` from a by-hand run, but the names are all in `fleet.env` | The wrapper passes the `FLEET_*` layout only; the command has to read `fleet.env` itself | Fixed — every Go command now calls `internal/fleetenv` at startup. If it recurs, `FLEET_ENV` is wrong or the service account cannot read the 0600 file: `sudo -u ctiagent head -1 /etc/cti-agent/fleet.env` |
+| `missing required environment variables: [...]` from a by-hand run, but the names are all in `fleet.env` | Before 1.3 the wrapper passed the `FLEET_*` layout only, and the Python lanes, `fleet-db` and `cti-kev` ran on defaults | Fixed — the wrapper now loads `fleet.env` as the service account, and every Go command also calls `internal/fleetenv` at startup. If it recurs, `FLEET_ENV` is wrong or the service account cannot read the 0600 file: `sudo -u ctiagent head -1 /etc/cti-agent/fleet.env` |
 | A missing-variable list naming credentials the command never uses | Wrong config loader — `config.Load()` demands Graph *and* Qualys | `LoadGraphOnly()` for mailbox lanes, `LoadVulnLookup()` for scanner lanes. `task test:env` covers this |
 | Microsoft CVEs stopped appearing in the daily digest | Working as designed: a sent Patch Tuesday synopsis covers them | The raw report lists every held CVE under its own heading. `jq .sent $FLEET_HOME/state/patchtuesday-*.json`; delete the file to report them again |
 | Patch Tuesday CVEs are still flooding the daily | The manifest was never marked sent — the monthly mailer failed, or the runner did not reach `--mark-sent` | `journalctl -u cti-agent-patchtuesday`. This is the safe direction to fail in, so it is a nuisance, not an incident |
@@ -1966,7 +2012,7 @@ on the generic layout. The lock files live in state, not code, so they follow
 
 ## Rollout — one primitive at a time
 
-The fleet guide's advice applies here: don't stand up all four lanes on day one.
+The fleet guide's advice applies here: don't stand up every lane on day one.
 
 **Week 1 — pipeline only.** Install, run `run-digest daily --dry-run` by hand,
 read the HTML yourself. Confirm the Sev5/Sev4 calls match your judgment. Tune the

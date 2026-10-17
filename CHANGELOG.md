@@ -75,8 +75,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   bot checks refuse the Azure box. Save the Qualys review and the
   BleepingComputer article in a browser into
   `/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing
-  `qualys` / `bleeping`, `.html` or `.txt`) before the Wednesday run and the
-  lane reads them instead of fetching (`--drop-dir`). Without them it sends
+  `qualys` / `bleeping`, `.html` or `.txt`) before running it and the lane
+  reads them instead of fetching (`--drop-dir`). Run by hand for now, timer
+  disabled: CHEATSHEET section 7a. Without them it sends
   from Microsoft's data and says where to save them. With Microsoft's data
   loaded, a missing article no longer marks the report incomplete.
 - **Long-lapsed registrations are not reported as problems.** A domain
@@ -102,9 +103,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   comment", "not re-checked: the scanner lookup failed") - with tickets closed
   in the last 30 days below. A ticket used to appear only on a day its CVE was
   back in the mail, so the daily follow-up reached Jira and not the reader.
+  The domains lock-down ticket is listed there too, and the follow-up no
+  longer reports it as a ticket "with no CVE label".
 - **The domains report leads with WEBSITES.** Which domains have a live
   site - sitecheck.go's first use - was only in the inventory table at the
-  bottom. The report now opens with it, grouped as live (final host, status,
+  bottom. The report now opens with it (after INVENTORY vs GODADDY, when the
+  account and the inventory disagree), grouped as live (final host, status,
   page title), redirecting to another domain, registrar-hosted, parked, DNS
   but no working page, no website, and not checked, and the lead says it in
   one sentence.
@@ -161,10 +165,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 Reinstall. `man cti-domains` works afterwards.
 
-Patch Tuesday: if you disabled its timer, re-enable it
-(`sudo systemctl enable --now cti-agent-patchtuesday.timer`). Microsoft's
-data loads from the box; save the two articles into the release's inbox
-folder before the Wednesday run to include their commentary (CHEATSHEET 7a).
+Patch Tuesday is run by hand for now: leave `cti-agent-patchtuesday.timer`
+disabled (`sudo systemctl disable --now cti-agent-patchtuesday.timer` if it is
+on) and follow CHEATSHEET 7a each month. Microsoft's data loads from the box;
+save the two articles into the release's inbox folder before the run to
+include their commentary.
 
 Update `/etc/cti-agent/domains.txt`: change `send` to `send receive` on every
 domain that also receives mail, and add `receive`, `legacy`, `saas` or

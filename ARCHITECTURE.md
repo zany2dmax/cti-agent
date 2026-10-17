@@ -124,12 +124,13 @@ flowchart TB
         QUALYS["Vulnerability scanner<br/>host detection"]
         DAST["Web app scanner<br/>scan-complete mail + API"]
         DNSREG["Public DNS + our sites<br/>GoDaddy account (read-only)"]
+        MSRC["Microsoft release data<br/>MSRC API + saved articles"]
     end
 
     subgraph LANES["Executor lanes — on timers, deterministic, cannot talk to a human"]
         DIGEST["daily brief 06:00<br/>+ weekly Monday"]
         SCOUT["feed poll<br/>every 4 hours"]
-        PT["Patch Tuesday<br/>monthly"]
+        PT["Patch Tuesday<br/>monthly, by hand for now"]
         CLEAN["mailbox cleanup<br/>07:00"]
         APPSEC["AppSec report<br/>Monday 07:30"]
         DOMS["domains check<br/>Monday 08:00"]
@@ -149,7 +150,7 @@ flowchart TB
 
     subgraph OUT["Outputs"]
         EMAIL["Security DL<br/>the morning brief"]
-        TICKET["Jira<br/>one ticket per confirmed exposure"]
+        TICKET["Jira<br/>one ticket per confirmed exposure<br/>+ one DNS lock-down ticket"]
         APPDEV["App Dev<br/>the AppSec report"]
     end
 
@@ -162,11 +163,14 @@ flowchart TB
     QUALYS --> DIGEST
     DAST --> APPSEC
     DNSREG --> DOMS
+    MSRC --> PT
     LANES --> GO
     DIGEST --> EMAIL
     DIGEST --> TICKET
     APPSEC --> APPDEV
     DOMS --> EMAIL
+    DOMS --> TICKET
+    PT --> EMAIL
     LANES --> STATE
     STATE <--> ORCH2
     ORCH2 -->|"escalate only"| EMAIL
@@ -178,7 +182,7 @@ flowchart TB
     classDef out    fill:#e0d6f2,stroke:#4e2f85,stroke-width:2px,color:#1d1133
     classDef orch   fill:#fadfc0,stroke:#9a4a08,stroke-width:3px,color:#3a1c02
     classDef store  fill:#e7e1cf,stroke:#6f6134,stroke-width:2px,color:#2a2410
-    class MBX,FEEDS,NVD,QUALYS,DAST,DNSREG source
+    class MBX,FEEDS,NVD,QUALYS,DAST,DNSREG,MSRC source
     class DIGEST,SCOUT,PT,CLEAN,APPSEC,DOMS lane
     class P1,P2,P3,P4,P5,P6,P7,P8 pkg
     class EMAIL,TICKET,APPDEV out
@@ -195,7 +199,7 @@ flowchart TB
 | Primitive | Here | Why it exists |
 |---|---|---|
 | **Orchestrator** | A Claude session every 2 hours | Judgment. Decides what to chase and what to say nothing about |
-| **Executor lanes** | Seven systemd timers, plus the heartbeat's | Deterministic work. Each does one thing and cannot reach a human |
+| **Executor lanes** | Seven systemd timers, plus the heartbeat's (Patch Tuesday's is off for now; the operator runs that lane by hand) | Deterministic work. Each does one thing and cannot reach a human |
 | **Heartbeat** | `cti-agent-checkin.timer` | Turns a program into a presence. It wakes whether or not you asked |
 | **Message board** | Append-only markdown | How parts that never run at the same time talk to each other |
 | **Persistent memory** | SQLite | Continuity. Without it every beat is a stranger starting over |
@@ -211,6 +215,9 @@ Each answers a different question, and the brief is the join across them.
 - **What didn't arrive in the mailbox?** — the feed poller, so coverage does not
   depend on who remembered to subscribe us
 - **Has someone external set a deadline?** — federal remediation due dates
+- **What did this month's Microsoft release land on us?** — Microsoft's own
+  release data, cross-checked against a news write-up and correlated with the
+  scanner, one row per update somebody installs
 - **What does a human do with this?** — a Jira ticket, with the hostnames
   attached, because our team reports and IT remediates
 - **Are our own applications exposed?** — the web application scanner, read
@@ -221,8 +228,10 @@ Each answers a different question, and the brief is the join across them.
 - **Can somebody impersonate us, or take a domain from us?** — the weekly
   domains check: registrar state (expiry, transfer lock, a domain leaving the
   account), dangling CNAMEs, certificates, and whether each domain's mail
-  records match whether it sends. A nameserver change nobody planned is how a
-  hijack looks from outside, so changes are diffed week over week
+  records match its row in the security team's decision chart (sends,
+  receives, both, a SaaS sender, or no mail at all). The exact DNS changes go
+  to IT as one Jira lock-down ticket. A nameserver change nobody planned is how
+  a hijack looks from outside, so changes are diffed week over week
 - **Is the fleet itself healthy and affordable?** — the heartbeat, rationed
   against the model subscription so a crash loop cannot exhaust it
 
@@ -232,7 +241,7 @@ The orchestrator has no mailbox, no shell and no ability to address mail. It
 may call a short allowlist of commands — named **per subcommand**, so it can
 write its own notes but cannot record a digest as sent, rewrite a finding, or
 mark a monthly release delivered — and nothing else. It cannot run any lane:
-every one of them sends or moves mail, and timers own them. Its only route to a
+every one of them sends or moves mail, and timers (or the operator) own them. Its only route to a
 person is `cti-alert`, which has no recipient argument. A test checks that
 everything its instructions tell it to run is on that list, and that nothing
 they forbid is.

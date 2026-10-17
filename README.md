@@ -53,14 +53,20 @@ gaps](SECURITY.md#known-gaps-and-accepted-risks)
 
 **A daily digest.** Reads the mailbox, extracts CVEs, asks the scanner what is
 present, enriches with NVD CVSS, EPSS and CISA KEV, prioritises Sev5–Sev1, and
-mails an HTML digest with the exploited-and-present findings at the top.
+mails an HTML digest with the exploited-and-present findings at the top. A
+FLEET TICKETS section lists every open fleet ticket in Jira (and those closed
+in the last 30 days) with its status, the hosts the scanner sees today and what
+that morning's re-check did.
 
 **A monthly Patch Tuesday synopsis.** Reads Microsoft's own release data,
-cross-checks it against BleepingComputer (and the Qualys blog when it loads),
-correlates the release against Host Detection, and answers the
-question neither public write-up can: what landed on *our* machines. One table
-row per QID, the Qualys Detection Score, and the review's own QQL verbatim so
-somebody can paste it into the console and see the same set.
+cross-checks it against BleepingComputer (and the Qualys blog when it can be
+read), correlates the release against Host Detection, and answers the question
+neither public write-up can: what landed on *our* machines. One table row per
+QID, the Qualys Detection Score, and the Qualys review's own QQL verbatim (when
+the review was read) so somebody can paste it into the console and see the
+same set. **Run by hand for now:** both article sites refuse the server, so the
+operator saves the two articles into the release's inbox folder and starts the
+run ([CHEATSHEET.md](CHEATSHEET.md) section 7a); the timer stays disabled.
 
 **A weekly AppSec report.** Mondays, to a separate list — the people who own
 application code, not the people who patch servers, and the split is enforced
@@ -73,11 +79,15 @@ that stops working alerts the operator rather than the developers.
 **A weekly domains check.** Mondays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
 repository): still registered in the GoDaddy account, and is the account
-holding domains nobody listed; live, parked or dark; does the certificate
-verify; and do the mail records match the domain's role — a sender needs SPF,
-DKIM and an enforcing DMARC, a non-sender must publish `v=spf1 -all` and
-`p=reject` so nobody can send as it. Then what changed since last week. A
-failed DNS lookup is reported as *not checked*, never as a missing record.
+holding domains nobody listed (INVENTORY vs GODADDY); which domains have a live
+website (WEBSITES); does the certificate verify; and do the mail records match
+the domain's row in the security team's decision chart, chosen by markers in
+the inventory (`send`, `receive`, `saas`, `unknown`, `legacy`; no marker means
+no mail at all) — a sender needs SPF, DKIM and an enforcing DMARC, a domain
+with no mail must publish `v=spf1 -all`, `p=reject` and a null MX so nobody can
+send as it. The difference is listed as DNS CHANGES FOR IT and filed as one
+Jira lock-down ticket per run. Then what changed since last week. A failed DNS
+lookup is reported as *not checked*, never as a missing record.
 
 **KEV deadline tracking.** CISA remediation deadlines, but only for CVEs the
 scanner actually found in the estate — a deadline for something you do not have
@@ -92,27 +102,27 @@ quiet day — which only holds if a broken pipeline is loud.
 
 ---
 
-## The nine binaries
+## The ten binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
 | `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
 | `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
 | `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails. Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
-| `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom` |
+| `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom`. `--actions-out` writes the DNS changes for `cti-jira --domains-actions` |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
-| `cti-patchtuesday` | `run-patchtuesday`, monthly | The Patch Tuesday synopsis: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
-| `cti-mailer` | every lane, and by hand | The **single outbound channel**. Holds the `FLEET_ALLOW_TO` recipient gate, which covers Cc as well as To. `--check` decodes the token and reports the roles the tenant actually consented to. A port of `mailer.py`; see [SECURITY.md](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision) |
-| `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete |
-| `cti-jira` | `run-digest`, between enrich and brief | Files one Jira ticket per confirmed KEV or Sev5 CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. Creates nothing without `--for-real` and a project in `JIRA_ALLOW_CREATE` |
+| `cti-patchtuesday` | `run-patchtuesday`, monthly (by hand for now) | The Patch Tuesday synopsis from Microsoft's release data (MSRC API), cross-checked against BleepingComputer: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
+| `cti-mailer` | every lane, and by hand | The **single outbound channel**. Holds the `FLEET_ALLOW_TO` recipient gate, which covers Cc as well as To. `--check` decodes the token and reports the roles the tenant actually consented to. `--to-dev` sends a preview to `FLEET_DEV_EMAIL` only, subject prefixed `[DEV TEST]`. A port of `mailer.py`; see [SECURITY.md](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision) |
+| `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete. Archives the fleet's own reports only when their `X-CTI-Agent-Sent` header carries a valid signature |
+| `cti-jira` | `run-digest`, between enrich and brief; `run-domains`, after the send | Files one Jira ticket per confirmed KEV or Sev5 CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. `--domains-actions` files the domains lane's DNS changes as one lock-down ticket, commenting on the open one only when the list changed. Writes nothing — no ticket, comment or attachment — without `--for-real` and a project in `JIRA_ALLOW_CREATE` |
 
-All nine are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All ten are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host.
 
 ```bash
-task build              # all nine into bin/
+task build              # all ten into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
 task --list             # everything else
@@ -262,6 +272,8 @@ internal/vulnlookup/qualys/    Qualys implementation
 internal/vulnlookup/crowdstrike/ placeholder for a future implementation
 internal/vulnlookup/noop/      no scanner: exercises extraction only
 
+man/man1/                      a man page for every operator command
+
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
@@ -275,7 +287,8 @@ fleet-kit/fleet/systemd-fedora/ same, FHS layout for Fedora/RHEL
 fleet-kit/install.sh           generic installer, everything under one directory
 fleet-kit/install-fedora.sh    FHS installer: /opt, /etc, /var/lib
 fleet-kit/tests/               lane tests (stdlib unittest, no network)
-scripts/                       history scrub + exposure remediation notes
+scripts/                       history scrub, exposure remediation notes,
+                               cheatsheet-pdf.py (task cheatsheet:pdf)
 ```
 
 ---

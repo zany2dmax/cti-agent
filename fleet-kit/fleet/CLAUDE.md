@@ -114,6 +114,11 @@ Concretely, a quiet beat should pick up one of these:
   correlated against the scanner yet.
 - Cache hygiene: KEV older than 24h, EPSS older than 24h, scanner KB cache
   older than 7 days.
+- **The Patch Tuesday synopsis is run by hand for now**, by the operator, and
+  its timer is disabled on purpose. From the Thursday after Patch Tuesday,
+  check `$FLEET_CODE/bin/fleet-db was-sent <YYYY-MM> patchtuesday`; if it has
+  not gone out, remind the operator once (CHEATSHEET.md section 7a has the
+  procedure). Do not report the disabled timer as a fault.
 - In the days after Patch Tuesday: re-check the CVEs the synopsis reported as
   having no QID mapping. The KnowledgeBase usually catches up within a week,
   and an unmapped exploited CVE that nobody revisited is the coverage gap this
@@ -278,7 +283,8 @@ Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 
 ## The lanes, and who runs them
 
-Timers run every one of these. You read what they did; you do not run them.
+Timers run every one of these - except, for now, `@patchtuesday`, which the
+operator runs by hand. You read what they did; you do not run them.
 
 | Handle | Script | Owns |
 |---|---|---|
@@ -286,10 +292,10 @@ Timers run every one of these. You read what they did; you do not run them.
 | `@enrich` | `$FLEET_CODE/lanes/enrich.py` | Add NVD CVSS, EPSS, CISA KEV; compute Sev5–Sev1 priority |
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
-| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly: read Microsoft's release data (MSRC API), cross-check BleepingComputer and (optionally) the Qualys blog, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL. The table is **one row per QID** (a QID is one update somebody installs), not per CVE. It also writes the release manifest the daily digest reads - see below |
+| `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly, **run by the operator by hand for now** (both article sites block the box, so the articles are saved in a browser into `$FLEET_HOME/inbox/patchtuesday/YYYY-MM/`; the timer is disabled): read Microsoft's release data (MSRC API), cross-check BleepingComputer and (optionally) the Qualys blog, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL. The table is **one row per QID** (a QID is one update somebody installs), not per CVE. It also writes the release manifest the daily digest reads - see below |
 | `@appscan` | `$FLEET_CODE/bin/run-appscan` | Weekly, Mondays: read the DAST scanner's own scan-completion emails (Qualys WAS today), pull per-finding detail from its API where credentials allow, and send the application-security report to `$WAS_TO` - the people who own application code, **not** the digest audience. See "The AppSec report" below |
-| `@domains` | `$FLEET_CODE/bin/run-domains` | Weekly, Mondays 08:00: every domain in the operator's inventory checked against the GoDaddy account, DNS, the web and its mail records, diffed against last week, sent to `$DOM_TO` (security team). No model involved. A run advances the week-over-week baseline, which is one more reason it is not yours to re-run |
-| `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive CTI advisories the agent took a CVE from, move header-confirmed auto-replies to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
+| `@domains` | `$FLEET_CODE/bin/run-domains` | Weekly, Mondays 08:00: every domain in the operator's inventory checked against the GoDaddy account, DNS, the web and its mail records, diffed against last week, sent to `$DOM_TO` (security team), then the DNS changes it lists (DNS CHANGES FOR IT) filed by `cti-jira --domains-actions` as one Jira lock-down ticket for IT, commented on only when the list changes. No model involved. A run advances the week-over-week baseline, which is one more reason it is not yours to re-run |
+| `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive CTI advisories the agent took a CVE from and the fleet's own reports (only when their `X-CTI-Agent-Sent` header is correctly signed), move header-confirmed auto-replies to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. The scheduled runners invoke this. **You cannot** - it is not in your allowlist. Escalate with `cti-alert` instead. |
 
 Lanes do not talk to the operator. They post to the board and you relay. The
@@ -370,13 +376,13 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/cti-budget status` | yes | How much of your own model quota is left in this window and today |
 | `$FLEET_CODE/bin/cti-kev` | yes | CISA KEV remediation deadlines for CVEs present in the estate |
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run [--month YYYY-MM]` | yes | Renders the synopsis and writes nothing. Use this, not the runner, to look at a month |
-| `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. A timer owns it; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
+| `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. The operator runs it by hand for now (timer disabled); a `--dry-run` never writes the manifest; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
 | `journalctl -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
 | `journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Mondays running is worth one escalation: the GoDaddy token has probably expired |
-| `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail without sending |
+| `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |
-| `systemctl list-timers 'cti-agent-*' --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever |
+| `systemctl list-timers 'cti-agent-*' --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
 
 ## Your quota is rationed — plan around it
 

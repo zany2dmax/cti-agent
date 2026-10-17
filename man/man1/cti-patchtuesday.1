@@ -49,10 +49,13 @@ cti-patchtuesday \- build the monthly Microsoft Patch Tuesday synopsis and corre
 .SH DESCRIPTION
 .B cti-patchtuesday
 writes the monthly synopsis of Microsoft's Patch Tuesday release. It is run by
-.BR run\-patchtuesday (1)
-from
+.BR run\-patchtuesday (1),
+by
 .B cti\-agent\-patchtuesday.timer
-at 07:30 on the Wednesday after the second Tuesday (the 9th to the 15th).
+at 07:30 on the Wednesday after the second Tuesday (the 9th to the 15th) or,
+while the article sites block the fleet's address, by the operator after
+saving the two articles (see
+.BR \-\-drop\-dir ).
 .PP
 It reads three public sources.
 .TP
@@ -77,11 +80,12 @@ At a URL computed from the release date. Used when it loads, for its
 published QQL; when it does not (it answers 403 to Azure addresses), it is
 listed as "optional, not read" and the report is not marked incomplete.
 .PP
-When Microsoft's document or BleepingComputer cannot be read, the email opens
-with an
+When Microsoft's document cannot be read (or BleepingComputer cannot, and
+Microsoft's document did not load either), the email opens with an
 .B Incomplete sources
 banner saying what it was built from and what failed, and the figures fall
-back to the articles. With no source at all, nothing is produced. Where each
+back to the articles. With Microsoft's document loaded, a missing article is
+listed as "optional, not read" with where to save it. With no source at all, nothing is produced. Where each
 headline figure came from is printed on standard error.
 .PP
 It then maps the release's CVEs to Qualys QIDs through the KnowledgeBase

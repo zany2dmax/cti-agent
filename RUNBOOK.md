@@ -25,6 +25,7 @@ document assumes you have decided to run it.
 - [11e. Taking a host off the schedule](#11e-taking-a-host-off-the-schedule)
 - [11f. The weekly application-security lane](#11f-the-weekly-application-security-lane)
 - [11g. The weekly domains lane](#11g-the-weekly-domains-lane)
+- [11h. Man pages](#11h-man-pages)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -36,7 +37,7 @@ document assumes you have decided to run it.
 
 | You need | Why | Notes |
 |---|---|---|
-| Go 1.23+ | builds the seven binaries | stdlib only; `go.mod` has no dependencies |
+| Go 1.23+ | builds the ten binaries | stdlib only; `go.mod` has no dependencies |
 | [Task](https://taskfile.dev) | every build, test and gate target | `task --list` shows all of them |
 | Python 3.9+ | the enrich, scout, brief and mailer lanes | stdlib only |
 | A shared M365 mailbox | where the CTI advisories arrive | the agent reads it; it never replies |
@@ -149,8 +150,10 @@ the CISA KEV catalog need no key.
 ## 4. Configuration
 
 One file, `fleet.env` in production or `.env` in a checkout. Every Go command
-reads it through `internal/fleetenv`, so a run by hand gets the same settings
-systemd gives it. `export KEY=value` and `KEY=value` both work.
+reads it through `internal/fleetenv`, and the `cti-agent` wrapper loads it as
+the service account before starting any command (Python lanes and `fleet-db`
+included), so a run by hand gets the same settings systemd gives it.
+`export KEY=value` and `KEY=value` both work.
 
 ### Microsoft Graph — required
 
@@ -195,6 +198,7 @@ regression test.
 | `WAS_TO` | Application-security report recipients — the people who own application code, not the people who patch servers. No default |
 | `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `FLEET_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
 | `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
+| `FLEET_DEV_EMAIL` | Development only: where `cti-mailer --to-dev` sends a preview (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, `count`. [Section 13](#13-report-sensitivity) |
 | `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
@@ -234,7 +238,7 @@ go run ./cmd/cti-agent
 Or with Task:
 
 ```bash
-task build               # all seven binaries into bin/
+task build               # all ten binaries into bin/
 task run
 ```
 
@@ -336,8 +340,9 @@ Two installers, two layouts:
 | `fleet-kit/install.sh` | everything under one directory | a VM you own, simple paths |
 | `fleet-kit/install-fedora.sh` | FHS: `/opt`, `/etc`, `/var/lib` | Fedora/RHEL, SELinux, a service account |
 
-The Fedora installer builds all seven binaries, installs 13 systemd units, writes
-the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux, and then verifies
+The Fedora installer builds all ten binaries, installs 17 systemd units and the
+man pages, writes the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux,
+and then verifies
 the paths it just created. It refuses to install from inside the tree it
 deploys into.
 
@@ -375,7 +380,7 @@ one is enabled.
 | 2 | `cti-agent-weekly.timer` | the Monday roll-up | one daily digest delivered successfully |
 | 3 | `cti-agent-scout.timer` | vendor advisory sweep | the digest is stable |
 | 4 | `cti-agent-checkin.timer` | orchestrator heartbeat | Claude Code installed, budget ceilings set |
-| 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent |
+| 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent. **Leave it disabled for now** and run the lane by hand ([section 11](#11-the-monthly-patch-tuesday-lane)) |
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
@@ -420,6 +425,7 @@ nobody watching. Treat the rollout accordingly.
 | Message | Action |
 |---|---|
 | The agent read it and took a CVE from it | **Archive** |
+| The fleet's own report, delivered back to the mailbox, with a correctly **signed** `X-CTI-Agent-Sent` header | **Archive** (a copy is in Sent Items) |
 | Its own headers declare it an automatic reply | **Deleted Items** (recoverable) |
 | Everything else | **Left alone** |
 
@@ -434,6 +440,11 @@ Auto-reply detection is **headers only** — `Auto-Submitted: auto-replied` or
 `X-Auto-Response-Suppress`. Subject text does not delete mail. An auto-reply
 whose sender omits the headers stays in the inbox, which is the direction to
 fail in.
+
+The self-sent header carries an HMAC keyed from the app's client secret, so a
+sender cannot get a message archived by adding the header. Fleet mail sent
+before 1.3, or before a client-secret rotation, fails the check and is left
+for a human.
 
 ### The two leave counts
 
@@ -459,7 +470,30 @@ sudo cti-agent run-patchtuesday --month 2026-08    # replay a past release
 ```
 
 A `--month` replay never sends and never writes or changes the release
-manifest, so it cannot alter what the daily digest suppresses.
+manifest, so it cannot alter what the daily digest suppresses. A `--dry-run`
+passes `--no-manifest`, so it cannot reset a sent manifest either, and the
+structured `--json` dump goes to `reports/`, never over the manifest in
+`state/`.
+
+### Sources, and why it is run by hand for now
+
+Microsoft's own release data, the Security Update Guide's CVRF API
+(`api.msrc.microsoft.com`, public, no key), is the primary source: counts,
+severities, exploited and publicly disclosed CVEs, and the CVE list correlated
+with the scanner. BleepingComputer's write-up is the cross-check, and the
+Qualys blog is optional (its published QQL, when it loads).
+
+Both article sites block the Azure box (Cloudflare bot checks; the Qualys blog
+answers 403), so **the timer is disabled and the lane is run by hand** each
+month. Save the two articles in a browser and copy them to
+`/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing `qualys` /
+`bleeping`, `.html` or `.txt`); the lane reads them instead of fetching
+(`cti-patchtuesday --drop-dir`). Then dry-run, preview with `cti-mailer
+--to-dev`, and send. The step-by-step procedure is
+[CHEATSHEET.md section 7a](CHEATSHEET.md#7a-patch-tuesday-run-by-hand-monthly).
+Without the saved copies the synopsis still goes out from Microsoft's data and
+says where to save them; with Microsoft's data loaded a missing article does
+not mark the report incomplete.
 
 ### The release manifest
 
@@ -702,7 +736,9 @@ and the last line says so.
 sudo cti-agent cti-jira --test-ticket --for-real
 ```
 
-Requires `JIRA_ALLOW_CREATE` to contain the project key. Files one obviously
+Requires `JIRA_ALLOW_CREATE` to contain the project key. That gate covers
+every write - tickets, comments, CSV attachments and the stored exposure
+property - so with it empty the whole lane is read-only. Files one obviously
 synthetic ticket — `CVE-1900-00000`, hosts under `.invalid` — titled so that
 nobody mistakes it for a finding. Running it twice does not file a second: the
 label-based duplicate check catches it.
@@ -740,7 +776,12 @@ file carries only a ten-host sample. Only the selected CVEs are looked up, so
 a normal day is a handful of Host Detection calls rather than one per finding.
 
 The daily then quotes the key and links the ticket under each CVE, in both the
-HTML and text parts, until the scanner stops finding it.
+HTML and text parts, until the scanner stops finding it. Its **FLEET TICKETS**
+section lists every ticket the follow-up re-checked - key and link, CVE, Jira
+status, hosts the scanner sees today, and what the re-check did ("commented:
+no detections remain", "no change - no comment", "not re-checked: the scanner
+lookup failed") - with tickets closed in the last 30 days below, and the
+domains lane's lock-down ticket ([11g](#3b-what-the-report-contains-and-the-lock-down-ticket)).
 
 ### Filing tickets for findings that are already outstanding
 
@@ -789,7 +830,7 @@ answer is not a fix, and reading its zero hosts as "remediated" would tell IT a
 live exposure was closed. The run logs one line:
 
 ```text
-[cti-jira] follow-up: 14 fleet ticket(s) found, 11 re-checked, 2 already handled this run, 0 with no CVE label, 1 left alone because the scanner could not answer
+[cti-jira] follow-up: 15 fleet ticket(s) found, 11 re-checked, 2 already handled this run, 1 domains lock-down, 0 with no CVE label, 1 left alone because the scanner could not answer
 ```
 
 To see what it would do without writing anything - one line per ticket,
@@ -1099,11 +1140,26 @@ sudo install -m 0640 -o root -g ctiagent /dev/null /etc/cti-agent/domains.txt
 sudoedit /etc/cti-agent/domains.txt
 ```
 
-One domain per line; `send` after a domain that sends mail; `#` comments.
-Everything not marked `send` is checked as a domain that must **not** send
-(`v=spf1 -all`, DMARC `p=reject`). A typo in the marker is reported in the
-email rather than silently read as "does not send". `domains.txt` is in
-`.gitignore`, and a test fails if one appears anywhere in the tree.
+One domain per line, then the markers that choose its row in the security
+team's decision chart; `#` comments:
+
+```text
+example.com          send receive     # 1: active mail domain
+example.net          send             # 2: send-only (no MX needed)
+example.org          receive          # 3: receive-only
+parked.example                        # 4/5: no mail at all (null MX preferred)
+app.example          saas             # 6: an application or service sends as it
+unsure.example       unknown          # 7: senders not known - reported, never tightened
+old-brand.example    receive legacy   # 9: outbound moved to the main domain
+```
+
+`send receive legacy` is row 8. **`send` alone now means send-only**, so mark
+every domain that also receives mail `send receive`. A domain with no marker is
+checked as one that must not send or receive (`v=spf1 -all`, DMARC
+`p=reject`, null MX `0 .`). A typo in a marker is reported in the email rather
+than silently read as "no mail". `man cti-domains` has the full chart.
+`domains.txt` is in `.gitignore`, and a test fails if one appears anywhere in
+the tree.
 
 ### 2. The GoDaddy token
 
@@ -1135,6 +1191,26 @@ sudo systemctl enable --now cti-agent-domains.timer
 The first real run says *"First run: no previous week to compare with"*. The
 week-over-week section starts the Monday after. State is
 `$FLEET_HOME/state/domains-state.json` (0600); move it aside to start over.
+
+### 3b. What the report contains, and the lock-down ticket
+
+In order: **INVENTORY vs GODADDY** (only when the account and `domains.txt`
+disagree: domains in the account but not listed, listed but not in the
+account, and listed registrations cancelled, expired or transferred out more
+than 45 days ago, which are set aside for removal and not probed);
+**WEBSITES** (live, redirecting, registrar-hosted, parked, DNS but no working
+page, none); NEEDS ACTION, CHANGED SINCE LAST WEEK, REVIEW and NOTES; then
+**DNS CHANGES FOR IT** - the exact records each domain needs to match its
+profile, and items to review.
+
+`cti-domains --actions-out` writes those changes, and after the email has gone
+`run-domains` passes them to `cti-jira --domains-actions`, which files **one
+lock-down ticket** for IT (every change needs the same registrar access). When
+that ticket is already open it adds a comment only if the list has changed,
+and says once when nothing is left. A dry run only previews the ticket; with
+`JIRA_ALLOW_CREATE` empty nothing is written; a Jira failure is logged and
+never stops the report. Read DNS CHANGES FOR IT in a `--dry-run` before the
+first Monday run: every unmarked domain gets a null MX in it.
 
 ### 4. Public DNS, and outbound port 53
 

@@ -167,9 +167,16 @@ reading on a phone before they're fully awake.
 ### Axis 8 — the vendor's clock: *what did this release land on us?*
 
 `cti-patchtuesday` — once a month, on the morning after Microsoft's Patch
-Tuesday, reads the two public wrap-ups everyone already reads and adds the one
-thing neither can provide: how much of that release is on our machines,
-according to the scanner, with the exact query to see it yourself.
+Tuesday, reads Microsoft's own release data (the Security Update Guide API),
+cross-checks it against a public write-up, and adds the one thing neither can
+provide: how much of that release is on our machines, according to the
+scanner, with the exact query to see it yourself.
+
+For now it is the one lane a person starts. Both article sites put a bot check
+in front of the server, so the operator saves the articles in a browser, drops
+them in the release's inbox folder and runs the lane by hand; the timer stays
+off. That is the pattern bending rather than breaking: the deterministic lane
+still does all the work, and a human supplies one input the box cannot fetch.
 
 This axis is different in kind from the others. Axes 1–4 are continuous: mail
 arrives, feeds update, scores move. This one is a **cadence** — a vendor
@@ -237,11 +244,15 @@ operator rather than to the developers, who cannot fix it.
 one asks about the names that software answers to. A domain that lapses, loses
 its transfer lock, or has a CNAME pointing at a deleted cloud app can be taken;
 a domain with no DMARC can be sent as. The input is a list the operator keeps
-**outside** the repository, each entry marked as sending mail or not, because
-the right answer for the two is opposite: a sender needs SPF, DKIM and an
-enforcing DMARC, a non-sender must publish that it sends nothing - and a
-non-sender that turns out to authorise senders is a question about the
-inventory, not just a record to fix.
+**outside** the repository, each entry marked with its role in the security
+team's decision chart - sends, receives, both, a SaaS service sends as it,
+senders unknown, or no mail at all - because the right answers are opposite: a
+sender needs SPF, DKIM and an enforcing DMARC, a domain with no mail must
+publish that it sends and receives nothing - and a non-sender that turns out
+to authorise senders is a question about the inventory, not just a record to
+fix. The difference between each role and the live DNS becomes exact records
+for IT, filed as one Jira lock-down ticket per run rather than a card per
+domain.
 
 Two rules carried over from the rest of the fleet. A failed lookup is *not
 checked*, never *missing*: a resolver timeout must not become a High finding
@@ -353,9 +364,9 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | The job | The fleet |
 |---|---|
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
-| Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, with our own exposure and the scanner query |
+| Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, from Microsoft's own release data, with our own exposure and the scanner query (run by hand for now) |
 | Report web application scan results to the developers who own the code | `cti-appscan`, weekly, on its own recipient list, with a broken scanner login escalated to us rather than to them |
-| Keep the domain portfolio registered, un-hijackable and un-spoofable | `cti-domains`, weekly: registrar state, DNS, certificates and mail records by role, with changes since last week |
+| Keep the domain portfolio registered, un-hijackable and un-spoofable | `cti-domains`, weekly: registrar state, websites, DNS, certificates and mail records by role, with changes since last week and one Jira ticket of DNS changes for IT |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
 | Track known-exploited vulnerabilities and compliance deadlines | `cti-kev`, against CISA's published due dates |
