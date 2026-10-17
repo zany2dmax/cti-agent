@@ -67,7 +67,8 @@ degrees differ:
 | Input | Source | Trust | Handling |
 |---|---|---|---|
 | CTI advisory emails | third parties, via a shared mailbox | **untrusted** | parsed for indicators; HTML escaped before rendering; never executed |
-| Vendor wrap-up pages (Qualys blog, BleepingComputer) | public internet | **untrusted** | fetched over HTTPS, parsed, escaped |
+| Microsoft Security Update Guide (CVRF API) | public internet | **untrusted but reputable** | the Patch Tuesday lane's primary source; parsed as JSON, values escaped |
+| Vendor wrap-up pages (Qualys blog, BleepingComputer) | public internet, or a copy the operator saved in a browser and dropped into `inbox/patchtuesday/YYYY-MM/` | **untrusted** | fetched over HTTPS or read from the drop folder, parsed, escaped. A saved copy is the same third-party HTML, not operator-trusted input |
 | NVD, EPSS, CISA KEV | public internet | **untrusted but reputable** | parsed as JSON, values escaped |
 | Qualys API responses | our scanner, over the network | **semi-trusted** | XML parsed; host names treated as sensitive output |
 | Microsoft Graph responses | our tenant | **semi-trusted** | message bodies are third-party content and stay untrusted |
@@ -274,8 +275,10 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   Both names, and anything else ending `.env`, are gitignored. That gap was
   real until recently: only `.env` was listed, so a `fleet.env` copied into a
   checkout to replay a run locally could be committed.
-- `internal/fleetenv` is the single reader, so a run by hand gets the same
-  configuration as a run by systemd, and there is one place to audit. A lane
+- `internal/fleetenv` is the single reader for the Go commands, and the
+  `cti-agent` wrapper loads `fleet.env` as the service account before any hand
+  run (the Python lanes and `fleet-db` included), so a run by hand gets the
+  same configuration as a run by systemd, and there is one place to audit. A lane
   test fails any command that loads config without calling it (`cti-domains`
   calls it before its flag defaults are read, so `DOMAINS_FILE` applies to a
   run by hand too): `cti-appscan` shipped without, and worked under its timer while failing by hand with
@@ -286,6 +289,10 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   only** - it never launches a scan, edits a web application or touches an
   authentication record - so the role it needs is read access to WAS, and
   granting more is not required.
+- **`CLIENT_SECRET` also keys the self-sent header signature** (below,
+  Mailbox modification). Rotating it is still the right response to exposure;
+  the cost is that fleet mail already in the inbox stops verifying and is
+  left for a human instead of archived.
 - **No default mailbox and no default recipient.** An unconfigured install
   refuses to start rather than guessing an address.
 - Each command validates only the credentials it uses, so a missing-variable
@@ -353,6 +360,12 @@ so a shared core is written once. Unset references are errors, cycles are caught
 with a depth limit, and wildcard references (`$*_ALLOW_TO`, `${*}`) are refused
 by name rather than expanded to whatever happens to match.
 
+`cti-mailer --to-dev` is a development preview: it sends only to
+`FLEET_DEV_EMAIL` from root-owned `fleet.env`, pre-approved the way the
+operator's address is, never Cc'd, subject prefixed `[DEV TEST]`, and it
+refuses to combine with `--lane`, `--to` or `--to-operator`. It cannot widen
+who receives a report; it can only narrow it to one person.
+
 ### There are two outbound paths, and only one is gated
 
 `mailer.py` is the path for every digest and report, and it is gated as above.
@@ -394,6 +407,15 @@ The orchestrator runs unattended. Its standing instructions
 
 Auto-sending is limited to scheduled reports on an established schedule to an
 allowlisted list. Everything else is proposed on the message board and waits.
+
+**The Jira write gate covers every write.** `cti-jira` writes nothing without
+`--for-real` and a project key in `JIRA_ALLOW_CREATE`. Until 1.3 an empty gate
+stopped new tickets only; comments, CSV attachments and stored exposure
+properties went ahead. Every write is gated now, so with the gate closed the
+daily follow-up and the domains lane's lock-down ticket run read-only. The
+lanes that do write - `run-digest` (one ticket per KEV or Sev5 CVE) and
+`run-domains` (one DNS lock-down ticket per run, commented on only when the
+list changes) - are timer-owned and not on the orchestrator's grant.
 
 ### What the orchestrator may run
 
@@ -495,9 +517,10 @@ a timer with nobody watching. Four properties follow:
 2. **It cannot permanently delete.** See the Graph section above.
 3. **It acts only on messages a completed run recorded as processed.** No
    record, no move — that log is its entire authority.
-4. **Only two kinds of message move**: an advisory the agent took a CVE from,
-   and a message whose own headers declare it an automatic reply. Everything
-   else is left where a human can see it.
+4. **Only three kinds of message move**: an advisory the agent took a CVE
+   from, a message whose own headers declare it an automatic reply, and the
+   fleet's own report carrying a correctly **signed** `X-CTI-Agent-Sent`
+   header. Everything else is left where a human can see it.
 
 Rule 4 is a security property, not tidiness. The mailbox is a shared reporting
 address: it receives phishing reports from colleagues, alerts, and ordinary
@@ -508,6 +531,18 @@ triaged it is the most damaging thing this lane could plausibly do.
 Auto-reply detection is **headers only** — `Auto-Submitted: auto-replied`,
 `X-Auto-Response-Suppress`. Subject text does not delete mail, because a
 subject is trivially forged.
+
+**The self-sent header is signed.** Until 1.3 its value was the mailbox name,
+and its mere presence marked a message as the fleet's own: the digest skipped
+it unread and cti-mailbox archived it, so anyone able to mail the inbox could
+get a message filed away by adding one header. The value now carries an
+HMAC-SHA256 keyed from a key derived from `CLIENT_SECRET`; an unsigned or
+forged header is ignored. cti-mailbox archives only verified mail - the
+sender address alone is no longer enough. The digest still also skips mail
+from its own mailbox, which keeps our reports out of its input. Not stopped:
+a recipient of a report copying its header onto a message of their own; every
+recipient is allowlisted and internal, and could archive the mail by hand
+anyway.
 
 ---
 
@@ -766,6 +801,12 @@ nor the portal reports the effective scope.
   stray report contains.
 - ~~Only `.env` was gitignored.~~ `fleet.env` — the production credentials
   filename — and anything else ending `.env` are ignored too.
+- ~~Anyone could get mail archived by setting `X-CTI-Agent-Sent`.~~ The header
+  is signed (Mailbox modification, above).
+- ~~An empty `JIRA_ALLOW_CREATE` still let cti-jira comment and attach.~~
+  Every Jira write is gated (Autonomy gates, above).
+- ~~`cti-alert --dry-run` posted a real line to the board.~~ It prints the line
+  it would post and posts nothing.
 
 **Worth fixing**
 

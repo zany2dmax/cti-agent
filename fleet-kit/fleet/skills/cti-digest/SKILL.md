@@ -57,6 +57,14 @@ broke. Read them as reference, not as a recipe.
      --out $FLEET_HOME/state/enriched-$(date +%F).json
    ```
 
+   **Tickets** (`run-digest` does this between enrich and brief; it writes
+   Jira, so it is the operator's, not yours):
+   `$FLEET_CODE/bin/cti-jira --from-enriched <enriched> --for-real --follow-up`.
+   It writes the ticket keys and the follow-up results to
+   `enriched-<date>-tickets.json` beside the enriched file, which is where the
+   brief's ticket links and its FLEET TICKETS section come from. Without `--for-real` or with `JIRA_ALLOW_CREATE` empty it writes
+   nothing to Jira.
+
 3. **Brief.** Render HTML.
    ```
    python3 $FLEET_CODE/lanes/brief.py --daily \
