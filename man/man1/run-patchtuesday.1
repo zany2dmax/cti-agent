@@ -16,7 +16,14 @@ builds the month's Patch Tuesday synopsis with
 .BR cti\-patchtuesday (1)
 and mails it to the digest audience. Plain shell, no model involved.
 .PP
-It is run by
+While the article sites block the fleet's address it is run by hand, with
+the timer disabled: save the two articles into the release's drop folder
+(see
+.BR cti\-patchtuesday (1)
+.BR \-\-drop\-dir ),
+preview with
+.BR \-\-dry\-run ,
+then run it with no arguments. Otherwise it is run by
 .B cti\-agent\-patchtuesday.service
 from
 .BR cti\-agent\-patchtuesday.timer :
