@@ -48,3 +48,45 @@ func TestRender(t *testing.T) {
 		t.Error("registrar failure reason not in the lead")
 	}
 }
+
+func TestTheInventoryMismatchHasItsOwnSectionNearTheTop(t *testing.T) {
+	rep := Report{Now: now, Registrar: "godaddy",
+		Results: []Result{{Entry: Entry{Name: "example.com"},
+			Web: []Web{{Host: "example.com", Addrs: Lookup{Absent: true}}}}},
+		Findings: []Finding{
+			{Domain: "lost.example", Sev: Medium, Area: "inventory", Text: "not in the godaddy account"},
+			{Domain: "extra.example", Sev: Medium, Area: "inventory", Text: "in the godaddy account but not in the inventory"},
+		},
+		RegistrarOnly: []Registration{{Domain: "extra.example", Status: "ACTIVE",
+			Expires: now.AddDate(0, 0, 40), AutoRenew: false}},
+		InventoryOnly: []Entry{{Name: "lost.example"}},
+	}
+	b := rep.Render()
+	for _, want := range []string{
+		"Inventory: 1 domain(s) in the godaddy account are missing from domains.txt, and 1 in domains.txt",
+		"INVENTORY vs GODADDY",
+		"In the godaddy account but not in domains.txt (1)",
+		"extra.example",
+		"ACTIVE, expires",
+		"auto-renew OFF",
+		"In domains.txt but not in the godaddy account (1)",
+		"lost.example",
+	} {
+		if !strings.Contains(b.Text, want) {
+			t.Errorf("text missing %q:\n%s", want, b.Text)
+		}
+	}
+	// Its own section, not two more REVIEW cards - but still counted.
+	if strings.Contains(b.Text, "REVIEW (") {
+		t.Error("inventory findings were also rendered as review cards")
+	}
+	if !strings.Contains(b.Subject, "2 Medium") {
+		t.Errorf("subject stopped counting them: %q", b.Subject)
+	}
+	if strings.Index(b.Text, "INVENTORY vs") > strings.Index(b.Text, "WEBSITES") {
+		t.Error("the inventory section must come before WEBSITES")
+	}
+	if !strings.Contains(b.HTML, "INVENTORY vs GODADDY") {
+		t.Error("HTML lacks the section")
+	}
+}
