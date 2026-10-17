@@ -136,12 +136,26 @@ func run() int {
 		} else {
 			regs = list
 			c := domains.Compare(reg.Name(), entries, regs)
+			// Cancelled or long-expired registrations are history, not
+			// work: their inventory lines are listed once for removal and
+			// not probed, and unlisted ones are not reported at all.
+			gone := c.SetAsideLapsed(opt.Now)
+			if len(gone) > 0 {
+				live := entries[:0:0]
+				for _, e := range entries {
+					if !gone[e.Name] {
+						live = append(live, e)
+					}
+				}
+				entries = live
+			}
 			cmp = &c
 			opt.Registrar = reg.Name()
 			orgOf = c.Covered
 			logf("registrar: %d domain(s) in the %s account; %d inventory entr(ies) not there, "+
-				"%d registration(s) not in the inventory", len(regs), reg.Name(),
-				len(c.NotAtRegistrar), len(c.NotInInventory))
+				"%d registration(s) not in the inventory, %d lapsed in domains.txt (not probed), "+
+				"%d lapsed and unlisted (ignored)", len(regs), reg.Name(),
+				len(c.NotAtRegistrar), len(c.NotInInventory), len(c.Lapsed), c.LapsedUnlisted)
 		}
 	}
 
@@ -208,7 +222,7 @@ func run() int {
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
 		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions}
 	if cmp != nil {
-		rep.RegistrarOnly, rep.InventoryOnly = cmp.NotInInventory, cmp.NotAtRegistrar
+		rep.RegistrarOnly, rep.InventoryOnly, rep.Lapsed = cmp.NotInInventory, cmp.NotAtRegistrar, cmp.Lapsed
 	}
 	block := rep.Render()
 	af := domains.NewActionsFile(opt.Now, actions)
