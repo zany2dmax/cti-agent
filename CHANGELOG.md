@@ -68,6 +68,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `p=none` DMARC for senders with none, review items otherwise. `unknown` is
   never tightened; broken SPF is fixed before DMARC enforcement.
   **`send` alone now means send-only** - mark mail domains `send receive`.
+- **`cti-mailer --to-dev`** sends a report only to `FLEET_DEV_EMAIL`, never
+  CC'd, subject prefixed `[DEV TEST]`: a preview in a real mail client
+  without mailing the team.
 - **INVENTORY vs GODADDY at the top of the domains report.** Domains in the
   registrar account but missing from `domains.txt` (with status, expiry and
   auto-renew) and domains in `domains.txt` that the account does not hold,

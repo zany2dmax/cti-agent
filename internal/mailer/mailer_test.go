@@ -281,3 +281,24 @@ func TestEscalationHTMLEscapesItsInputs(t *testing.T) {
 		t.Error("newlines within a block should become <br>")
 	}
 }
+
+func TestToDevGoesOnlyToTheDeveloper(t *testing.T) {
+	a := Audience{ToDev: true, Dev: "dev@example.com", DigestTo: "team@example.com",
+		DigestCC: "cc@example.com", CCFromAllow: true, AllowRaw: "team@example.com"}
+	to, cc, err := a.Resolve()
+	if err != nil || len(to) != 1 || to[0] != "dev@example.com" || len(cc) != 0 {
+		t.Fatalf("to=%v cc=%v err=%v", to, cc, err)
+	}
+	if err := CheckAllowed(to, cc, "team@example.com", "", "dev@example.com", false); err != nil {
+		t.Errorf("the developer address was not pre-approved: %v", err)
+	}
+	for name, bad := range map[string]Audience{
+		"unset":         {ToDev: true},
+		"with --to":     {ToDev: true, Dev: "dev@example.com", ToFlag: "x@example.com"},
+		"with operator": {ToDev: true, Dev: "dev@example.com", ToOperator: true, Operator: "op@example.com"},
+	} {
+		if _, _, err := bad.Resolve(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
