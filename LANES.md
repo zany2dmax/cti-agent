@@ -1,15 +1,17 @@
-# What the CTI fleet does
+# What the fleet does
 
-A set of scheduled jobs that read the threat-intelligence mail we receive, check
-it against our own scanners, and send each team only the email it needs to act
-on. **One part uses AI, and none of the reports pass through it** — if the AI
-is down, every report still goes out on time.
+A set of scheduled jobs — lanes — that do the security team's recurring chores:
+read the threat-intelligence mail, chase the tickets, write up Patch Tuesday,
+check the web applications and the domains, keep the mailbox tidy. Each checks
+what it finds against our own systems and sends each team only the email it
+needs to act on. **One part uses AI, and none of the reports pass through it** —
+if the AI is down, every report still goes out on time.
 
 | Lane | What it does | When | AI? | Who gets it |
 |---|---|---|:---:|---|
-| **Daily brief** | Reads the overnight advisory mail and feeds, asks the vulnerability scanner which CVEs are actually on our machines, ranks them Sev5 (exploited *and* present) to Sev1, adds federal remediation deadlines, and opens a Jira ticket for each exploited vulnerability confirmed on our machines | Daily, 06:00 | N | Security team |
+| **Daily brief** (threat intel) | Reads the overnight advisory mail and feeds, asks the vulnerability scanner which CVEs are actually on our machines, ranks them Sev5 (exploited *and* present) to Sev1, adds federal remediation deadlines, and opens a Jira ticket for each exploited vulnerability confirmed on our machines | Daily, 06:00 | N | Security team |
 | **Ticket follow-up** *(part of the daily)* | Re-checks every open ticket against the scanner each morning, whether or not that vulnerability is in the news. Comments when machines IT hasn't been told about are affected — at most once a week per ticket, batched, with the new host list attached — and tells IT *"no detections remain, this ticket can be closed"* when it is fixed everywhere. If IT closes a ticket the scanner still sees, says so once. Stays quiet when nothing changed, and never closes or reopens a ticket — that is IT's call. The brief shows each ticket's Jira status beside the finding, and a FLEET TICKETS section lists every fleet ticket with its status, the hosts the scanner sees today and what the re-check did | Daily, 06:00 | N | IT, on the ticket |
-| **Weekly brief** | The week's findings rolled up, including the lowest-priority items the dailies leave out | Monday, 07:00 | N | Security team |
+| **Weekly brief** (threat intel) | The week's findings rolled up, including the lowest-priority items the dailies leave out | Monday, 07:00 | N | Security team |
 | **Feed scout** | Polls vendor and government advisory feeds for vulnerabilities that never arrived in the mailbox, so coverage doesn't depend on who subscribed us to what | Every 4 hours | N | Feeds the brief |
 | **Patch Tuesday synopsis** | The morning after Microsoft's monthly release: what was fixed, how much of it is on our machines, and the exact scanner query to see it yourself. Built from Microsoft's own release data, cross-checked against a news write-up | Monthly — the Wednesday after the second Tuesday. **Run by hand for now:** both article sites block the server, so the operator saves the articles and starts it | N | Security team |
 | **AppSec report** | What the web application scanner found open on each of our sites, what is new since the last scan, and whether each scan logged in | Monday, 07:30 | N | Application developers |

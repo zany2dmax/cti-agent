@@ -1,6 +1,6 @@
 ---
 name: cti-digest
-description: Run the full CTI pipeline and send the digest to the security DL. Use for the daily 06:00 brief, the Monday weekly, or an on-demand run.
+description: Run the threat-intel lane's full CTI pipeline and send the digest to the security DL. Use for the daily 06:00 brief, the Monday weekly, or an on-demand run.
 ---
 
 # /cti-digest [--daily|--weekly|--dry-run]
@@ -11,7 +11,7 @@ description: Run the full CTI pipeline and send the digest to the security DL. U
 > with the operator present, Claude Code asks before each one. On a beat,
 > escalate with the command instead of running it.
 
-Full pipeline: ingest → enrich → brief → send. Default is `--daily`.
+The threat-intel lane's full pipeline: ingest → enrich → brief → send. Default is `--daily`.
 
 ## Prefer run-digest over these steps
 
