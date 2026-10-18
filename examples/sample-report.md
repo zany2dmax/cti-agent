@@ -18,6 +18,32 @@ The Sample Hosts column reflects REPORT_HOSTNAMES:
 - Lookup provider: `qualys`
 - Generated: `2026-05-21T09:00:00-04:00`
 
+              ()
+              /\
+             |==|
+             ====
+              XX
+             xXXx
+             XXXX
+             XXXX
+             XXXX
+            xXXXXx
+            XXXXXX
+            XXXXXX
+           xXXXXXXx
+           XXXXXXXX
+          xXXXXXXXXx
+          XXXXXXXXXX
+         XXXXX  XXXXX
+        xXXXX"  "XXXXx
+       XXXXXxxxxxxXXXXX
+     xXXXXX""""""""XXXXXx
+   xXXXXXX"        "XXXXXXx
+xxXXXXXXX            XXXXXXXxx
+
+Eiffel Watchtower Agentic Vulnerably Report (®) 
+
+
 | CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason |
 |---|---|---|---|---:|---:|---|---|---|
 | CVE-2026-9082 | PRESENT | qualys | 123456 | 3 | 95 | 2026-05-21T03:15:00Z | web01.example.com, web02.example.com, web03.example.com | Detected by QID 123456 |
