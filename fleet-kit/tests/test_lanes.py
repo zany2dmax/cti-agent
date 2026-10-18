@@ -1685,9 +1685,12 @@ class TestFileShape(unittest.TestCase):
 
     def test_nothing_is_defined_after_the_main_block(self):
         src = pathlib.Path(__file__).read_text(encoding="utf-8")
-        marker = 'if __name__ == "__main__":'
+        # Anchored at column 0: this test's own copy of the string is
+        # indented, and index() on the bare string found it first, so every
+        # class defined after this one failed the check.
+        marker = '\nif __name__ == "__main__":'
         self.assertIn(marker, src)
-        after = src[src.index(marker):]
+        after = src[src.rindex(marker):]
         for kw in ("\nclass ", "\ndef "):
             self.assertNotIn(
                 kw, after,
@@ -2363,6 +2366,150 @@ class TestFileShape(unittest.TestCase):
                         f"write the escape instead")
                     break  # one per file is enough to act on
         self.assertEqual(found, [], "\n" + "\n".join(found))
+
+
+
+# One stub for every binary a runner calls. Each records its argv; the few
+# whose output a runner reads produce just enough of it.
+_STUB = r"""#!/usr/bin/env bash
+me=$(basename "$0")
+echo "$me $*" >> "$STUB_LOG"
+next=""
+for a in "$@"; do
+  case "$next" in
+    out|text) echo "<p>x</p>" > "$a" ;;
+    subj)     echo "Weekly domains check" > "$a" ;;
+    json)     echo "{}" > "$a" ;;
+    authfail) printf 'App One\trecord\tFAILED\n' > "$a" ;;
+  esac
+  next=""
+  case "$a" in
+    --out|--text-out|--csv-out|--actions-out) next=out ;;
+    --subject-out) next=subj ;;
+    --json) next=json ;;
+    --auth-fail-out) next=authfail ;;
+  esac
+done
+case "$me $*" in
+  "cti-appscan --subject-only"*)      echo "AppSec weekly" ;;
+  "cti-patchtuesday"*"--subject-only"*) echo "Microsoft Patch Tuesday for October 2026" ;;
+  "fleet-db was-sent"*)               echo no ;;
+  "fleet-db rollup"*)                 echo '{"total": 0, "counts": {}}' ;;
+esac
+exit 0
+"""
+
+_LANE_STUB = r"""import sys, os
+a = sys.argv[1:]
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write(os.path.basename(sys.argv[0]) + " " + " ".join(a) + "\n")
+if "--subject-only" in a:
+    print("CTI daily digest")
+for flag in ("--out", "--text-out"):
+    if flag in a:
+        open(a[a.index(flag) + 1], "w").write("<p>x</p>")
+"""
+
+
+class RunnersToDev(unittest.TestCase):
+    """--to-dev on a runner: real pipeline, mail to FLEET_DEV_EMAIL only, and
+    none of the side effects a real send has."""
+
+    BIN = ("cti-mailer", "cti-alert", "cti-jira", "cti-domains", "cti-appscan",
+           "cti-patchtuesday", "fleet-db", "fleet-board")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self.tmp.name)
+        self.code, self.home = root / "code", root / "home"
+        (self.code / "bin").mkdir(parents=True)
+        (self.code / "lanes").mkdir()
+        self.home.mkdir()
+        for name in self.BIN:
+            p = self.code / "bin" / name
+            p.write_text(_STUB)
+            p.chmod(0o755)
+        for name in ("enrich.py", "brief.py"):
+            (self.code / "lanes" / name).write_text(_LANE_STUB)
+        agent = root / "agent"
+        agent.mkdir()
+        (agent / "cti-agent").write_text(
+            '#!/usr/bin/env bash\necho "| CVE-2026-1 |" > "$REPORT_PATH"\n')
+        (agent / "cti-agent").chmod(0o755)
+        self.log = root / "calls.log"
+        self.log.write_text("")
+        self.envfile = root / "fleet.env"
+        self.base = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(root),
+            "FLEET_HOME": str(self.home),
+            "FLEET_CODE": str(self.code),
+            "FLEET_ENV": str(self.envfile),
+            "STUB_LOG": str(self.log),
+            "CTI_AGENT_DIR": str(agent),
+            "GRAPH_MAILBOX": "fleet@example.com",
+        }
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_lane(self, runner, *args, dev="dev@example.com"):
+        self.envfile.write_text(f"FLEET_DEV_EMAIL={dev}\n" if dev else "")
+        r = subprocess.run(["bash", str(KIT / "fleet" / "bin" / runner), *args],
+                           env=self.base, capture_output=True, text=True, timeout=60)
+        return r, self.log.read_text().splitlines()
+
+    def assertTestSend(self, runner, *args):
+        r, calls = self.run_lane(runner, *args, "--to-dev")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        sends = [c for c in calls if c.startswith("cti-mailer ")]
+        self.assertEqual(len(sends), 1, calls)
+        self.assertIn("--to-dev", sends[0])
+        self.assertNotIn("--lane", sends[0], "a test send reached a lane's audience")
+        self.assertNotIn("--dry-run", sends[0], "--to-dev alone must actually send")
+        for c in calls:
+            self.assertNotIn("--for-real", c, f"a test send made a real change: {c}")
+            self.assertNotIn("--mark-sent", c, c)
+            self.assertFalse(c.startswith("fleet-db sent"), c)
+            self.assertFalse(c.startswith("fleet-board post"), f"a test send posted to the board: {c}")
+        return calls
+
+    def test_digest(self):
+        self.assertTestSend("run-digest", "daily")
+
+    def test_patchtuesday_including_a_replay_without_for_real(self):
+        self.assertTestSend("run-patchtuesday")
+        self.log.write_text("")
+        self.assertTestSend("run-patchtuesday", "--month", "2026-08")
+
+    def test_domains_leaves_the_baseline_alone(self):
+        calls = self.assertTestSend("run-domains")
+        probe = [c for c in calls if c.startswith("cti-domains ")]
+        self.assertIn("--no-state-write", probe[0])
+
+    def test_appscan_sends_its_alert_to_dev_too(self):
+        calls = self.assertTestSend("run-appscan")
+        alerts = [c for c in calls if c.startswith("cti-alert ")]
+        self.assertEqual(len(alerts), 1, calls)
+        self.assertIn("--to-dev", alerts[0])
+
+    def test_no_dev_address_is_refused_before_any_work(self):
+        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):
+            with self.subTest(runner=runner):
+                self.log.write_text("")
+                r, calls = self.run_lane(runner, "--to-dev", dev="")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertEqual([c for c in calls if c.startswith("cti-mailer")], [],
+                                 "a test send with no FLEET_DEV_EMAIL reached the mailer")
+
+    def test_with_dry_run_nothing_is_mailed(self):
+        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):
+            with self.subTest(runner=runner):
+                self.log.write_text("")
+                r, calls = self.run_lane(runner, "--to-dev", "--dry-run")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                sends = [c for c in calls if c.startswith("cti-mailer ")]
+                self.assertTrue(sends and all("--dry-run" in c for c in sends), calls)
 
 
 if __name__ == "__main__":
