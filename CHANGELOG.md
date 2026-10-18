@@ -84,6 +84,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `cti-alert --to-dev`, which mails `FLEET_DEV_EMAIL` and posts nothing to
   the board. With `--dry-run` too, nothing is mailed. Unset
   `FLEET_DEV_EMAIL` is refused before any work.
+- **`run-patchtuesday` and `run-mailbox-cleanup` on macOS bash 3.2.** An
+  empty argument array (no `--month`, no `--no-manifest`, no thresholds) is
+  "unbound" there under `set -u`, so the runners died on the Mac while
+  working on the box's bash 5. Guarded expansions now, and a test refuses
+  the unguarded form in any runner.
 
 ### Upgrade
 
