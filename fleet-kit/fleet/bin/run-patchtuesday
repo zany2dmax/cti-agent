@@ -95,11 +95,14 @@ say "building the $TAG synopsis"
 # next daily digest.
 NOMANIFEST=()
 [ -n "$DRY" ] && NOMANIFEST=(--no-manifest)
-"$PT" "${MONTH_ARG[@]}" "${NOMANIFEST[@]}" --out "$HTML" --text-out "$TXT" --json "$JSON" \
+# Arrays below use the ${A[@]+...} guard form: macOS bash 3.2 calls an
+# empty array expansion unbound under set -u. Fedora's bash 5 does not, so the
+# plain form passed on the box and failed only in tests on the Mac.
+"$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} ${NOMANIFEST[@]+"${NOMANIFEST[@]}"} --out "$HTML" --text-out "$TXT" --json "$JSON" \
   || fail "cti-patchtuesday exited non-zero (check outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com)"
 [ -s "$HTML" ] || fail "no HTML written to $HTML"
 
-SUBJECT="$("$PT" "${MONTH_ARG[@]}" --subject-only)"
+SUBJECT="$("$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} --subject-only)"
 say "subject: $SUBJECT"
 
 # A replayed month is a test. Sending it to the distribution list would be a
@@ -175,7 +178,7 @@ if [ -z "$DRY" ]; then
   #
   # Failure here is not fatal. Unmarked means the daily keeps reporting them -
   # noisy, and the safe direction.
-  "$PT" "${MONTH_ARG[@]}" --mark-sent \
+  "$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} --mark-sent \
     || say "WARNING: could not mark the manifest sent; the daily digest will keep reporting this release's CVEs"
 
   MID=$(printf '%s' "$RESULT" | python3 -c \

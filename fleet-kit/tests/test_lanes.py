@@ -1683,6 +1683,19 @@ class TestFileShape(unittest.TestCase):
     proves nothing about the gate.
     """
 
+    def test_runners_expand_arrays_safely_on_macos_bash(self):
+        """macOS ships bash 3.2, where an EMPTY "${A[@]}" is an unbound
+        variable under set -u. run-patchtuesday's "${MONTH_ARG[@]}" passed on
+        the box (bash 5) for months and failed the first time a test ran the
+        runner on the Mac. ${A[@]+"${A[@]}"} works on both."""
+        bad = re.compile(r'(?<![+])"\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}"')
+        for path in sorted((KIT / "fleet" / "bin").glob("run-*")):
+            with self.subTest(runner=path.name):
+                hits = [f"{i}: {line.strip()}"
+                        for i, line in enumerate(path.read_text().splitlines(), 1)
+                        if bad.search(line.replace('[@]+"${', '[@]+"X{'))]
+                self.assertEqual(hits, [], "use ${A[@]+\"${A[@]}\"} instead")
+
     def test_nothing_is_defined_after_the_main_block(self):
         src = pathlib.Path(__file__).read_text(encoding="utf-8")
         # Anchored at column 0: this test's own copy of the string is
