@@ -27,11 +27,12 @@ Environment (from ~/fleet/fleet.env):
   GRAPH_MAILBOX         mailbox that sends as (required)
   DIGEST_TO             digest recipients, comma-separated (required)
   DIGEST_CC             additional recipients on CC, comma-separated (optional)
-  DIGEST_CC_FROM_ALLOW_TO  true: CC everyone on FLEET_ALLOW_TO as well
+  DIGEST_CC_FROM_ALLOW_TO  true: CC everyone on VM_ALLOW_TO as well
   FLEET_OPERATOR_EMAIL  where --to-operator escalations go
   CTI_REPLY_MAILBOX     mailbox the operator replies to; defaults to GRAPH_MAILBOX
-  FLEET_ALLOW_TO        allowlist; anything else needs --approve.
+  VM_ALLOW_TO           allowlist; anything else needs --approve.
                         Defaults to DIGEST_TO, plus FLEET_OPERATOR_EMAIL.
+                        FLEET_ALLOW_TO, its name before 1.3.1, is still read.
 
 Escalations to the operator are pre-approved - the orchestrator has to be able
 to ask a question without needing permission to ask it. Every other
@@ -147,6 +148,29 @@ def env_true(name):
     return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def vm_allow(strict=True):
+    """The digest allowlist's raw value, and a note if the old name was used.
+
+    FLEET_ALLOW_TO is VM_ALLOW_TO's name before 1.3.1 and is still read. Both
+    set to different lists is refused: a control whose value depends on which
+    line wins is not a control. Mirrors mailer.VMAllow in Go.
+    """
+    vm = (os.environ.get("VM_ALLOW_TO") or "").strip()
+    legacy = (os.environ.get("FLEET_ALLOW_TO") or "").strip()
+    if vm and legacy:
+        same = ({a.strip().lower() for a in vm.split(",") if a.strip()}
+                == {a.strip().lower() for a in legacy.split(",") if a.strip()})
+        if not same and strict:
+            die("VM_ALLOW_TO and FLEET_ALLOW_TO are both set, to different "
+                "lists. FLEET_ALLOW_TO is the old name for VM_ALLOW_TO: "
+                "delete the FLEET_ALLOW_TO line from fleet.env")
+        return vm, ("FLEET_ALLOW_TO is the old name for VM_ALLOW_TO and is set "
+                    "to the same list - delete the FLEET_ALLOW_TO line from fleet.env")
+    if legacy:
+        return legacy, "FLEET_ALLOW_TO is deprecated - rename it to VM_ALLOW_TO in fleet.env"
+    return vm, ""
+
+
 def env_path():
     """Where load_env() actually read from, for error messages.
 
@@ -168,9 +192,9 @@ REQUIRED = [
 ]
 OPTIONAL = [
     ("DIGEST_TO", "digest recipients; without it every send needs --to"),
-    ("DIGEST_CC", "extra recipients on CC; also gated by FLEET_ALLOW_TO"),
+    ("DIGEST_CC", "extra recipients on CC; also gated by VM_ALLOW_TO"),
     ("DIGEST_CC_FROM_ALLOW_TO", "true: also CC everyone on the allowlist"),
-    ("FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"),
+    ("VM_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO (old name FLEET_ALLOW_TO still read)"),
     ("NVD_API_KEY", "without it NVD throttles to 5 requests/30s"),
     ("CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"),
 ]
@@ -315,7 +339,7 @@ def main():
     ap.add_argument("--subject")
     ap.add_argument("--to", help="comma-separated; defaults to DIGEST_TO")
     ap.add_argument("--cc", help="comma-separated; defaults to DIGEST_CC. Subject "
-                                 "to the same FLEET_ALLOW_TO gate as --to")
+                                 "to the same VM_ALLOW_TO gate as --to")
     ap.add_argument("--to-operator", action="store_true",
                     help="send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the "
                          "operator something is not an outward-facing send.")
@@ -369,11 +393,16 @@ def main():
     # names in To reads as a mail to five parties and invites reply-all.
     # Escalations to the operator are never CC'd: a question addressed to one
     # person should not be a thread.
+    # An escalation to the operator consults no allowlist, so a conflict
+    # here must not close the alert path.
+    allow_env, allow_note = vm_allow(strict=not args.to_operator)
+    if allow_note:
+        log(f"note   : {allow_note}")
     cc_raw = "" if args.to_operator else (args.cc or os.environ.get("DIGEST_CC") or "")
     cc = [r.strip() for r in cc_raw.split(",") if r.strip()]
 
     # Optionally derive the CC from the allowlist, so a standing recipient is
-    # one edit rather than two. Opt-in, because it changes what FLEET_ALLOW_TO
+    # one edit rather than two. Opt-in, because it changes what VM_ALLOW_TO
     # MEANS: from "addresses this fleet may mail" to "addresses this fleet
     # mails". The cost is that adding someone to the allowlist for a single
     # approved off-cycle send then subscribes them to every digest - so keep
@@ -382,10 +411,10 @@ def main():
     # Read from the RAW variable, not the augmented allow set below: that one
     # has FLEET_OPERATOR_EMAIL added so the orchestrator can always escalate,
     # and silently CC-ing the operator on every digest is not what enabling
-    # this asks for. List them in FLEET_ALLOW_TO explicitly if you want that.
+    # this asks for. List them in VM_ALLOW_TO explicitly if you want that.
     if not args.to_operator and env_true("DIGEST_CC_FROM_ALLOW_TO"):
         from_allow = [a.strip() for a
-                      in (os.environ.get("FLEET_ALLOW_TO") or "").split(",")
+                      in allow_env.split(",")
                       if a.strip()]
         have = {r.lower() for r in cc}
         cc += [a for a in from_allow if a.lower() not in have]
@@ -396,7 +425,7 @@ def main():
 
     # A CC that is already a To recipient is a duplicate delivery, and Graph
     # will happily send both. This matters more with the allowlist as the CC
-    # source, since DIGEST_TO is normally in FLEET_ALLOW_TO by definition.
+    # source, since DIGEST_TO is normally in VM_ALLOW_TO by definition.
     seen = {r.lower() for r in recipients}
     cc = [r for r in cc if r.lower() not in seen]
 
@@ -405,10 +434,10 @@ def main():
     # must be able to ask a question without needing permission to ask it.
     # Anything else needs an explicit human OK on this specific send.
     #
-    # FLEET_ALLOW_TO defaults to DIGEST_TO rather than to everything, so an
+    # VM_ALLOW_TO defaults to DIGEST_TO rather than to everything, so an
     # unconfigured deployment fails closed: the scheduled digest still works,
     # any other recipient needs --approve.
-    allow_raw = os.environ.get("FLEET_ALLOW_TO") or os.environ.get("DIGEST_TO") or ""
+    allow_raw = allow_env or os.environ.get("DIGEST_TO") or ""
     allow = {a.strip().lower() for a in allow_raw.split(",") if a.strip()}
     if operator:
         allow.add(operator.lower())
@@ -418,8 +447,8 @@ def main():
     # the findings.
     outside = [r for r in recipients + cc if r.lower() not in allow]
     if outside and not args.approve:
-        die(f"recipients outside FLEET_ALLOW_TO: {', '.join(outside)}. "
-            f"Add them to FLEET_ALLOW_TO in fleet.env for a standing "
+        die(f"recipients outside VM_ALLOW_TO: {', '.join(outside)}. "
+            f"Add them to VM_ALLOW_TO in fleet.env for a standing "
             f"recipient, or post the draft to the board tagged [APPROVE] and "
             f"re-run with --approve for a one-off.")
     if args.require_approval and not args.approve:

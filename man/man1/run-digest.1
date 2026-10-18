@@ -134,7 +134,7 @@ on a dry run. The mailer resolves recipients from
 and
 .B DIGEST_CC
 against
-.BR FLEET_ALLOW_TO ;
+.BR VM_ALLOW_TO ;
 see the mailer for the send gate. Fatal on failure. The mailer's JSON
 result is printed.
 .TP
@@ -247,7 +247,7 @@ Days of stored findings in the weekly rollup. Not in
 .IR fleet.env.example .
 Default:\~\fB7\fR.
 .TP
-.BR DIGEST_TO ", " DIGEST_CC ", " FLEET_ALLOW_TO
+.BR DIGEST_TO ", " DIGEST_CC ", " VM_ALLOW_TO
 Recipients and the send allowlist, read by
 .B mailer.py
 (section 4).
