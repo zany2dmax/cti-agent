@@ -19,6 +19,8 @@
 # USAGE
 #   run-appscan              render and send
 #   run-appscan --dry-run    render, print the subject, send nothing
+#   run-appscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
+#                            subject, auth-failure alert to you too
 set -euo pipefail
 
 # THE RUNNER SOURCES fleet.env. The Go binaries do not.
@@ -59,12 +61,18 @@ log()  { echo "[run-appscan] $*" >&2; }
 # shrugs at that runs in the wrong mode and reports success - and the service
 # file looks correct to anyone reading it.
 DRY=""
-case "${1:-}" in
-  "")         ;;
-  --dry-run)  DRY="--dry-run" ;;
-  *)          fail "unknown argument: $1 (only --dry-run is accepted)" ;;
-esac
-[ $# -le 1 ] || fail "too many arguments: $*"
+TODEV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run" ;;
+    --to-dev)   TODEV=1 ;;
+    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+  esac
+  shift
+done
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
+fi
 
 APPSCAN="$FLEET_CODE/bin/cti-appscan"
 MAILER="$FLEET_CODE/bin/cti-mailer"
@@ -108,9 +116,18 @@ SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line
 
 log "subject: $SUBJECT"
 
-# shellcheck disable=SC2086
-"$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
-  || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
+if [ -n "$TODEV" ]; then
+  # FLEET_DEV_EMAIL only. WAS_TO / WAS_ALLOW_TO are not consulted, so a test
+  # works before the lane's audience is configured - which is when you most
+  # want to see the report.
+  # shellcheck disable=SC2086
+  "$MAILER" --to-dev --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+    || fail "test send failed"
+else
+  # shellcheck disable=SC2086
+  "$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+    || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
+fi
 
 # ── the operator's half of the report ────────────────────────────────────────
 #
@@ -147,7 +164,8 @@ elif [ -s "$AUTHFAIL" ]; then
   if [ -n "$DRY" ]; then
     log "dry run - would alert the operator about $n authentication failure(s)"
   elif [ -x "$ALERT" ]; then
-    "$ALERT" --unit cti-agent-appscan.service --kind HOLD \
+    # --to-dev on a test send: the alert goes to you too, not the operator.
+    "$ALERT" --unit cti-agent-appscan.service --kind HOLD ${TODEV:+--to-dev} \
       --reason "Qualys WAS authentication failed on $n application(s): $apps. The scan covered only the public surface, so this week's counts are not comparable with last week's. Check the authentication record in Qualys WAS; details in $AUTHFAIL on $(hostname -s)." \
       || log "warn: cti-alert failed - the failure is still recorded in $AUTHFAIL"
   else
@@ -157,5 +175,7 @@ fi
 
 if [ -n "$DRY" ]; then
   log "dry run - nothing was sent. The rendered report is at $HTML"
+elif [ -n "$TODEV" ]; then
+  log "test send - mailed to FLEET_DEV_EMAIL only. The rendered report is at $HTML"
 fi
 log "done"

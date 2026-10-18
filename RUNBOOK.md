@@ -199,7 +199,7 @@ regression test.
 | `WAS_TO` | Application-security report recipients — the people who own application code, not the people who patch servers. No default |
 | `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `VM_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
 | `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
-| `FLEET_DEV_EMAIL` | Development only: where `cti-mailer --to-dev` sends a preview (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
+| `FLEET_DEV_EMAIL` | Development only: where `--to-dev` sends a test (never CC'd, subject `[DEV TEST] ...`). Accepted by `cti-mailer`, `cti-alert` and the `run-digest`, `run-patchtuesday`, `run-appscan` and `run-domains` runners; a runner test send records nothing, files no tickets and advances no baseline. Nothing scheduled uses it |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, `count`. [Section 13](#13-report-sensitivity) |
 | `REPORT_REDACTION_SALT` | Private, stable salt for hostname pseudonyms |
@@ -490,8 +490,8 @@ answers 403), so **the timer is disabled and the lane is run by hand** each
 month. Save the two articles in a browser and copy them to
 `/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` (names containing `qualys` /
 `bleeping`, `.html` or `.txt`); the lane reads them instead of fetching
-(`cti-patchtuesday --drop-dir`). Then dry-run, preview with `cti-mailer
---to-dev`, and send. The step-by-step procedure is
+(`cti-patchtuesday --drop-dir`). Then dry-run, test-send to yourself with
+`run-patchtuesday --to-dev`, and send. The step-by-step procedure is
 [CHEATSHEET.md section 7a](CHEATSHEET.md#7a-patch-tuesday-run-by-hand-monthly).
 Without the saved copies the synopsis still goes out from Microsoft's data and
 says where to save them; with Microsoft's data loaded a missing article does

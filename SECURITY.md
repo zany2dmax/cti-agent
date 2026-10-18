@@ -367,6 +367,14 @@ operator's address is, never Cc'd, subject prefixed `[DEV TEST]`, and it
 refuses to combine with `--lane`, `--to` or `--to-operator`. It cannot widen
 who receives a report; it can only narrow it to one person.
 
+The runners' `--to-dev` (`run-digest`, `run-patchtuesday`, `run-appscan`,
+`run-domains`) routes their send through that same path and otherwise runs as
+a dry run - no Jira writes, no sent record, no baseline, no board line - so a
+test cannot make the real send skip as "already sent". `cti-alert --to-dev`
+mails `FLEET_DEV_EMAIL` instead of the operator and posts nothing to the board
+the orchestrator reads. Unset `FLEET_DEV_EMAIL` is refused before any work in
+every case: there is no fallback to a real audience.
+
 ### There are two outbound paths, and only one is gated
 
 `mailer.py` is the path for every digest and report, and it is gated as above.

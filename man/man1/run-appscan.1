@@ -4,9 +4,11 @@ run-appscan \- weekly application-security report to the App Dev audience, and s
 .SH SYNOPSIS
 .B run\-appscan
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .PP
 .B sudo cti\-agent run\-appscan
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .SH DESCRIPTION
 .B run-appscan
 renders the week's Qualys WAS scan results with
@@ -80,14 +82,31 @@ today's report files. It sends nothing through
 .BR cti\-mailer ,
 and it logs, but does not alert on, authentication failures.
 .SH OPTIONS
-A single shell argument.
+Shell arguments, in any order.
 .TP
 .B \-\-dry\-run
 Render, print the subject, and pass
 .B \-\-dry\-run
 to the mailer; no alert is sent.
+.TP
+.B \-\-to\-dev
+A test send: the report goes through
+.B cti\-mailer \-\-to\-dev
+to
+.B FLEET_DEV_EMAIL
+only, subject prefixed
+.BR "[DEV TEST]" .
+.B WAS_TO
+and
+.B WAS_ALLOW_TO
+are not consulted, so the report can be seen before the lane's audience is
+configured. An authentication-failure alert goes through
+.B cti\-alert \-\-to\-dev
+to the same address. With
+.B \-\-dry\-run
+as well, nothing is mailed.
 .PP
-Anything else, or more than one argument, is refused with exit status 1.
+Anything else is refused with exit status 1.
 .SH ENVIRONMENT
 .I fleet.env
 is sourced with every assignment exported, and its values replace the
