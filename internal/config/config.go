@@ -47,7 +47,7 @@ type Config struct {
 	JiraProjectKey string
 	JiraIssueType  string
 	// JiraAllowCreate is the project-key allowlist, and it is deliberately the
-	// same shape as FLEET_ALLOW_TO: a comma-separated list the fleet may write
+	// same shape as VM_ALLOW_TO: a comma-separated list the fleet may write
 	// to, with no default. A ticket filed into the wrong project is the same
 	// class of mistake as mail sent to the wrong distribution list, and both
 	// are mistakes you cannot take back - a Jira issue, once created, has been

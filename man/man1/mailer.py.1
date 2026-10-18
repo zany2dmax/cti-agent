@@ -88,7 +88,7 @@ else
 then, when
 .B DIGEST_CC_FROM_ALLOW_TO
 is true, every address in
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 as written (not the operator added below) that is not already there. Any
 Cc address that is also a To address is dropped, compared without regard
 to case.
@@ -100,7 +100,7 @@ with no spaces.
 .TP
 .B Allowlist
 The allowed set is
-.BR FLEET_ALLOW_TO ,
+.BR VM_ALLOW_TO ,
 or
 .B DIGEST_TO
 when that is unset, plus
@@ -239,7 +239,7 @@ and each optional one
 .RB ( DIGEST_TO ,
 .BR DIGEST_CC ,
 .BR DIGEST_CC_FROM_ALLOW_TO ,
-.BR FLEET_ALLOW_TO ,
+.BR VM_ALLOW_TO ,
 .BR NVD_API_KEY ,
 .BR CLAUDE_CODE_OAUTH_TOKEN )
 as
@@ -283,7 +283,7 @@ Default:\~\fB$GRAPH_MAILBOX\fR. Section 1.
 .TP
 .B DIGEST_TO
 Default To list; the allowlist when
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 is unset. Section 4, RECIPIENTS AND THE SEND GATE.
 .TP
 .B DIGEST_CC
@@ -296,12 +296,22 @@ Default Cc list. Section 4.
 or
 .B on
 (any case) adds
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 to the Cc. Anything else is off. Section 4.
 .TP
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 The recipient allowlist, comma-separated, covering To and Cc.
 Default:\~\fB$DIGEST_TO\fR. Section 4.
+.TP
+.B FLEET_ALLOW_TO
+The name of
+.B VM_ALLOW_TO
+before 1.3.1, still read with a note to rename it.
+Set to a different list from
+.BR VM_ALLOW_TO ,
+every send except
+.B \-\-to\-operator
+is refused.
 .TP
 .B FLEET_OPERATOR_EMAIL
 Where
