@@ -392,7 +392,6 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
 - More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
 - Qualys severity bands beside the QDS number, once the thresholds are verified
   against Qualys' own documentation rather than guessed
-- Pagination and QID batching for very large Qualys environments
 - A container image for deployment
 - AppSec lane fully provider-neutral: `cmd/cti-appscan` fetching detail through
   `appscan.DetailFetcher` (and scan-list reconciliation as an optional provider
