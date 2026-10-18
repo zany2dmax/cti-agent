@@ -394,3 +394,10 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   against Qualys' own documentation rather than guessed
 - Pagination and QID batching for very large Qualys environments
 - A container image for deployment
+- AppSec lane fully provider-neutral: `cmd/cti-appscan` fetching detail through
+  `appscan.DetailFetcher` (and scan-list reconciliation as an optional provider
+  capability) instead of calling the Qualys API type directly
+- Message trace for the domains lane: which domains actually send mail and from
+  where, on a separate read-only app registration
+- The AI triage agent wired into the threat-intel digest, and a Defender for
+  Cloud attack-path lane
