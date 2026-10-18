@@ -14,8 +14,9 @@ Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet)
 by **Limited Edition Jonathan**, who worked it out for a personal-assistant
 workload.
 
-What follows is that pattern applied to cyber threat intelligence, plus what we
-learned deploying it to a real production server and getting it wrong several
+What follows is that pattern applied to a security team's recurring chores —
+starting with cyber threat intelligence, which is where this fleet began — plus
+what we learned deploying it to a real production server and getting it wrong several
 times along the way. The structure is his. The bruises are ours.
 
 If you only read one thing, read his guide first. This document assumes it.
@@ -50,9 +51,10 @@ someone who has never read the others.
 
 ---
 
-## Why threat intel fits this shape
+## Why security chores fit this shape
 
-Threat intel is a batch problem pretending to be a real-time one.
+Most of a security team's routine work is a batch problem pretending to be a
+real-time one. Threat intel, the first lane here, shows it most clearly.
 
 Vendor advisories, CVE mailing lists, and CERT bulletins arrive continuously
 and matter occasionally. The work is not reacting in seconds — it's making sure
@@ -62,7 +64,10 @@ don't stay out of their way.
 
 That is a filtering and correlation problem with a daily rhythm. It has a clear
 deliverable (a brief), a clear rhythm (mornings), and a clear failure mode
-(something important got buried). All three suit a fleet.
+(something important got buried). All three suit a fleet. So do the other
+chores the fleet now carries — Patch Tuesday monthly, the application scans and
+the domain portfolio weekly, the ticket follow-up every morning: each has a
+deliverable, a rhythm, and a way of quietly going wrong when nobody does it.
 
 ---
 
@@ -282,7 +287,8 @@ Everything above is composition. These two are load-bearing.
 
 ### 1. Delivery is deterministic. Judgment is not.
 
-**The morning digest does not go through the model.**
+**No lane's report goes through the model.** The threat-intel lane's morning
+digest is the clearest case:
 
 `cti-agent-digest.timer` runs a shell script that ingests, enriches, renders and
 sends. No language model is involved. If the model is slow, rate-limited,
@@ -457,7 +463,8 @@ cadences. That distinction is the design work; the code is the easy part.
 
 ## The transferable lesson
 
-If you take one idea from this, it shouldn't be about threat intelligence.
+If you take one idea from this, it shouldn't be about threat intelligence, or
+any other single chore.
 
 **The pattern is not about AI. It's about where you put the AI.**
 

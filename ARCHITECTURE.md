@@ -8,25 +8,32 @@ actually work*. For the full argument see
 
 ## The problem
 
-Fifty vendor advisories, CERT bulletins and threat roundups arrive overnight.
-Four of them concern software you actually run. Nobody has time to read fifty,
-so in practice nobody reads any — and the four that mattered are found later, by
-somebody else, under worse circumstances.
+A security team has chores that have to happen every day, every week or every
+month. Fifty vendor advisories arrive overnight and four of them concern
+software you actually run. The tickets for last month's exposures need checking
+against the scanner. Patch Tuesday needs writing up. Somebody should notice a
+domain's transfer lock came off. Nobody has time for all of it, so in practice
+the chores slip — and what mattered is found later, by somebody else, under
+worse circumstances.
 
-This is not a hard problem. It is a *tedious* problem with a daily rhythm, and
-it is exactly the kind of work that gets dropped first when a two-person
-security team has a bad week.
+None of this is hard. It is *tedious* work with a fixed rhythm, and it is
+exactly the kind of work that gets dropped first when a two-person security
+team has a bad week. The fleet is an always-on junior analyst for it: each
+chore is a **lane** on a timer, and every lane ends in a report a person can
+act on.
 
 ## What it does
 
-Every morning at 06:00 an email arrives naming the vulnerabilities that are
+[LANES.md](LANES.md) lists every lane. Two examples show the shape.
+
+The **threat-intel lane**: every morning at 06:00 an email arrives naming the vulnerabilities that are
 **both** actively exploited in the wild **and** confirmed present on machines in
 our estate, with the affected hostnames and a Jira ticket already open for IT.
 
 Everything else is counted and not discussed.
 
-Every Monday a second, separate email goes to the people who own our
-**application code**: what the web application scanner found open on each of
+The **application-security lane**: every Monday a separate email goes to the
+people who own our **application code**: what the web application scanner found open on each of
 our sites, which findings are new since the last scan, and whether each scan
 logged in or covered only the public pages. Different audience, different
 recipient list, enforced in code — the patching team and the application team
@@ -37,7 +44,9 @@ each get only the mail meant for them.
 ## The one design decision worth understanding
 
 Most people assume an "AI agent" means the model runs the show. Here it is the
-opposite, deliberately:
+opposite, deliberately. The diagram follows the threat-intel lane; every other
+lane has the same shape — a timer, a deterministic program, an allowlisted
+email — and none of them involves the model:
 
 ```mermaid
 flowchart TB
@@ -72,9 +81,9 @@ flowchart TB
     style J fill:#fff7ee,stroke:#9a4a08,stroke-width:2px,color:#3a1c02
 ```
 
-**The morning brief never passes through the model.** If the model is slow,
-rate-limited, out of credit, or refuses for reasons nobody can reproduce, the
-brief still lands at 06:00. That is the difference between a tool you can put in
+**No report passes through the model.** If the model is slow, rate-limited,
+out of credit, or refuses for reasons nobody can reproduce, the morning brief
+still lands at 06:00, and every other lane's report on its own schedule. That is the difference between a tool you can put in
 a compliance narrative and a demo.
 
 The model does the work that genuinely needs judgment and where being wrong is
@@ -91,7 +100,7 @@ deliver.
 
 | Property | How it is achieved |
 |---|---|
-| **The brief arrives even when the model does not** | No model in the delivery path at all |
+| **Every report arrives even when the model does not** | No model in the delivery path at all |
 | **"We have this" is a scanner fact, not a guess** | Every reported CVE is confirmed present by host detection before it is scored |
 | **Silence means a quiet day, not a dead pipeline** | A failed lane escalates by email; a growing unread backlog escalates on its own |
 | **It cannot mail the wrong people** | Recipients are a hard allowlist enforced in code, one per report; there is no default recipient, and a report never falls back to another report's list |
@@ -100,8 +109,8 @@ deliver.
 ## What it will never do
 
 It does not patch anything, change a firewall, or touch production. Remediation
-is IT's job — the fleet opens the ticket and then reports that ticket's status
-in the brief until it closes.
+is IT's job — the fleet does the legwork and people make the calls: it opens the
+ticket and then reports that ticket's status in the brief until it closes.
 
 It does not decide what a human may see. The analysis step annotates; it is
 structurally unable to drop an item.
@@ -206,7 +215,8 @@ flowchart TB
 
 ### What each lane adds
 
-Each answers a different question, and the brief is the join across them.
+Each answers a different question. Several feed the threat-intel brief, which
+is the join across them; the rest report on their own.
 
 - **What is being talked about?** — the mailbox and the feeds
 - **Do we actually have it?** — the scanner, which turns an advisory into an
