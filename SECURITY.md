@@ -3,8 +3,9 @@
 The threat model, trust boundaries and security-relevant design decisions for
 this repository.
 
-This file is longer than a disclosure policy because the system it describes
-holds credentials to a mail tenant and a vulnerability scanner, writes a
+This file is longer than a disclosure policy because the system it describes —
+a fleet of scheduled lanes doing a security team's routine chores — holds
+credentials to a mail tenant and a vulnerability scanner, writes a
 document that names exploitable machines, modifies a shared mailbox
 unattended, and is being extended to pass attacker-authored text to a model.
 Each of those deserves an explicit answer rather than an assumption.

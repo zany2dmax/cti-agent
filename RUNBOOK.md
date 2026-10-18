@@ -1,7 +1,8 @@
 # RUNBOOK
 
-Everything needed to get this running, from an empty checkout to a box that
-mails a digest every morning without being asked.
+Everything needed to get this running, from an empty checkout to a box whose
+lanes do their chores on schedule without being asked — starting with the
+threat-intel digest every morning, then each other lane in turn.
 
 Read [README.md](README.md) first if you want to know *what* it is; this
 document assumes you have decided to run it.
@@ -225,7 +226,8 @@ The full annotated reference, including every fleet-only setting, is
 
 ## 5. The agent alone
 
-Build it, point it at a mailbox, get a markdown report. No fleet, no systemd.
+The threat-intel lane's ingest binary on its own: build it, point it at a
+mailbox, get a markdown report. No fleet, no systemd.
 
 ```bash
 cp .env.example .env
@@ -376,8 +378,8 @@ one is enabled.
 
 | Order | Timer | What it does | Gate before enabling |
 |---|---|---|---|
-| 1 | `cti-agent-digest.timer` | the daily digest | a dry run you have read end to end |
-| 2 | `cti-agent-weekly.timer` | the Monday roll-up | one daily digest delivered successfully |
+| 1 | `cti-agent-digest.timer` | the threat-intel daily digest | a dry run you have read end to end |
+| 2 | `cti-agent-weekly.timer` | the threat-intel Monday roll-up | one daily digest delivered successfully |
 | 3 | `cti-agent-scout.timer` | vendor advisory sweep | the digest is stable |
 | 4 | `cti-agent-checkin.timer` | orchestrator heartbeat | Claude Code installed, budget ceilings set |
 | 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent. **Leave it disabled for now** and run the lane by hand ([section 11](#11-the-monthly-patch-tuesday-lane)) |

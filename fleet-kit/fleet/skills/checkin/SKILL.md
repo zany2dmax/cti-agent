@@ -1,6 +1,6 @@
 ---
 name: checkin
-description: Time-aware heartbeat for the CTI fleet orchestrator — look around, relay, then act or stay quiet.
+description: Time-aware heartbeat for the fleet orchestrator — look across every lane, relay, then act or stay quiet.
 ---
 
 # /checkin — one heartbeat
