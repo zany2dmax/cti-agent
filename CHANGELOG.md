@@ -35,6 +35,35 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.3.1 — 2026-10-18
+
+### Fixed
+
+- **Qualys host counts stopped at the first page.** The Host List Detection
+  API returns 1,000 hosts per page and a WARNING with the next page's URL
+  when there are more. The client read the first page only, so a QID on
+  more than 1,000 hosts - a cumulative update across the Windows estate -
+  was counted from whichever hosts happened to be on page one, and nothing
+  in the daily, the Jira tickets or the Patch Tuesday exposure table said
+  the number was partial. Every page is now read and merged (a host is
+  counted once per QID across pages). The page size is set explicitly.
+- **When not every page can be read, the count says "at least".** A later
+  page failing, a next-page URL pointing anywhere but `QUALYS_BASE_URL`
+  (it is never followed - the request would carry the account's
+  credentials), or the 200-page safety limit marks every count from that
+  call as a floor, through the same path the 5,000-host cap already used.
+  A failure on the first page is still an error.
+- **The KnowledgeBase download follows pages too**, and a rebuild or
+  incremental refresh that could not read every page is refused rather
+  than saved: the cached CVE→QID map is kept.
+
+### Upgrade
+
+Pull, reinstall. Expect larger host counts on widespread QIDs in the next
+daily and on open Jira tickets - those are the real numbers, not a
+regression. Worth one spot check: pick a QID on most of the estate and
+compare the daily's host count with the Qualys console.
+
 ## 1.3 — 2026-10-17
 
 ### Added
