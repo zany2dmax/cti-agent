@@ -308,7 +308,7 @@ func HostCSV(f Finding) ([]byte, error) {
 }
 
 // CheckAllowed is the write gate, and it is the same decision as the mailer's
-// FLEET_ALLOW_TO: this fleet may not write to a project nobody approved.
+// VM_ALLOW_TO: this fleet may not write to a project nobody approved.
 //
 // Unset means create nothing. An install that reads Jira without being able to
 // file into it is a legitimate state - and far better than one that guesses a

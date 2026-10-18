@@ -25,7 +25,8 @@ PY="fleet-kit/fleet/lanes/mailer.py"
 if [ -f ./.env ]; then set -a; . ./.env; set +a; fi
 export DIGEST_TO="dl@example.com"
 export DIGEST_CC="cc1@example.com,cc2@example.com"
-export FLEET_ALLOW_TO="dl@example.com,cc1@example.com,cc2@example.com"
+export VM_ALLOW_TO="dl@example.com,cc1@example.com,cc2@example.com"
+export FLEET_ALLOW_TO=""   # old name; empty so fleet.env cannot load a conflicting one
 export FLEET_OPERATOR_EMAIL="op@example.com"
 export CTI_REPLY_MAILBOX="reply@example.com"
 unset DIGEST_CC_FROM_ALLOW_TO
