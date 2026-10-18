@@ -1,14 +1,18 @@
 # CTI Agent Fleet — Build Runbook
 
-An always-on threat-intel fleet for a Linux server. It wraps `cti-agent`
-in an orchestrator plus three executor lanes, adds exploitability context to
-every CVE, and mails a prioritized digest to a security distribution list on a
-schedule.
+An always-on junior analyst for a security team, built as a fleet on a Linux
+server: an orchestrator plus executor lanes on systemd timers, each doing one
+recurring chore. The first and largest is the threat-intel lane, which wraps
+`cti-agent`, adds exploitability context to every CVE, and mails a prioritized
+digest to a security distribution list on a schedule; the others follow up
+Jira tickets, write up Patch Tuesday, report application scans, check the
+domains and keep the mailbox tidy.
 
 The fleet pattern — orchestrator, executors, heartbeat, message board,
 persistent memory — comes from [Build Your Own Claude Code Agent
 Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet).
-This applies it to a CTI workload instead of a personal-assistant one.
+This applies it to a security team's routine chores instead of a
+personal-assistant workload.
 
 **Where to start.** This document is the fleet's complete reference: every
 command, every setting, the schedule, and the troubleshooting table. If you are
@@ -32,7 +36,9 @@ the map of every other document.
 
 ## The idea in one paragraph
 
-The Go agent already does the hard part: read the CTI mailbox, pull CVEs, ask
+Each chore is a lane: a deterministic program on a timer that gathers facts and
+writes them up, and an orchestrator that watches all of them. The threat-intel
+lane shows the shape. The Go agent already does the hard part: read the CTI mailbox, pull CVEs, ask
 the vulnerability scanner whether the environment is actually exposed, write
 markdown. What it doesn't do is decide what matters, or tell anyone. The fleet
 wraps it. An orchestrator wakes every two hours, three executor lanes add
@@ -51,14 +57,16 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 ├── ORCHESTRATOR ─ the analyst on duty
 │   /checkin every 2h (systemd timer, quota-governed)
 │   · reads the board, memory, lane logs
-│   · emails the operator when it needs a decision
-│   · fires lanes, decides what's worth sending
-│   · THE ONLY AGENT THAT SENDS MAIL
+│   · escalates to the operator (cti-alert) when it needs a decision
+│   · does NOT run the lanes or send the reports: systemd timers run
+│     each lane, and each lane's runner sends its own report
 │
 ├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
 ├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 ├── @brief    lanes/brief.py          enriched JSON → HTML digest
+├── @jira     cti-jira (Go)           KEV/Sev5 tickets, daily re-check, lock-down ticket
+├── @ptuesday cti-patchtuesday (Go)   Microsoft release + scanner → monthly synopsis
 ├── @appscan  cti-appscan (Go)        DAST scan mail + API → AppSec report
 │                                     (own audience: WAS_TO, not SECURITY_DL)
 └── @domains  cti-domains (Go)        inventory + GoDaddy + DNS → domains check
@@ -71,9 +79,9 @@ LINUX SERVER · your Claude subscription · user: ctiagent
       │  ~/fleet/CLAUDE.md         standing behavior + autonomy    │
       └────────────────────────────────────────────────────────────┘
                                             │
-                          lanes/mailer.py → Graph sendMail
+               mailer.py / cti-mailer → Graph sendMail (allowlisted)
                                             ↓
-                                        SECURITY_DL
+                   each lane's own audience (DIGEST_TO, WAS_TO, DOM_TO)
 ```
 
 Two things are worth calling out because they're where most fleets go wrong.

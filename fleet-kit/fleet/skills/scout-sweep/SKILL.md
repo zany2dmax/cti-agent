@@ -12,7 +12,7 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 > read what it found with `fleet-db recent` and the journal. In a session with
 > the operator present, Claude Code asks before each command below.
 
-Runs every 4 hours. The mailbox is reactive — this lane is how you find things
+Part of the threat-intel lane; runs every 4 hours. The mailbox is reactive — this lane is how you find things
 before a vendor newsletter gets around to telling you.
 
 1. `python3 $FLEET_CODE/lanes/scout.py --out $FLEET_HOME/state/scout-$(date +%F).json`
