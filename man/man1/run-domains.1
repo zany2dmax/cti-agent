@@ -4,9 +4,11 @@ run-domains \- weekly domains check: run cti-domains, then mail the report to th
 .SH SYNOPSIS
 .B run\-domains
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .PP
 .B sudo cti\-agent run\-domains
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .SH DESCRIPTION
 .B run-domains
 runs
@@ -82,13 +84,30 @@ so it still probes every domain and queries the registrar, and overwrites
 today's report files, but leaves last week's baseline in place: the real run
 still reports this week's changes. It sends nothing.
 .SH OPTIONS
-A single shell argument.
+Shell arguments, in any order.
 .TP
 .B \-\-dry\-run
 Probe, render and print the subject; do not send and do not advance the
 baseline.
+.TP
+.B \-\-to\-dev
+A test send: the report goes through
+.B cti\-mailer \-\-to\-dev
+to
+.B FLEET_DEV_EMAIL
+only, subject prefixed
+.BR "[DEV TEST]" .
+.B DOM_TO
+and
+.B DOM_ALLOW_TO
+are not consulted. Everything else is as for
+.BR \-\-dry\-run :
+the baseline is not advanced and the lock-down ticket is only previewed.
+With
+.B \-\-dry\-run
+as well, nothing is mailed.
 .PP
-Anything else, or more than one argument, is refused with exit status 1.
+Anything else is refused with exit status 1.
 .SH ENVIRONMENT
 .I fleet.env
 is sourced with every assignment exported, and its values replace the

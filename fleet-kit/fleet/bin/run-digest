@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# run-digest [daily|weekly] [--dry-run]
+# run-digest [daily|weekly] [--dry-run] [--to-dev]
+#
+# --to-dev is a test send: the real pipeline, mailed to FLEET_DEV_EMAIL only
+# and subject-prefixed [DEV TEST], with every side effect of a dry run - no
+# already-sent record, no Jira writes, no board INFO line. With --dry-run as
+# well, nothing is mailed at all.
 #
 # The deterministic pipeline: ingest -> enrich -> brief -> send.
 # systemd calls this so delivery never depends on the orchestrator noticing the
@@ -13,11 +18,14 @@ set -euo pipefail
 # `run-digest --dry-run daily` SENT MAIL while looking like a rehearsal.
 KIND=""
 DRY=""
+SEND_DRY=""
+TODEV=""
 LOOKBACK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     daily|weekly)  KIND="$1"; shift ;;
-    --dry-run)     DRY="--dry-run"; shift ;;
+    --dry-run)     DRY="--dry-run"; SEND_DRY="--dry-run"; shift ;;
+    --to-dev)      TODEV=1; shift ;;
     # A catch-up window for the morning after the lane was off. Passed to the
     # ingest binary; it cannot go through the environment because the
     # cti-agent wrapper hops to the service account with a fixed
@@ -25,11 +33,14 @@ while [ $# -gt 0 ]; do
     --lookback)    LOOKBACK="$2"; shift 2 ;;
     --lookback=*)  LOOKBACK="${1#*=}"; shift ;;
     *) echo "[run-digest] unknown argument: $1" >&2
-       echo "usage: run-digest [daily|weekly] [--dry-run] [--lookback 168h]" >&2
+       echo "usage: run-digest [daily|weekly] [--dry-run] [--to-dev] [--lookback 168h]" >&2
        exit 2 ;;
   esac
 done
 KIND="${KIND:-daily}"
+# A test send changes WHO is mailed and nothing else is allowed to happen as
+# if it were real: from here on it is a dry run, except at the mailer.
+[ -n "$TODEV" ] && DRY="--dry-run"
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 
@@ -72,7 +83,12 @@ DB="$FLEET_CODE/bin/fleet-db"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say() { echo "[run-digest $(date '+%H:%M:%S')] $*"; }
-fail() { say "FAILED: $*"; "$BOARD" post @brief @you ERROR "run-digest $KIND failed: $*" || true; exit 1; }
+fail() { say "FAILED: $*"; [ -n "$TODEV" ] || "$BOARD" post @brief @you ERROR "run-digest $KIND failed: $*" || true; exit 1; }
+
+# Before any work: a test send with nowhere to go is a usage error.
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  say "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"; exit 2
+fi
 
 # Do not double-send. A duplicate 6am digest trains people to ignore it.
 if [ -z "$DRY" ] && [ "$("$DB" was-sent "$DAY" "$KIND" 2>/dev/null || echo no)" = "yes" ]; then
@@ -189,6 +205,17 @@ SUBJECT=$(python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" --subject-only --enrich
 
 # ── 4. send ──────────────────────────────────────────────────────────────────
 say "send: $SUBJECT"
+if [ -n "$TODEV" ]; then
+  # cti-mailer holds the --to-dev path; mailer.py does not have one.
+  say "send: TEST to FLEET_DEV_EMAIL ($FLEET_DEV_EMAIL) only"
+  ATTACH=()
+  [ -s "$RAW" ] && ATTACH=(--attach "$RAW")
+  # shellcheck disable=SC2086
+  "$FLEET_CODE/bin/cti-mailer" --to-dev --html "$HTML" --text "$TXT" \
+    --subject "$SUBJECT" "${ATTACH[@]}" $SEND_DRY || fail "test send failed"
+  say "test send complete - nothing recorded, no tickets touched. $HTML"
+  exit 0
+fi
 RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" --attach "$RAW" $DRY) || fail "send failed"
 echo "$RESULT"

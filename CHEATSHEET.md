@@ -110,6 +110,23 @@ sudo cti-agent run-mailbox-cleanup                     # plan only; moves nothin
 sudo cti-agent cti-alert --unit cti-agent-digest.service --dry-run
 ```
 
+### Test sends: to you only
+
+`--to-dev` runs the real lane but mails **only** `FLEET_DEV_EMAIL`, subject
+prefixed `[DEV TEST]`, so you can see the report in Outlook. Everything else is
+a dry run: nothing recorded as sent, no Jira writes, no baseline advanced, no
+board line. Safe after the real send has gone.
+
+```bash
+sudo cti-agent run-digest daily --to-dev
+sudo cti-agent run-digest weekly --to-dev
+sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you too
+sudo cti-agent run-domains --to-dev
+sudo cti-agent run-patchtuesday --to-dev
+sudo cti-agent run-patchtuesday --month 2026-09 --to-dev   # replay to yourself, no --for-real needed
+sudo cti-agent cti-alert --unit cti-agent-digest.service --to-dev
+```
+
 Then read the result:
 
 ```bash
@@ -189,13 +206,12 @@ sudo cti-agent run-patchtuesday --dry-run 2>&1 | grep -E 'saved copy|subject|FAI
 sudo less "$(sudo ls -t /var/lib/cti-agent/reports/patchtuesday-*.txt | head -1)"
 ```
 
-To see it rendered in Outlook, send the preview to yourself only
-(`FLEET_DEV_EMAIL`, subject prefixed `[DEV TEST]`):
+To see it rendered in Outlook, send it to yourself only
+(`FLEET_DEV_EMAIL`, subject prefixed `[DEV TEST]`; records nothing, so the
+real send below still goes):
 
 ```bash
-sudo cti-agent cti-mailer --to-dev \
-  --html "$(sudo ls -t /var/lib/cti-agent/reports/patchtuesday-*.html | head -1)" \
-  --subject "Patch Tuesday preview"
+sudo cti-agent run-patchtuesday --to-dev
 ```
 
 **6. Send it** (SENDS MAIL to the digest audience; records the send, so a

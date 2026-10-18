@@ -69,6 +69,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   operator still go) and `cti-mailer --check` reports it - one control,
   one value.
 
+- **`--to-dev` on every runner that mails, and on `cti-alert`.** It reached
+  only `cti-mailer` in 1.3, so testing a lane meant a dry run and then a
+  hand-built `cti-mailer --to-dev` against the right file. `run-digest`,
+  `run-patchtuesday`, `run-appscan` and `run-domains` now take `--to-dev`:
+  the real lane, mailed to `FLEET_DEV_EMAIL` only with a `[DEV TEST]`
+  subject, and **otherwise a dry run** - no already-sent record (so the real
+  send still goes), no Jira writes, no baseline advanced, no Patch Tuesday
+  manifest or mark-sent, no board line. A lane's own `*_TO` / `*_ALLOW_TO`
+  are not consulted, so a report can be seen before its audience is
+  configured. `run-patchtuesday --month M --to-dev` replays a past release
+  to you without `--for-real`. `run-appscan --to-dev` sends its
+  authentication-failure alert to you as well, through the new
+  `cti-alert --to-dev`, which mails `FLEET_DEV_EMAIL` and posts nothing to
+  the board. With `--dry-run` too, nothing is mailed. Unset
+  `FLEET_DEV_EMAIL` is refused before any work.
+
 ### Upgrade
 
 Pull, reinstall. Expect larger host counts on widespread QIDs in the next

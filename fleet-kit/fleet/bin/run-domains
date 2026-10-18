@@ -16,6 +16,8 @@
 #   run-domains --dry-run    probe, render, print the subject; send nothing,
 #                            leave the baseline alone, and only PREVIEW the
 #                            Jira lock-down ticket
+#   run-domains --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
+#                            subject; baseline and Jira as for --dry-run
 #
 # After the mail goes, cti-jira --domains-actions files the week's DNS
 # changes as ONE lock-down ticket for IT, or comments on the one already open
@@ -38,12 +40,22 @@ fail() { echo "[run-domains] error: $*" >&2; exit 1; }
 log()  { echo "[run-domains] $*" >&2; }
 
 DRY=""
-case "${1:-}" in
-  "")         ;;
-  --dry-run)  DRY="--dry-run" ;;
-  *)          fail "unknown argument: $1 (only --dry-run is accepted)" ;;
-esac
-[ $# -le 1 ] || fail "too many arguments: $*"
+SEND_DRY=""
+TODEV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run"; SEND_DRY="--dry-run" ;;
+    --to-dev)   TODEV=1 ;;
+    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+  esac
+  shift
+done
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
+fi
+# A test send changes who is mailed and nothing else: the baseline is not
+# advanced and the lock-down ticket is only previewed, exactly as a dry run.
+[ -n "$TODEV" ] && DRY="--dry-run"
 
 DOMAINS="$FLEET_CODE/bin/cti-domains"
 MAILER="$FLEET_CODE/bin/cti-mailer"
@@ -87,8 +99,17 @@ log "subject: $SUBJECT"
 # The CSV is sitecheck.go's full per-host output, attached so the detail the
 # email summarises is one click away and sortable.
 # shellcheck disable=SC2086
-"$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $DRY \
-  || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
+if [ -n "$TODEV" ]; then
+  # FLEET_DEV_EMAIL only. DOM_TO / DOM_ALLOW_TO are not consulted, so a test
+  # works before the lane's audience is configured.
+  # shellcheck disable=SC2086
+  "$MAILER" --to-dev --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $SEND_DRY \
+    || fail "test send failed"
+else
+  # shellcheck disable=SC2086
+  "$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $DRY \
+    || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
+fi
 
 # The lock-down ticket. After the send, so the email goes out whatever Jira
 # does; || so a Jira failure is logged, not fatal.
@@ -104,7 +125,9 @@ else
     || log "WARNING: lock-down ticket not filed or updated - see the lines above"
 fi
 
-if [ -n "$DRY" ]; then
+if [ -n "$TODEV" ] && [ -z "$SEND_DRY" ]; then
+  log "test send - mailed to FLEET_DEV_EMAIL only; baseline not advanced. Report: $HTML"
+elif [ -n "$DRY" ]; then
   log "dry run - nothing was sent and the baseline was not advanced. Report: $HTML"
 fi
 log "done"

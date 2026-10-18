@@ -7,6 +7,7 @@ run-patchtuesday \- the monthly Microsoft Patch Tuesday synopsis: build, send, m
 .RB [ \-\-month
 .IR YYYY\-MM ]
 .RB [ \-\-for\-real ]
+.RB [ \-\-to\-dev ]
 .PP
 .B sudo cti\-agent run\-patchtuesday
 .RI [ options ]
@@ -156,6 +157,24 @@ Build and pass
 to the mailer; skips the already-sent check and step 8. Takes precedence
 over
 .BR \-\-for\-real .
+.TP
+.B \-\-to\-dev
+A test send: built as for
+.B \-\-dry\-run
+(no manifest, no already-sent check, no mark-sent, nothing recorded), then
+mailed through
+.B cti\-mailer \-\-to\-dev
+to
+.B FLEET_DEV_EMAIL
+only, subject prefixed
+.BR "[DEV TEST]" .
+Works with
+.B \-\-month
+and needs no
+.BR \-\-for\-real :
+replaying a past release to yourself is the safe way to check one. With
+.B \-\-dry\-run
+as well, nothing is mailed.
 .TP
 .BI \-\-month " YYYY\-MM"
 Replay a past release instead of the most recent one. Passed to

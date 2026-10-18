@@ -42,6 +42,8 @@ const journalLines = "40"
 func main() {
 	unit := flag.String("unit", "", "the systemd unit that failed (required)")
 	dryRun := flag.Bool("dry-run", false, "print what would be sent, send nothing")
+	toDev := flag.Bool("to-dev", false,
+		"send to FLEET_DEV_EMAIL only, subject prefixed [DEV TEST], and post nothing to the board")
 	// A lane can be stopped on purpose - a budget hold, say - which is worth an
 	// email but is not a failure. Without these two flags such a notice would
 	// arrive titled FAILED and quoting a journal that shows the unit succeeded,
@@ -65,6 +67,15 @@ func main() {
 
 	loadEnvFile()
 
+	// A development test goes to the developer and nowhere else. Checked
+	// before anything is gathered, so a missing address is a usage error and
+	// never a quiet fallback to the operator's mailbox.
+	dev := strings.TrimSpace(os.Getenv("FLEET_DEV_EMAIL"))
+	if *toDev && dev == "" {
+		fmt.Fprintln(os.Stderr, "cti-alert: --to-dev needs FLEET_DEV_EMAIL set in fleet.env")
+		os.Exit(2)
+	}
+
 	f := gather(name)
 	f.Kind = strings.ToUpper(*kind)
 	f.Reason = *reason
@@ -84,6 +95,11 @@ func main() {
 	}
 	body := renderHTML(f)
 	subject := fmt.Sprintf("[CTI FLEET %s] %s on %s", f.Kind, f.Unit, f.Host)
+	to := ""
+	if *toDev {
+		subject = "[DEV TEST] " + subject
+		to = dev
+	}
 
 	// A dry run touches nothing, the board included. It used to post first
 	// and check the flag second, so rehearsing an alert put a real ERROR line
@@ -92,16 +108,28 @@ func main() {
 		level, msg := boardLine(f)
 		fmt.Println("DRY RUN - nothing sent, nothing posted")
 		fmt.Printf("subject: %s\n", subject)
-		fmt.Printf("board:   would post %s %s\n", level, msg)
+		if *toDev {
+			fmt.Printf("to:      %s (FLEET_DEV_EMAIL)\n", to)
+			fmt.Println("board:   nothing - a dev test never posts")
+		} else {
+			fmt.Printf("board:   would post %s %s\n", level, msg)
+		}
 		fmt.Println(renderText(f))
 		return
 	}
 
 	// Board first: it needs nothing external, so it is the channel most
 	// likely to survive whatever caused the failure.
-	boardPosted := postToBoard(f)
+	//
+	// Not for a dev test: the orchestrator reads the board every beat, and a
+	// test alert there is an incident it would open for something that did
+	// not happen.
+	boardPosted := false
+	if !*toDev {
+		boardPosted = postToBoard(f)
+	}
 
-	if reqID, err := sendEmail(subject, body, f); err != nil {
+	if reqID, err := sendEmail(subject, body, f, to); err != nil {
 		// This is the bad case: the pipeline failed AND we cannot say so.
 		// Dump everything to the journal, which systemd has already captured.
 		fmt.Fprintf(os.Stderr, "cti-alert: COULD NOT EMAIL the operator about %s: %v\n", f.Unit, err)
@@ -109,7 +137,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cti-alert: board posted: %v\n", boardPosted)
 		fmt.Fprintln(os.Stderr, renderText(f))
 	} else {
-		fmt.Printf("cti-alert: emailed the operator about %s (request-id %s)\n", f.Unit, reqID)
+		who := "the operator"
+		if *toDev {
+			who = "FLEET_DEV_EMAIL"
+		}
+		fmt.Printf("cti-alert: emailed %s about %s (request-id %s)\n", who, f.Unit, reqID)
 	}
 
 	// Always 0. See the package comment.
@@ -228,12 +260,16 @@ func boardLine(f failure) (level, msg string) {
 		f.Unit, f.Result, f.ExitCode, f.Host, f.When)
 }
 
-func sendEmail(subject, htmlBody string, f failure) (string, error) {
+// sendEmail mails the alert. to overrides the recipient (a dev test); empty
+// means the operator, as always.
+func sendEmail(subject, htmlBody string, f failure, to string) (string, error) {
 	tenant := os.Getenv("TENANT_ID")
 	clientID := os.Getenv("CLIENT_ID")
 	secret := os.Getenv("CLIENT_SECRET")
 	from := os.Getenv("GRAPH_MAILBOX")
-	to := firstNonEmptyEnv("FLEET_OPERATOR_EMAIL", "DIGEST_TO")
+	if to == "" {
+		to = firstNonEmptyEnv("FLEET_OPERATOR_EMAIL", "DIGEST_TO")
+	}
 
 	var missing []string
 	for name, v := range map[string]string{

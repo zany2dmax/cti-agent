@@ -5,6 +5,7 @@ run-digest \- the deterministic daily digest and Monday rollup: ingest, enrich, 
 .B run\-digest
 .RB [ daily | weekly ]
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .RB [ \-\-lookback
 .IR DURATION ]
 .PP
@@ -182,6 +183,23 @@ runs without
 .BR \-\-for\-real ,
 the already-sent check is skipped and nothing is recorded as sent. See
 DESCRIPTION for what a dry run still writes.
+.TP
+.B \-\-to\-dev
+A test send: every step runs as for
+.B \-\-dry\-run
+(no already-sent check or record,
+.B cti\-jira
+without
+.BR \-\-for\-real ,
+no board line), but the digest is mailed through
+.B cti\-mailer \-\-to\-dev
+to
+.B FLEET_DEV_EMAIL
+only, subject prefixed
+.BR "[DEV TEST]" .
+Safe to run after the real digest has gone. With
+.B \-\-dry\-run
+as well, nothing is mailed.
 .TP
 .BI \-\-lookback " DURATION"
 .TQ
