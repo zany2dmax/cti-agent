@@ -10,6 +10,7 @@ cti-alert \- tell the operator that a fleet unit failed, is holding, or needs a 
 .RB [ \-\-reason
 .IR TEXT ]
 .RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
 .PP
 .B cti-alert
 .RI [ options ]
@@ -166,6 +167,19 @@ Default:\~empty.
 Print the subject, the board line that would be posted, and the plain-text
 body. Sends no email and posts nothing to the board.
 Default:\~off.
+.TP
+.B \-\-to\-dev
+Send to
+.B FLEET_DEV_EMAIL
+instead of the operator, subject prefixed
+.BR "[DEV TEST]" ,
+and post nothing to the board, which the orchestrator reads and would act
+on. Unset
+.B FLEET_DEV_EMAIL
+is a usage error, exit status 2. With
+.BR \-\-dry\-run ,
+prints the address and sends nothing.
+Default:\~off.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from
@@ -187,6 +201,11 @@ The mailbox the alert is sent as. Section 1.
 .B FLEET_OPERATOR_EMAIL
 Recipients, comma-separated. A person, not a distribution list.
 Section 4.
+.TP
+.B FLEET_DEV_EMAIL
+Where
+.B \-\-to\-dev
+sends. Required by it; unset, a test send is refused before any work.
 .TP
 .B DIGEST_TO
 Used as the recipient list only when

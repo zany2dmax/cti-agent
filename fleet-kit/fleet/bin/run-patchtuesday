@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# run-patchtuesday [--dry-run] [--month YYYY-MM]
+# run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real] [--to-dev]
+#
+# --to-dev is a test send to FLEET_DEV_EMAIL only, subject prefixed
+# [DEV TEST], with every side effect of a dry run: no manifest, no mark-sent,
+# no already-sent record. It works with --month and needs no --for-real -
+# replaying a past release to yourself is the test the guards below protect
+# the distribution list from.
 #
 # The monthly Microsoft Patch Tuesday synopsis: read the two public wrap-ups,
 # correlate against Qualys, render, send. Deterministic shell, same as
@@ -13,16 +19,21 @@
 set -euo pipefail
 
 DRY=""
+SEND_DRY=""
+TODEV=""
 MONTH=""
 FOR_REAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dry-run)  DRY="--dry-run"; shift ;;
+    --dry-run)  DRY="--dry-run"; SEND_DRY="--dry-run"; shift ;;
+    --to-dev)   TODEV=1; shift ;;
     --month)    MONTH="$2"; shift 2 ;;
     --for-real) FOR_REAL=1; shift ;;
-    *) echo "usage: run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real]" >&2; exit 2 ;;
+    *) echo "usage: run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real] [--to-dev]" >&2; exit 2 ;;
   esac
 done
+# A test send is a dry run everywhere except at the mailer.
+[ -n "$TODEV" ] && DRY="--dry-run"
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
@@ -42,8 +53,12 @@ PT="$FLEET_CODE/bin/cti-patchtuesday"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say()  { echo "[run-patchtuesday $(date '+%F %H:%M:%S')] $*"; }
-fail() { say "FAILED: $*"; "$BOARD" post @patchtuesday @you ERROR \
+fail() { say "FAILED: $*"; [ -n "$TODEV" ] || "$BOARD" post @patchtuesday @you ERROR \
          "run-patchtuesday failed: $*" 2>/dev/null || true; exit 1; }
+
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  say "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"; exit 2
+fi
 
 [ -x "$PT" ] || fail "cti-patchtuesday not found at $PT - rerun the installer"
 
@@ -140,6 +155,14 @@ if [ -n "$MONTH" ] && [ -n "$FOR_REAL" ] && [ -z "$DRY" ]; then
 fi
 
 say "send: $SUBJECT"
+if [ -n "$TODEV" ]; then
+  say "send: TEST to FLEET_DEV_EMAIL ($FLEET_DEV_EMAIL) only"
+  # shellcheck disable=SC2086
+  "$FLEET_CODE/bin/cti-mailer" --to-dev --html "$HTML" --text "$TXT" \
+    --subject "$SUBJECT" $SEND_DRY || fail "test send failed"
+  say "test send complete - manifest untouched, nothing recorded. $HTML"
+  exit 0
+fi
 RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" $DRY) || fail "send failed"
 echo "$RESULT"
