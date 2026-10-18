@@ -64,7 +64,7 @@ fi
 
 # Capture the output: it is the audit trail for a lane that moves other
 # people's mail, and it goes to the board so the orchestrator sees it too.
-OUT="$("$CLEAN" $FOR_REAL "${THRESH[@]}" --json "$PLAN" 2>&1)" || {
+OUT="$("$CLEAN" $FOR_REAL ${THRESH[@]+"${THRESH[@]}"} --json "$PLAN" 2>&1)" || {
   echo "$OUT"
   fail "cti-mailbox exited non-zero (a failed move usually means the app "\
 "registration is missing Mail.ReadWrite with admin consent)"
