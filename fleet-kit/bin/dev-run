@@ -301,7 +301,9 @@ stage_send() {
   # Exercise the real allowlist rather than bypassing it with --approve: an
   # explicit --to on this command is the operator's decision, so scope the
   # allowlist to exactly that recipient and let the normal gate run.
-  export FLEET_ALLOW_TO="$to"
+  # FLEET_ALLOW_TO is the old name; set it empty (not unset) so a value in
+  # fleet.env cannot be loaded behind this and conflict with it.
+  export VM_ALLOW_TO="$to" FLEET_ALLOW_TO=""
 
   local subject
   subject=$(python3 "$KIT/fleet/lanes/brief.py" --daily --subject-only --enriched "$ENRICHED")

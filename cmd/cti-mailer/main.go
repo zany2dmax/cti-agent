@@ -13,7 +13,7 @@
 //
 // # WHY THIS IS GO NOW
 //
-// This is the only component that sends mail, and it holds the FLEET_ALLOW_TO
+// This is the only component that sends mail, and it holds the VM_ALLOW_TO
 // recipient gate - the control that decides who receives a document naming
 // exploitable machines. It was the most security-relevant code in the
 // repository sitting outside gosec and govulncheck, for no better reason than
@@ -89,7 +89,7 @@ func run() int {
 			"audience")
 	cc := flag.String("cc", "",
 		"comma-separated; defaults to DIGEST_CC. Subject to the same "+
-			"FLEET_ALLOW_TO gate as --to")
+			"VM_ALLOW_TO gate as --to")
 	toOperator := flag.Bool("to-operator", false,
 		"send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the operator "+
 			"something is not an outward-facing send.")
@@ -145,6 +145,20 @@ func run() int {
 
 	operator := strings.TrimSpace(os.Getenv("FLEET_OPERATOR_EMAIL"))
 
+	// The digest allowlist, under its current name or the one before 1.3.1.
+	// Two names set to two lists is refused for every send that consults an
+	// allowlist, lane sends included (lane lists can reference it): a control
+	// whose value depends on which line wins is not a control. An escalation
+	// to the operator consults none, so the alert path stays open.
+	vmAllow, allowNote, allowErr := mailer.VMAllow(os.LookupEnv)
+	if allowErr != nil && (!*toOperator || *lane != "") {
+		return die("%s", safelog.Line(allowErr.Error()))
+	}
+	if allowNote != "" {
+		logf("note   : %s", safelog.Line(allowNote))
+	}
+	var err error
+
 	var recipients, copies []string
 	if *toDev && *lane != "" {
 		return die("--to-dev cannot be combined with --lane: a test send goes to FLEET_DEV_EMAIL only")
@@ -153,7 +167,7 @@ func run() int {
 		// A lane send uses its OWN recipient list and its OWN allowlist, and
 		// refuses if either is unset.
 		//
-		// It does NOT fall through to DIGEST_TO / FLEET_ALLOW_TO the way the
+		// It does NOT fall through to DIGEST_TO / VM_ALLOW_TO the way the
 		// default path does. That fallback is what makes a second audience
 		// dangerous: an unset WAS_ALLOW_TO would deliver the
 		// application-security report - which names which applications have
@@ -170,7 +184,7 @@ func run() int {
 			To:       pick(*to, os.Getenv(prefix+"_TO")),
 			Allow:    os.Getenv(prefix + "_ALLOW_TO"),
 			Operator: operator,
-			Lookup:   os.LookupEnv,
+			Lookup:   mailer.AllowLookup(os.LookupEnv, vmAllow),
 		}
 		got, err := l.Resolve(*approve)
 		if err != nil {
@@ -185,7 +199,6 @@ func run() int {
 			logf("note   : %s", safelog.Line(note))
 		}
 	} else {
-		var err error
 		recipients, copies, err = mailer.Audience{
 			ToOperator:  *toOperator,
 			ToDev:       *toDev,
@@ -195,7 +208,7 @@ func run() int {
 			DigestTo:    os.Getenv("DIGEST_TO"),
 			DigestCC:    os.Getenv("DIGEST_CC"),
 			Operator:    operator,
-			AllowRaw:    os.Getenv("FLEET_ALLOW_TO"),
+			AllowRaw:    vmAllow,
 			CCFromAllow: mailer.Truthy(os.Getenv("DIGEST_CC_FROM_ALLOW_TO")),
 		}.Resolve()
 		if err != nil {
@@ -210,7 +223,7 @@ func run() int {
 			preapproved = strings.TrimSpace(os.Getenv("FLEET_DEV_EMAIL"))
 		}
 		if err := mailer.CheckAllowed(recipients, copies,
-			os.Getenv("FLEET_ALLOW_TO"), os.Getenv("DIGEST_TO"),
+			vmAllow, os.Getenv("DIGEST_TO"),
 			preapproved, *approve); err != nil {
 			return die("%s", safelog.Line(err.Error()))
 		}
@@ -377,9 +390,9 @@ var required = [][2]string{
 
 var optional = [][2]string{
 	{"DIGEST_TO", "digest recipients; without it every send needs --to"},
-	{"DIGEST_CC", "extra recipients on CC; also gated by FLEET_ALLOW_TO"},
+	{"DIGEST_CC", "extra recipients on CC; also gated by VM_ALLOW_TO"},
 	{"DIGEST_CC_FROM_ALLOW_TO", "true: also CC everyone on the allowlist"},
-	{"FLEET_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO"},
+	{"VM_ALLOW_TO", "recipient allowlist, covers To AND Cc; falls back to DIGEST_TO (old name FLEET_ALLOW_TO still read)"},
 	{"WAS_TO", "--lane was recipients; app-security, a different audience"},
 	{"WAS_ALLOW_TO", "--lane was allowlist; NO fallback - unset means it will not send"},
 	{"DOM_TO", "--lane dom recipients; the weekly domains check, security team only"},
@@ -440,9 +453,15 @@ func preflight(mailbox string) int {
 		}
 		logf("  %s %-22s %s", state, kv[0], kv[1])
 	}
+	if _, note, err := mailer.VMAllow(os.LookupEnv); err != nil {
+		logf("  FAIL %s", safelog.Line(err.Error()))
+		missing++
+	} else if note != "" {
+		logf("  note %s", safelog.Line(note))
+	}
 	if missing > 0 {
 		logf("")
-		logf("%d required setting(s) unset. Edit %s, then rerun.",
+		logf("%d required setting(s) unset or in conflict. Edit %s, then rerun.",
 			missing, safelog.Line(fleetenv.Path()))
 		// Stop here deliberately: requesting a token without a tenant produces
 		// an Entra error that describes the wrong problem.

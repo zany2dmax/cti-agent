@@ -57,12 +57,32 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   incremental refresh that could not read every page is refused rather
   than saved: the cached CVE→QID map is kept.
 
+### Changed
+
+- **`FLEET_ALLOW_TO` is now `VM_ALLOW_TO`.** It only ever gated the
+  vulnerability digest, and beside `WAS_ALLOW_TO` and `DOM_ALLOW_TO` the
+  "FLEET" name read as if it covered every lane. Lane lists already
+  referenced it as `$VM_ALLOW_TO`. Both mailers still read the old name and
+  log a note asking for the rename; `$FLEET_ALLOW_TO` and `$VM_ALLOW_TO`
+  references in lane lists both resolve. Both names set to **different**
+  lists refuses every send that uses an allowlist (escalations to the
+  operator still go) and `cti-mailer --check` reports it - one control,
+  one value.
+
 ### Upgrade
 
 Pull, reinstall. Expect larger host counts on widespread QIDs in the next
 daily and on open Jira tickets - those are the real numbers, not a
 regression. Worth one spot check: pick a QID on most of the estate and
 compare the daily's host count with the Qualys console.
+
+Rename `FLEET_ALLOW_TO=` to `VM_ALLOW_TO=` in `/etc/cti-agent/fleet.env`
+when convenient - nothing breaks until you do, the mailer just notes it:
+
+```bash
+sudo sed -i 's/^FLEET_ALLOW_TO=/VM_ALLOW_TO=/' /etc/cti-agent/fleet.env
+sudo cti-agent cti-mailer --check | grep -i allow
+```
 
 ## 1.3 — 2026-10-17
 

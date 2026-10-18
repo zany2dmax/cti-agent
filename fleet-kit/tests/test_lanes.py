@@ -596,7 +596,7 @@ class MailerGate(unittest.TestCase):
         os.environ.update({
             "GRAPH_MAILBOX": "security@example.com",
             "DIGEST_TO": "soc@example.com",
-            "FLEET_ALLOW_TO": "soc@example.com",
+            "VM_ALLOW_TO": "soc@example.com",
             "FLEET_OPERATOR_EMAIL": "operator@example.com",
             "FLEET_HOME": tempfile.mkdtemp(),
         })
@@ -637,9 +637,31 @@ class MailerGate(unittest.TestCase):
             self.run_mailer("--to-operator", "--require-approval",
                             "--subject", "s", "--message", "m"), 0)
 
+    def test_old_allowlist_name_is_still_read(self):
+        del os.environ["VM_ALLOW_TO"]
+        os.environ["FLEET_ALLOW_TO"] = "soc@example.com,ok@example.com"
+        self.assertEqual(
+            self.run_mailer("--to", "ok@example.com", "--subject", "s", "--message", "m"), 0)
+
+    def test_both_allowlist_names_disagreeing_is_refused(self):
+        os.environ["FLEET_ALLOW_TO"] = "soc@example.com,other@example.com"
+        self.assertNotEqual(
+            self.run_mailer("--html", __file__, "--subject", "s"), 0,
+            "two names for one control, with two values, must not send")
+
+    def test_both_names_agreeing_still_sends(self):
+        os.environ["FLEET_ALLOW_TO"] = " SOC@example.com "
+        self.assertEqual(
+            self.run_mailer("--to", "soc@example.com", "--subject", "s", "--message", "m"), 0)
+
+    def test_allowlist_conflict_does_not_close_the_alert_path(self):
+        os.environ["FLEET_ALLOW_TO"] = "other@example.com"
+        self.assertEqual(
+            self.run_mailer("--to-operator", "--subject", "s", "--message", "m"), 0)
+
     def test_no_recipient_is_refused_rather_than_guessed(self):
         del os.environ["DIGEST_TO"]
-        del os.environ["FLEET_ALLOW_TO"]
+        del os.environ["VM_ALLOW_TO"]
         self.assertNotEqual(self.run_mailer("--subject", "s", "--message", "m"), 0)
 
     def test_missing_sending_mailbox_is_refused(self):
@@ -837,7 +859,7 @@ class MailerCc(unittest.TestCase):
 
     def test_cc_on_the_allowlist_is_sent(self):
         code, out = self.run_mailer(
-            self.env(FLEET_ALLOW_TO="dl@example.com,ok@example.com"),
+            self.env(VM_ALLOW_TO="dl@example.com,ok@example.com"),
             "--cc", "ok@example.com")
         self.assertEqual(code, 0)
         self.assertIn("ok@example.com", json.loads(out)["cc"])
@@ -851,15 +873,15 @@ class MailerCc(unittest.TestCase):
     def test_digest_cc_env_var_is_honoured(self):
         code, out = self.run_mailer(self.env(
             DIGEST_CC="ok@example.com",
-            FLEET_ALLOW_TO="dl@example.com,ok@example.com"))
+            VM_ALLOW_TO="dl@example.com,ok@example.com"))
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["cc"], ["ok@example.com"])
 
     def test_allowlist_can_supply_the_cc(self):
-        # One edit instead of two: add a standing recipient to FLEET_ALLOW_TO
+        # One edit instead of two: add a standing recipient to VM_ALLOW_TO
         # and they receive the digest.
         code, out = self.run_mailer(self.env(
-            FLEET_ALLOW_TO="dl@example.com,alice@example.com,bob@example.com",
+            VM_ALLOW_TO="dl@example.com,alice@example.com,bob@example.com",
             DIGEST_CC_FROM_ALLOW_TO="true"))
         self.assertEqual(code, 0)
         self.assertEqual(sorted(json.loads(out)["cc"]),
@@ -869,7 +891,7 @@ class MailerCc(unittest.TestCase):
         # DIGEST_TO is in the allowlist by definition, so without this every
         # digest would CC its own To line.
         code, out = self.run_mailer(self.env(
-            FLEET_ALLOW_TO="dl@example.com", DIGEST_CC_FROM_ALLOW_TO="1"))
+            VM_ALLOW_TO="dl@example.com", DIGEST_CC_FROM_ALLOW_TO="1"))
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["cc"], [])
 
@@ -878,14 +900,14 @@ class MailerCc(unittest.TestCase):
         # work. Deriving the CC from the raw variable keeps them off the
         # digest unless they are listed deliberately.
         code, out = self.run_mailer(self.env(
-            FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+            VM_ALLOW_TO="dl@example.com,alice@example.com",
             DIGEST_CC_FROM_ALLOW_TO="yes"))
         self.assertEqual(code, 0)
         self.assertNotIn("op@example.com", json.loads(out)["cc"])
 
     def test_allowlist_cc_merges_with_an_explicit_digest_cc(self):
         code, out = self.run_mailer(self.env(
-            FLEET_ALLOW_TO="dl@example.com,alice@example.com,carol@example.com",
+            VM_ALLOW_TO="dl@example.com,alice@example.com,carol@example.com",
             DIGEST_CC="alice@example.com",
             DIGEST_CC_FROM_ALLOW_TO="on"))
         self.assertEqual(code, 0)
@@ -896,7 +918,7 @@ class MailerCc(unittest.TestCase):
     def test_allowlist_cc_is_off_unless_explicitly_enabled(self):
         for value in ("", "ture", "maybe", "0", "false", "no"):
             code, out = self.run_mailer(self.env(
-                FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+                VM_ALLOW_TO="dl@example.com,alice@example.com",
                 DIGEST_CC_FROM_ALLOW_TO=value))
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(out)["cc"], [],
@@ -906,7 +928,7 @@ class MailerCc(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         old = dict(os.environ)
         os.environ.clear()
-        os.environ.update(self.env(FLEET_ALLOW_TO="dl@example.com,alice@example.com",
+        os.environ.update(self.env(VM_ALLOW_TO="dl@example.com,alice@example.com",
                                    DIGEST_CC_FROM_ALLOW_TO="true"),
                           FLEET_HOME=tmp.name,
                           FLEET_ENV=os.path.join(tmp.name, "absent.env"))
@@ -929,7 +951,7 @@ class MailerCc(unittest.TestCase):
 
     def test_invalid_cc_address_is_refused(self):
         code, _ = self.run_mailer(
-            self.env(FLEET_ALLOW_TO="dl@example.com,notanemail"), "--cc", "notanemail")
+            self.env(VM_ALLOW_TO="dl@example.com,notanemail"), "--cc", "notanemail")
         self.assertNotEqual(code, 0)
 
 

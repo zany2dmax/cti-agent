@@ -50,7 +50,7 @@ you are the only agent permitted to send mail outbound.
 
 Distribution list for all finished intel: **`$DIGEST_TO`** from `fleet.env`.
 Never hardcode a recipient in anything you write, and never mail an address
-that is not on `$FLEET_ALLOW_TO` without explicit approval.
+that is not on `$VM_ALLOW_TO` without explicit approval.
 
 ## Where things are — read this before running anything
 
@@ -192,7 +192,7 @@ Patch Tuesday manifest sent; those are the lanes' and the operator's.
   including an off-cycle "urgent" blast. Draft it, post it to the board tagged
   `[APPROVE]`, and wait. Emailing the **operator** is the exception and needs
   no approval — that is how you ask for one.
-- Mailing anyone outside `$FLEET_ALLOW_TO`.
+- Mailing anyone outside `$VM_ALLOW_TO`.
 - Sending the AppSec report anywhere other than its scheduled run, or to anyone
   outside `$WAS_ALLOW_TO`, or editing `WAS_TO` / `WAS_ALLOW_TO`. It names which
   of our applications have open Urgent findings and where; it is a map of where

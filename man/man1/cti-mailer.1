@@ -106,7 +106,7 @@ No recipients at all is refused: there is no default.
 if given, else
 .BR DIGEST_CC ,
 plus every address on
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 when
 .B DIGEST_CC_FROM_ALLOW_TO
 is true. Anyone already on To is dropped from Cc. An escalation
@@ -114,7 +114,7 @@ is true. Anyone already on To is dropped from Cc. An escalation
 is never copied.
 .TP
 .B Allowlist
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 if set, else
 .BR DIGEST_TO ,
 plus
@@ -151,7 +151,7 @@ does not change that. Nothing falls back to
 .BR DIGEST_TO ,
 .B DIGEST_CC
 or
-.BR FLEET_ALLOW_TO :
+.BR VM_ALLOW_TO :
 that is how a report reaches an audience nobody chose.
 .TP
 .B Recipients
@@ -179,7 +179,7 @@ is given.
 or
 .BR ${NAME} ,
 for example
-.BR WAS_ALLOW_TO=$FLEET_ALLOW_TO,appdev@example.com .
+.BR WAS_ALLOW_TO=$VM_ALLOW_TO,appdev@example.com .
 A name is letters, digits and underscores, not starting with a digit.
 References nest up to 5 deep; a cycle is refused; an address reached twice is
 kept once. A reference to a variable that is not in the environment at all is
@@ -302,7 +302,7 @@ Comma-separated recipients, replacing
 with
 .BR \-\-lane ).
 They still have to pass the allowlist: with no
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 the allowlist is
 .BR DIGEST_TO ,
 not
@@ -315,7 +315,7 @@ Default:\~none.
 Comma-separated Cc recipients, replacing
 .BR DIGEST_CC .
 Gated by
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 exactly like To. Ignored with
 .B \-\-lane
 and with
@@ -480,7 +480,7 @@ The escalation address. Always allowed by every gate. Required by
 .TP
 .B DIGEST_TO
 Default recipients, and the allowlist when
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 is empty.
 .TP
 .B DIGEST_CC
@@ -493,14 +493,27 @@ Default Cc recipients. Gated like To.
 or
 .B on
 (any case): also copy every address on
-.BR FLEET_ALLOW_TO .
+.BR VM_ALLOW_TO .
 Anything else is off. The operator is not added unless listed there.
 .TP
-.B FLEET_ALLOW_TO
+.B VM_ALLOW_TO
 The default gate's allowlist, covering To and Cc. Literal addresses only;
 .B $NAME
 is not expanded here. Empty: falls back to
 .BR DIGEST_TO .
+.TP
+.B FLEET_ALLOW_TO
+The name of
+.B VM_ALLOW_TO
+before 1.3.1, still read with a note to rename it, and resolved for
+.B $FLEET_ALLOW_TO
+references in lane allowlists. Set to a different list from
+.BR VM_ALLOW_TO ,
+every send except
+.B \-\-to\-operator
+is refused, and
+.B \-\-check
+reports it.
 .TP
 .IB LANE _TO ", " LANE _ALLOW_TO
 A lane's recipients and allowlist, for example

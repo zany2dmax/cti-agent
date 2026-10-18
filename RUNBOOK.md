@@ -195,9 +195,9 @@ regression test.
 | `FLEET_HOME` | Fleet state directory. Also where the processed-message log and release manifests live |
 | `REPORT_PATH` | Markdown output file for the agent |
 | `DIGEST_TO` | Digest recipients, comma-separated. No default |
-| `FLEET_ALLOW_TO` | Recipient allowlist enforced in code; anything outside it needs `--approve` |
+| `VM_ALLOW_TO` | Recipient allowlist enforced in code; anything outside it needs `--approve`. Named `FLEET_ALLOW_TO` before 1.3.1; the old name is still read, and both set to different lists refuses to send |
 | `WAS_TO` | Application-security report recipients — the people who own application code, not the people who patch servers. No default |
-| `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `FLEET_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
+| `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `VM_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
 | `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
 | `FLEET_DEV_EMAIL` | Development only: where `cti-mailer --to-dev` sends a preview (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
@@ -657,7 +657,7 @@ either runner moves.
 escalate through `cti-alert`, which talks to `internal/graph` directly and has
 its own recipient handling. Switching the mailer does not touch them, and
 looking for a line there that does not exist is how somebody concludes they
-missed a step. (`cti-alert` bypassing `FLEET_ALLOW_TO` is a separate known gap,
+missed a step. (`cti-alert` bypassing `VM_ALLOW_TO` is a separate known gap,
 recorded in SECURITY.md.)
 
 Keep `mailer.py` on disk for a couple of weeks; deleting it is a separate,

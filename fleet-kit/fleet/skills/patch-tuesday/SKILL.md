@@ -141,7 +141,7 @@ live distribution list, dated today, which is almost never what anyone means.
 
 That nearly happened: `run-patchtuesday --for-real --month 2026-08` in
 September reached the mailer, which refused it because two CC addresses were
-not yet on `FLEET_ALLOW_TO`. The error advised adding them - and doing so would
+not yet on `VM_ALLOW_TO`. The error advised adding them - and doing so would
 have mailed August's synopsis to the team.
 
 So a back-dated send now needs the month named in the environment as well:

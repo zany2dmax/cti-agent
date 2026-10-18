@@ -339,7 +339,7 @@ people skip, and an unused permission is standing risk with no benefit.
 
 ## The send gate
 
-`FLEET_ALLOW_TO` is an allowlist enforced in code, not a convention:
+`VM_ALLOW_TO` is an allowlist enforced in code, not a convention:
 
 - It covers **To and Cc**. Exempting Cc would make the control trivially
   bypassable — a header name does not change who receives the findings.
@@ -350,13 +350,13 @@ people skip, and an unused permission is standing risk with no benefit.
 **Per-lane lists fail closed.** The AppSec report is sent with
 `cti-mailer --lane was`, which resolves `WAS_TO` against `WAS_ALLOW_TO` and
 refuses if **either** is unset, naming the variable. It does not fall back to
-`DIGEST_TO` or `FLEET_ALLOW_TO`, and `--approve` does not override an empty
+`DIGEST_TO` or `VM_ALLOW_TO`, and `--approve` does not override an empty
 list — approval is for a one-off recipient, not for a missing control. This is
 stricter than the original digest path, deliberately: a report about our
 application code going to the server-patching list is a disclosure, not a
 misconfiguration.
 
-A list may reference another by exact name (`WAS_ALLOW_TO=$FLEET_ALLOW_TO,x@y`),
+A list may reference another by exact name (`WAS_ALLOW_TO=$VM_ALLOW_TO,x@y`),
 so a shared core is written once. Unset references are errors, cycles are caught
 with a depth limit, and wildcard references (`$*_ALLOW_TO`, `${*}`) are refused
 by name rather than expanded to whatever happens to match.
@@ -376,7 +376,7 @@ reimplementing it.
 **`cti-alert` is the exception.** It calls Graph `sendMail` directly
 (`cmd/cti-alert/main.go`), because the thing it reports on may be the mailer
 itself — an alerter that depends on the component it alerts about is not an
-alerter. It is **not** subject to `FLEET_ALLOW_TO`. Its recipient is
+alerter. It is **not** subject to `VM_ALLOW_TO`. Its recipient is
 `FLEET_OPERATOR_EMAIL`, falling back to `DIGEST_TO`, and its body embeds up to
 40 lines of `journalctl` output, which can contain host names, paths and
 logged subjects.
@@ -466,7 +466,7 @@ Deliberately absent from the grant:
   mail. The worst an injected advisory achieves is one message to an address
   the operator already configured, sent from the fleet's own mailbox.
 
-  This is why the earlier note that `cti-alert` bypasses `FLEET_ALLOW_TO`
+  This is why the earlier note that `cti-alert` bypasses `VM_ALLOW_TO`
   matters less than it reads: the allowlist exists to stop the fleet mailing an
   address nobody approved, and `cti-alert` cannot be pointed at an address at
   all. It remains worth closing, because a future `--to` would silently turn a
@@ -604,7 +604,7 @@ about where:
 | the other six `cti-*` binaries | no | Go | yes |
 
 `mailer.py` **has been ported to `cmd/cti-mailer`**, because it is the single
-outbound channel and holds the `FLEET_ALLOW_TO` recipient gate — the control
+outbound channel and holds the `VM_ALLOW_TO` recipient gate — the control
 deciding who receives a document that names exploitable machines. It had no
 database dependency; it was simply where the code started, and it was the most
 security-relevant code in the repository outside `gosec` and `govulncheck`.
@@ -882,9 +882,9 @@ A short checklist, in order:
 1. Create the Entra app with **only** the permissions you will use.
 2. Apply an Application Access Policy confining it to the CTI mailbox, and
    verify with `Test-ApplicationAccessPolicy`, **before** granting consent.
-3. Set `FLEET_ALLOW_TO` **and** `DIGEST_TO` before the first send. There is no
+3. Set `VM_ALLOW_TO` **and** `DIGEST_TO` before the first send. There is no
    default address anywhere, so an install with neither refuses rather than
-   guesses — but note that leaving `FLEET_ALLOW_TO` unset does not refuse: it
+   guesses — but note that leaving `VM_ALLOW_TO` unset does not refuse: it
    falls back to `DIGEST_TO`, and `FLEET_OPERATOR_EMAIL` is always allowed.
    The gate is only as narrow as those two variables.
 4. Set `FLEET_OPERATOR_EMAIL`, so alert mail never falls back to the whole

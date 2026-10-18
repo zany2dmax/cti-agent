@@ -930,10 +930,10 @@ play.
 |---|---|
 | `DIGEST_TO` | scheduled digest recipients, comma-separated |
 | `DIGEST_CC` | additional recipients on CC, comma-separated. For individuals who should see the digest but are not the DL |
-| `DIGEST_CC_FROM_ALLOW_TO` | `true` to also Cc everyone on `FLEET_ALLOW_TO`. One edit instead of two — read the caveat below |
-| `FLEET_ALLOW_TO` | **hard allowlist, enforced in code, covering To *and* Cc.** A send to any address not listed is refused. Defaults to `DIGEST_TO` only — so a `DIGEST_CC` address must be added here too |
+| `DIGEST_CC_FROM_ALLOW_TO` | `true` to also Cc everyone on `VM_ALLOW_TO`. One edit instead of two — read the caveat below |
+| `VM_ALLOW_TO` | **hard allowlist, enforced in code, covering To *and* Cc.** A send to any address not listed is refused. Defaults to `DIGEST_TO` only — so a `DIGEST_CC` address must be added here too. Named `FLEET_ALLOW_TO` before 1.3.1; the old name is still read, and both set to different lists refuses to send |
 | `WAS_TO` | AppSec report recipients - the people who own application code. **No default, and no fallback to `DIGEST_TO`** |
-| `WAS_ALLOW_TO` | allowlist for `WAS_TO`. **Fail-closed:** unset means `cti-mailer --lane was` refuses, naming the variable, and `--approve` does not override an empty list. May reference another list by name - `WAS_ALLOW_TO=$FLEET_ALLOW_TO,appdev@example.com` - with cycles caught; wildcards such as `$*_ALLOW_TO` are refused |
+| `WAS_ALLOW_TO` | allowlist for `WAS_TO`. **Fail-closed:** unset means `cti-mailer --lane was` refuses, naming the variable, and `--approve` does not override an empty list. May reference another list by name - `WAS_ALLOW_TO=$VM_ALLOW_TO,appdev@example.com` - with cycles caught; wildcards such as `$*_ALLOW_TO` are refused |
 | `DOM_TO` | domains-check recipients - the security team. **No default, no fallback** |
 | `DOM_ALLOW_TO` | allowlist for `DOM_TO`. Fail-closed, same rules as `WAS_ALLOW_TO` |
 | `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository. One domain per line plus markers `send`, `receive`, `saas`, `unknown`, `legacy`; no marker means no mail, and `send` alone means send-only |
@@ -959,12 +959,12 @@ reply-all.
 ```bash
 DIGEST_TO=soc@example.com
 DIGEST_CC=alice@example.com,bob@example.com
-FLEET_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com,you@example.com
+VM_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com,you@example.com
 ```
 
 **The allowlist covers Cc as well as To.** It has to: a Cc is still a delivery,
 and exempting it would make the one control that stops a mis-send trivially
-bypassable. The `FLEET_ALLOW_TO` fallback only covers `DIGEST_TO`, so a Cc
+bypassable. The `VM_ALLOW_TO` fallback only covers `DIGEST_TO`, so a Cc
 added without updating the allowlist is **refused**, not silently delivered.
 That is the right direction to fail, but it does mean two edits.
 
@@ -974,18 +974,18 @@ should not become a thread.
 
 #### One edit instead of two
 
-Maintaining the same addresses in both `DIGEST_CC` and `FLEET_ALLOW_TO` is
+Maintaining the same addresses in both `DIGEST_CC` and `VM_ALLOW_TO` is
 annoying and easy to get half-right. Set `DIGEST_CC_FROM_ALLOW_TO=true` and the
 Cc is derived from the allowlist:
 
 ```bash
 DIGEST_TO=soc@example.com
-FLEET_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com
+VM_ALLOW_TO=soc@example.com,alice@example.com,bob@example.com
 DIGEST_CC_FROM_ALLOW_TO=true
 # -> To: soc@  Cc: alice@, bob@
 ```
 
-**Know what this changes.** `FLEET_ALLOW_TO` is a *permission* list — addresses
+**Know what this changes.** `VM_ALLOW_TO` is a *permission* list — addresses
 the fleet **may** mail. Enabling this makes it also a *distribution* list —
 addresses the fleet **does** mail. The cost is that adding someone to the
 allowlist to approve a single off-cycle send then subscribes them to every
@@ -996,7 +996,7 @@ Three things it deliberately does not do:
 
 - **It does not Cc `FLEET_OPERATOR_EMAIL`.** That address is added to the allow
   *set* in code so the orchestrator can always escalate; Cc-ing them on every
-  digest is not what enabling this asks for. List them in `FLEET_ALLOW_TO`
+  digest is not what enabling this asks for. List them in `VM_ALLOW_TO`
   explicitly if you want it.
 - **It does not Cc the To recipients.** `DIGEST_TO` is in the allowlist by
   definition, so without this every digest would Cc its own To line.
@@ -1006,7 +1006,7 @@ It accepts `true`, `yes`, `1`, `on`. Anything else — including a typo — leav
 it off, because a flag that converts a security control into a mailing list
 should not be enabled by accident.
 
-`FLEET_ALLOW_TO` is the control that stops a confused or compromised agent
+`VM_ALLOW_TO` is the control that stops a confused or compromised agent
 mailing your findings somewhere else. Keep it as tight as the job allows.
 Mail to `FLEET_OPERATOR_EMAIL` is pre-approved and needs no gate — telling you
 something is broken is not an outward-facing send.
@@ -1656,7 +1656,7 @@ enforced in three independent places, because a prompt alone isn't a control.
 | Layer | Enforces |
 |---|---|
 | `CLAUDE.md` | The orchestrator's standing instructions — what it may and may not do |
-| `mailer.py` recipient allowlist | `FLEET_ALLOW_TO` in `fleet.env`. Any recipient not on it **exits non-zero** unless `--approve` is passed. Not advisory. |
+| `mailer.py` recipient allowlist | `VM_ALLOW_TO` in `fleet.env`. Any recipient not on it **exits non-zero** unless `--approve` is passed. Not advisory. |
 | systemd hardening | `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadWritePaths` limited to the fleet home |
 
 **No approval needed:** running lanes; reading mailbox, scanner, NVD, EPSS, KEV,
@@ -1678,7 +1678,7 @@ decide Sev5s should auto-send, wire a separate `FLEET_Sev5_AUTO` path rather tha
 widening the allowlist — those are different risks and deserve different
 switches.
 
-Tightening it further is a one-line change: set `FLEET_ALLOW_TO` to an address
+Tightening it further is a one-line change: set `VM_ALLOW_TO` to an address
 nobody reads and every send needs `--approve`, which turns the fleet into a
 draft-only assistant.
 
@@ -2060,13 +2060,13 @@ normalized evidence, so nothing here needs to know which scanner answered.
 
 **A different mail transport.** `lanes/mailer.py` is the only component that
 sends. Swap Graph for SMTP by replacing `token()` and `graph_post()` — keep the
-`FLEET_ALLOW_TO` allowlist and the `--approve` gate, since those are the control,
+`VM_ALLOW_TO` allowlist and the `--approve` gate, since those are the control,
 not the transport.
 
 **A chat channel instead of email.** The orchestrator reaches you by email and
 nothing else — one transport, one allowlist, one thing to audit. Adding Teams,
 Slack, or SMS means a second sender in `mailer.py`'s place; keep the
-`FLEET_ALLOW_TO` gate and the `--approve` flag wherever it lands, since those
+`VM_ALLOW_TO` gate and the `--approve` flag wherever it lands, since those
 are the control and the transport is not.
 
 Note if you reach for Teams: Microsoft retired Office 365 connectors in Teams

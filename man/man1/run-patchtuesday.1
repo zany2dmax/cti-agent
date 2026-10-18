@@ -124,7 +124,7 @@ on a dry run. Recipients are the digest audience
 .RB ( DIGEST_TO ,
 .BR DIGEST_CC ,
 gated by
-.BR FLEET_ALLOW_TO ).
+.BR VM_ALLOW_TO ).
 Fatal on failure.
 .TP
 .B 8. Record (not on a dry run)
@@ -209,7 +209,7 @@ runner. Setting it in
 .I fleet.env
 for the one run does.
 .TP
-.BR DIGEST_TO ", " DIGEST_CC ", " FLEET_ALLOW_TO
+.BR DIGEST_TO ", " DIGEST_CC ", " VM_ALLOW_TO
 Recipients and the send gate, read by
 .B mailer.py
 (section 4).

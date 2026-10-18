@@ -43,7 +43,7 @@ func TestTheAllowlistGate(t *testing.T) {
 		// Fail closed when unconfigured: the allowlist falls back to DIGEST_TO,
 		// not to everything.
 		{"no allowlist set, digest recipient", []string{dl}, nil, "", dl, op, false, false,
-			"FLEET_ALLOW_TO defaults to DIGEST_TO"},
+			"VM_ALLOW_TO defaults to DIGEST_TO"},
 		{"no allowlist set, stranger", []string{out1}, nil, "", dl, op, false, true,
 			"the default must not be 'anyone'"},
 		{"neither set, any recipient", []string{dl}, nil, "", "", "", false, true,
@@ -68,7 +68,7 @@ func TestTheAllowlistGate(t *testing.T) {
 }
 
 // The refusal has to name the addresses. An operator seeing "recipients
-// outside FLEET_ALLOW_TO" with no names cannot tell a typo from an intruder.
+// outside VM_ALLOW_TO" with no names cannot tell a typo from an intruder.
 func TestTheRefusalNamesEveryAddressItRefused(t *testing.T) {
 	err := CheckAllowed(
 		[]string{"a@x.com", "b@x.com"}, []string{"c@x.com"},
@@ -174,7 +174,7 @@ func TestCcFromAllowlistDoesNotSubscribeTheOperator(t *testing.T) {
 	for _, r := range cc {
 		if strings.EqualFold(r, "op@x.com") {
 			t.Error("the operator was CC'd on a digest by enabling " +
-				"DIGEST_CC_FROM_ALLOW_TO; list them in FLEET_ALLOW_TO " +
+				"DIGEST_CC_FROM_ALLOW_TO; list them in VM_ALLOW_TO " +
 				"explicitly if that is wanted")
 		}
 	}

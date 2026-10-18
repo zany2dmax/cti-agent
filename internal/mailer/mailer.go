@@ -12,7 +12,7 @@
 // # WHY THIS MOVED FROM PYTHON
 //
 // mailer.py is the single outbound channel for the whole fleet and holds the
-// FLEET_ALLOW_TO gate, and it was the most security-relevant code in the
+// VM_ALLOW_TO gate, and it was the most security-relevant code in the
 // repository sitting outside gosec and govulncheck - not because Python was
 // the right tool, but because that is where it started. It needs no SQLite,
 // which is the only thing keeping the other lanes in Python.
@@ -74,10 +74,10 @@ type Audience struct {
 	DigestTo   string // DIGEST_TO
 	DigestCC   string // DIGEST_CC
 	Operator   string // FLEET_OPERATOR_EMAIL
-	AllowRaw   string // FLEET_ALLOW_TO, raw
+	AllowRaw   string // VM_ALLOW_TO, raw
 
 	// CCFromAllow mirrors DIGEST_CC_FROM_ALLOW_TO. Opt-in, because it changes
-	// what FLEET_ALLOW_TO MEANS: from "addresses this fleet may mail" to
+	// what VM_ALLOW_TO MEANS: from "addresses this fleet may mail" to
 	// "addresses this fleet mails".
 	CCFromAllow bool
 }
@@ -180,7 +180,7 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 
 	// A Cc that is already a To recipient is a duplicate delivery, and Graph
 	// sends both. This matters more with the allowlist as the Cc source, since
-	// DIGEST_TO is normally in FLEET_ALLOW_TO by definition.
+	// DIGEST_TO is normally in VM_ALLOW_TO by definition.
 	seen := map[string]bool{}
 	for _, r := range to {
 		seen[strings.ToLower(r)] = true
@@ -201,7 +201,7 @@ func (a Audience) Resolve() (to, cc []string, err error) {
 // be able to ask a question without needing permission to ask it. Anything
 // else needs an explicit human OK on this specific send.
 //
-// FLEET_ALLOW_TO defaults to DIGEST_TO rather than to everything, so an
+// VM_ALLOW_TO defaults to DIGEST_TO rather than to everything, so an
 // unconfigured deployment fails closed: the scheduled digest still works and
 // any other recipient needs --approve.
 //
@@ -236,8 +236,8 @@ func CheckAllowed(to, cc []string, allowRaw, digestTo, operator string, approved
 		//
 		//lint:ignore ST1005 matches mailer.py verbatim until it is retired
 		return fmt.Errorf( //nolint:staticcheck // see Resolve
-			"recipients outside FLEET_ALLOW_TO: %s. Add them to "+
-				"FLEET_ALLOW_TO in fleet.env for a standing recipient, or post the "+
+			"recipients outside VM_ALLOW_TO: %s. Add them to "+
+				"VM_ALLOW_TO in fleet.env for a standing recipient, or post the "+
 				"draft to the board tagged [APPROVE] and re-run with --approve for "+
 				"a one-off.", strings.Join(outside, ", "))
 	}
