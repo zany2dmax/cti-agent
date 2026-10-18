@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -50,8 +51,10 @@ type DetectionSummary struct {
 	// to one read "10" - the cap, not the estate. A number that is really a
 	// buffer size is worse than no number.
 	Hosts []string
-	// HostsTruncated means the estate is larger than maxHostsPerQID, so any
-	// union built from Hosts is a lower bound and must be reported as one.
+	// HostsTruncated means Hosts - and HostCount - may be incomplete: the
+	// estate is larger than maxHostsPerQID, or Qualys had more pages than
+	// could be read (see getAllPages). Any count or union built from it is a
+	// lower bound and must be reported as one.
 	HostsTruncated bool
 	// SampleHosts is a short list for printing. Separate from Hosts so that
 	// "some names to show a human" and "the set to do arithmetic on" cannot be
@@ -64,6 +67,14 @@ const (
 	// pathological one cannot exhaust memory.
 	maxHostsPerQID = 5000
 	sampleHostsPer = 10
+
+	// detectionPageSize is asked for explicitly rather than left to the
+	// API's default (1000 hosts), so the page size is in the code, not in
+	// a vendor setting that could change.
+	detectionPageSize = 1000
+	// maxPages bounds one paged call: 200 pages of 1000 hosts. Hitting it
+	// marks the result incomplete; it never stops silently.
+	maxPages = 200
 )
 
 type KBCache map[string][]int
@@ -313,11 +324,14 @@ func (c *Client) refreshKBCacheSince(ctx context.Context, cache KBCache, since t
 	params.Set("last_modified_after", since.UTC().Format("2006-01-02"))
 	endpoint := c.baseURL + "/api/4.0/fo/knowledge_base/vuln/?" + params.Encode()
 
-	body, err := c.doQualysGET(ctx, endpoint)
+	pages, complete, err := c.getAllPages(ctx, endpoint)
 	if err != nil {
 		return 0, err
 	}
-	partial, err := parseKB(body)
+	if !complete {
+		return 0, fmt.Errorf("incremental refresh: not every page of the KnowledgeBase could be read")
+	}
+	partial, err := parseKB(pages...)
 	if err != nil {
 		return 0, err
 	}
@@ -423,32 +437,53 @@ func (c *Client) BuildKBCache(ctx context.Context) (KBCache, error) {
 	params.Set("details", "Basic")
 	endpoint := c.baseURL + "/api/4.0/fo/knowledge_base/vuln/?" + params.Encode()
 
-	body, err := c.doQualysGET(ctx, endpoint)
+	pages, complete, err := c.getAllPages(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return parseKB(body)
+	if !complete {
+		// A partial KnowledgeBase would map some CVEs and not others, and
+		// an unmapped CVE reads as "coverage unverified" rather than as a
+		// failure. Refuse it; the caller keeps the cache it has.
+		return nil, fmt.Errorf("not every page of the KnowledgeBase could be read")
+	}
+	return parseKB(pages...)
 }
 
-// parseKB turns a KnowledgeBase XML response into a CVE->QID map.
-func parseKB(body []byte) (KBCache, error) {
-	type kb struct {
-		Vulns []struct {
-			QID     int `xml:"QID"`
-			CVEList struct {
-				CVEs []struct {
-					ID string `xml:"ID"`
-				} `xml:"CVE"`
-			} `xml:"CVE_LIST"`
-		} `xml:"RESPONSE>VULN_LIST>VULN"`
-	}
-	var parsed kb
-	if err := xml.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to parse Qualys KB XML: %w", err)
-	}
-
+// parseKB turns KnowledgeBase XML responses - one per page - into a
+// CVE->QID map.
+func parseKB(bodies ...[]byte) (KBCache, error) {
 	cache := KBCache{}
-	for _, vuln := range parsed.Vulns {
+	for _, body := range bodies {
+		var parsed kbPage
+		if err := xml.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("failed to parse Qualys KB XML: %w", err)
+		}
+		addKB(cache, parsed.Vulns)
+	}
+	for cve := range cache {
+		sort.Ints(cache[cve])
+		cache[cve] = dedupeInts(cache[cve])
+	}
+	return cache, nil
+}
+
+// kbPage is one page of a KnowledgeBase list response.
+type kbPage struct {
+	Vulns []kbVuln `xml:"RESPONSE>VULN_LIST>VULN"`
+}
+
+type kbVuln struct {
+	QID     int `xml:"QID"`
+	CVEList struct {
+		CVEs []struct {
+			ID string `xml:"ID"`
+		} `xml:"CVE"`
+	} `xml:"CVE_LIST"`
+}
+
+func addKB(cache KBCache, vulns []kbVuln) {
+	for _, vuln := range vulns {
 		for _, cve := range vuln.CVEList.CVEs {
 			id := strings.ToUpper(strings.TrimSpace(cve.ID))
 			if id == "" || vuln.QID == 0 {
@@ -457,11 +492,6 @@ func parseKB(body []byte) (KBCache, error) {
 			cache[id] = append(cache[id], vuln.QID)
 		}
 	}
-	for cve := range cache {
-		sort.Ints(cache[cve])
-		cache[cve] = dedupeInts(cache[cve])
-	}
-	return cache, nil
 }
 
 func (c *Client) HostDetections(ctx context.Context, qids []int) (map[int]DetectionSummary, error) {
@@ -473,13 +503,123 @@ func (c *Client) HostDetections(ctx context.Context, qids []int) (map[int]Detect
 	params.Set("show_qds", "1")
 	params.Set("status", "New,Active,Re-Opened")
 	params.Set("qids", joinInts(qids))
+	params.Set("truncation_limit", strconv.Itoa(detectionPageSize))
 	endpoint := c.baseURL + "/api/4.0/fo/asset/host/vm/detection/?" + params.Encode()
 
-	body, err := c.doQualysGET(ctx, endpoint)
+	pages, complete, err := c.getAllPages(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return parseHostDetections(body)
+	out, err := parseHostDetections(pages...)
+	if err != nil {
+		return nil, err
+	}
+	if !complete {
+		// Some hosts were not read. Every count is then a floor, and says so.
+		for q, s := range out {
+			s.HostsTruncated = true
+			out[q] = s
+		}
+	}
+	return out, nil
+}
+
+// PAGING
+//
+// Qualys list APIs return one page and, when there is more, a WARNING in the
+// response carrying the URL of the next page:
+//
+//	<RESPONSE> ... <WARNING><CODE>1980</CODE><TEXT>...</TEXT>
+//	  <URL>https://.../detection/?action=list&...&id_min=12345</URL></WARNING>
+//
+// This client used to read the first page and stop, so a QID on more hosts
+// than one page holds - a cumulative update on most of the Windows estate -
+// was counted from the first page only, with nothing in the output saying
+// so. getAllPages follows the URL until there is none.
+
+// errUnreadablePage is a response body that is not XML.
+var errUnreadablePage = errors.New("unreadable page")
+
+type qualysWarning struct {
+	Warning struct {
+		Code string `xml:"CODE"`
+		Text string `xml:"TEXT"`
+		URL  string `xml:"URL"`
+	} `xml:"RESPONSE>WARNING"`
+}
+
+// getAllPages fetches endpoint and every following page. complete is false
+// when a later page could not be fetched or read, the next-page URL was
+// unusable, or maxPages was reached - the pages read so far are still
+// returned, so the caller can report a floor. A failure of the FIRST page, or
+// a cancelled context, is an error.
+func (c *Client) getAllPages(ctx context.Context, endpoint string) (pages [][]byte, complete bool, err error) {
+	for n := 0; ; n++ {
+		if n == maxPages {
+			log.Printf("Qualys: stopped after %d pages - results are incomplete", maxPages)
+			return pages, false, nil
+		}
+		body, err := c.doQualysGET(ctx, endpoint)
+		if err != nil {
+			if n == 0 {
+				return nil, false, err
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// Cancelled, not a Qualys failure: stop, don't report a floor.
+				return nil, false, ctxErr
+			}
+			log.Printf("Qualys: page %d failed (%v) - results are incomplete", n+1, err)
+			return pages, false, nil
+		}
+		next, err := c.nextPage(body)
+		if errors.Is(err, errUnreadablePage) && n > 0 {
+			// A garbled later page is treated like a failed one: keep the
+			// pages that parsed, report a floor. A garbled FIRST page goes
+			// through to the caller's parser, which reports it.
+			log.Printf("Qualys: page %d is not readable XML - results are incomplete", n+1)
+			return pages, false, nil
+		}
+		pages = append(pages, body)
+		if err != nil && !errors.Is(err, errUnreadablePage) {
+			log.Printf("Qualys: %v - results are incomplete", err)
+			return pages, false, nil
+		}
+		if next == "" {
+			if n > 0 {
+				log.Printf("Qualys: read %d pages", n+1)
+			}
+			return pages, true, nil
+		}
+		endpoint = next
+	}
+}
+
+// nextPage returns the next page's URL from a response, "" when there is
+// none. The URL must point at the same scheme and host as the configured
+// API: it comes from a response body, and the request that follows it
+// carries the account's credentials.
+func (c *Client) nextPage(body []byte) (string, error) {
+	var w qualysWarning
+	if err := xml.Unmarshal(body, &w); err != nil {
+		return "", errUnreadablePage
+	}
+	raw := strings.TrimSpace(w.Warning.URL)
+	if raw == "" {
+		return "", nil
+	}
+	next, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("unusable next-page URL from Qualys: %v", err)
+	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("unusable QUALYS_BASE_URL: %v", err)
+	}
+	if !strings.EqualFold(next.Scheme, base.Scheme) || !strings.EqualFold(next.Host, base.Host) {
+		return "", fmt.Errorf("next-page URL points at %s://%s, not the configured %s://%s - not followed",
+			next.Scheme, next.Host, base.Scheme, base.Host)
+	}
+	return next.String(), nil
 }
 
 func (c *Client) doQualysGET(ctx context.Context, endpoint string) ([]byte, error) {
@@ -506,7 +646,9 @@ func (c *Client) doQualysGET(ctx context.Context, endpoint string) ([]byte, erro
 	return body, nil
 }
 
-func parseHostDetections(b []byte) (map[int]DetectionSummary, error) {
+// parseHostDetections reads Host List Detection responses - one per page -
+// into per-QID summaries. A host is counted once per QID across all pages.
+func parseHostDetections(bodies ...[]byte) (map[int]DetectionSummary, error) {
 	type detection struct {
 		QID      int    `xml:"QID"`
 		QDS      string `xml:"QDS"`
@@ -521,14 +663,18 @@ func parseHostDetections(b []byte) (map[int]DetectionSummary, error) {
 	type root struct {
 		Hosts []host `xml:"RESPONSE>HOST_LIST>HOST"`
 	}
-	var parsed root
-	if err := xml.Unmarshal(b, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to parse host detection XML: %w", err)
+	var hosts []host
+	for _, b := range bodies {
+		var parsed root
+		if err := xml.Unmarshal(b, &parsed); err != nil {
+			return nil, fmt.Errorf("failed to parse host detection XML: %w", err)
+		}
+		hosts = append(hosts, parsed.Hosts...)
 	}
 
 	out := map[int]DetectionSummary{}
 	seenHostPerQID := map[int]map[string]bool{}
-	for _, h := range parsed.Hosts {
+	for _, h := range hosts {
 		name := firstNonEmpty(h.DNS, h.NetBIOS, h.IP)
 		for _, d := range h.Detections {
 			if d.QID == 0 {
