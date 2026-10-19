@@ -1683,6 +1683,30 @@ class TestFileShape(unittest.TestCase):
     proves nothing about the gate.
     """
 
+    def test_every_script_is_executable_in_git(self):
+        """install-fedora.sh lost its executable bit in a commit on 2026-10-12
+        and `./fleet-kit/install-fedora.sh` stopped working - the box saw
+        "Permission denied" as the installer having gone. The installer copies
+        runners with -m 0755, so the box hid it for everything else."""
+        root = KIT.parent
+        try:
+            out = subprocess.run(["git", "-C", str(root), "ls-files", "-s"],
+                                 capture_output=True, text=True, timeout=30, check=True).stdout
+        except (OSError, subprocess.SubprocessError):
+            self.skipTest("not a git checkout")
+        bad = []
+        for line in out.splitlines():
+            meta, _, path = line.partition("\t")
+            mode = meta.split()[0]
+            f = root / path
+            try:
+                shebang = f.open("rb").read(2) == b"#!"
+            except OSError:
+                continue
+            if shebang and mode != "100755":
+                bad.append(path)
+        self.assertEqual(bad, [], "git update-index --chmod=+x these")
+
     def test_runners_expand_arrays_safely_on_macos_bash(self):
         """macOS ships bash 3.2, where an EMPTY "${A[@]}" is an unbound
         variable under set -u. run-patchtuesday's "${MONTH_ARG[@]}" passed on
