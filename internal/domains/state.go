@@ -46,6 +46,11 @@ type Snapshot struct {
 	DMARC string              `json:"dmarc,omitempty"`
 	Hosts map[string]HostSnap `json:"hosts,omitempty"`
 	Reg   *RegSnap            `json:"reg,omitempty"`
+	// Route is the mail route's state (Route.State) and RouteSince the date,
+	// YYYY-MM-DD, it was first seen in that state - so the report can say a
+	// domain has been off the gateway "for 6 weeks".
+	Route      string `json:"route,omitempty"`
+	RouteSince string `json:"routeSince,omitempty"`
 }
 
 // HostSnap is one probed host.
@@ -175,6 +180,21 @@ func Snap(now time.Time, results []Result, cmp *Comparison, regs []Registration,
 			}
 		} else {
 			sn.Reg = p.Reg
+		}
+		if r.RouteChecked {
+			switch st := r.Route.State(); {
+			case !r.Route.Known && had:
+				sn.Route, sn.RouteSince = p.Route, p.RouteSince // a failed lookup is not a move
+			case !r.Route.Known:
+			case had && p.Route == st && p.RouteSince != "":
+				sn.Route, sn.RouteSince = st, p.RouteSince
+			default:
+				sn.Route, sn.RouteSince = st, now.UTC().Format("2006-01-02")
+			}
+		} else if had {
+			// The check was off this run (no tenant could be settled): keep
+			// the clock, so next week does not restart at "first seen".
+			sn.Route, sn.RouteSince = p.Route, p.RouteSince
 		}
 		s.Domains[r.Entry.Name] = sn
 	}

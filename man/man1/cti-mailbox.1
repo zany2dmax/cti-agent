@@ -1,6 +1,6 @@
 .TH CTI-MAILBOX 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
 .SH NAME
-cti-mailbox \- daily tidy of the shared CTI mailbox: archive processed advisories, delete auto-replies, leave the rest
+cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lane has read, delete auto-replies, leave the rest
 .SH SYNOPSIS
 .B cti-mailbox
 .RB [ \-\-for\-real ]
@@ -9,6 +9,8 @@ cti-mailbox \- daily tidy of the shared CTI mailbox: archive processed advisorie
 .RB [ \-\-backlog\-threshold
 .IR N ]
 .RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-lookback
 .IR DURATION ]
 .PP
 .B sudo cti\-agent cti\-mailbox
@@ -29,21 +31,31 @@ explicitly.
 The plan is computed and printed in full, and the output says
 .BR "DRY RUN" .
 .PP
-Before looking at the mailbox it checks the processed-message log, which the
-digest writes as it reads mail. It refuses to act, and exits 0, when no
-message carrying a CVE was recorded as read today (in
-.BR FLEET_TIMEZONE );
-a day on which the agent read nothing is a day to leave the inbox alone.
-A missing log counts as empty. A log that does not parse, or no way to locate it (neither
+Before looking at the mailbox it loads the processed-message logs: the
+digest's, which it writes as it reads mail, and one per lane that owns mail of
+its own
+.RI ( state/processed\-appscan.json ,
+written by
+.B cti\-appscan \-\-commit\-seen
+after the application-security weekly is sent). A missing log counts as
+empty. A log that does not parse, or no way to locate the digest's (neither
 .B FLEET_HOME
 nor
 .BR FLEET_PROCESSED_LOG ),
 stops the run.
 .PP
+When no message carrying a CVE was recorded as read today (in
+.BR FLEET_TIMEZONE ),
+nothing is archived that day: the fleet may not be reading the mailbox.
+Automatic replies are still deleted, and the fleet's own reports still
+archived.
+.PP
 It then reads every message received in
 .B GRAPH_FOLDER
 within the last
 .B MAILBOX_LOOKBACK_HOURS
+(or
+.BR \-\-lookback )
 and decides each one by these rules, in this order:
 .TP
 .B 0. Sent by this fleet: archive
@@ -51,39 +63,48 @@ The message carries an
 .B X\-CTI\-Agent\-Sent
 header with a valid signature (an HMAC keyed from the app registration's
 client secret, which only this fleet holds). The sender address alone is not
-enough, and neither is an unsigned header: either can be set by anyone who
-can mail the inbox. Mail signed before a client secret rotation no longer
-verifies and is left for the operator. The fleet's own
-digests come back to the mailbox they are read from and are never recorded as
-processed, so this rule precedes rule 1 and is not subject to the archive
-grace.
+enough, and neither is an unsigned header. Mail signed before a client secret
+rotation no longer verifies and is left for the operator. Not subject to the
+archive grace.
 .TP
-.B 1. No processing record: leave
-Absolute. Nothing the agent has no record of reading is ever moved.
-.TP
-.B 2. Carried a CVE: archive, never delete
-But only once it has been in the mailbox for
-.BR MAILBOX_MIN_AGE_HOURS ;
-until then it is left, with the reason stated.
-.TP
-.B 3. Declared an automatic reply: Deleted Items
-Only on headers:
-.B Auto\-Submitted: auto\-replied
+.B 1. An automatic reply: Deleted Items, read or not
+Declared by its headers
+.RB ( "Auto\-Submitted: auto\-replied"
 or
 .BR auto\-notified ,
 or
 .B X\-Auto\-Response\-Suppress: All
-together with an
+with an
 .B Auto\-Submitted
 value containing
-.BR auto .
-Subject text is never used.
-.B auto\-generated
-mail (vendor advisories) is not an auto-reply. Not subject to the grace.
+.BR auto ),
+or by a subject that
+.B starts
+like an out-of-office:
+.BR "Automatic reply:" ,
+.BR "Auto-reply:" ,
+.B "Out of Office:"
+and their common variants (not
+.BR OOO: ,
+which people use for their own notices). Anyone can title a message that
+way, so a subject-only match is bounded twice: one no lane has read yet waits
+.B GRAPH_LOOKBACK_HOURS
+for the digest, and one the digest took a CVE from is archived instead.
+Header-declared replies go on sight. Not subject to the archive grace.
+.TP
+.B 2. No processing record: leave
+Nothing else that no lane has a record of reading is ever moved.
+.TP
+.B 3. Read by the lane that owns it: archive
+The digest owns what it took a CVE from; the application-security lane owns
+the Qualys WAS notifications its weekly reported on. Archived once the
+message has been in the mailbox for
+.BR MAILBOX_MIN_AGE_HOURS ;
+until then it is left, with the reason stated.
 .TP
 .B 4. Anything else: leave
-Read by the agent but carrying no CVE: a reported phish, an alert or a
-colleague's mail. Somebody else's job.
+Read, but no lane owns it: a reported phish, a Defender alert, a colleague's
+mail. Somebody else's job.
 .PP
 Every line of the plan states the action, the subject (sanitised and cut to
 60 characters, because subjects are attacker-controlled) and the reason.
@@ -153,6 +174,18 @@ Go duration
 .RB ( 90s ,
 .BR 5m ).
 Default:\~\fB2m0s\fR.
+.TP
+.BI \-\-lookback " DURATION"
+Look this far back for this run only, instead of
+.BR MAILBOX_LOOKBACK_HOURS ,
+for a one-off sweep such as
+.B \-\-lookback 720h
+to clear a month of old auto-replies. Archiving still needs a processing
+record, and records expire after 14 days, so a wider window mostly reaches
+auto-replies. Longer windows need a longer
+.BR \-\-timeout .
+Default:\~\fB0\fR (use
+.BR MAILBOX_LOOKBACK_HOURS ).
 .SH ENVIRONMENT
 Read from the process environment, after
 .I fleet.env
@@ -173,8 +206,10 @@ with 403 and the run exits 1.
 The folder read. Default:\~\fBinbox\fR.
 .TP
 .B MAILBOX_LOOKBACK_HOURS
-How far back to look, in whole hours. Must exceed the time between runs.
-Default:\~\fB72\fR.
+How far back to look, in whole hours. Must exceed the time between runs, and
+should cover the weekly lanes' windows plus the grace, or their mail falls
+out of view before it can be archived.
+Default:\~\fB336\fR (14 days, the processed log's retention; 72 before 1.3.2).
 .TP
 .B MAILBOX_MIN_AGE_HOURS
 How long a processed advisory stays in the inbox before it is archived.

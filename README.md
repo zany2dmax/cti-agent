@@ -122,8 +122,10 @@ lookup is reported as *not checked*, never as a missing record.
 scanner actually found in the estate — a deadline for something you do not have
 is noise.
 
-**A tidy mailbox.** Processed advisories to Archive, header-confirmed
-auto-replies to Deleted Items, and *everything else left exactly where it is.*
+**A tidy mailbox.** Mail the lane that owns it has read goes to Archive (CTI
+advisories after the digest, Qualys WAS scan notices after the AppSec weekly),
+automatic replies to Deleted Items, and *everything else is left exactly where
+it is.*
 
 **Noise when something breaks.** A failed unit emails the operator and posts to
 the message board, because the whole premise is that a quiet inbox means a
@@ -400,25 +402,15 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   where, on a separate read-only app registration. Probably unnecessary:
   outbound mail relays through Proofpoint on Demand, so the PoD Log API
   item below covers it for every domain already moved to PoD
-- Domains lane learns mail roles instead of reading them from `domains.txt`
-  (Proofpoint on Demand). Receive: an MX pointing at our PoD tenant's
-  `pphosted.com` hosts; an MX on `pphosted.com` with a *different* tenant ID
-  is its own finding. Send: SPF authorising PoD, confirmed by PoD's Log API
-  (read-only cluster token, WebSocket stream) showing outbound mail with
-  that header From, plus the DKIM selector it signed with - so a lock-down
-  ticket is never raised for a domain that actually sends. The same log also
-  shows inbound mail spoofing our domains and failing DMARC, which is the
-  evidence for `p=reject`. Keep aggregates only, never per-message data.
-  `domains.txt` keeps `saas` / `legacy` / `unknown` and overrides. Costs: a
-  WebSocket client (the module has no dependencies today) and confirming
-  the stream's back-fill window.
-  NOT YET ON PROOFPOINT, its own weekly section: during an acquisition a
-  domain's mail runs elsewhere until it is moved. Name the provider from
-  the MX and SPF hosts (Microsoft 365 direct, Google, another gateway, an
-  unknown host), say how many weeks it has been in that state from the
-  lane's baseline, and after the move flag what is left behind - an SPF
-  include or DKIM key still authorising the old provider. A domain off PoD
-  is also invisible to the Log API, so its send role stays "unconfirmed"
-  rather than "does not send"
+- Domains lane, the Proofpoint on Demand Log API half (the DNS half - not yet
+  on the gateway, other-tenant MX, leftovers - shipped in 1.3.2). Confirm a
+  domain really sends from outbound mail in PoD's log stream (read-only
+  cluster token, WebSocket) with that header From and the DKIM selector it
+  signed with, so a lock-down ticket is never raised for a domain that
+  sends; count inbound mail spoofing our domains and failing DMARC as the
+  evidence for `p=reject`. Aggregates only, never per-message data. Then
+  `domains.txt` needs only `saas` / `legacy` / `unknown`. Costs: a WebSocket
+  client (the module has no dependencies) and confirming the stream's
+  back-fill window
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane

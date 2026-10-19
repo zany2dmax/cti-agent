@@ -1,8 +1,9 @@
 // cti-mailbox tidies the shared CTI mailbox once a day.
 //
-// Processed advisories go to Archive. Out-of-office auto-replies go to Deleted
-// Items. Anything the agent has no record of reading is left exactly where it
-// is, and counted.
+// Mail a lane owns and has read goes to Archive: CTI advisories the digest
+// took a CVE from, Qualys WAS notifications the application-security weekly
+// reported on. Automatic replies go to Deleted Items, read or not. Anything
+// else is left exactly where it is, and counted.
 //
 //	cti-mailbox                 show what would happen, move nothing
 //	cti-mailbox --for-real      actually move
@@ -23,13 +24,12 @@
 // "Delete" means Deleted Items, which is recoverable, and emptying that folder
 // is a person's job.
 //
-// IT REFUSES TO RUN ON A DAY NOTHING WAS PROCESSED. The operator's rule is
+// IT ARCHIVES NOTHING ON A DAY NOTHING WAS PROCESSED. The operator's rule is
 // "only after a CTI email is processed". A day where the agent read nothing -
 // because it broke, because the mailbox went quiet, because a credential
-// expired - is a day where the safest thing to do with the inbox is nothing.
-// Exits 0 in that case: a working refusal is not a failure, and returning
-// non-zero would make systemd mark the unit failed and cti-alert email about
-// a lane that behaved correctly.
+// expired - is a day where nothing should be filed away. Automatic replies
+// are still deleted (since 1.3.2): that needs no fleet health, and skipping
+// whole days is how out-of-office replies piled up in the inbox.
 package main
 
 import (
@@ -64,6 +64,10 @@ func run() int {
 			"A growing backlog is what 'the agent stopped reading the mailbox' "+
 			"looks like from outside")
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall Graph timeout")
+	lookback := flag.Duration("lookback", 0,
+		"how far back to look this run, e.g. 720h for a one-off sweep of old "+
+			"auto-replies; 0 means MAILBOX_LOOKBACK_HOURS. Archiving still needs "+
+			"a processing record, and records expire after 14 days")
 	flag.Parse()
 
 	// fleet.env, for a run by hand. The cti-agent wrapper exports only the
@@ -103,13 +107,32 @@ func run() int {
 		return exitFailure
 	}
 
+	// The lanes that own mail of their own. Missing is normal (the lane has
+	// not run yet, or is not installed); corrupt is the same hard stop as the
+	// digest's log, for the same reason.
+	var owned []*mailbox.Log
+	for _, owner := range []string{mailbox.OwnerAppScan} {
+		p := mailbox.OwnerLogPath(owner)
+		ol, err := mailbox.NewStore(p).Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cti-mailbox: %s\n", safelog.Line(err.Error()))
+			fmt.Fprintf(os.Stderr, "cti-mailbox: refusing to act on a %s log that "+
+				"does not parse. Delete it; that lane's mail will simply not be "+
+				"archived until its next run rebuilds it.\n", owner)
+			return exitFailure
+		}
+		owned = append(owned, ol)
+	}
+
 	loc := timezone()
 	ok, todayCount := l.ProcessedToday(time.Now(), loc)
+	hold := ""
 	if !ok {
-		fmt.Printf("No CTI email has been processed today (%s). "+
-			"Nothing to clean up - leaving the mailbox alone.\n",
+		hold = "no CTI email has been processed today, so nothing is filed " +
+			"away - the fleet may not be reading the mailbox"
+		fmt.Printf("No CTI email has been processed today (%s): archiving "+
+			"nothing, deleting automatic replies only.\n",
 			time.Now().In(loc).Format("2006-01-02"))
-		return exitOK
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
@@ -123,9 +146,20 @@ func run() int {
 	// run it has already fallen out of a 24h window - so it is never archived,
 	// ever. The lane looked like it "sometimes missed some".
 	//
-	// MAILBOX_LOOKBACK_HOURS defaults to 72: two missed runs of slack.
+	// MAILBOX_LOOKBACK_HOURS defaults to 336 (14 days, the processed log's
+	// retention) since 1.3.2, so a weekly lane's mail is still in view.
 	now := time.Now()
-	since := now.Add(-cfg.MailboxLookback)
+	window := cfg.MailboxLookback
+	if *lookback != 0 {
+		// Validated: auto-reply deletion needs no processing record, so a
+		// typo'd window (168000h) would sweep years of mailbox.
+		if err := config.ValidateLookback(*lookback); err != nil {
+			fmt.Fprintf(os.Stderr, "cti-mailbox: --lookback: %s\n", safelog.Line(err.Error()))
+			return exitFailure
+		}
+		window = *lookback
+	}
+	since := now.Add(-window)
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
 	msgs, err := g.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
 	if err != nil {
@@ -145,14 +179,16 @@ func run() int {
 			SelfSent: m.SelfVerified,
 		})
 	}
-	plan := mailbox.Plan(candidates, l.Index(), now, cfg.MailboxMinAge)
+	plan := mailbox.PlanWith(candidates, mailbox.Merge(now, l.Index(), owned...),
+		mailbox.Options{Now: now, MinAge: cfg.MailboxMinAge, HoldArchive: hold,
+			SubjectGrace: cfg.GraphLookback})
 	counts := mailbox.Summarise(plan)
 
 	// State the window and the grace. "Why was that not archived?" should be
 	// answerable from the output rather than from fleet.env, and the answer
 	// is almost always one of these two numbers.
 	fmt.Printf("  window %s, archive grace %s\n",
-		cfg.MailboxLookback, cfg.MailboxMinAge)
+		window, cfg.MailboxMinAge)
 	fmt.Printf("%s: %d message(s) in the window; %d CTI email(s) processed today\n",
 		cfg.GraphMailbox, len(candidates), todayCount)
 	// The leave count is split, because its two halves mean opposite things:

@@ -88,6 +88,34 @@ section that answers "which domains have a live site" directly, one group
 each for: live website (final host, status, page title), redirects to
 another domain, registrar-hosted, parked or for sale, DNS but no working
 page, no website, and not checked. The lead says the same in one sentence.
+.PP
+When any domain's MX is on Proofpoint on Demand (or
+.B PROOFPOINT_POD_TENANT
+is set), a
+.B "PROOFPOINT ON DEMAND"
+section follows, from MX and SPF alone:
+.RS
+.IP \(bu 2
+.B Not yet on the gateway
+(Medium): mail received by another system, named from its MX host -
+Microsoft 365 directly, Google Workspace, Mimecast, another gateway, or an
+unrecognised host - with how many weeks it has been that way, from the state
+file. Usually an acquisition not yet moved.
+.IP \(bu 2
+.B Another organisation's tenant
+(High): MX on pphosted.com with a tenant id that is not ours.
+.IP \(bu 2
+.B Send route unconfirmed
+(Medium): a domain marked
+.B send
+whose SPF does not authorise Proofpoint, so its outbound mail does not go
+through the gateway. Never reported as "does not send": DNS cannot tell.
+.IP \(bu 2
+.B Leftovers
+(Medium): on the gateway, but SPF still authorises another mailbox provider,
+or a Google Workspace DKIM key is still published. SaaS senders in SPF and
+Microsoft 365's selector1/selector2 keys are expected and not reported.
+.RE
 .TP
 .B TLS
 The certificate is fetched and verified separately from whether a page
@@ -287,6 +315,11 @@ internal zone without SPF or DMARC.
 .B system
 uses this host's resolver. The web and SMTP probes connect to the addresses
 these servers return.
+.TP
+.B PROOFPOINT_POD_TENANT
+Our Proofpoint on Demand tenant id. Empty: the most common tenant in the
+inventory's MX records; with no domain on pphosted.com the gateway section
+is off.
 .TP
 .B DOMAINS_DKIM_SELECTORS
 DKIM selectors to probe, comma- or space-separated. Empty: selector1,

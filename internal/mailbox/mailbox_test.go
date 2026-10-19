@@ -15,13 +15,11 @@ func at(h int) time.Time {
 // ---------------------------------------------------------------- the gate
 
 func TestNothingIsTouchedWithoutAProcessingRecord(t *testing.T) {
-	// The operator's rule, and the only one that cannot be overridden by any
-	// other: "make sure a given email has been processed before deleting it".
-	//
-	// Every candidate here looks deletable - one is a textbook auto-reply -
-	// and none of them may move, because nothing recorded reading them.
+	// "Make sure a given email has been processed" - for everything except
+	// an automatic reply, which since 1.3.2 goes to Deleted Items on sight
+	// (its own test below). None of these may move.
 	cands := []Candidate{
-		{ID: "unread-1", Subject: "Automatic reply: Out of Office", AutoReply: true},
+		{ID: "unread-1", Subject: "Re: Out of Office plans for December"},
 		{ID: "unread-2", Subject: "Daily CTI digest"},
 		{ID: "unread-3", Subject: "anything at all"},
 	}
@@ -35,48 +33,111 @@ func TestNothingIsTouchedWithoutAProcessingRecord(t *testing.T) {
 	}
 }
 
-func TestACVEBearingMessageIsArchivedNeverDeleted(t *testing.T) {
-	// Precedence test. A message that contributed a finding is evidence. If it
-	// also carries auto-reply headers - an out-of-office that quoted an
-	// advisory back, which happens - archiving is the wrong-but-recoverable
-	// outcome and deleting is the loss.
-	proc := map[string]Processed{
-		"m1": {ID: "m1", HasCVE: true, AutoReply: true},
-	}
-	got := planNoGrace([]Candidate{{ID: "m1", Subject: "Automatic reply: re CVE-2026-1", AutoReply: true}}, proc)
-	if got[0].Action != ActionArchive {
-		t.Errorf("action = %s, want archive: a CVE outranks an auto-reply header", got[0].Action)
+// The operator's rule (1.3.2): automatic replies always go to Deleted Items.
+// Below the processed rule they only went when the digest happened to have
+// recorded them, and the inbox kept every out-of-office that arrived after
+// the morning read.
+func TestAutoRepliesAreDeletedEvenUnread(t *testing.T) {
+	plan := planNoGrace([]Candidate{
+		{ID: "hdr", Subject: "Re: your report", AutoReply: true},
+		{ID: "subj", Subject: "Automatic reply: Out of Office"},
+	}, map[string]Processed{})
+	for _, d := range plan {
+		if d.Action != ActionDelete {
+			t.Errorf("%s: %s, want delete", d.ID, d.Action)
+		}
+		if d.Known {
+			t.Errorf("%s: an unread auto-reply must not be counted as read", d.ID)
+		}
 	}
 }
 
-func TestOnlyHeaderConfirmedAutoRepliesAreDeleted(t *testing.T) {
-	proc := map[string]Processed{
-		"ooo":     {ID: "ooo", AutoReply: true},
-		"subject": {ID: "subject", AutoReply: false},
+func TestAnUnreadSubjectOnlyMatchWaitsForTheDigest(t *testing.T) {
+	// A real advisory titled "Automatic reply: ..." arriving at 06:50 must not
+	// be deleted at 07:00 before the digest has read it - the CVE exception
+	// only protects a message with a record.
+	now := at(7)
+	opt := Options{Now: now, SubjectGrace: 24 * time.Hour}
+	got := PlanWith([]Candidate{
+		{ID: "fresh", Subject: "Automatic reply: CVE-2026-1 advisory", Received: now.Add(-10 * time.Minute)},
+		{ID: "old", Subject: "Automatic reply: away", Received: now.Add(-25 * time.Hour)},
+		{ID: "hdr", Subject: "Re: x", AutoReply: true, Received: now.Add(-time.Minute)},
+	}, map[string]Processed{}, opt)
+	by := map[string]Action{}
+	for _, d := range got {
+		by[d.ID] = d.Action
 	}
-	plan := planNoGrace([]Candidate{
-		{ID: "ooo", Subject: "Automatic reply: Out of Office", AutoReply: true},
-		// Looks exactly like an auto-reply and is not one, as far as the
-		// headers are concerned. Subject text does not delete mail.
-		{ID: "subject", Subject: "Automatic reply: Out of Office"},
-	}, proc)
+	if by["fresh"] != ActionLeave {
+		t.Errorf("fresh subject-only match: %s, want leave until the digest reads it", by["fresh"])
+	}
+	if by["old"] != ActionDelete {
+		t.Errorf("subject-only match older than the grace: %s, want delete", by["old"])
+	}
+	if by["hdr"] != ActionDelete {
+		t.Errorf("header-declared auto-reply is never held: %s", by["hdr"])
+	}
+}
+
+func TestAutoReplySubjectsAreMatchedAtTheStartOnly(t *testing.T) {
+	for _, s := range []string{
+		"Automatic reply: Out of Office", "  automatic REPLY: x",
+		"Out of Office: back Monday", "Autoreply: away",
+		"Automatische Antwort: abwesend",
+	} {
+		if !AutoReplySubject(s) {
+			t.Errorf("%q should match", s)
+		}
+	}
+	for _, s := range []string{
+		"Re: Automatic reply: Out of Office", "FW: Out of Office: x",
+		"Out of office plans", "CVE-2026-1 automatic reply bypass", "",
+		"OOO: Friday", // a colleague's own notice, written by a person
+	} {
+		if AutoReplySubject(s) {
+			t.Errorf("%q must not match - a prefix, not a substring", s)
+		}
+	}
+}
+
+func TestACVEBearingMessageIsArchivedNeverDeleted(t *testing.T) {
+	// A SUBJECT-only auto-reply match the digest took a CVE from is archived:
+	// anyone can title a message "Automatic reply:", and a real advisory under
+	// that subject is evidence. A message whose HEADERS declare it an
+	// auto-reply is deleted whatever it quoted - the operator's "always".
+	proc := map[string]Processed{
+		"subj": {ID: "subj", HasCVE: true},
+		"hdr":  {ID: "hdr", HasCVE: true, AutoReply: true},
+	}
 	byID := map[string]Decision{}
-	for _, d := range plan {
+	for _, d := range planNoGrace([]Candidate{
+		{ID: "subj", Subject: "Automatic reply: re CVE-2026-1"},
+		{ID: "hdr", Subject: "Automatic reply: re CVE-2026-1", AutoReply: true},
+	}, proc) {
 		byID[d.ID] = d
 	}
-	if byID["ooo"].Action != ActionDelete {
-		t.Errorf("header-confirmed auto-reply: %s", byID["ooo"].Action)
+	if byID["subj"].Action != ActionArchive {
+		t.Errorf("subject-only + CVE: %s, want archive", byID["subj"].Action)
 	}
-	// The point of this case is that subject text does not delete mail. It is
-	// now left rather than archived, but the property under test is the same:
-	// anything short of a header saying "automatic reply" must not be deleted.
-	if byID["subject"].Action == ActionDelete {
-		t.Errorf("subject-only match must not be deleted: %s",
-			byID["subject"].Action)
+	if byID["hdr"].Action != ActionDelete {
+		t.Errorf("header-declared auto-reply: %s, want delete", byID["hdr"].Action)
 	}
-	if byID["subject"].Action != ActionLeave {
-		t.Errorf("a processed non-CVE message should be left alone: %s",
-			byID["subject"].Action)
+}
+
+func TestHeaderAndSubjectAutoRepliesAreBothDeleted(t *testing.T) {
+	proc := map[string]Processed{
+		"ooo":     {ID: "ooo", AutoReply: true},
+		"subject": {ID: "subject"},
+	}
+	for _, d := range planNoGrace([]Candidate{
+		{ID: "ooo", Subject: "Re: hello", AutoReply: true},
+		{ID: "subject", Subject: "Automatic reply: Out of Office"},
+	}, proc) {
+		if d.Action != ActionDelete {
+			t.Errorf("%s: %s, want delete", d.ID, d.Action)
+		}
+		if !d.Known {
+			t.Errorf("%s: it was read, so it is Known", d.ID)
+		}
 	}
 }
 
@@ -372,9 +433,10 @@ func TestEveryDecisionCarriesAReason(t *testing.T) {
 // by a bot is institutional memory removed from the people who need it, and
 // nobody is watching when this lane runs.
 //
-// So exactly two kinds of message may ever move: a CTI advisory the agent
-// actually took a CVE from, and a message whose own headers declare it an
-// automatic reply. Everything else stays where a human can see it. This table
+// So only three kinds of message may ever move: mail a lane OWNS and has read
+// (a CTI advisory the digest took a CVE from, a Qualys WAS notification the
+// application-security weekly reported on), and an automatic reply. Everything
+// else stays where a human can see it. This table
 // is the regression test for that, and it is written from the real subjects in
 // the first production dry run - three of which this lane proposed to archive.
 func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
@@ -395,6 +457,9 @@ func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
 		{"Automatic reply: CR Cyber Security Team - Important!",
 			Processed{}, true, ActionDelete,
 			"header-confirmed auto-reply"},
+		{"Qualys: Scheduled Web Application Vulnerability Scan Notification",
+			Processed{Owner: OwnerAppScan}, false, ActionArchive,
+			"a scan notice the appscan weekly reported on - its owner has seen it"},
 
 		// Everything a shared security mailbox actually receives. Every one of
 		// these was archived by the first version of this rule.
@@ -405,7 +470,8 @@ func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
 		{"Microsoft Defender for Cloud found potential attack path",
 			Processed{}, false, ActionLeave, "an alert somebody has to action"},
 		{"Qualys: Scheduled Web Application Vulnerability Scan Notification",
-			Processed{}, false, ActionLeave, "scanner operations mail"},
+			Processed{}, false, ActionLeave,
+			"the same notice before its owner has read it - the digest seeing it is not enough"},
 		{"pathway missing again", Processed{}, false, ActionLeave,
 			"a person writing to the team"},
 		{"Please add the new starter to the security distribution list",
@@ -428,87 +494,160 @@ func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
 	}
 }
 
-// The decision must not depend on the subject line at all. Reading intent out
-// of subject text is how a lane starts deleting a genuine advisory titled
-// "Automatic reply: ..." or archiving a phishing report because it looks like
-// a newsletter.
-func TestTheSubjectLineHasNoInfluenceOnTheDecision(t *testing.T) {
+// The subject line influences exactly one thing: a subject that STARTS like an
+// out-of-office. Anything else in it - urgency, a CVE number, "newsletter" -
+// changes nothing; reading intent out of subject text is how a lane starts
+// archiving a phishing report because it looks like a newsletter.
+func TestTheSubjectLineOnlyMattersAsAnAutoReplyPrefix(t *testing.T) {
 	subjects := []string{
-		"", "newsletter", "Automatic reply: out of office",
+		"", "newsletter", "Re: Automatic reply: out of office",
 		"URGENT ACTION REQUIRED", "CVE-2026-1111 in Windows NTFS",
 		"re: re: re: fw:", "suspicious",
 	}
 	for _, s := range subjects {
-		// Same record every time: read, no CVE, no auto-reply header.
+		// Same record every time: read, no CVE, no owner, no header.
 		plan := planNoGrace([]Candidate{{ID: "x", Subject: s}},
 			map[string]Processed{"x": {ID: "x"}})
 		if plan[0].Action != ActionLeave {
-			t.Errorf("subject %q changed the action to %s; only the "+
-				"processed-message record and the headers may decide",
-				s, plan[0].Action)
+			t.Errorf("subject %q changed the action to %s", s, plan[0].Action)
 		}
 	}
-	// And a CVE-bearing message is archived even when its subject looks like
-	// an out-of-office reply.
 	plan := planNoGrace([]Candidate{{ID: "y", Subject: "Automatic reply: out of office"}},
 		map[string]Processed{"y": {ID: "y", HasCVE: true}})
 	if plan[0].Action != ActionArchive {
-		t.Errorf("a CVE-bearing message must be archived, not %s - deleting a "+
-			"genuine advisory is a loss, archiving an auto-reply is untidy",
+		t.Errorf("a CVE-bearing message with an auto-reply subject must be "+
+			"archived, not %s - deleting a genuine advisory is a loss",
 			plan[0].Action)
 	}
 }
 
-// Every input combination, enumerated. Plan has four rules whose ORDER carries
-// the safety properties, and a truth table is the only way a future edit to
-// that order shows up as a test failure rather than as mail going missing.
+// Every input combination, enumerated. The ORDER of Plan's rules carries the
+// safety properties, and a truth table is the only way a future edit to that
+// order shows up as a test failure rather than as mail going missing.
 func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
-	cases := []struct {
-		haveRecord bool
-		hasCVE     bool
-		recAuto    bool
-		hdrAuto    bool
-		want       Action
-		why        string
-	}{
-		// No record: leave, absolutely, whatever anything else says.
-		{false, false, false, false, ActionLeave, "never read"},
-		{false, false, false, true, ActionLeave,
-			"never read, and an auto-reply header cannot override that"},
-
-		// Carries a CVE: archive, whatever else it looks like.
-		{true, true, false, false, ActionArchive, "advisory"},
-		{true, true, false, true, ActionArchive,
-			"advisory whose headers also say auto-reply - archive wins over delete"},
-		{true, true, true, false, ActionArchive, "same, recorded as an auto-reply"},
-		{true, true, true, true, ActionArchive, "same, both flags set"},
-
-		// No CVE, declared an auto-reply: delete.
-		{true, false, true, false, ActionDelete, "recorded as an auto-reply"},
-		{true, false, false, true, ActionDelete, "header says auto-reply"},
-		{true, false, true, true, ActionDelete, "both say auto-reply"},
-
-		// Read, no CVE, not an auto-reply: leave. The case that was archive.
-		{true, false, false, false, ActionLeave, "read, and not this lane's mail"},
+	type in struct {
+		record, cve, recAuto, hdrAuto, subjAuto bool
+		owner                                   string
 	}
+	cases := []struct {
+		in   in
+		want Action
+		why  string
+	}{
+		// Auto-replies first, read or not.
+		{in{hdrAuto: true}, ActionDelete, "unread, header says auto-reply"},
+		{in{subjAuto: true}, ActionDelete, "unread, subject says auto-reply"},
+		{in{record: true, recAuto: true}, ActionDelete, "recorded as an auto-reply"},
+		{in{record: true, cve: true, hdrAuto: true}, ActionDelete,
+			"headers outrank a quoted CVE"},
+		{in{record: true, cve: true, subjAuto: true}, ActionArchive,
+			"subject only, with a CVE: evidence, archived"},
+		{in{record: true, owner: OwnerAppScan, subjAuto: true}, ActionDelete,
+			"subject auto-reply with no CVE, owner or not"},
 
+		// Not an auto-reply, never read: leave, whatever else.
+		{in{}, ActionLeave, "never read"},
+
+		// Read by its owner: archive.
+		{in{record: true, cve: true}, ActionArchive, "digest-owned advisory"},
+		{in{record: true, owner: OwnerAppScan}, ActionArchive, "appscan-owned notice"},
+		{in{record: true, cve: true, owner: OwnerAppScan}, ActionArchive, "both"},
+
+		// Read, no owner: leave.
+		{in{record: true}, ActionLeave, "read, and no lane owns it"},
+	}
 	for _, c := range cases {
 		proc := map[string]Processed{}
-		if c.haveRecord {
-			proc["id"] = Processed{ID: "id", HasCVE: c.hasCVE, AutoReply: c.recAuto}
+		if c.in.record {
+			proc["id"] = Processed{ID: "id", HasCVE: c.in.cve,
+				AutoReply: c.in.recAuto, Owner: c.in.owner}
 		}
-		plan := planNoGrace([]Candidate{{ID: "id", AutoReply: c.hdrAuto}}, proc)
+		subject := "Weekly notes"
+		if c.in.subjAuto {
+			subject = "Automatic reply: away"
+		}
+		plan := planNoGrace([]Candidate{{ID: "id", Subject: subject,
+			AutoReply: c.in.hdrAuto}}, proc)
 		if plan[0].Action != c.want {
-			t.Errorf("record=%v cve=%v recAuto=%v hdrAuto=%v -> %s, want %s (%s)",
-				c.haveRecord, c.hasCVE, c.recAuto, c.hdrAuto,
-				plan[0].Action, c.want, c.why)
+			t.Errorf("%+v -> %s, want %s (%s)", c.in, plan[0].Action, c.want, c.why)
 		}
-		if plan[0].Known != c.haveRecord {
-			t.Errorf("record=%v -> Known=%v", c.haveRecord, plan[0].Known)
+		if plan[0].Known != c.in.record {
+			t.Errorf("%+v -> Known=%v", c.in, plan[0].Known)
 		}
 		if plan[0].Reason == "" {
-			t.Error("every decision needs a reason; this lane has to be " +
-				"explainable from the log alone")
+			t.Error("every decision needs a reason")
+		}
+	}
+}
+
+// On a day no CTI email was processed nothing is filed away - but
+// auto-replies still go, which needs no fleet health at all.
+func TestAHeldDayStillDeletesAutoRepliesButArchivesNothing(t *testing.T) {
+	now := at(9)
+	plan := PlanWith([]Candidate{
+		{ID: "adv", Received: now.Add(-72 * time.Hour)},
+		{ID: "ooo", Subject: "Automatic reply: away", Received: now},
+		{ID: "own", SelfSent: true, Received: now},
+	}, map[string]Processed{"adv": {ID: "adv", HasCVE: true}},
+		Options{Now: now, HoldArchive: "no CTI email processed today"})
+	byID := map[string]Decision{}
+	for _, d := range plan {
+		byID[d.ID] = d
+	}
+	if byID["adv"].Action != ActionLeave || !strings.Contains(byID["adv"].Reason, "no CTI email") {
+		t.Errorf("held advisory: %s %q", byID["adv"].Action, byID["adv"].Reason)
+	}
+	if byID["ooo"].Action != ActionDelete {
+		t.Errorf("auto-reply on a held day: %s", byID["ooo"].Action)
+	}
+	if byID["own"].Action != ActionArchive {
+		t.Errorf("our own report on a held day: %s", byID["own"].Action)
+	}
+}
+
+func TestMergeGivesOwnerLanesTheirMail(t *testing.T) {
+	digest := map[string]Processed{
+		"both": {ID: "both", AutoReply: false},
+		"cve":  {ID: "cve", HasCVE: true},
+	}
+	appscan := &Log{Entries: []Processed{
+		{ID: "both", Owner: OwnerAppScan, ReadAt: at(6)},
+		{ID: "only", Owner: OwnerAppScan, ReadAt: at(6)},
+		{ID: "noowner", ReadAt: at(6)}, // claims nothing
+		{ID: "expired", Owner: OwnerAppScan, ReadAt: at(6).Add(-15 * 24 * time.Hour)},
+	}}
+	m := Merge(at(9), digest, appscan, nil)
+	if m["both"].Owner != OwnerAppScan || m["only"].Owner != OwnerAppScan {
+		t.Errorf("owner not merged: %+v", m)
+	}
+	if _, ok := m["noowner"]; ok {
+		t.Error("an owner-log entry without an owner was treated as a record")
+	}
+	if _, ok := m["expired"]; ok {
+		t.Error("an expired owner record still carries authority to move mail")
+	}
+	if !m["cve"].HasCVE || len(digest) != 2 {
+		t.Error("the digest's index was changed or lost")
+	}
+}
+
+func TestOwnerLogPath(t *testing.T) {
+	t.Setenv("FLEET_PROCESSED_LOG", "")
+	t.Setenv("FLEET_HOME", "")
+	if OwnerLogPath(OwnerAppScan) != "" {
+		t.Error("no FLEET_HOME must mean no path")
+	}
+	t.Setenv("FLEET_HOME", "/var/lib/cti-agent")
+	if got := OwnerLogPath(OwnerAppScan); got != "/var/lib/cti-agent/state/processed-appscan.json" {
+		t.Errorf("path = %q", got)
+	}
+	t.Setenv("FLEET_PROCESSED_LOG", "/tmp/dev/processed.json")
+	if got := OwnerLogPath(OwnerAppScan); got != "/tmp/dev/processed-appscan.json" {
+		t.Errorf("an overridden digest log must take the lane logs with it: %q", got)
+	}
+	for _, bad := range []string{"", "../x", "a/b", "a.b"} {
+		if OwnerLogPath(bad) != "" {
+			t.Errorf("owner %q must not produce a path", bad)
 		}
 	}
 }

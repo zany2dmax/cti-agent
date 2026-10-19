@@ -143,7 +143,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		return Config{}, fmt.Errorf("QUALYS_KB_MAX_AGE_HOURS must be a positive integer")
 	}
 
-	mailboxLookbackHours, err := strconv.Atoi(getenvDefault("MAILBOX_LOOKBACK_HOURS", "72"))
+	mailboxLookbackHours, err := strconv.Atoi(getenvDefault("MAILBOX_LOOKBACK_HOURS", "336"))
 	if err != nil || mailboxLookbackHours <= 0 {
 		return Config{}, fmt.Errorf("MAILBOX_LOOKBACK_HOURS must be a positive integer")
 	}

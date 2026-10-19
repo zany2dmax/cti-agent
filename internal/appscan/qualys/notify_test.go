@@ -57,6 +57,27 @@ const deepScan = `
 <div>If you wish to view these scan results, click here : <a href="https://urldefense.com/v3/__https://qualysguard.qg3.apps.qualys.com/was/*/reports/online-reports/email-report/scan/25080022__;Iw!!A!B$">link</a></div>
 `
 
+func TestRecognisesChecksTheAddressNotTheDisplayName(t *testing.T) {
+	p := Provider{}
+	subj := "Qualys: Web Application Vulnerability Scan Results - X Run #1"
+	for _, ok := range []string{"qualys@qualys.net", "Qualys <noreply@qualys.com>",
+		"Qualys <noreply@notify.qualys.com>"} {
+		if !p.Recognises(ok, subj) {
+			t.Errorf("%q should be recognised", ok)
+		}
+	}
+	for _, bad := range []string{
+		"noreply@qualys.com <evil@attacker.example>",
+		"Qualys <noreply@qualys.com.attacker.example>",
+		"Qualys <x@notqualys.com>",
+		"evil@attacker.example",
+	} {
+		if p.Recognises(bad, subj) {
+			t.Errorf("%q must not be recognised - a recognised notice is archived", bad)
+		}
+	}
+}
+
 func TestRecognisesOnlyQualysNotifications(t *testing.T) {
 	var p Provider
 	if !p.Recognises("qualys@qualys.net", "Qualys: Web Application Vulnerability Scan Results - X Run #1") {
