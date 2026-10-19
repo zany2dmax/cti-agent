@@ -12,6 +12,11 @@ cti-appscan \- weekly application-security report from the web-application scan 
 .IR FILE ]
 .RB [ \-\-auth\-fail\-out
 .IR FILE ]
+.RB [ \-\-seen\-out
+.IR FILE ]
+.PP
+.B cti-appscan
+.BI \-\-commit\-seen " FILE"
 .PP
 .B cti-appscan
 .RB [ \-\-since
@@ -141,6 +146,32 @@ run, empty when nothing failed, so that an empty file ("checked, none
 failed") can be told from an absent one ("not checked"). A failure to write
 it is a warning, not a failed run.
 Default:\~empty (not written).
+.TP
+.BI \-\-seen\-out " FILE"
+Write the scan notifications this report covered (message IDs, subjects,
+received times) to
+.IR FILE ,
+mode 0600, for
+.B \-\-commit\-seen
+once the report has been sent. Not written with
+.BR \-\-subject\-only .
+Default:\~empty (not written).
+.TP
+.BI \-\-commit\-seen " FILE"
+Record a
+.B \-\-seen\-out
+file in
+.IR $FLEET_HOME/state/processed\-appscan.json ,
+which
+.BR cti\-mailbox (1)
+reads to archive the notifications this lane owns, then exit. Nothing else
+runs and no Graph credentials are needed.
+.BR run\-appscan (1)
+calls it only after a real send, never on a dry run or a
+.B \-\-to\-dev
+test. Needs
+.BR FLEET_HOME .
+Default:\~empty.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from

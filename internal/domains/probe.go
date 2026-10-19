@@ -17,6 +17,11 @@ type Result struct {
 	NS   Lookup
 	Web  []Web // the name, then www.<name> for an apex entry
 	Mail Mail
+	// Route is how the domain's mail flows relative to the Proofpoint on
+	// Demand gateway; RouteChecked is false when that check is off (no
+	// domain on PoD). Filled by AssignRoutes after probing.
+	Route        Route
+	RouteChecked bool
 }
 
 // Live reports whether any probed host answered.

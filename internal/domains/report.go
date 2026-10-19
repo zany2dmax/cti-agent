@@ -78,10 +78,39 @@ func bySev(f []Finding, s Severity) []Finding {
 }
 
 // withoutInventory drops the inventory findings, which have their own section.
+func proofpointFindings(f []Finding) []Finding {
+	var out []Finding
+	for _, x := range f {
+		if x.Area == "proofpoint" {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// proofpointTitle heads the gateway section: acquisitions whose mail has not
+// been moved yet, and what is left behind after one has.
+const proofpointTitle = "PROOFPOINT ON DEMAND - NOT YET ON THE GATEWAY, AND LEFTOVERS"
+
+func (r Report) proofpointText(b *strings.Builder) {
+	pf := proofpointFindings(r.Findings)
+	if len(pf) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n%s (%d)\n%s\n", proofpointTitle, len(pf), strings.Repeat("-", len(proofpointTitle)+5))
+	for _, g := range grouped(pf) {
+		fmt.Fprintf(b, "  %s\n", g.domain)
+		for _, x := range g.items {
+			fmt.Fprintf(b, "    - [%s] %s\n", x.Sev.String(), x.Text)
+		}
+	}
+}
+
 func withoutInventory(f []Finding) []Finding {
 	var out []Finding
 	for _, x := range f {
-		if x.Area != "inventory" {
+		// Both have sections of their own near the top.
+		if x.Area != "inventory" && x.Area != "proofpoint" {
 			out = append(out, x)
 		}
 	}
@@ -404,6 +433,7 @@ func (r Report) text() string {
 	// first built to answer.
 	r.inventoryText(&b)
 	r.websitesText(&b)
+	r.proofpointText(&b)
 
 	section := func(title string, f []Finding, tagSev bool) {
 		if len(f) == 0 {
@@ -570,6 +600,9 @@ func (r Report) html() string {
 	}
 	r.inventoryHTML(&b)
 	r.websitesHTML(&b)
+	if pf := proofpointFindings(r.Findings); len(pf) > 0 {
+		cards(proofpointTitle, "#6b46c1", "#f5f0ff", pf, true)
+	}
 	cards("NEEDS ACTION", "#b3001b", "#fdecee", r.high(), false)
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
 	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)

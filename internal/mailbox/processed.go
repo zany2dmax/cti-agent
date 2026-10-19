@@ -53,6 +53,13 @@ type Processed struct {
 	// disagree about what a message is.
 	AutoReply bool      `json:"auto_reply"`
 	ReadAt    time.Time `json:"read_at"`
+
+	// Owner names the lane responsible for this message, when that is not
+	// the digest. Only a lane's OWN log sets it, and only for mail it
+	// recognised as its input and then reported on - cti-appscan writes
+	// "appscan" for the Qualys WAS notifications its weekly covered. Empty
+	// on the digest's entries, whose ownership is HasCVE.
+	Owner string `json:"owner,omitempty"`
 }
 
 // Log is the on-disk record.
@@ -93,6 +100,68 @@ func LogPath() string {
 		return ""
 	}
 	return filepath.Join(home, "state", "processed-messages.json")
+}
+
+// OwnerAppScan is the application-security lane's name in Processed.Owner.
+const OwnerAppScan = "appscan"
+
+// OwnerLogPath is where a lane other than the digest records the mail it
+// owns: $FLEET_HOME/state/processed-<owner>.json, "" without FLEET_HOME.
+//
+// A file per lane, not one shared file. The digest and the weekly lanes are
+// separate processes on separate timers, and two writers doing
+// load-modify-rename on one file lose each other's entries on a collision -
+// silently, as a message that is simply never archived.
+//
+// Beside FLEET_PROCESSED_LOG when that override is set, so a test or
+// development run that redirects the digest's log is not paired with the
+// production lane logs.
+func OwnerLogPath(owner string) string {
+	if strings.ContainsAny(owner, `/\.`) || owner == "" {
+		return ""
+	}
+	name := "processed-" + owner + ".json"
+	if p := strings.TrimSpace(os.Getenv("FLEET_PROCESSED_LOG")); p != "" {
+		return filepath.Join(filepath.Dir(p), name)
+	}
+	home := strings.TrimSpace(os.Getenv("FLEET_HOME"))
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "state", name)
+}
+
+// Merge combines the digest's index with owner lanes' entries. A message in
+// both keeps the digest's view (CVE, auto-reply) and gains the owner; a
+// message only an owner lane read is added with that owner.
+//
+// Owner entries older than DefaultRetain before now are dropped: an owner
+// log is pruned only when its lane next writes, which for a weekly lane can
+// be a week late, and an expired record must not carry authority to move
+// mail meanwhile.
+func Merge(now time.Time, digest map[string]Processed, owned ...*Log) map[string]Processed {
+	cutoff := now.Add(-DefaultRetain)
+	out := make(map[string]Processed, len(digest))
+	for id, e := range digest {
+		out[id] = e
+	}
+	for _, l := range owned {
+		if l == nil {
+			continue
+		}
+		for _, e := range l.Entries {
+			if strings.TrimSpace(e.Owner) == "" || !e.ReadAt.After(cutoff) {
+				continue // claims nothing: no owner, or the record has expired
+			}
+			if cur, ok := out[e.ID]; ok {
+				cur.Owner = e.Owner
+				out[e.ID] = cur
+				continue
+			}
+			out[e.ID] = e
+		}
+	}
+	return out
 }
 
 func NewStore(path string) *Store {

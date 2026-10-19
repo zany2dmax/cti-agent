@@ -3,6 +3,7 @@ package mailbox
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -65,102 +66,147 @@ type Decision struct {
 //
 // THE RULES, IN THIS ORDER, AND THE ORDER MATTERS
 //
-//  0. Sent by this fleet -> archive. The one rule that precedes rule 1, and
-//     only because our own reports can never satisfy it: the digest skips its
-//     own mail before recording anything, so they never get a processed-log
-//     entry and rule 1 would leave them in the inbox forever.
-//  1. No record of the agent having read it -> leave. Absolute. This is the
-//     operator's "make sure a given email has been processed" rule, and it is
-//     checked first so that no later rule can override it.
-//  2. Carries a CVE -> archive, never delete. A message that contributed a
-//     finding is evidence; it goes to Archive whatever else it looks like.
-//  3. Declared an auto-reply by its own headers -> Deleted Items.
+//  0. Sent by this fleet -> archive. Our own reports are never processed (the
+//     digest skips them), so no later rule could ever move them.
+//  1. An automatic reply -> Deleted Items, read or not. Declared by its own
+//     headers, or - since 1.3.2 - by a subject that starts the way an
+//     out-of-office does ("Automatic reply:", "Out of Office:" ...).
+//  2. No record of a lane having read it -> leave.
+//  3. Read by the lane that OWNS it -> archive, after the grace. The digest
+//     owns what it took a CVE from; cti-appscan owns the Qualys WAS
+//     notifications its weekly reported on (Processed.Owner).
 //  4. Anything else -> leave.
 //
-// Rule 2 sits above rule 3 deliberately. An out-of-office reply quoting an
-// advisory in its body would match both, and archiving something that should
-// have been deleted is a tidiness failure, whereas deleting a genuine advisory
-// is a loss.
+// # WHY AUTO-REPLIES MOVED ABOVE THE PROCESSED RULE (1.3.2)
+//
+// The operator's instruction: automatic replies should always just go to
+// Deleted Items. Below rule 2 they only went when the digest happened to have
+// recorded them, so every out-of-office arriving after the morning read - and
+// every one on a day the lane did not run - stayed in the inbox for good.
+// "Processed first" exists to protect mail somebody may need; nobody needs a
+// bounce, and Deleted Items is recoverable.
+//
+// The subject match is deliberately narrow (a prefix, not a substring) and
+// has one exception: a subject-only match the digest took a CVE from is
+// archived, not deleted. Anyone can title a message "Automatic reply:", and
+// a real advisory filed under that subject is evidence. A message whose
+// HEADERS say auto-reply is deleted whatever it quoted - that is the sending
+// system's own declaration.
 //
 // # WHY RULE 4 IS "LEAVE" AND NOT "ARCHIVE"
 //
-// It used to be archive, and the first real dry run showed what that means.
 // This is a shared security mailbox: alongside the advisories it receives
 // user-reported phishing, Defender alerts, scan notifications and ordinary
-// mail from colleagues. The plan proposed archiving a message whose entire
-// subject was "suspicious", a forwarded invoice, and an alert about a
-// potential attack path - all with the reason "processed, no CVE, not an
-// automatic reply".
-//
-// "The agent read it looking for CVEs and found none" and "this has been
-// dealt with" are different facts, and only the first one is in the
-// processed-message log. Filing away a colleague's phishing report before
-// anybody triaged it is precisely the quiet damage this package's own doc
-// comment warns about, and the operator asked for the CTI emails to be
-// archived - not for everything the agent happened to glance at.
-//
-// So the default is now to do nothing, which also makes the rules match what
-// was actually asked for: CTI mail is archived, out-of-office replies are
-// deleted, everything else is somebody's job. The leave count feeds
-// BacklogNote, so mail accumulating here is reported rather than silently
-// tidied.
-// Plan decides what to do with each message.
-//
-// now and minAge exist because archiving used to depend on WHEN the lane ran.
-// The rule was "processed and carried a CVE -> archive", with no age in it, so
-// a manual run after the morning digest filed away mail that had arrived hours
-// earlier - while the same lane on its timer, firing before the digest, would
-// have left it. Same code, same mailbox, different outcome by clock position.
-//
-// minAge removes that. An advisory stays in the inbox until it has been there
-// long enough that nobody is still reading it, whenever the lane runs.
-//
-// THE GRACE APPLIES TO ARCHIVING ONLY. Auto-replies are deleted on sight,
-// because the reason for the grace is "a colleague may still want to read
-// this in the inbox", and nobody wants to read a bounce.
+// mail from colleagues. The first real dry run of an "archive whatever was
+// read" rule proposed filing a message whose whole subject was "suspicious",
+// a forwarded invoice, and an attack-path alert. "A lane read it" is not
+// "this has been dealt with" - only the lane that OWNS a kind of mail can say
+// it has been, so only an owner's record archives (the operator's rule since
+// 1.3.2: archive once the right lane has seen it). The leave count feeds
+// BacklogNote, so mail accumulating here is reported rather than tidied.
 func Plan(candidates []Candidate, processed map[string]Processed,
 	now time.Time, minAge time.Duration) []Decision {
+	return PlanWith(candidates, processed, Options{Now: now, MinAge: minAge})
+}
+
+// Options tune a plan.
+type Options struct {
+	Now time.Time
+	// MinAge is the archive grace: an owned message stays in the inbox until
+	// it is this old, so the outcome does not depend on when the lane runs.
+	// It applies to archiving only; auto-replies go on sight.
+	MinAge time.Duration
+	// SubjectGrace holds a SUBJECT-only auto-reply match that no lane has
+	// read yet until it is this old (cti-mailbox passes GRAPH_LOOKBACK). The
+	// CVE exception below can only protect a message the digest has read; a
+	// real advisory titled "Automatic reply: ..." arriving just before the
+	// cleanup would otherwise be deleted before the digest ever saw it.
+	// Header-declared auto-replies are not held.
+	SubjectGrace time.Duration
+	// HoldArchive, when set, turns every archive except our own reports into
+	// a leave with this as the reason. cti-mailbox sets it on a day no CTI
+	// email was processed: the fleet may not be reading the mailbox, so
+	// nothing is filed away - but auto-replies are still deleted, which needs
+	// no fleet health at all.
+	HoldArchive string
+}
+
+// autoReplyPrefixes are subject openings out-of-office systems use. Matched
+// at the start of the subject, case-insensitively, after any spaces.
+var autoReplyPrefixes = []string{
+	"automatic reply:",
+	"auto reply:", "auto-reply:", "autoreply:", "auto response:",
+	"auto-response:", "autoresponse:",
+	"out of office:", "out of office reply:", "out-of-office:",
+	"automatische antwort:", "réponse automatique :", "réponse automatique:",
+	"respuesta automática:",
+}
+
+// AutoReplySubject reports whether a subject starts like an out-of-office.
+func AutoReplySubject(subject string) bool {
+	s := strings.ToLower(strings.TrimSpace(subject))
+	for _, p := range autoReplyPrefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// PlanWith is Plan with every option.
+func PlanWith(candidates []Candidate, processed map[string]Processed, o Options) []Decision {
+	now, minAge := o.Now, o.MinAge
 	out := make([]Decision, 0, len(candidates))
 	for _, c := range candidates {
 		rec, ok := processed[c.ID]
+		headerAuto := c.AutoReply || (ok && rec.AutoReply)
+		subjectAuto := AutoReplySubject(c.Subject)
+		owner := ""
+		switch {
+		case ok && rec.Owner != "":
+			owner = rec.Owner
+		case ok && rec.HasCVE:
+			owner = "digest"
+		}
 		switch {
 		case c.SelfSent:
-			// Before rule 1, and the only thing that is. Our own reports are
-			// deliberately never processed - the digest skips them so it does
-			// not re-report its own CVEs - so they can never acquire a
-			// processed-log entry and rule 1 would leave them in the inbox
-			// permanently.
-			//
-			// Archived rather than deleted, and archived rather than left:
-			// there is a copy in Sent Items, nobody reads the shared inbox to
-			// find yesterday's digest, and leaving them is what would make the
-			// backlog alarm cry wolf.
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: "sent by this fleet - our own report delivered back to " +
 					"the mailbox it is read from", Known: true})
+		case headerAuto:
+			out = append(out, Decision{Candidate: c, Action: ActionDelete,
+				Reason: "the sending system's headers declare it an automatic reply",
+				Known:  ok})
+		case subjectAuto && !ok && o.SubjectGrace > 0 && c.Received.After(now.Add(-o.SubjectGrace)):
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: "the subject looks like an automatic reply, but no lane has " +
+					"read it yet - it waits for the digest in case it is a real advisory"})
+		case subjectAuto && !(ok && rec.HasCVE):
+			out = append(out, Decision{Candidate: c, Action: ActionDelete,
+				Reason: "the subject marks it an automatic reply",
+				Known:  ok})
 		case !ok:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "no record that a completed run has read this message"})
-		case rec.HasCVE && minAge > 0 && c.Received.After(now.Add(-minAge)):
+		case owner == "":
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: "read by the agent but no lane owns it - not a CTI " +
+					"advisory or a scan notification; could be a reported " +
+					"phish, an alert or a person writing to the team",
+				Known: true})
+		case o.HoldArchive != "":
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: o.HoldArchive, Known: true})
+		case minAge > 0 && c.Received.After(now.Add(-minAge)):
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: fmt.Sprintf(
-					"processed and carried a CVE, but only %s old - it stays in "+
-						"the inbox until %s so the team can still read it there",
-					now.Sub(c.Received).Round(time.Minute), minAge),
+					"%s, but only %s old - it stays in the inbox until %s so "+
+						"the team can still read it there",
+					ownedBy(owner), now.Sub(c.Received).Round(time.Minute), minAge),
 				Known: true})
-		case rec.HasCVE:
-			out = append(out, Decision{Candidate: c, Action: ActionArchive,
-				Reason: "processed and carried at least one CVE", Known: true})
-		case rec.AutoReply || c.AutoReply:
-			out = append(out, Decision{Candidate: c, Action: ActionDelete,
-				Reason: "processed, no CVE, and the sending system declared it " +
-					"an automatic reply", Known: true})
 		default:
-			out = append(out, Decision{Candidate: c, Action: ActionLeave,
-				Reason: "read by the agent but carried no CVE, so it is not a " +
-					"CTI advisory this lane is responsible for - could be a " +
-					"reported phish, an alert or a person writing to the team",
-				Known: true})
+			out = append(out, Decision{Candidate: c, Action: ActionArchive,
+				Reason: ownedBy(owner), Known: true})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -170,6 +216,17 @@ func Plan(candidates []Candidate, processed map[string]Processed,
 		return out[i].Received.Before(out[j].Received)
 	})
 	return out
+}
+
+func ownedBy(owner string) string {
+	switch owner {
+	case "digest":
+		return "processed and carried at least one CVE"
+	case OwnerAppScan:
+		return "a scan notification the application-security weekly reported on"
+	default:
+		return "read by the " + owner + " lane, which owns it"
+	}
 }
 
 // Counts summarises a plan.
