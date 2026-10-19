@@ -397,7 +397,9 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   `appscan.DetailFetcher` (and scan-list reconciliation as an optional provider
   capability) instead of calling the Qualys API type directly
 - Message trace for the domains lane: which domains actually send mail and from
-  where, on a separate read-only app registration
+  where, on a separate read-only app registration. Probably unnecessary:
+  outbound mail relays through Proofpoint on Demand, so the PoD Log API
+  item below covers it for every domain already moved to PoD
 - Domains lane learns mail roles instead of reading them from `domains.txt`
   (Proofpoint on Demand). Receive: an MX pointing at our PoD tenant's
   `pphosted.com` hosts; an MX on `pphosted.com` with a *different* tenant ID
@@ -409,6 +411,14 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   evidence for `p=reject`. Keep aggregates only, never per-message data.
   `domains.txt` keeps `saas` / `legacy` / `unknown` and overrides. Costs: a
   WebSocket client (the module has no dependencies today) and confirming
-  the stream's back-fill window
+  the stream's back-fill window.
+  NOT YET ON PROOFPOINT, its own weekly section: during an acquisition a
+  domain's mail runs elsewhere until it is moved. Name the provider from
+  the MX and SPF hosts (Microsoft 365 direct, Google, another gateway, an
+  unknown host), say how many weeks it has been in that state from the
+  lane's baseline, and after the move flag what is left behind - an SPF
+  include or DKIM key still authorising the old provider. A domain off PoD
+  is also invisible to the Log API, so its send role stays "unconfirmed"
+  rather than "does not send"
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
