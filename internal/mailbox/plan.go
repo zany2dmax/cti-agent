@@ -181,7 +181,7 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "the subject looks like an automatic reply, but no lane has " +
 					"read it yet - it waits for the digest in case it is a real advisory"})
-		case subjectAuto && !(ok && rec.HasCVE):
+		case subjectAuto && (!ok || !rec.HasCVE):
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: "the subject marks it an automatic reply",
 				Known:  ok})
