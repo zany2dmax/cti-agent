@@ -74,6 +74,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `PROOFPOINT_POD_TENANT`); nested SPF includes count.
   No credentials. The PoD Log API half stays on the backlog.
 
+### Fixed
+
+- **`install-fedora.sh` was not executable.** A commit on 2026-10-12 dropped
+  its executable bit (and those of `run-digest`, `run-patchtuesday`,
+  `run-mailbox-cleanup`, `dev-run`, `brief.py`, `mailer.py`), so
+  `./fleet-kit/install-fedora.sh` answered "Permission denied". The box's
+  installed runners were unaffected (the installer copies them 0755). Bits
+  restored, and a lane test now fails on any script git does not record as
+  executable.
+
 ### Upgrade
 
 Pull, reinstall. Then, in `/etc/cti-agent/fleet.env`:
