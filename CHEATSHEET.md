@@ -160,6 +160,8 @@ sudo cti-agent run-digest daily                    # refuses if today's already 
 - **Never re-run a digest that exited 3.** It was sent but not recorded; the
   journal prints the exact `fleet-db sent ...` command to record it instead.
 - `run-mailbox-cleanup --for-real` **WRITES**: it moves mail in the mailbox.
+- One-off sweep of old auto-replies (dry run first, then add `--for-real`):
+  `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m`
 
 ## 7a. Patch Tuesday, run by hand (monthly)
 

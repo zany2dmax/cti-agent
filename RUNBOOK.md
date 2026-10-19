@@ -426,10 +426,16 @@ nobody watching. Treat the rollout accordingly.
 
 | Message | Action |
 |---|---|
-| The agent read it and took a CVE from it | **Archive** |
 | The fleet's own report, delivered back to the mailbox, with a correctly **signed** `X-CTI-Agent-Sent` header | **Archive** (a copy is in Sent Items) |
-| Its own headers declare it an automatic reply | **Deleted Items** (recoverable) |
+| An automatic reply - by its headers, or a subject starting `Automatic reply:`, `Out of Office:` and the like - read by a lane or not | **Deleted Items** (recoverable) |
+| The digest read it and took a CVE from it | **Archive**, after the grace |
+| A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
 | Everything else | **Left alone** |
+
+On a day no CTI email was processed nothing is archived, but auto-replies
+still go. For a one-off sweep of old auto-replies:
+`sudo cti-agent cti-mailbox --lookback 720h --timeout 10m` (dry run), then add
+`--for-real`.
 
 A shared security mailbox receives reported phishing, alerts, scan
 notifications and ordinary mail from colleagues. "The agent read it looking for
@@ -438,10 +444,11 @@ those is what the processed-message log records. Rule 4 used to be archive, and
 the first production dry run proposed filing away a message whose entire
 subject was `suspicious`.
 
-Auto-reply detection is **headers only** — `Auto-Submitted: auto-replied` or
-`X-Auto-Response-Suppress`. Subject text does not delete mail. An auto-reply
-whose sender omits the headers stays in the inbox, which is the direction to
-fail in.
+Auto-reply detection is **headers, or a subject prefix** (since 1.3.2) —
+`Auto-Submitted: auto-replied`, `X-Auto-Response-Suppress`, or a subject that
+*starts* `Automatic reply:`, `Out of Office:`, `Autoreply:` and similar. Anyone can
+title a message that way, so a subject-only match the digest took a CVE from
+is archived instead of deleted; Deleted Items is recoverable either way.
 
 The self-sent header carries an HMAC keyed from the app's client secret, so a
 sender cannot get a message archived by adding the header. Fleet mail sent
@@ -1241,7 +1248,17 @@ timeout 5 bash -c '</dev/tcp/<an-mx-host>/25' && echo open || echo blocked
 
 Either open it for this host or set `DOMAINS_SMTP=off`.
 
-### 5. DKIM selectors and DMARC reports
+### 5. Proofpoint on Demand
+
+With any domain's MX on PoD, the weekly gains a **PROOFPOINT ON DEMAND**
+section: domains whose mail is received elsewhere (acquisitions not yet
+moved, named by provider, with how many weeks), an MX on another
+organisation's PoD tenant (High), senders whose SPF does not authorise PoD,
+and what is left after a move (an old SPF include, a Google DKIM key). The
+tenant is learned from the MX records; pin it with `PROOFPOINT_POD_TENANT`
+if a week could ever have more domains off the gateway than on it.
+
+### 6. DKIM selectors and DMARC reports
 
 DKIM keys cannot be listed, only probed by selector. If a sending domain shows
 "no DKIM key at the selectors tried", find the selector from a message header

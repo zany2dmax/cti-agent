@@ -537,9 +537,11 @@ mail. "The agent read it looking for CVEs and found none" is not "this has
 been dealt with," and filing a colleague's phishing report before anyone
 triaged it is the most damaging thing this lane could plausibly do.
 
-Auto-reply detection is **headers only** — `Auto-Submitted: auto-replied`,
-`X-Auto-Response-Suppress`. Subject text does not delete mail, because a
-subject is trivially forged.
+Auto-reply detection is **headers, or a subject prefix** since 1.3.2 (the
+operator's call: they should always go). A subject is trivially forged, so the
+cost is bounded on purpose: the prefix must start the subject, the move is to
+Deleted Items (recoverable), every move is logged with its reason, and a
+subject-only match the digest took a CVE from is archived rather than deleted.
 
 **The self-sent header is signed.** Until 1.3 its value was the mailbox name,
 and its mere presence marked a message as the fleet's own: the digest skipped

@@ -2397,7 +2397,7 @@ for a in "$@"; do
   esac
   next=""
   case "$a" in
-    --out|--text-out|--csv-out|--actions-out) next=out ;;
+    --out|--text-out|--csv-out|--actions-out|--seen-out) next=out ;;
     --subject-out) next=subj ;;
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
@@ -2505,6 +2505,22 @@ class RunnersToDev(unittest.TestCase):
         alerts = [c for c in calls if c.startswith("cti-alert ")]
         self.assertEqual(len(alerts), 1, calls)
         self.assertIn("--to-dev", alerts[0])
+
+    def test_appscan_records_what_it_saw_only_after_a_real_send(self):
+        # The mailbox cleanup archives a WAS notice once the AppSec lane has
+        # "seen" it. That has to mean the report reached App Dev - a dry run
+        # or a test send to the developer must not license archiving.
+        for args, want in ((["--to-dev"], False), (["--dry-run"], False), ([], True)):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appscan", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                committed = [c for c in calls if "--commit-seen" in c]
+                self.assertEqual(bool(committed), want, calls)
+                if want:
+                    send = [i for i, c in enumerate(calls) if c.startswith("cti-mailer ")]
+                    commit = [i for i, c in enumerate(calls) if "--commit-seen" in c]
+                    self.assertLess(send[0], commit[0], "recorded before the send")
 
     def test_no_dev_address_is_refused_before_any_work(self):
         for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):

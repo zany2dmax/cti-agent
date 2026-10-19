@@ -35,6 +35,60 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.3.2 — 2026-10-19
+
+### Changed
+
+- **Automatic replies always go to Deleted Items.** The mailbox cleanup only
+  deleted an out-of-office when the digest had recorded reading it, checked
+  only its headers, and skipped the whole run on a day with no CTI email - so
+  replies arriving after the morning read, from systems that omit the
+  auto-reply headers, or on a quiet day stayed in the inbox for good. Now an
+  automatic reply is deleted read or not, recognised by its headers **or** a
+  subject that starts `Automatic reply:`, `Out of Office:`, `Autoreply:` and similar
+  variants, on every run. Anyone can title a message that way, so a
+  subject-only match no lane has read yet waits `GRAPH_LOOKBACK_HOURS` for
+  the digest, and one the digest took a CVE from is archived instead.
+  Deleted Items is recoverable; nothing purges.
+- **Mail is archived once the lane that owns it has seen it.** Qualys WAS scan
+  notifications used to stay in the inbox forever: the digest reads them and
+  finds no CVE, and the AppSec weekly that reports on them recorded nothing.
+  `cti-appscan --seen-out` / `--commit-seen` now record the notices a weekly
+  covered, only after a real send (`state/processed-appscan.json`), and the
+  cleanup archives them after the usual grace. Only notices that parsed are
+  claimed, and the Qualys sender check now matches the address's domain
+  exactly - it was a substring test on "Name <address>", which a display
+  name could satisfy. Mail no lane owns - reported phish, Defender alerts,
+  colleagues - is still left alone.
+- **The cleanup looks back 14 days, not 3** (`MAILBOX_LOOKBACK_HOURS` default
+  336, was 72), so a weekly lane's mail is still in view when it is
+  archived. `cti-mailbox --lookback 720h` sweeps further for a one-off.
+- **Domains: Proofpoint on Demand, from DNS.** A new weekly section, on when
+  any domain's MX is on PoD: domains NOT YET ON THE GATEWAY (acquisitions
+  whose mail is still at Microsoft 365, Google or another system, named, with
+  how many weeks), MX on another organisation's PoD tenant (High), senders
+  whose SPF does not authorise PoD (send route unconfirmed), and leftovers
+  after a move (another mailbox provider still in SPF, a Google DKIM key).
+  The tenant is learned from the MX records only when one has a strict
+  majority (otherwise the check is off and the log says to pin it with
+  `PROOFPOINT_POD_TENANT`); nested SPF includes count.
+  No credentials. The PoD Log API half stays on the backlog.
+
+### Upgrade
+
+Pull, reinstall. Then, in `/etc/cti-agent/fleet.env`:
+
+```bash
+sudo sed -i 's/^MAILBOX_LOOKBACK_HOURS=72$/MAILBOX_LOOKBACK_HOURS=336/' /etc/cti-agent/fleet.env
+```
+
+The next cleanup will move mail it used to leave: auto-replies without the
+headers or never read, and WAS notices after the next AppSec weekly. Look
+at a dry run first - `sudo cti-agent run-mailbox-cleanup` - and, for the
+backlog already sitting there, a one-off
+`sudo cti-agent cti-mailbox --lookback 720h --timeout 10m`, then the same
+with `--for-real`.
+
 ## 1.3.1 — 2026-10-18
 
 ### Fixed

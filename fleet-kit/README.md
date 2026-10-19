@@ -944,6 +944,7 @@ play.
 | `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
 | `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
+| `PROOFPOINT_POD_TENANT` | Proofpoint on Demand tenant id (the `00xxxxxx` in `mx0a-00xxxxxx.pphosted.com`). Empty: learned from the inventory's MX records; the gateway section is off when no domain is on PoD |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_DEV_EMAIL` | development only: your own address, for `--to-dev` on `cti-mailer`, `cti-alert` and the four mailing runners, which sends a report **only** there (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
@@ -1014,14 +1015,16 @@ something is broken is not an outward-facing send.
 
 ### Mailbox cleanup
 
-Once a day, after the digest: processed advisories to **Archive**,
-header-confirmed out-of-office replies to **Deleted Items**, anything the agent
-has no record of reading left exactly where it is.
+Once a day, after the digest: mail its owning lane has read to **Archive** (CTI
+advisories the digest took a CVE from; Qualys WAS notices the AppSec weekly
+reported on), automatic replies to **Deleted Items** whether read or not,
+anything else left exactly where it is.
 
 | Variable | Notes |
 |---|---|
 | `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Default `$FLEET_HOME/state/processed-messages.json` |
 | `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record (default 25) |
+| `MAILBOX_LOOKBACK_HOURS` | How far back the cleanup looks (default 336 = 14 days since 1.3.2, so the weekly AppSec lane's notices are still in view; was 72). `cti-mailbox --lookback 720h` for a one-off sweep |
 
 ```bash
 sudo cti-agent cti-mailbox                       # dry run: what it would do
@@ -1053,32 +1056,36 @@ not in that log. Inferring "processed" from something adjacent, like a report
 existing or a digest having been sent, is true in plenty of cases where the
 message was never read.
 
-**No CTI email processed today, no cleanup.** A day where the agent read
-nothing — it broke, a credential expired, the mailbox went quiet — is a day
-where the right thing to do with the inbox is nothing. A mailbox full of
-out-of-office replies and no advisories does not count either. The lane exits
-**0** in that case: a working refusal is not a failed unit, and a non-zero exit
-would have systemd mark it failed and `cti-alert` email about a lane that
-behaved correctly.
+**No CTI email processed today, no archiving.** A day where the agent read
+nothing — it broke, a credential expired, the mailbox went quiet — is a day to
+file nothing away. A mailbox full of out-of-office replies and no advisories
+does not count either. Since 1.3.2 the auto-replies themselves are still
+deleted that day: skipping whole days is how they piled up, and deleting one
+needs no fleet health.
 
 **Dry run unless `--for-real`.** The systemd unit passes that flag explicitly,
 so the decision to modify mail is visible in the unit file rather than buried
 in a default. `task mailbox` and the runner without the flag both move nothing.
 
-#### Precedence, and why a CVE beats an auto-reply header
+#### Precedence (1.3.2)
 
 The rules run in this order and the order is the safety property:
 
-1. No processing record → **leave**. Checked first so nothing below can
-   override it.
-2. Carries a CVE → **archive**, never delete. A message that contributed a
-   finding is evidence.
-3. Declared an auto-reply by its own headers → **Deleted Items**.
+0. The fleet's own report (signed header) → **archive**.
+1. An automatic reply → **Deleted Items**, read or not. Headers, or a subject
+   that starts like an out-of-office. A subject-only match the digest took a
+   CVE from is archived instead: anyone can title a message that way.
+2. No processing record → **leave**.
+3. Read by the lane that **owns** it → **archive** after the grace. The digest
+   owns what it took a CVE from; the AppSec lane owns the Qualys WAS notices
+   its weekly reported on, recorded by `cti-appscan --commit-seen` only after a
+   real send (`state/processed-appscan.json`).
 4. Anything else → **leave**.
 
-Rule 2 sits above rule 3 because an out-of-office reply that quotes an advisory
-back matches both, and archiving something that should have been deleted is a
-tidiness failure while deleting a real advisory is a loss.
+Auto-replies moved above the processed rule on the operator's instruction
+that they should always go: below it they went only when the digest happened
+to have recorded them, and every out-of-office arriving after the morning read
+stayed in the inbox.
 
 #### Rule 4 was "archive", and the first production dry run showed why it cannot be
 
@@ -1108,22 +1115,23 @@ the processed-message log records. The instruction was to archive the CTI
 emails; archiving everything the agent happened to glance at was a reading of
 that instruction nobody asked for.
 
-So exactly two kinds of message may ever move: a CTI advisory the agent took a
-CVE from, and a message whose own headers declare it an automatic reply.
-Everything else stays where a human can see it. The same ten messages now plan
-as **archive 3, delete 2, leave 5**.
+So only three kinds of message may ever move: mail the lane that owns it has
+read (a CTI advisory the digest took a CVE from; since 1.3.2, a scan notice the
+AppSec weekly reported on), our own reports, and automatic replies. Everything
+else stays where a human can see it - "a lane glanced at it" never archives.
 
 `TestOnlyCTIAdvisoriesAndAutoRepliesEverMove` is the regression test, written
 from those real subjects, and `TestEveryInputCombinationIsPinnedDown`
 enumerates all ten reachable input combinations so a future edit to the rule
 order fails a test instead of losing mail.
 
-Detection is **headers only** — `Auto-Submitted: auto-replied` or Exchange's
-`X-Auto-Response-Suppress`. Subject text does not delete mail: "Automatic
-reply:" in a subject is easy to fake and easy to hit by accident, and RFC 3834
-distinguishes `auto-replied` from `auto-generated`, which is what a vendor
-advisory from a mailing system sets. An auto-reply whose sender omits the
-headers stays in the inbox, which is the failure we want.
+Detection is **headers or a subject prefix** — `Auto-Submitted: auto-replied`,
+Exchange's `X-Auto-Response-Suppress`, or (since 1.3.2) a subject that *starts*
+`Automatic reply:`, `Out of Office:`, `Autoreply:` and the like. Until 1.3.2 it was
+headers only, and replies from systems that omit them stayed in the inbox for
+good. The prefix is matched at the start only (`Re: Automatic reply:` is a
+person replying), and a subject-only match that carried a CVE is archived, not
+deleted.
 
 #### The backlog count is an ingest monitor
 
@@ -1963,7 +1971,7 @@ sudo -u ctiagent bash -c 'cd ~/fleet && claude "what Sev5s are open and unremedi
 | `Failed to load environment files: Permission denied` | Same — systemd reads `fleet.env` as `init_t` | `ls -Z /etc/cti-agent/fleet.env` should be `etc_t`. `restorecon` fixes it |
 | Heartbeat skipping, unit shows success | Quota ceiling or cooldown — working as designed | `fleet cti-budget status` gives the reason and when it resumes. Raise `FLEET_BUDGET_WINDOW_BEATS` to give the fleet more of your quota |
 | A CVE was in yesterday's digest and is gone today, with no remediation | The cleanup archived the advisory while it was still inside the digest's ingest window, so it was not re-read | `MAILBOX_MIN_AGE_HOURS` must be >= `GRAPH_LOOKBACK_HOURS`; the agent now refuses to start otherwise. To check what was lost, move the mail back to the Inbox and run `run-digest daily --dry-run --lookback 48h` — dry run, so no second email |
-| A processed advisory was never archived | The cleanup window equals the interval between runs, so mail arriving just before the lane fires ages out before the next one | `MAILBOX_LOOKBACK_HOURS` must EXCEED the time between runs; 72h is the default. The lane prints its window and grace on every run |
+| A processed advisory was never archived | The cleanup window equals the interval between runs, so mail arriving just before the lane fires ages out before the next one | `MAILBOX_LOOKBACK_HOURS` must EXCEED the time between runs, and cover the weekly AppSec window; 336h is the default since 1.3.2 (72h before). The lane prints its window and grace on every run |
 | Today's advisory was archived hours after it arrived | A manual run after the digest, rather than the timer which fires before it | Expected before `MAILBOX_MIN_AGE_HOURS` existed. With the grace set (24h default) the outcome no longer depends on what time the lane runs |
 | Heartbeat reports tools "require approval", but edits files fine | No `--allowedTools` list. `acceptEdits` approves edits ONLY; every Bash call is denied with nobody present to approve | Not SELinux and not sudo. Check `journalctl -u cti-agent-checkin \| grep "allowed tools"` — if that line is absent, the box is running a build from before the allowlist existed |
 | `Credit balance is too low`, but you configured a subscription token | A stale `ANTHROPIC_API_KEY` is also set, and claude prefers it — so the beat bills a Console balance, not your seat | `sudo grep -E '^(export )?(ANTHROPIC_API_KEY\|ANTHROPIC_AUTH_TOKEN\|CLAUDE_CODE_OAUTH_TOKEN)=' /etc/cti-agent/fleet.env \| sed 's/=.*/=<set>/'` — blank all but one. run-checkin now refuses when more than one is set, and prints `auth: <NAME>` on every beat |
