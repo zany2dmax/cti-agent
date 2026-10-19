@@ -398,13 +398,17 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   capability) instead of calling the Qualys API type directly
 - Message trace for the domains lane: which domains actually send mail and from
   where, on a separate read-only app registration
-- Domains lane reads mail roles from Proofpoint: which domains Proofpoint
-  accepts mail for (receive) and relays outbound for (send), from its API
-  with a read-only credential, instead of hand-kept `send` / `receive`
-  markers in `domains.txt`. The file would keep the markers no mail system
-  knows (`saas`, `legacy`, `unknown`) and act as an override, and the report
-  would flag where the file and Proofpoint disagree. First check which
-  Proofpoint product is in use and whether its API exposes domain
-  configuration
+- Domains lane learns mail roles instead of reading them from `domains.txt`
+  (Proofpoint on Demand). Receive: an MX pointing at our PoD tenant's
+  `pphosted.com` hosts; an MX on `pphosted.com` with a *different* tenant ID
+  is its own finding. Send: SPF authorising PoD, confirmed by PoD's Log API
+  (read-only cluster token, WebSocket stream) showing outbound mail with
+  that header From, plus the DKIM selector it signed with - so a lock-down
+  ticket is never raised for a domain that actually sends. The same log also
+  shows inbound mail spoofing our domains and failing DMARC, which is the
+  evidence for `p=reject`. Keep aggregates only, never per-message data.
+  `domains.txt` keeps `saas` / `legacy` / `unknown` and overrides. Costs: a
+  WebSocket client (the module has no dependencies today) and confirming
+  the stream's back-fill window
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
