@@ -4,6 +4,8 @@
 //	cti-appscan --out report.html --text-out report.txt
 //	cti-appscan --since 168h --no-detail      # counts only, no Qualys API
 //	cti-appscan --subject-only                # for the runner's subject line
+//	cti-appscan --out r.html --seen-out seen.json   # and list the notices read
+//	cti-appscan --commit-seen seen.json        # after the send: let cleanup archive them
 //
 // # IT DOES NOT SEND
 //
@@ -17,6 +19,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -29,6 +32,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
@@ -60,7 +64,17 @@ func run() int {
 		"write one line per scan whose configured credential failed to "+
 			"authenticate; the runner alerts the operator when this file is "+
 			"non-empty. Absent or empty means every credential worked.")
+	seenOut := flag.String("seen-out", "",
+		"write the scan notifications this report covered here, for "+
+			"--commit-seen after the report has been sent")
+	commitSeen := flag.String("commit-seen", "",
+		"record a --seen-out file in the processed log the mailbox cleanup "+
+			"reads, so those notifications can be archived; then exit")
 	flag.Parse()
+
+	if *commitSeen != "" {
+		return doCommitSeen(*commitSeen)
+	}
 
 	// fleet.env, so a run by hand gets the same settings systemd gives it.
 	// Existing environment always wins.
@@ -88,7 +102,7 @@ func run() int {
 		return die("reading the mailbox: %s", safelog.Line(err.Error()))
 	}
 
-	scans, problems := collect(msgs)
+	scans, seen, problems := collect(msgs)
 	for _, p := range problems {
 		logf("warn   : %s", safelog.Line(p))
 	}
@@ -120,6 +134,17 @@ func run() int {
 	if *subjectOnly {
 		fmt.Println(block.Subject)
 		return exitOK
+	}
+
+	// The notices this report covered. Written here, committed by the runner
+	// only after the send: "the owning lane has seen it" has to mean the
+	// report reached its audience, not that a dry run rendered it.
+	if *seenOut != "" {
+		if err := writeSeen(*seenOut, seen); err != nil {
+			logf("warn   : could not write %s: %s - these notifications "+
+				"will not be archived this week", safelog.Line(*seenOut),
+				safelog.Line(err.Error()))
+		}
 	}
 
 	// THE AUTHENTICATION-FAILURE FILE, AND WHY IT IS A FILE.
@@ -220,8 +245,9 @@ func writeAuthFailures(path string, scans []appscan.ScanResult) error {
 var providers = []appscan.Provider{qualys.Provider{}}
 
 // collect turns mailbox messages into scan results.
-func collect(msgs []graph.Message) ([]appscan.ScanResult, []string) {
+func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, []string) {
 	var scans []appscan.ScanResult
+	var seenMsgs []mailbox.Processed
 	var problems []string
 	seen := map[string]bool{}
 
@@ -237,6 +263,16 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []string) {
 				continue
 			}
 			s, probs := p.Parse(m.BodyText)
+			// Claimed for the mailbox cleanup only when it parsed into a scan
+			// this report covers - a notice that did not parse was not reported
+			// on, and stays in the inbox for a person. Duplicates of a parsed
+			// scan are claimed too: each is a message this lane has read.
+			if s.Reference != "" {
+				seenMsgs = append(seenMsgs, mailbox.Processed{
+					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
+					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
+				})
+			}
 			for _, pr := range probs {
 				problems = append(problems,
 					fmt.Sprintf("%s: %s", shortSubject(m.Subject), pr))
@@ -262,7 +298,48 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []string) {
 	// NOT deduplicated per application here. That happens after
 	// reconciliation, when each result can be keyed on the scanner's own
 	// application id rather than a name derived from the scan title.
-	return scans, problems
+	return scans, seenMsgs, problems
+}
+
+// writeSeen writes the notices a report covered, 0600: subject lines from a
+// security mailbox.
+func writeSeen(path string, seen []mailbox.Processed) error {
+	b, err := json.MarshalIndent(mailbox.Log{Entries: seen}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o600)
+}
+
+// doCommitSeen merges a --seen-out file into this lane's processed log.
+func doCommitSeen(path string) int {
+	dest := mailbox.OwnerLogPath(mailbox.OwnerAppScan)
+	if dest == "" {
+		return die("FLEET_HOME is not set, so there is no state directory to record in")
+	}
+	// #nosec G304 -- the runner's own --seen-out file under $FLEET_HOME/state.
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return die("reading %s: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	var pending mailbox.Log
+	if err := json.Unmarshal(b, &pending); err != nil {
+		return die("%s does not parse: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	store := mailbox.NewStore(dest)
+	l, err := store.Load()
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	for i := range pending.Entries {
+		pending.Entries[i].Owner = mailbox.OwnerAppScan
+	}
+	store.Record(l, pending.Entries)
+	if err := store.Save(l); err != nil {
+		return die("saving %s: %s", safelog.Line(dest), safelog.Line(err.Error()))
+	}
+	logf("seen   : %d notification(s) recorded for the mailbox cleanup", len(pending.Entries))
+	return exitOK
 }
 
 // newestPerApp keeps one scan per application: the newest. An application

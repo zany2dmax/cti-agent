@@ -86,6 +86,11 @@ STAMP="$(date -u +%Y-%m-%d)"
 HTML="$STATE/appscan-$STAMP.html"
 TXT="$STATE/appscan-$STAMP.txt"
 AUTHFAIL="$STATE/appscan-authfail-$STAMP.tsv"
+# The notices this report covers. Committed to the processed log only after a
+# real send, so the mailbox cleanup archives them once App Dev has the report
+# - never on a dry run or a test send.
+SEEN="$STATE/appscan-seen-$STAMP.json"
+rm -f "$SEEN"
 
 # Mode set BEFORE anything is written. A report naming which applications have
 # open Urgent findings, and which are scanned without authentication, is a map
@@ -108,7 +113,7 @@ AUTHFAIL="$STATE/appscan-authfail-$STAMP.tsv"
 # one would be read as this run's answer.
 rm -f "$AUTHFAIL"
 
-"$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" \
+"$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" --seen-out "$SEEN" \
   || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
 
 SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line"
@@ -127,7 +132,14 @@ else
   # shellcheck disable=SC2086
   "$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
     || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
+  # Sent: the owning lane has now seen these notices. Non-fatal - the report
+  # is out, and an unrecorded notice is only left in the inbox.
+  if [ -z "$DRY" ] && [ -s "$SEEN" ]; then
+    "$APPSCAN" --commit-seen "$SEEN" \
+      || log "warn: could not record the notices for the mailbox cleanup; they stay in the inbox"
+  fi
 fi
+rm -f "$SEEN"
 
 # ── the operator's half of the report ────────────────────────────────────────
 #

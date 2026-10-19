@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,10 @@ type Mail struct {
 	// SPFLookupErr is set when an include could not be followed, so the count
 	// is a lower bound.
 	SPFLookupErr string
+	// SPFIncludes is every include:/redirect= domain reached, nested ones
+	// too, so "authorises Proofpoint" holds for a domain whose SPF includes
+	// a parent record that includes it.
+	SPFIncludes []string
 
 	DMARC Lookup
 	// DMARCFrom is where the policy came from: the name itself, or the
@@ -107,7 +112,14 @@ func ProbeMail(ctx context.Context, r Resolver, name, org string, selectors []st
 		SPF: only(lookupTXT(ctx, r, name), isSPF),
 	}
 	if len(m.SPF.Values) == 1 {
-		m.SPFLookups, m.SPFLookupErr = countSPFLookups(ctx, r, m.SPF.Values[0], map[string]bool{name: true}, 0)
+		seen := map[string]bool{name: true}
+		m.SPFLookups, m.SPFLookupErr = countSPFLookups(ctx, r, m.SPF.Values[0], seen, 0)
+		for d := range seen {
+			if d != name {
+				m.SPFIncludes = append(m.SPFIncludes, d)
+			}
+		}
+		sort.Strings(m.SPFIncludes)
 	}
 
 	m.DMARC = only(lookupTXT(ctx, r, "_dmarc."+name), isDMARC)

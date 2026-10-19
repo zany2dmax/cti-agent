@@ -31,13 +31,39 @@ func (Provider) Name() string { return "qualys-was" }
 // Both, not either. The subject alone would match a human forwarding one of
 // these into the mailbox with commentary attached, and the body of a forward
 // is not the body this parser expects.
+//
+// The sender is checked on its ADDRESS's domain, exactly. A substring test
+// on "Name <addr>" let a display name of "noreply@qualys.com", or an address
+// at qualys.com.attacker.example, pass - and since 1.3.2 a recognised notice
+// is archived by the mailbox cleanup, so that would file a phish away.
 func (Provider) Recognises(sender, subject string) bool {
-	s := strings.ToLower(sender)
-	if !strings.Contains(s, "@qualys.net") && !strings.Contains(s, "@qualys.com") {
+	if !qualysDomain(senderDomain(sender)) {
 		return false
 	}
 	return strings.Contains(strings.ToLower(subject),
 		"web application vulnerability scan results")
+}
+
+// senderDomain is the domain of the address in "Name <addr>" or a bare addr.
+func senderDomain(sender string) string {
+	s := strings.TrimSpace(sender)
+	if i := strings.LastIndex(s, "<"); i >= 0 {
+		s = strings.TrimSuffix(strings.TrimSpace(s[i+1:]), ">")
+	}
+	at := strings.LastIndex(s, "@")
+	if at < 0 || strings.ContainsAny(s, " <>") {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(s[at+1:]))
+}
+
+func qualysDomain(d string) bool {
+	for _, base := range []string{"qualys.com", "qualys.net"} {
+		if d == base || strings.HasSuffix(d, "."+base) {
+			return true
+		}
+	}
+	return false
 }
 
 var (

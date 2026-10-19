@@ -206,6 +206,17 @@ func run() int {
 		opt.SMTPBlocked = true
 		logf("note   : no MX answered on the SMTP port - outbound SMTP looks blocked from this host")
 	}
+	// Proofpoint on Demand, from MX and SPF: off unless some domain's MX is
+	// on PoD or PROOFPOINT_POD_TENANT pins the tenant.
+	tenant, tenants := domains.HomeTenantWhy(results)
+	domains.AssignRoutes(results, tenant)
+	switch {
+	case tenant != "":
+		logf("pod    : Proofpoint on Demand tenant %s", safelog.Line(tenant))
+	case len(tenants) > 0:
+		logf("pod    : PoD tenants %v and none is a strict majority - the gateway "+
+			"check is OFF this run; set PROOFPOINT_POD_TENANT", tenants)
+	}
 	findings := domains.Evaluate(results, cmp, opt)
 
 	prev, err := domains.LoadState(*statePath)
@@ -216,6 +227,8 @@ func run() int {
 	}
 	cur := domains.Snap(opt.Now, results, cmp, regs, prev)
 	changes := domains.Diff(prev, cur, cmp != nil, opt.Registrar)
+	findings = append(findings, domains.EvalProofpoint(results, cur, opt.Now)...)
+	domains.SortFindings(findings)
 
 	actions := domains.Actions(results, opt.ExpectRUA)
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
