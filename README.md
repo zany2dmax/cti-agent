@@ -402,6 +402,13 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   where, on a separate read-only app registration. Probably unnecessary:
   outbound mail relays through Proofpoint on Demand, so the PoD Log API
   item below covers it for every domain already moved to PoD
+- *Maybe:* subdomain discovery for the domains lane, from Certificate
+  Transparency only (or the zone records, if the GoDaddy token can read
+  them) - not subfinder, whose dozens of third-party sources and libraries
+  would break the no-dependency rule and hand our domain list to outside
+  services. Resolve every name and report only live hosts missing from
+  `domains.txt`, dangling CNAMEs (takeover risk, High) and names new since
+  last week; historical names that no longer resolve are dropped
 - Domains lane, the Proofpoint on Demand Log API half (the DNS half - not yet
   on the gateway, other-tenant MX, leftovers - shipped in 1.3.2). Confirm a
   domain really sends from outbound mail in PoD's log stream (read-only
