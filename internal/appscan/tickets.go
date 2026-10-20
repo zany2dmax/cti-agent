@@ -36,6 +36,9 @@ const maxInstances = 25
 type TicketsFile struct {
 	Generated time.Time   `json:"generated"`
 	Tickets   []AppTicket `json:"tickets"`
+	// Unowned are web apps defined in the scanner with no owner in
+	// app-owners.txt, scanned this week or not.
+	Unowned []string `json:"unowned,omitempty"`
 }
 
 // AppTicket is one application's ticket input.
