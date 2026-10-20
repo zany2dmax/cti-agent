@@ -45,7 +45,7 @@ deletes today's subject file so a stale one cannot be mistaken for this
 run's.
 .TP
 .B 2. Check
-.B cti\-domains \-\-out \-\-text\-out \-\-subject\-out \-\-csv\-out
+.B cti\-domains \-\-out \-\-text\-out \-\-subject\-out \-\-csv\-out \-\-ticket\-slot
 probes every domain and writes all four files, comparing with last week's
 state and then replacing it. Fatal on a non-zero exit.
 .TP
@@ -53,7 +53,27 @@ state and then replacing it. Fatal on a non-zero exit.
 The first line of the subject file. Fatal, and nothing is sent, if the
 file is missing, empty, or its first line is blank.
 .TP
-.B 4. Send
+.B 4. Lock-down ticket
+.B cti\-jira \-\-domains\-actions
+with the day's actions file,
+.B \-\-ref\-out
+and, on a real run,
+.BR \-\-for\-real :
+one Jira ticket for IT listing the DNS changes, or a comment on the one
+already open when the list has changed (see
+.BR cti\-jira (1)).
+Then
+.B cti\-domains \-\-stamp\-ticket
+puts the ticket's key, status and link into the report beside the DNS
+changes. Before the send so the email names the ticket, and never fatal:
+a Jira failure becomes "not updated this run" in the report, and the email
+still goes. On a dry run or
+.B \-\-to\-dev
+it runs without
+.B \-\-for\-real
+and the report says what it would do.
+.TP
+.B 5. Send
 .B cti\-mailer \-\-lane dom
 with the HTML, text and subject and the CSV attached, plus
 .B \-\-dry\-run
@@ -63,18 +83,6 @@ against
 .B DOM_ALLOW_TO
 and refuses if either is unset; there is no fallback to the digest audience.
 Fatal on failure.
-.TP
-.B 5. Lock-down ticket
-.B cti\-jira \-\-domains\-actions
-with the day's actions file and
-.BR \-\-for\-real :
-one Jira ticket for IT listing the DNS changes, or a comment on the one
-already open when the list has changed (see
-.BR cti\-jira (1)).
-After the send, and never fatal: a Jira failure is logged and the run still
-succeeds. On a dry run it runs without
-.B \-\-for\-real
-and only prints the ticket it would file.
 .PP
 A dry run passes
 .B \-\-no\-state\-write
