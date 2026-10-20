@@ -70,6 +70,9 @@ func run() int {
 	domainsActions := flag.String("domains-actions", "",
 		"file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down "+
 			"ticket, or comment on the one already open when the list has changed")
+	refOut := flag.String("ref-out", "",
+		"with --domains-actions: write what happened to the lock-down ticket (key, "+
+			"status, action) here as JSON, for cti-domains --stamp-ticket")
 	flag.Parse()
 
 	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" {
@@ -111,7 +114,7 @@ func run() int {
 		return doTestTicket(ctx, c, cfg, *forReal)
 	}
 	if *domainsActions != "" {
-		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now())
+		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
 	}
 	// --follow-up on its own is allowed: re-checking the open tickets needs
 	// the scanner and Jira, not today's findings.
