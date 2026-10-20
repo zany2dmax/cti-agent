@@ -89,3 +89,32 @@ func TestWrapNames(t *testing.T) {
 		t.Errorf("wrapNames = %q", got)
 	}
 }
+
+func TestOnlyRealLiveWebsitesGoToTheAppSecLane(t *testing.T) {
+	rs := websitesReport().Results
+	rs = append(rs, Result{Entry: Entry{Name: "l.example", Landing: true}, Web: []Web{
+		{Host: "l.example", Addrs: addrs(), HTTPS: Fetch{Tried: true, Status: 200, FinalURL: "https://l.example/"}}}})
+	wf := LiveWebsites(rs, now)
+	got := map[string]Website{}
+	for _, s := range wf.Sites {
+		got[s.Domain] = s
+	}
+	if len(got) != 2 {
+		t.Fatalf("sites %+v - want only a.example and h.example", wf.Sites)
+	}
+	if s := got["a.example"]; s.Host != "www.a.example" || s.Title != "Home Page" {
+		t.Errorf("a.example: %+v", s)
+	}
+	for _, not := range []string{"b.example", "c.example", "g.example", "l.example"} {
+		if _, ok := got[not]; ok {
+			t.Errorf("%s is a redirect, parked page, lander or marked landing - not a site to scan", not)
+		}
+	}
+}
+
+func TestTheLandingMarkerParses(t *testing.T) {
+	es, problems, err := ParseInventory(strings.NewReader("promo.example landing\n"))
+	if err != nil || len(problems) != 0 || len(es) != 1 || !es[0].Landing {
+		t.Errorf("entries %+v problems %v err %v", es, problems, err)
+	}
+}

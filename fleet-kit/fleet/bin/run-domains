@@ -93,6 +93,7 @@ NOSTATE=""
 # shellcheck disable=SC2086
 "$DOMAINS" $NOSTATE --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" \
   --csv-out "$CSV" --actions-out "$ACTIONS" --ticket-slot \
+  --websites-out "$STATE/domains-websites.json" \
   || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
 
 [ -s "$SUBJ" ] || fail "no subject written - refusing to send"
