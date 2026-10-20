@@ -631,6 +631,9 @@ func doStampTickets(refPath, ticketsPath, htmlPath, textPath string) int {
 		}
 		out := appscan.StampTickets(string(b), p.isHTML, tf, apps)
 		tmp := p.path + ".stamp"
+		// #nosec G703 -- tmp is the runner's own --out / --text-out report
+		// (under $FLEET_HOME/state) plus a fixed suffix, given on the command
+		// line by run-domains / run-appscan; nothing read from outside chooses it.
 		if err := os.WriteFile(tmp, []byte(out), 0o600); err != nil {
 			_ = os.Remove(tmp)
 			return die("writing %s: %s", safelog.Line(tmp), safelog.Line(err.Error()))
