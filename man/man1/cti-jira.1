@@ -19,6 +19,8 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
 .B cti-jira \-\-domains\-actions
 .I FILE
 .RB [ \-\-for\-real ]
+.RB [ \-\-ref\-out
+.IR FILE ]
 .PP
 .B sudo cti\-agent cti\-jira
 .I mode
@@ -247,8 +249,28 @@ it prints what it would do and the ticket text. Subject to the
 .B JIRA_ALLOW_CREATE
 write gate. Run by
 .BR run\-domains (1)
-after the weekly email.
+before the weekly email, so the email can name the ticket.
 Default:\~empty.
+.TP
+.BI \-\-ref\-out " FILE"
+With
+.BR \-\-domains\-actions :
+write what happened to the lock-down ticket as JSON, mode 0600 - the
+action
+.RB ( created ,
+.BR commented ,
+.BR unchanged ,
+.BR resolved ,
+.BR none ,
+.BR would\-create ,
+.BR would\-comment ,
+.BR would\-resolve ,
+.BR gate\-closed ,
+.BR error ),
+the key, its browse URL, its status and, on failure, why. Written on every
+path, failures included, for
+.BR "cti\-domains \-\-stamp\-ticket" .
+Default:\~not written.
 .TP
 .B \-\-follow\-up
 Re-check every open fleet ticket against the scanner as described above,

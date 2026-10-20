@@ -2418,6 +2418,7 @@ for a in "$@"; do
     subj)     echo "Weekly domains check" > "$a" ;;
     json)     echo "{}" > "$a" ;;
     authfail) printf 'App One\trecord\tFAILED\n' > "$a" ;;
+    ref)      echo '{"action":"commented","key":"SEC-50"}' > "$a" ;;
   esac
   next=""
   case "$a" in
@@ -2425,6 +2426,7 @@ for a in "$@"; do
     --subject-out) next=subj ;;
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
+    --ref-out) next=ref ;;
   esac
 done
 case "$me $*" in
@@ -2545,6 +2547,24 @@ class RunnersToDev(unittest.TestCase):
                     send = [i for i, c in enumerate(calls) if c.startswith("cti-mailer ")]
                     commit = [i for i, c in enumerate(calls) if "--commit-seen" in c]
                     self.assertLess(send[0], commit[0], "recorded before the send")
+
+    def test_domains_names_its_ticket_in_the_email(self):
+        # The ticket is filed (or previewed) BEFORE the send and stamped into
+        # the report, so the email says which ticket IT is working from.
+        for args, real in (([], True), (["--to-dev"], False), (["--dry-run"], False)):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-domains", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
+                jira = idx(lambda c: c.startswith("cti-jira ") and "--domains-actions" in c)
+                stamp = idx(lambda c: "--stamp-ticket" in c)
+                send = idx(lambda c: c.startswith("cti-mailer "))
+                self.assertLess(jira, stamp, calls)
+                self.assertLess(stamp, send, "the email went before the ticket was stamped")
+                self.assertIn("--ref-out", calls[jira])
+                self.assertEqual("--for-real" in calls[jira], real,
+                                 f"{args}: Jira written on a run that must not write: {calls[jira]}")
 
     def test_no_dev_address_is_refused_before_any_work(self):
         for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):

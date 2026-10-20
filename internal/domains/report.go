@@ -42,6 +42,9 @@ type Report struct {
 	RegistrarOnly []Registration // in the account, not in domains.txt
 	InventoryOnly []Entry        // in domains.txt, not in the account
 	Lapsed        []LapsedEntry  // in domains.txt, cancelled or long expired
+	// TicketSlot leaves a TicketSlot marker beside the DNS changes, for the
+	// runner to stamp with the lock-down ticket (cti-domains --stamp-ticket).
+	TicketSlot bool
 }
 
 // NotChecked is said in every report, because a check that is silently
@@ -455,6 +458,9 @@ func (r Report) text() string {
 	section("CHANGED SINCE LAST WEEK", r.changes(), true)
 	section("REVIEW", r.medium(), false)
 	section("NOTES", r.info(), false)
+	if r.TicketSlot {
+		b.WriteString(slotSentinel)
+	}
 	r.actionsText(&b)
 
 	if len(r.Problems) > 0 {
@@ -607,6 +613,9 @@ func (r Report) html() string {
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
 	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)
 	cards("NOTES", "#4a5568", "#f4f5f7", r.info(), false)
+	if r.TicketSlot {
+		b.WriteString(slotSentinel)
+	}
 	r.actionsHTML(&b)
 
 	if len(r.Problems) > 0 {
@@ -664,9 +673,19 @@ func itemHTML(b *strings.Builder, s string) {
         <div style="font:400 13px/1.55 %s;color:#4a5568">%s</div></td></tr>`, font, e(s))
 }
 
+// slotSentinel is what the renderer writes where the real slot goes. Render
+// then deletes any TicketSlot that arrived inside observed data - a TXT
+// record or page title can carry the marker text, and the text report does
+// not escape it - before turning the sentinel into the one real slot.
+const slotSentinel = "\x00cti-ticket-slot\x00"
+
 // Render builds both forms.
 func (r Report) Render() Block {
-	return Block{Subject: r.Subject(), Text: r.text(), HTML: r.html()}
+	fix := func(s string) string {
+		s = strings.ReplaceAll(s, TicketSlot, "")
+		return strings.ReplaceAll(s, slotSentinel, TicketSlot)
+	}
+	return Block{Subject: r.Subject(), Text: fix(r.text()), HTML: fix(r.html())}
 }
 
 // ─── inventory vs registrar ─────────────────────────────────────────────────

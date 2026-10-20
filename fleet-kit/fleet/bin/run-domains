@@ -19,9 +19,11 @@
 #   run-domains --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
 #                            subject; baseline and Jira as for --dry-run
 #
-# After the mail goes, cti-jira --domains-actions files the week's DNS
+# BEFORE the mail goes, cti-jira --domains-actions files the week's DNS
 # changes as ONE lock-down ticket for IT, or comments on the one already open
-# when the list has changed. Non-fatal: Jira trouble costs the ticket, never
+# when the list has changed, and the ticket's key and status are stamped into
+# the report - so the email says which ticket IT is working from. Non-fatal:
+# Jira trouble costs the ticket line ("not updated this run - why"), never
 # the report.
 set -euo pipefail
 
@@ -71,6 +73,7 @@ TXT="$STATE/domains-$STAMP.txt"
 SUBJ="$STATE/domains-$STAMP.subject"
 CSV="$STATE/domains-$STAMP.csv"
 ACTIONS="$STATE/domains-$STAMP-actions.json"
+TICKET="$STATE/domains-$STAMP-ticket.json"
 JIRA="$FLEET_CODE/bin/cti-jira"
 
 # Mode before content: the report lists every domain we own and which of them
@@ -80,21 +83,48 @@ JIRA="$FLEET_CODE/bin/cti-jira"
 : > "$CSV";  chmod 0600 "$CSV"
 : > "$ACTIONS"; chmod 0600 "$ACTIONS"
 # The subject file is deleted, not pre-created: an empty one left over from a
-# failed run must not read as this run's subject.
-rm -f "$SUBJ"
+# failed run must not read as this run's subject. The ticket ref likewise: a
+# stale one would put last run's outcome in this week's email.
+rm -f "$SUBJ" "$TICKET"
 
 NOSTATE=""
 [ -n "$DRY" ] && NOSTATE="--no-state-write"
 
 # shellcheck disable=SC2086
 "$DOMAINS" $NOSTATE --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" \
-  --csv-out "$CSV" --actions-out "$ACTIONS" \
+  --csv-out "$CSV" --actions-out "$ACTIONS" --ticket-slot \
   || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
 
 [ -s "$SUBJ" ] || fail "no subject written - refusing to send"
 SUBJECT="$(head -n1 "$SUBJ")"
 [ -n "$SUBJECT" ] || fail "empty subject - refusing to send"
 log "subject: $SUBJECT"
+
+# The lock-down ticket, then its line in the report. Every failure here is
+# logged and survived: the ticket line says "not updated, and why", or
+# "unavailable" when cti-jira wrote nothing at all.
+if [ ! -x "$JIRA" ]; then
+  log "cti-jira not installed - no lock-down ticket"
+elif [ ! -s "$ACTIONS" ]; then
+  log "no actions file written - no lock-down ticket"
+elif [ -n "$DRY" ]; then
+  log "ticket: dry run, previewing the lock-down ticket only"
+  "$JIRA" --domains-actions "$ACTIONS" --ref-out "$TICKET" \
+    || log "WARNING: lock-down ticket preview failed"
+else
+  "$JIRA" --domains-actions "$ACTIONS" --for-real --ref-out "$TICKET" \
+    || log "WARNING: lock-down ticket not filed or updated - see the lines above"
+fi
+if [ -x "$JIRA" ] && [ -s "$ACTIONS" ]; then
+  "$DOMAINS" --stamp-ticket "$TICKET" --out "$HTML" --text-out "$TXT" \
+    || { log "WARNING: could not stamp the ticket into the report; removing the slot"
+         sed -i.bak 's/<!--CTI_DOMAINS_TICKET-->//g' "$HTML" "$TXT" 2>/dev/null || true
+         rm -f "$HTML.bak" "$TXT.bak"; }
+else
+  # No ticket step ran, so there is nothing to say: just clear the slot.
+  sed -i.bak 's/<!--CTI_DOMAINS_TICKET-->//g' "$HTML" "$TXT" 2>/dev/null || true
+  rm -f "$HTML.bak" "$TXT.bak"
+fi
 
 # The CSV is sitecheck.go's full per-host output, attached so the detail the
 # email summarises is one click away and sortable.
@@ -111,19 +141,7 @@ else
     || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
 fi
 
-# The lock-down ticket. After the send, so the email goes out whatever Jira
-# does; || so a Jira failure is logged, not fatal.
-if [ ! -x "$JIRA" ]; then
-  log "cti-jira not installed - no lock-down ticket"
-elif [ ! -s "$ACTIONS" ]; then
-  log "no actions file written - no lock-down ticket"
-elif [ -n "$DRY" ]; then
-  log "ticket: dry run, previewing the lock-down ticket only"
-  "$JIRA" --domains-actions "$ACTIONS" || log "WARNING: lock-down ticket preview failed"
-else
-  "$JIRA" --domains-actions "$ACTIONS" --for-real \
-    || log "WARNING: lock-down ticket not filed or updated - see the lines above"
-fi
+rm -f "$TICKET"
 
 if [ -n "$TODEV" ] && [ -z "$SEND_DRY" ]; then
   log "test send - mailed to FLEET_DEV_EMAIL only; baseline not advanced. Report: $HTML"

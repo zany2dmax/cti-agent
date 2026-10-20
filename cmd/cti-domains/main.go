@@ -93,7 +93,17 @@ func run() int {
 	csvOut := flag.String("csv-out", "", "write every probed host as CSV (sitecheck.go's columns first)")
 	actionsOut := flag.String("actions-out", "",
 		"write the DNS changes each domain needs as JSON, for cti-jira --domains-actions")
+	ticketSlot := flag.Bool("ticket-slot", false,
+		"leave a slot beside the DNS changes for --stamp-ticket to fill with the lock-down ticket")
+	stampTicket := flag.String("stamp-ticket", "",
+		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports "+
+			"already written, then exit; a missing or unreadable FILE says the "+
+			"status is unavailable")
 	flag.Parse()
+
+	if *stampTicket != "" {
+		return doStampTicket(*stampTicket, *out, *textOut)
+	}
 
 	f, err := os.Open(*inventory)
 	if err != nil {
@@ -233,7 +243,8 @@ func run() int {
 	actions := domains.Actions(results, opt.ExpectRUA)
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
-		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions}
+		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions,
+		TicketSlot: *ticketSlot}
 	if cmp != nil {
 		rep.RegistrarOnly, rep.InventoryOnly, rep.Lapsed = cmp.NotInInventory, cmp.NotAtRegistrar, cmp.Lapsed
 	}
@@ -321,6 +332,47 @@ func dnsResolver(spec string) (*net.Resolver, string, error) {
 		},
 	}
 	return r, "DNS servers " + strings.Join(servers, ", "), nil
+}
+
+// doStampTicket fills the ticket slot in reports already written.
+func doStampTicket(refPath, htmlPath, textPath string) int {
+	ref, err := domains.ReadTicketRef(refPath)
+	if err != nil {
+		logf("ticket : %s unreadable (%s) - the report says the status is unavailable",
+			safelog.Line(refPath), safelog.Line(err.Error()))
+		ref = nil
+	}
+	for _, p := range []struct {
+		path   string
+		isHTML bool
+	}{{htmlPath, true}, {textPath, false}} {
+		if p.path == "" {
+			continue
+		}
+		// #nosec G304 -- the runner's own report under $FLEET_HOME/state.
+		b, err := os.ReadFile(p.path)
+		if err != nil {
+			return die("reading %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+		out := domains.StampTicket(string(b), p.isHTML, ref)
+		// Temp file and rename: a write that fails half-way must leave the
+		// unstamped report, not a truncated one the runner then sends.
+		tmp := p.path + ".stamp"
+		if err := os.WriteFile(tmp, []byte(out), 0o600); err != nil {
+			_ = os.Remove(tmp)
+			return die("writing %s: %s", safelog.Line(tmp), safelog.Line(err.Error()))
+		}
+		if err := os.Rename(tmp, p.path); err != nil {
+			_ = os.Remove(tmp)
+			return die("replacing %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+	}
+	line, _ := domains.TicketLine(ref)
+	if line == "" {
+		line = "no lock-down ticket to mention"
+	}
+	logf("ticket : %s", safelog.Line(line))
+	return exitOK
 }
 
 func stateWhen(s *domains.State) string {

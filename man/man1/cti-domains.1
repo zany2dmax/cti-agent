@@ -261,6 +261,29 @@ passes it to
 .BR "cti\-jira \-\-domains\-actions" .
 Default:\~not written.
 .TP
+.B \-\-ticket\-slot
+Leave an invisible slot beside the DNS changes for
+.B \-\-stamp\-ticket
+to fill with the lock-down ticket's key, status and link.
+.B run\-domains
+passes it. Default:\~off.
+.TP
+.BI \-\-stamp\-ticket " FILE"
+Read a
+.B cti\-jira \-\-ref\-out
+file and stamp its line into the
+.B \-\-out
+and
+.B \-\-text\-out
+reports already written, then exit; nothing is probed. The link is included
+only if it is an https Jira browse link for that key. A missing or
+unreadable
+.I FILE
+stamps "status unavailable this run"; an action of
+.B none
+removes the slot.
+Default:\~empty.
+.TP
 .BI \-\-csv\-out " FILE"
 Write every probed host as CSV, mode 0600. The first 28 columns are the
 original

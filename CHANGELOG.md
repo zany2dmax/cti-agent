@@ -35,6 +35,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The domains email now names its Jira lock-down ticket.** `run-domains`
+  filed the ticket after the email had gone, so the report never said which
+  ticket IT was working from. The ticket is now filed or updated first
+  (`cti-jira --domains-actions --ref-out`) and its key, status and link are
+  stamped beside the DNS changes (`cti-domains --ticket-slot`,
+  `--stamp-ticket`): "filed", "list changed, added as a comment", "already
+  has this list", "nothing left - it can be closed", or "NOT updated this
+  run - why". A dry run or `--to-dev` says what it would do. Jira trouble
+  still never stops the email. Only an https Jira browse link for that key
+  is put in the email.
+
+### Upgrade
+
+Pull, reinstall. Nothing to configure.
+
 ## 1.3.2 — 2026-10-19
 
 ### Changed

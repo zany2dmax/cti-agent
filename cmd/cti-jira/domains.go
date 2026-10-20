@@ -49,7 +49,22 @@ func domainsJQL(projectKey string) string {
 }
 
 func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
-	path string, forReal bool, now time.Time) int {
+	path string, forReal bool, now time.Time, refOut string) int {
+
+	// What happened, for the email. Written on every path, failures
+	// included: "not updated, and why" is worth saying in the report.
+	ref := func(action string, is *jira.Issue, note string) {
+		if refOut == "" {
+			return
+		}
+		r := domains.TicketRef{Action: action, Note: note}
+		if is != nil {
+			r.Key, r.URL, r.Status = is.Key, c.BrowseURL(is.Key), is.Fields.Status.Name
+		}
+		if err := domains.WriteTicketRef(refOut, r); err != nil {
+			logf("WARNING: could not write %s: %s", safelog.Line(refOut), safelog.Line(err.Error()))
+		}
+	}
 
 	// path is the operator- or runner-supplied --domains-actions file.
 	b, err := os.ReadFile(path) // #nosec G304 -- operator-supplied path, read-only
@@ -65,6 +80,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 
 	issues, err := c.Search(ctx, domainsJQL(cfg.JiraProjectKey), 5)
 	if err != nil {
+		ref("error", nil, "Jira could not be searched for the open ticket")
 		return die("searching for an open lock-down ticket: %s", safelog.Line(err.Error()))
 	}
 	var open *jira.Issue
@@ -82,6 +98,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 			// same list on the ticket whenever Jira had a bad minute.
 			logf("WARNING: could not read what %s was last told (%s) - leaving it alone this run",
 				open.Key, safelog.Line(err.Error()))
+			ref("error", open, "could not read what it was last told, so it was left alone")
 			return exitOK
 		}
 	}
@@ -89,11 +106,27 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 	plan, why := planDomains(open, prev, af)
 	logf("domains: %s", why)
 	if plan == domainsNothing {
+		switch {
+		case open == nil:
+			ref("none", nil, "")
+		case prev.Resolved && len(af.Actions) == 0:
+			ref("resolved", open, "")
+		default:
+			ref("unchanged", open, "")
+		}
 		emit(map[string]any{"mode": modeName(forReal), "action": "nothing", "reason": why})
 		return exitOK
 	}
 
 	if !forReal {
+		switch plan {
+		case domainsCreate:
+			ref("would-create", nil, "")
+		case domainsComment:
+			ref("would-comment", open, "")
+		case domainsDone:
+			ref("would-resolve", open, "")
+		}
 		logf("DRY RUN - nothing written to Jira. Add --for-real to %s.", plan)
 		if plan == domainsCreate || plan == domainsComment {
 			fmt.Println(domainsBody(af, now))
@@ -102,6 +135,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 	if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
 		logf("WRITE GATE CLOSED - lock-down ticket not %s: %s", plan, safelog.Line(err.Error()))
+		ref("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
 		return exitOK
 	}
 
@@ -119,6 +153,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 			Labels:      []string{"cti-agent", domainsLabel},
 		})
 		if err != nil {
+			ref("error", nil, "Jira refused to create it")
 			return die("creating the lock-down ticket: %s", safelog.Line(err.Error()))
 		}
 		if err := c.Attach(ctx, res.Key, csvName, csvBody); err != nil {
@@ -129,12 +164,15 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 				res.Key, safelog.Line(err.Error()))
 		}
 		logf("filed %s - %s", res.Key, c.BrowseURL(res.Key))
+		created := &jira.Issue{Key: res.Key}
+		ref("created", created, "")
 		emit(map[string]any{"mode": "for-real", "action": "created", "key": res.Key, "url": c.BrowseURL(res.Key)})
 
 	case domainsComment:
 		text := "The weekly domains check found a different list of DNS changes. " +
 			"This replaces the list above.\n\n" + domainsBody(af, now)
 		if err := c.AddComment(ctx, open.Key, text); err != nil {
+			ref("error", open, "the comment with this week's list was refused")
 			return die("commenting on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		if err := c.Attach(ctx, open.Key, csvName, csvBody); err != nil {
@@ -144,12 +182,14 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 			logf("WARNING: could not record the list on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		logf("commented on %s with the updated list", open.Key)
+		ref("commented", open, "")
 		emit(map[string]any{"mode": "for-real", "action": "commented", "key": open.Key, "url": c.BrowseURL(open.Key)})
 
 	case domainsDone:
 		text := fmt.Sprintf("The weekly domains check on %s found every domain matching its "+
 			"profile: nothing in this ticket is left to change. It can be closed.", now.Format("2 January 2006"))
 		if err := c.AddComment(ctx, open.Key, text); err != nil {
+			ref("error", open, "the closing comment was refused")
 			return die("commenting on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		st.Resolved = true
@@ -157,6 +197,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 			logf("WARNING: could not record the list on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		logf("told %s that nothing is left to change", open.Key)
+		ref("resolved", open, "")
 		emit(map[string]any{"mode": "for-real", "action": "resolved", "key": open.Key, "url": c.BrowseURL(open.Key)})
 	}
 	return exitOK
