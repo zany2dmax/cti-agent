@@ -175,9 +175,21 @@ func run() int {
 			if apps, err := api.WebApps(ctx); err != nil {
 				logf("warn   : web app list unavailable, owners not checked: %s", safelog.Line(err.Error()))
 			} else {
-				_, unowned, stale := appscan.OwnersSkeleton(toApps(apps), owners)
+				sites, asOf := loadSites()
+				_, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
 				for _, a := range unowned {
 					tf.Unowned = append(tf.Unowned, a.Name)
+				}
+				for _, s := range appscan.Unscanned(sites, toApps(apps)) {
+					ns := appscan.NotScanned{Domain: s.Domain, URL: s.URL}
+					if w, ok := owners.ForSite(s.Domain); ok {
+						ns.Owner = w.Email
+					}
+					tf.NotScanned = append(tf.NotScanned, ns)
+				}
+				tf.SitesAsOf = asOf
+				if n := len(tf.NotScanned); n > 0 {
+					logf("coverage: %d live website(s) with no Qualys WAS web app - see NOT SCANNED", n)
 				}
 				if len(unowned) > 0 {
 					logf("owners : %d web app(s) with no owner - run cti-appscan --list-apps", len(unowned))
@@ -588,11 +600,34 @@ func doListApps(cfg config.Config) int {
 	for _, p := range problems {
 		logf("owners : %s", safelog.Line(p))
 	}
-	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), owners)
+	sites, _ := loadSites()
+	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
 	fmt.Print(text)
-	logf("apps   : %d web app(s) in the scanner, %d with no owner yet, %d owners-file line(s) matching none",
-		len(apps), len(unowned), len(stale))
+	logf("apps   : %d web app(s) in the scanner, %d with no owner yet, %d live website(s) not scanned, "+
+		"%d owners-file line(s) matching nothing", len(apps), len(unowned),
+		len(appscan.Unscanned(sites, toApps(apps))), len(stale))
 	return exitOK
+}
+
+// loadSites reads the domains lane's live websites. Missing or old is said,
+// never fatal: the coverage check is extra, not the lane.
+func loadSites() ([]appscan.Site, time.Time) {
+	path := appscan.DefaultSitesFile()
+	if path == "" {
+		logf("coverage: FLEET_HOME not set - live websites not checked against the scanner")
+		return nil, time.Time{}
+	}
+	sites, asOf, err := appscan.LoadSites(path)
+	if err != nil {
+		logf("coverage: no domains-lane website list (%s) - live websites not checked; "+
+			"run-domains writes it weekly", safelog.Line(err.Error()))
+		return nil, time.Time{}
+	}
+	if age := time.Since(asOf); age > 15*24*time.Hour {
+		logf("coverage: the website list is from %s, %d days old - is the domains lane running?",
+			asOf.Format("2006-01-02"), int(age.Hours()/24))
+	}
+	return sites, asOf
 }
 
 // doStampTickets fills the tickets slot in reports already written.

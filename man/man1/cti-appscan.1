@@ -200,12 +200,17 @@ exit: one line per application keyed on its web-app id, with the owner
 already on file where there is one and
 .B OWNER@example.com
 where there is not (the parser refuses that placeholder, so an unedited line
-means "no owner", never an assignment). Lines in the current file that match
-no application are listed at the end as comments. Read-only; needs the
+means "no owner", never an assignment). Live websites from the domains lane that no web app's URL points at
+(matched on host, www. ignored) follow in a NOT SCANNED section as
+.BI site: domain
+lines - the owner there is who should get a scan set up, and the line goes
+away once a web app covers the site. Lines in the current file that match
+nothing are listed at the end as comments. Read-only; needs the
 Qualys credentials. A weekly run with
 .B \-\-tickets\-out
 also checks every web app against the file and names the unowned ones in the
-report's JIRA TICKETS section.
+report's JIRA TICKETS section, and lists the live websites nothing scans in
+a NOT SCANNED section.
 Default:\~off.
 .TP
 .B \-\-ticket\-slot
@@ -269,6 +274,13 @@ where the application is the scanner's web-app id
 which survives a rename) or its exact name; # starts a comment. A missing
 file, or an application not in it, means its ticket is filed unassigned and
 the report says so. Never in the repository.
+.TP
+.B APPSCAN_WEBSITES_FILE
+The domains lane's live-website list. Default:\~\fI$FLEET_HOME/state/domains\-websites.json\fR,
+written by
+.BR run\-domains (1).
+Missing means the coverage check is skipped and the log says so; older
+than 15 days is noted.
 .TP
 .B FLEET_ORG
 Organisation name in the report banner. Default:\~\fBSecurity\fR.

@@ -39,6 +39,18 @@ type TicketsFile struct {
 	// Unowned are web apps defined in the scanner with no owner in
 	// app-owners.txt, scanned this week or not.
 	Unowned []string `json:"unowned,omitempty"`
+	// NotScanned are live websites (from the domains lane) that no web app
+	// in the scanner points at: a coverage gap. SitesAsOf is when the
+	// domains lane observed them.
+	NotScanned []NotScanned `json:"notScanned,omitempty"`
+	SitesAsOf  time.Time    `json:"sitesAsOf,omitempty"`
+}
+
+// NotScanned is one live website with no web application scan.
+type NotScanned struct {
+	Domain string `json:"domain"`
+	URL    string `json:"url,omitempty"`
+	Owner  string `json:"owner,omitempty"` // from a site: line in app-owners.txt
 }
 
 // AppTicket is one application's ticket input.

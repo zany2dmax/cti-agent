@@ -93,6 +93,9 @@ func run() int {
 	csvOut := flag.String("csv-out", "", "write every probed host as CSV (sitecheck.go's columns first)")
 	actionsOut := flag.String("actions-out", "",
 		"write the DNS changes each domain needs as JSON, for cti-jira --domains-actions")
+	websitesOut := flag.String("websites-out", "",
+		"write the domains with a live website of their own (not landers, parked pages, "+
+			"redirects or domains marked landing) as JSON, for the AppSec lane's coverage check")
 	ticketSlot := flag.Bool("ticket-slot", false,
 		"leave a slot beside the DNS changes for --stamp-ticket to fill with the lock-down ticket")
 	stampTicket := flag.String("stamp-ticket", "",
@@ -255,6 +258,7 @@ func run() int {
 	for _, w := range []struct{ path, body string }{
 		{*out, block.HTML}, {*textOut, block.Text}, {*subjectOut, block.Subject + "\n"},
 		{*csvOut, string(domains.CSV(results))}, {*actionsOut, string(af.JSON())},
+		{*websitesOut, string(domains.LiveWebsites(results, opt.Now).JSON())},
 	} {
 		if w.path == "" {
 			continue

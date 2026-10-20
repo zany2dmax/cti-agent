@@ -45,6 +45,9 @@ const PlaceholderOwner = "OWNER@example.com"
 type Owners struct {
 	byID   map[string]Owner
 	byName map[string]Owner
+	// bySite are "site:<domain>" lines: live websites with no web app scan
+	// yet, recorded so the gap has an owner to set the scan up.
+	bySite map[string]Owner
 }
 
 // DefaultOwnersFile is where the file lives unless APPSCAN_OWNERS_FILE says.
@@ -66,7 +69,7 @@ var (
 // ParseOwners reads the file. Problems are lines it could not use, worded for
 // the report; they never stop the lane.
 func ParseOwners(r io.Reader) (Owners, []string, error) {
-	o := Owners{byID: map[string]Owner{}, byName: map[string]Owner{}}
+	o := Owners{byID: map[string]Owner{}, byName: map[string]Owner{}, bySite: map[string]Owner{}}
 	var problems []string
 	sc := bufio.NewScanner(r)
 	n := 0
@@ -99,6 +102,15 @@ func ParseOwners(r io.Reader) (Owners, []string, error) {
 		own := Owner{Email: strings.ToLower(f[1]), Line: n, App: f[0]}
 		if len(f) > 2 {
 			own.Component = f[2]
+		}
+		if d, ok := strings.CutPrefix(strings.ToLower(f[0]), "site:"); ok {
+			d = hostOf(d)
+			if d == "" {
+				problems = append(problems, fmt.Sprintf("app-owners line %d: site: needs a domain", n))
+				continue
+			}
+			o.bySite[d] = own
+			continue
 		}
 		if m := ownerIDRE.FindStringSubmatch(strings.ToLower(f[0])); m != nil {
 			if prev, dup := o.byID[m[1]]; dup {
@@ -155,7 +167,13 @@ type App struct {
 // owner already on file where there is one, PlaceholderOwner where there is
 // not. unowned are the applications with no owner; stale are owners-file
 // entries that match no application (renamed, or deleted from the scanner).
-func OwnersSkeleton(apps []App, o Owners) (text string, unowned []App, stale []string) {
+// ForSite is the owner recorded for a live website with no scan yet.
+func (o Owners) ForSite(domain string) (Owner, bool) {
+	w, ok := o.bySite[hostOf(domain)]
+	return w, ok
+}
+
+func OwnersSkeleton(apps []App, sites []Site, o Owners) (text string, unowned []App, stale []string) {
 	var b strings.Builder
 	b.WriteString("# Application owners for the AppSec lane's Jira tickets.\n")
 	b.WriteString("# application | owner email | Jira component (optional)   # name  url\n")
@@ -176,7 +194,24 @@ func OwnersSkeleton(apps []App, o Owners) (text string, unowned []App, stale []s
 		}
 		fmt.Fprintf(&b, "%s    # %s\n", line, comment)
 	}
+	if gap := Unscanned(sites, apps); len(gap) > 0 {
+		b.WriteString("\n# LIVE WEBSITES WITH NO QUALYS WAS WEB APP - NOT SCANNED (from the domains check).\n")
+		b.WriteString("# The owner here is who should get a web application scan set up; the line\n")
+		b.WriteString("# goes away by itself once a web app in Qualys WAS points at the site.\n")
+		for _, s := range gap {
+			comment := strings.Join(strings.Fields(s.Title+"  "+s.URL), " ")
+			owner := PlaceholderOwner
+			if w, ok := o.ForSite(s.Domain); ok {
+				used[w.Line] = true
+				owner = w.Email
+			}
+			fmt.Fprintf(&b, "site:%s | %s    # %s\n", s.Domain, owner, comment)
+		}
+	}
 	var all []Owner
+	for _, w := range o.bySite {
+		all = append(all, w)
+	}
 	for _, w := range o.byID {
 		all = append(all, w)
 	}

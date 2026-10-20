@@ -44,6 +44,11 @@ type Entry struct {
 	// Legacy: an old brand. With Receives and no Sends, its outbound has moved
 	// to the main domain and it only keeps its inbound path.
 	Legacy bool
+	// Landing: the website is a landing page - a single marketing or
+	// holding page with nothing to test - so the AppSec lane does not ask
+	// for a web application scan of it. Registrar landers, parked pages and
+	// redirects are recognised without it.
+	Landing bool
 	// Line is where it came from, for error messages.
 	Line int
 }
@@ -101,6 +106,8 @@ func ParseInventory(r io.Reader) ([]Entry, []string, error) {
 				e.Unknown = true
 			case "legacy":
 				e.Legacy = true
+			case "landing":
+				e.Landing = true
 			default:
 				// Unknown is a problem, not a silent no-op. "sned" read as
 				// "does not send" would lock down the checks the wrong way.

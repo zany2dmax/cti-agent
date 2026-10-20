@@ -57,7 +57,7 @@ id:300          | OWNER@example.com
 		{ID: "202", Name: "Customer Portal"},
 		{ID: "300", Name: "New App"},
 	}
-	text, unowned, stale := OwnersSkeleton(apps, o)
+	text, unowned, stale := OwnersSkeleton(apps, nil, o)
 	for _, want := range []string{
 		"id:101 | lead@example.com | Web    # Portal https://p.example.com",
 		"id:202 | two@example.com    # Customer Portal",
@@ -80,5 +80,36 @@ id:300          | OWNER@example.com
 	}
 	if w, ok := o2.For("202", ""); !ok || w.Email != "two@example.com" {
 		t.Errorf("round trip lost the name-keyed owner: %+v", w)
+	}
+}
+
+func TestLiveWebsitesWithNoWebAppAreListedOnce(t *testing.T) {
+	o, _, _ := ParseOwners(strings.NewReader("site:shop.example.net | web@example.com\nsite:gone.example.org | old@example.com\n"))
+	apps := []App{{ID: "1", Name: "Portal", URL: "https://www.portal.example.com/login"}}
+	sites := []Site{
+		{Domain: "portal.example.com", Host: "www.portal.example.com"}, // scanned (www. ignored)
+		{Domain: "shop.example.net", Host: "shop.example.net", URL: "https://shop.example.net/", Title: "Shop"},
+		{Domain: "brochure.example.com", Host: "www.brochure.example.com"},
+	}
+	gap := Unscanned(sites, apps)
+	if len(gap) != 2 || gap[0].Domain != "brochure.example.com" || gap[1].Domain != "shop.example.net" {
+		t.Fatalf("gap %+v", gap)
+	}
+	text, _, stale := OwnersSkeleton(apps, sites, o)
+	for _, want := range []string{"NOT SCANNED", "site:shop.example.net | web@example.com",
+		"site:brochure.example.com | OWNER@example.com"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "site:portal.example.com") {
+		t.Error("a scanned site was listed as not scanned")
+	}
+	if len(stale) != 1 || !strings.Contains(stale[0], "gone.example.org") {
+		t.Errorf("a site line for a site no longer live should be stale: %v", stale)
+	}
+	o2, _, _ := ParseOwners(strings.NewReader(text))
+	if w, ok := o2.ForSite("shop.example.net"); !ok || w.Email != "web@example.com" {
+		t.Errorf("site line did not round-trip: %+v", w)
 	}
 }

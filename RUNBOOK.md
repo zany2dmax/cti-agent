@@ -1080,6 +1080,15 @@ sudo cti-agent run-appscan --to-dev        # the JIRA TICKETS section previews e
 The Jira API account needs the **Browse users and groups** global permission
 to look owners up; without it every ticket is filed unassigned.
 
+**Coverage: live websites nothing scans.** The domains lane writes our live
+websites to `state/domains-websites.json` each week (redirects, registrar
+landers, parked pages and domains marked `landing` in `domains.txt` left out).
+The weekly AppSec email lists any that no Qualys WAS web app points at under
+**NOT SCANNED**, and `--list-apps` adds a `site:<domain>` line for each - the
+owner there is who should get a web application scan set up. The line drops
+out once a web app covers the site. If a listed site is really a landing page,
+mark it `landing` in `domains.txt` instead.
+
 ### A different audience, enforced in code
 
 This mail goes to the people who own application code — not the people who

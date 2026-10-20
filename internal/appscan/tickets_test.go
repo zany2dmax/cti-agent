@@ -137,3 +137,17 @@ func TestASlotInsideObservedDataIsNotAStampSite(t *testing.T) {
 		t.Error("a slot in a report nobody will stamp")
 	}
 }
+
+func TestTheEmailListsLiveWebsitesNobodyScans(t *testing.T) {
+	tf := TicketsFile{SitesAsOf: time.Date(2026, 10, 19, 4, 0, 0, 0, time.UTC),
+		NotScanned: []NotScanned{{Domain: "shop.example.net", Owner: "web@example.com"}, {Domain: "brochure.example.com"}}}
+	for _, isHTML := range []bool{false, true} {
+		got := StampTickets("x"+TicketsSlot, isHTML, tf, map[string]ticketref.Ref{})
+		for _, want := range []string{"NOT SCANNED (2)", "shop.example.net", "owner web@example.com",
+			"add a site: line", "2026-10-19"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("html=%v missing %q:\n%s", isHTML, want, got)
+			}
+		}
+	}
+}

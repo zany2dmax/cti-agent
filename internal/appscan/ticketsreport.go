@@ -125,7 +125,41 @@ func StampTickets(body string, isHTML bool, tf TicketsFile, refs map[string]tick
 		rows = append(rows, row{fmt.Sprintf("No owner in app-owners.txt (%d): %s - their tickets are unassigned. "+
 			"cti-appscan --list-apps prints the file with these added.", n, strings.Join(names, ", ")), ""})
 	}
+	var gap []row
+	for _, ns := range tf.NotScanned {
+		who := "no owner recorded (add a site: line to app-owners.txt)"
+		if ns.Owner != "" {
+			who = "owner " + ticketref.Clean(ns.Owner)
+		}
+		gap = append(gap, row{fmt.Sprintf("%s - live website, no Qualys WAS web app; %s.",
+			ticketref.Clean(ns.Domain), who), ""})
+	}
 	var out strings.Builder
+
+	writeGap := func() {
+		if len(gap) == 0 {
+			return
+		}
+		asOf := ""
+		if !tf.SitesAsOf.IsZero() {
+			asOf = ", per the domains check of " + tf.SitesAsOf.Format("2006-01-02")
+		}
+		title := fmt.Sprintf("NOT SCANNED (%d)", len(gap))
+		intro := "Live websites of our own with no web application scan" + asOf +
+			". Landers, parked pages, redirects and domains marked landing are not listed."
+		if isHTML {
+			sectionHTML(&out, title, "#b25000")
+			itemHTML(&out, intro)
+			for _, r := range gap {
+				itemHTML(&out, r.line)
+			}
+			return
+		}
+		fmt.Fprintf(&out, "\n%s\n%s\n  %s\n", title, strings.Repeat("-", len(title)), intro)
+		for _, r := range gap {
+			fmt.Fprintf(&out, "  %s\n", r.line)
+		}
+	}
 	switch {
 	case len(rows) == 0:
 	case isHTML:
@@ -150,5 +184,6 @@ func StampTickets(body string, isHTML bool, tf TicketsFile, refs map[string]tick
 			}
 		}
 	}
+	writeGap()
 	return strings.ReplaceAll(body, TicketsSlot, out.String())
 }
