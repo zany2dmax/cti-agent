@@ -192,6 +192,22 @@ with
 .BR \-\-subject\-only .
 Default:\~not written.
 .TP
+.B \-\-list\-apps
+Print a complete
+.I app\-owners.txt
+to standard output for every web application defined in Qualys WAS, then
+exit: one line per application keyed on its web-app id, with the owner
+already on file where there is one and
+.B OWNER@example.com
+where there is not (the parser refuses that placeholder, so an unedited line
+means "no owner", never an assignment). Lines in the current file that match
+no application are listed at the end as comments. Read-only; needs the
+Qualys credentials. A weekly run with
+.B \-\-tickets\-out
+also checks every web app against the file and names the unowned ones in the
+report's JIRA TICKETS section.
+Default:\~off.
+.TP
 .B \-\-ticket\-slot
 Leave an invisible slot in the report for
 .B \-\-stamp\-tickets

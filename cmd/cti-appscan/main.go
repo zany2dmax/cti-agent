@@ -76,6 +76,9 @@ func run() int {
 			"above, with where, risk and fix) here, for cti-jira --appscan-tickets")
 	ticketSlot := flag.Bool("ticket-slot", false,
 		"leave a slot in the report for --stamp-tickets to fill with each application's ticket")
+	listApps := flag.Bool("list-apps", false,
+		"print a complete app-owners.txt for every web app defined in the scanner - "+
+			"owners already on file kept, new apps with a placeholder - and exit")
 	stampTickets := flag.String("stamp-tickets", "",
 		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports already "+
 			"written, using the --tickets-out file, then exit")
@@ -102,6 +105,9 @@ func run() int {
 	cfg, err := config.LoadGraphOnly()
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
+	}
+	if *listApps {
+		return doListApps(cfg)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -163,6 +169,24 @@ func run() int {
 			logf("owners : %s", safelog.Line(p))
 		}
 		tf := appscan.BuildTickets(scans, owners, time.Now())
+		// Every web app the scanner defines, not only this week's scans:
+		// an application nobody owns is a ticket nobody will be assigned.
+		if api := wasAPI(cfg); api != nil && !*noDetail {
+			if apps, err := api.WebApps(ctx); err != nil {
+				logf("warn   : web app list unavailable, owners not checked: %s", safelog.Line(err.Error()))
+			} else {
+				_, unowned, stale := appscan.OwnersSkeleton(toApps(apps), owners)
+				for _, a := range unowned {
+					tf.Unowned = append(tf.Unowned, a.Name)
+				}
+				if len(unowned) > 0 {
+					logf("owners : %d web app(s) with no owner - run cti-appscan --list-apps", len(unowned))
+				}
+				for _, s := range stale {
+					logf("owners : %s matches no web app in the scanner", safelog.Line(s))
+				}
+			}
+		}
 		for _, t := range tf.Tickets {
 			if !t.OwnerListed && t.Skip == "" && len(t.Findings) > 0 {
 				logf("owners : %s has no owner in %s - its ticket will be unassigned",
@@ -536,6 +560,39 @@ func attachRemedies(ctx context.Context, api appscan.RemedyFetcher, scans []apps
 		}
 	}
 	logf("fixes  : remediation text for %d of the week's findings, %d QID(s) looked up", n, len(rem))
+}
+
+func toApps(in []qualys.WebApp) []appscan.App {
+	out := make([]appscan.App, 0, len(in))
+	for _, w := range in {
+		out = append(out, appscan.App{ID: w.ID, Name: w.Name, URL: w.URL})
+	}
+	return out
+}
+
+// doListApps prints a complete owners file to stdout. Read-only: one WAS
+// search, and the current owners file. Redirect it, edit the placeholders,
+// install it.
+func doListApps(cfg config.Config) int {
+	api := wasAPI(cfg)
+	if api == nil {
+		return die("--list-apps needs QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	apps, err := api.WebApps(ctx)
+	if err != nil {
+		return die("listing the web apps: %s", safelog.Line(err.Error()))
+	}
+	owners, problems := appscan.LoadOwners(appscan.OwnersPath())
+	for _, p := range problems {
+		logf("owners : %s", safelog.Line(p))
+	}
+	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), owners)
+	fmt.Print(text)
+	logf("apps   : %d web app(s) in the scanner, %d with no owner yet, %d owners-file line(s) matching none",
+		len(apps), len(unowned), len(stale))
+	return exitOK
 }
 
 // doStampTickets fills the tickets slot in reports already written.

@@ -1064,11 +1064,16 @@ ticket per application (label `cti-appscan-<web app id>`), and the email's
   `state/appscan-tickets-preview-DATE.txt` (0600), not the journal. Jira
   trouble never stops the email.
 
-Set up the owners file once, then add a line whenever an application is
-added in Qualys:
+Set up the owners file from the scanner's own list, then fill in the owners.
+`--list-apps` keeps every owner already on file, adds each new web app with
+`OWNER@example.com`, and lists stale lines at the end; the weekly email also
+names any web app with no owner, so re-run it when one appears:
 
 ```bash
+sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt
+vi /tmp/app-owners.txt                     # replace every OWNER@example.com
 sudo install -o root -g ctiagent -m 0640 /tmp/app-owners.txt /etc/cti-agent/app-owners.txt
+rm /tmp/app-owners.txt
 sudo cti-agent run-appscan --to-dev        # the JIRA TICKETS section previews every app
 ```
 

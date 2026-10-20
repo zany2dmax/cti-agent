@@ -41,3 +41,44 @@ func TestAMissingOwnersFileIsAProblemNotAFailure(t *testing.T) {
 		t.Error("an empty owners set found an owner")
 	}
 }
+
+func TestTheSkeletonKeepsOwnersAndFlagsTheRest(t *testing.T) {
+	o, problems, _ := ParseOwners(strings.NewReader(`
+id:101          | lead@example.com | Web
+Customer Portal | two@example.com
+id:999          | gone@example.com
+id:300          | OWNER@example.com
+`))
+	if len(problems) != 1 || !strings.Contains(problems[0], "no owner yet") {
+		t.Errorf("an unedited placeholder must be refused: %v", problems)
+	}
+	apps := []App{
+		{ID: "101", Name: "Portal", URL: "https://p.example.com"},
+		{ID: "202", Name: "Customer Portal"},
+		{ID: "300", Name: "New App"},
+	}
+	text, unowned, stale := OwnersSkeleton(apps, o)
+	for _, want := range []string{
+		"id:101 | lead@example.com | Web    # Portal https://p.example.com",
+		"id:202 | two@example.com    # Customer Portal",
+		"id:300 | OWNER@example.com    # New App  <- no owner",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if len(unowned) != 1 || unowned[0].ID != "300" {
+		t.Errorf("unowned %v", unowned)
+	}
+	if len(stale) != 1 || !strings.Contains(stale[0], "id:999") {
+		t.Errorf("stale %v", stale)
+	}
+	// The skeleton parses back to the same owners.
+	o2, _, err := ParseOwners(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := o2.For("202", ""); !ok || w.Email != "two@example.com" {
+		t.Errorf("round trip lost the name-keyed owner: %+v", w)
+	}
+}

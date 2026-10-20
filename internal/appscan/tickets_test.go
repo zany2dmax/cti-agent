@@ -98,7 +98,7 @@ func TestTheEmailShowsAFixAndEachTicket(t *testing.T) {
 	if got := FixSummary(fix); got != "Encode all output for its context." {
 		t.Errorf("fix summary %q", got)
 	}
-	tf := TicketsFile{Tickets: []AppTicket{
+	tf := TicketsFile{Unowned: []string{"Orphan App"}, Tickets: []AppTicket{
 		{Key: "id:1", App: "Portal", OwnerListed: true, Findings: make([]TicketFinding, 2)},
 		{Key: "id:2", App: "Shop", Skip: "the scan did not complete"},
 		{Key: "id:3", App: "Quiet"},
@@ -111,7 +111,8 @@ func TestTheEmailShowsAFixAndEachTicket(t *testing.T) {
 	}
 	text := StampTickets(body, false, tf, refs)
 	for _, want := range []string{"Portal: filed SEC-9 with 2 finding(s) to fix. Assigned to lead@example.com.",
-		"https://jira.example.com/browse/SEC-9", "Shop: ticket not updated - the scan did not complete."} {
+		"https://jira.example.com/browse/SEC-9", "Shop: ticket not updated - the scan did not complete.",
+		"No owner in app-owners.txt (1): Orphan App"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}

@@ -121,6 +121,7 @@ board line. Safe after the real send has gone.
 sudo cti-agent run-digest daily --to-dev
 sudo cti-agent run-digest weekly --to-dev
 sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you too; previews each app's Jira ticket
+sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys; fill in OWNER@example.com
 sudo cti-agent run-domains --to-dev
 sudo cti-agent run-patchtuesday --to-dev
 sudo cti-agent run-patchtuesday --month 2026-09 --to-dev   # replay to yourself, no --for-real needed

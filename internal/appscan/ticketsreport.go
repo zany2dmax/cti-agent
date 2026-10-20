@@ -113,6 +113,18 @@ func StampTickets(body string, isHTML bool, tf TicketsFile, refs map[string]tick
 			rows = append(rows, row{line, url})
 		}
 	}
+	if n := len(tf.Unowned); n > 0 {
+		names := make([]string, 0, n)
+		for i, a := range tf.Unowned {
+			if i >= 15 {
+				names = append(names, fmt.Sprintf("and %d more", n-i))
+				break
+			}
+			names = append(names, strings.Join(strings.Fields(a), " "))
+		}
+		rows = append(rows, row{fmt.Sprintf("No owner in app-owners.txt (%d): %s - their tickets are unassigned. "+
+			"cti-appscan --list-apps prints the file with these added.", n, strings.Join(names, ", ")), ""})
+	}
 	var out strings.Builder
 	switch {
 	case len(rows) == 0:
