@@ -276,6 +276,18 @@ type ScanResult struct {
 	// Findings is per-vulnerability detail, present only when a DetailFetcher
 	// filled it in. Nil means "not fetched", NOT "none found".
 	Findings []Finding
+
+	// ScanType is the scanner's own type for the scan (VULNERABILITY,
+	// DISCOVERY), when the scan list supplied it. A discovery scan tests
+	// nothing, so it is never evidence that a finding was fixed.
+	ScanType string
+	// Open is every finding the scanner still holds open for the
+	// application, whenever it was last detected - what a ticket is built
+	// from (Findings is this week's detections, for "what changed").
+	// OpenFetched says the lookup succeeded; without it an empty Open means
+	// "unknown", never "nothing open".
+	Open        []Finding
+	OpenFetched bool
 }
 
 // Finding is one vulnerability on one URL.
@@ -297,6 +309,28 @@ type Finding struct {
 	// scanner's own console. Not shown as new work: that would re-raise a
 	// decision a person already made, every week.
 	Ignored bool
+
+	// Remedy is how to fix it, from the scanner's knowledge base, keyed by
+	// the finding's ID. nil when no RemedyFetcher ran or it had nothing for
+	// this ID - the ticket then says the fix was not available, rather than
+	// leaving a developer with a severity and no next step.
+	Remedy *Remedy
+}
+
+// Remedy is what a developer needs to fix a finding: what was found, why it
+// matters, and the fix. Plain text, already bounded in length.
+type Remedy struct {
+	Diagnosis   string // what the scanner found and how
+	Consequence string // what an attacker can do with it
+	Solution    string // how to fix it
+	CVEs        []string
+}
+
+// RemedyFetcher is implemented by providers whose knowledge base can be
+// queried for the fix behind a finding ID. Optional, like DetailFetcher: a
+// provider without it still files tickets, with the fix marked unavailable.
+type RemedyFetcher interface {
+	Remedies(ctx context.Context, ids []string) (map[string]Remedy, error)
 }
 
 // Fault reports whether something is wrong with the SCAN, as distinct from

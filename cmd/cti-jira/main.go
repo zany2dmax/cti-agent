@@ -70,15 +70,20 @@ func run() int {
 	domainsActions := flag.String("domains-actions", "",
 		"file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down "+
 			"ticket, or comment on the one already open when the list has changed")
+	appscanTickets := flag.String("appscan-tickets", "",
+		"file or update ONE ticket per application from this cti-appscan --tickets-out JSON, "+
+			"assigned to the owner in app-owners.txt")
 	refOut := flag.String("ref-out", "",
 		"with --domains-actions: write what happened to the lock-down ticket (key, "+
-			"status, action) here as JSON, for cti-domains --stamp-ticket")
+			"status, action) here as JSON, for cti-domains --stamp-ticket; with "+
+			"--appscan-tickets, one entry per application for cti-appscan --stamp-tickets")
 	flag.Parse()
 
-	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" {
+	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
+		*appscanTickets == "" {
 		flag.Usage()
-		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up " +
-			"or --domains-actions")
+		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up, " +
+			"--domains-actions or --appscan-tickets")
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A
@@ -102,6 +107,10 @@ func run() int {
 	if *followUpFlag {
 		budget = 15 * time.Minute
 	}
+	// Up to six Jira calls per application, one application after another.
+	if *appscanTickets != "" {
+		budget = 10 * time.Minute
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
@@ -115,6 +124,9 @@ func run() int {
 	}
 	if *domainsActions != "" {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
+	}
+	if *appscanTickets != "" {
+		return doAppscanTickets(ctx, c, cfg, *appscanTickets, *forReal, time.Now(), *refOut)
 	}
 	// --follow-up on its own is allowed: re-checking the open tickets needs
 	// the scanner and Jira, not today's findings.

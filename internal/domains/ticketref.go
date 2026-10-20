@@ -1,12 +1,11 @@
 package domains
 
 import (
-	"encoding/json"
 	"fmt"
 	"html"
-	"os"
-	"regexp"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/ticketref"
 )
 
 // THE LOCK-DOWN TICKET IN THE EMAIL
@@ -24,41 +23,15 @@ import (
 const TicketSlot = "<!--CTI_DOMAINS_TICKET-->"
 
 // TicketRef is what cti-jira --ref-out writes.
-type TicketRef struct {
-	// Action is one of: created, commented, unchanged, resolved, none,
-	// would-create, would-comment, would-resolve, error, gate-closed.
-	Action string `json:"action"`
-	Key    string `json:"key,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Status string `json:"status,omitempty"`
-	Note   string `json:"note,omitempty"`
-}
-
-var (
-	ticketKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,15}-[0-9]{1,9}$`)
-	// The URL is put in an email, so it must be the ticket's own browse link
-	// on https - not whatever a file on disk says.
-	ticketURLRE = regexp.MustCompile(`^https://[A-Za-z0-9.-]+/browse/[A-Z][A-Z0-9]{0,15}-[0-9]{1,9}$`)
-)
+type TicketRef = ticketref.Ref
 
 // WriteTicketRef writes a ref file, 0600.
-func WriteTicketRef(path string, r TicketRef) error {
-	b, err := json.Marshal(r)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o600)
-}
+func WriteTicketRef(path string, r TicketRef) error { return ticketref.Write(path, r) }
 
 // ReadTicketRef reads one; nil and an error when it is missing or unreadable.
 func ReadTicketRef(path string) (*TicketRef, error) {
-	// #nosec G304 -- the runner's own --ref-out file under $FLEET_HOME/state.
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
 	var r TicketRef
-	if err := json.Unmarshal(b, &r); err != nil {
+	if err := ticketref.Read(path, &r); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -70,20 +43,9 @@ func TicketLine(r *TicketRef) (line, url string) {
 	if r == nil {
 		return "Jira: the lock-down ticket's status is unavailable this run - see the run-domains journal.", ""
 	}
-	key := ""
-	if ticketKeyRE.MatchString(r.Key) {
-		key = r.Key
-		if ticketURLRE.MatchString(r.URL) && strings.HasSuffix(r.URL, "/"+key) {
-			url = r.URL
-		}
-	}
-	st := ""
-	if s := strings.TrimSpace(clean(r.Status)); s != "" && len(s) < 60 {
-		st = " (" + s + ")"
-	}
-	note := strings.TrimSpace(clean(r.Note))
-	if len(note) > 200 {
-		note = note[:200] + "..."
+	key, st, note := r.SafeKey(), r.SafeStatus(), r.SafeNote()
+	if key != "" {
+		url = r.SafeURL()
 	}
 	switch r.Action {
 	case "created":
@@ -118,16 +80,6 @@ func TicketLine(r *TicketRef) (line, url string) {
 		return fmt.Sprintf("Jira: lock-down ticket %s%s.", key, st), url
 	}
 	return "", ""
-}
-
-// clean drops control characters, so a field from Jira cannot break a line.
-func clean(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, s)
 }
 
 // StampTicket replaces the slot in a rendered report. Every slot is replaced,

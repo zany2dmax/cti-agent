@@ -50,9 +50,33 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   still never stops the email. Only an https Jira browse link for that key
   is put in the email.
 
+### Added
+
+- **One Jira ticket per application, assigned to its owner, with the fix.**
+  The AppSec weekly now keeps one live ticket per application
+  (`cti-jira --appscan-tickets`, filed before the email goes): every active,
+  confirmed finding of Qualys severity 5-3, grouped by QID with every URL and
+  parameter, and for each the **risk, what the scanner found and how to fix
+  it** from the Qualys KnowledgeBase entry for the QID (the WAS finding itself
+  carries none of that). Assigned to the owner in
+  `/etc/cti-agent/app-owners.txt` - looked up in Jira by email, never guessed;
+  unlisted means unassigned, and the email says so. Commented only when the
+  findings change, told once when nothing is left, left alone the week a scan
+  was incomplete, failed to log in, or its detail could not be fetched. The
+  weekly email gains a JIRA TICKETS section and a one-line fix under each new
+  finding. Dry runs and `--to-dev` preview only.
+
 ### Upgrade
 
-Pull, reinstall. Nothing to configure.
+Pull, reinstall. Then:
+
+1. Create `/etc/cti-agent/app-owners.txt` (format in `fleet.env.example`
+   and `man cti-appscan`), mode 0640 root:ctiagent. Use the web-app
+   id from Qualys (`id:123456`) where you can.
+2. Give the Jira API account the **Browse users and groups** permission, or
+   every ticket is filed unassigned.
+3. `sudo cti-agent run-appscan --to-dev` to preview the tickets, then let
+   Monday's run file them.
 
 ## 1.3.2 — 2026-10-19
 

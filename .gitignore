@@ -97,3 +97,8 @@ CHEATSHEET.pdf
 
 # Assistant working notes for this checkout. Local only, never committed.
 /CLAUDE.md
+
+# The AppSec lane's application owners are an operator file
+# (/etc/cti-agent/app-owners.txt): names and emails of the people who own
+# each application. Never in this public repository.
+app-owners.txt
