@@ -94,3 +94,6 @@ CHEATSHEET.pdf
 
 # Go toolchain tarball for offline build/test in the assistant sandbox. Never committed.
 .toolchain/
+
+# Assistant working notes for this checkout. Local only, never committed.
+/CLAUDE.md
