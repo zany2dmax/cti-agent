@@ -290,12 +290,12 @@ func wikiAction(x domains.Action) string {
 	return fmt.Sprintf("%s%s: %s", rec, cur, wikiEscape(x.Why))
 }
 
-// wikiEscape keeps a DNS value from being read as wiki markup: braces end a
-// {{monospace}} span, brackets make a link and a pipe a table cell. Every
-// value is placed inside {{...}} or after "* ", so * and # need nothing.
+// wikiEscape keeps a value from being read as wiki markup: braces end a
+// {{monospace}} span, brackets make a link, a pipe a table cell, "!" an
+// embedded image, and * _ + ^ ~ ? - format text. Values from DNS and from
+// the scanner both pass through here; see wikiMarkup.
 func wikiEscape(s string) string {
-	r := strings.NewReplacer("{", "\\{", "}", "\\}", "[", "\\[", "]", "\\]", "|", "\\|")
-	return r.Replace(strings.Join(strings.Fields(s), " "))
+	return wikiMarkup.Replace(strings.Join(strings.Fields(s), " "))
 }
 
 func modeName(forReal bool) string {

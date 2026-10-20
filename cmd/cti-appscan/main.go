@@ -34,6 +34,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
+	"github.com/zany2dmax/cti-agent/internal/ticketref"
 )
 
 const (
@@ -70,10 +71,21 @@ func run() int {
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup "+
 			"reads, so those notifications can be archived; then exit")
+	ticketsOut := flag.String("tickets-out", "",
+		"write one Jira ticket's input per application (active findings of Serious or "+
+			"above, with where, risk and fix) here, for cti-jira --appscan-tickets")
+	ticketSlot := flag.Bool("ticket-slot", false,
+		"leave a slot in the report for --stamp-tickets to fill with each application's ticket")
+	stampTickets := flag.String("stamp-tickets", "",
+		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports already "+
+			"written, using the --tickets-out file, then exit")
 	flag.Parse()
 
 	if *commitSeen != "" {
 		return doCommitSeen(*commitSeen)
+	}
+	if *stampTickets != "" {
+		return doStampTickets(*stampTickets, *ticketsOut, *out, *textOut)
 	}
 
 	// fleet.env, so a run by hand gets the same settings systemd gives it.
@@ -117,6 +129,10 @@ func run() int {
 			scans = reconcile(ctx, api, scans, windowStart, qualys.PortalOrigin(cfg.QualysBaseURL))
 			scans = newestPerApp(scans)
 			attachDetail(ctx, api, scans, windowStart)
+			if *ticketsOut != "" {
+				attachOpen(ctx, api, scans)
+			}
+			attachRemedies(ctx, api, scans)
 		} else {
 			scans = newestPerApp(scans)
 		}
@@ -129,11 +145,36 @@ func run() int {
 	// every link to plain text rather than dropping one or opening the gate.
 	appscan.AllowPortalHosts(qualys.Provider{}.Name(), qualys.PortalHosts...)
 
-	block := appscan.Render(scans, time.Now())
+	render := appscan.Render
+	if *ticketSlot {
+		render = appscan.RenderWithTicketSlot
+	}
+	block := render(scans, time.Now())
 
 	if *subjectOnly {
 		fmt.Println(block.Subject)
 		return exitOK
+	}
+
+	// One Jira ticket's input per application, for cti-jira --appscan-tickets.
+	if *ticketsOut != "" {
+		owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
+		for _, p := range oprobs {
+			logf("owners : %s", safelog.Line(p))
+		}
+		tf := appscan.BuildTickets(scans, owners, time.Now())
+		for _, t := range tf.Tickets {
+			if !t.OwnerListed && t.Skip == "" && len(t.Findings) > 0 {
+				logf("owners : %s has no owner in %s - its ticket will be unassigned",
+					safelog.Line(t.App), safelog.Line(appscan.OwnersPath()))
+			}
+		}
+		if err := os.WriteFile(*ticketsOut, tf.JSON(), 0o600); err != nil {
+			logf("warn   : could not write %s: %s - no tickets this week",
+				safelog.Line(*ticketsOut), safelog.Line(err.Error()))
+		} else {
+			logf("tickets: %d application(s) written to %s", len(tf.Tickets), safelog.Line(*ticketsOut))
+		}
 	}
 
 	// The notices this report covered. Written here, committed by the runner
@@ -442,6 +483,108 @@ func attachDetail(ctx context.Context, api *qualys.API, scans []appscan.ScanResu
 		}
 		scans[i].Findings = f
 	}
+}
+
+// attachOpen fetches every finding the scanner still holds open, for the
+// tickets. Only for applications the scan list identified: a lookup by a
+// name derived from a scan title can come back empty without error, and
+// empty here would tell a ticket everything was fixed.
+func attachOpen(ctx context.Context, api *qualys.API, scans []appscan.ScanResult) {
+	for i := range scans {
+		if scans[i].Provider != "qualys-was" || scans[i].NoNotification || scans[i].AppID == "" {
+			continue
+		}
+		f, err := api.OpenFindings(ctx, scans[i])
+		if err != nil {
+			logf("warn   : open findings unavailable for %s - its ticket is left alone this week: %s",
+				safelog.Line(scans[i].App), safelog.Line(err.Error()))
+			continue
+		}
+		scans[i].Open, scans[i].OpenFetched = f, true
+	}
+}
+
+// attachRemedies fills each finding's fix from the KnowledgeBase, one lookup
+// for every QID in the week. A failure is a warning: the tickets still go,
+// and each finding without a fix says so.
+func attachRemedies(ctx context.Context, api appscan.RemedyFetcher, scans []appscan.ScanResult) {
+	var ids []string
+	for _, s := range scans {
+		for _, f := range s.Findings {
+			ids = append(ids, f.ID)
+		}
+		for _, f := range s.Open {
+			ids = append(ids, f.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	rem, err := api.Remedies(ctx, ids)
+	if err != nil {
+		logf("warn   : remediation text incomplete: %s", safelog.Line(err.Error()))
+	}
+	n := 0
+	for i := range scans {
+		for _, list := range [][]appscan.Finding{scans[i].Findings, scans[i].Open} {
+			for j := range list {
+				if r, ok := rem[list[j].ID]; ok {
+					list[j].Remedy = &r
+					n++
+				}
+			}
+		}
+	}
+	logf("fixes  : remediation text for %d of the week's findings, %d QID(s) looked up", n, len(rem))
+}
+
+// doStampTickets fills the tickets slot in reports already written.
+func doStampTickets(refPath, ticketsPath, htmlPath, textPath string) int {
+	if ticketsPath == "" {
+		return die("--stamp-tickets needs --tickets-out naming the tickets file written earlier")
+	}
+	var tf appscan.TicketsFile
+	if err := ticketref.Read(ticketsPath, &tf); err != nil {
+		return die("reading %s: %s", safelog.Line(ticketsPath), safelog.Line(err.Error()))
+	}
+	var refs struct {
+		Apps map[string]ticketref.Ref `json:"apps"`
+	}
+	var apps map[string]ticketref.Ref
+	if err := ticketref.Read(refPath, &refs); err != nil {
+		logf("tickets: %s unreadable (%s) - the report says their status is unavailable",
+			safelog.Line(refPath), safelog.Line(err.Error()))
+	} else {
+		apps = refs.Apps
+		if apps == nil {
+			apps = map[string]ticketref.Ref{}
+		}
+	}
+	for _, p := range []struct {
+		path   string
+		isHTML bool
+	}{{htmlPath, true}, {textPath, false}} {
+		if p.path == "" {
+			continue
+		}
+		// #nosec G304 -- the runner's own report under $FLEET_HOME/state.
+		b, err := os.ReadFile(p.path)
+		if err != nil {
+			return die("reading %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+		out := appscan.StampTickets(string(b), p.isHTML, tf, apps)
+		tmp := p.path + ".stamp"
+		if err := os.WriteFile(tmp, []byte(out), 0o600); err != nil {
+			_ = os.Remove(tmp)
+			return die("writing %s: %s", safelog.Line(tmp), safelog.Line(err.Error()))
+		}
+		if err := os.Rename(tmp, p.path); err != nil {
+			_ = os.Remove(tmp)
+			return die("replacing %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+	}
+	logf("tickets: stamped %d application(s) into the report", len(tf.Tickets))
+	return exitOK
 }
 
 // shortSubject keeps a vendor subject to one readable line in a log.

@@ -1558,6 +1558,13 @@ and needs no credentials at all. An API is a second, optional interface,
 - **SCANNER FAULTS** only for a configured credential that **failed**, or a scan
   that did not finish. A failed login also alerts the operator through
   `cti-alert`, because App Dev cannot fix a scanner credential.
+- **A fix under every new finding** - the first sentence of the Qualys
+  KnowledgeBase solution for its QID.
+- **JIRA TICKETS** - one live ticket per application, assigned to its owner from
+  `/etc/cti-agent/app-owners.txt`, carrying every active Serious-or-above
+  finding with where, risk, what was found and how to fix it. Commented only
+  when the findings change; left alone the week a scan was not trustworthy.
+  See [RUNBOOK 11f](../RUNBOOK.md#one-jira-ticket-per-application).
 - **New and reopened at Serious or above** get per-finding detail - URL and
   parameter - capped at twelve per application.
 - **Its severities are Qualys's, not the fleet's.** The palette matches the
