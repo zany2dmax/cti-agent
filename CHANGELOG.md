@@ -70,6 +70,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   kept, new apps with an `OWNER@example.com` placeholder (refused by the
   parser until replaced), stale lines listed. The weekly email names any web
   app with no owner.
+- **Coverage check: live websites with no web application scan.** The domains
+  lane writes our live websites (`cti-domains --websites-out`,
+  `state/domains-websites.json`; redirects, registrar landers, parked pages
+  and the new `landing` inventory marker left out). The AppSec weekly lists any
+  that no Qualys WAS web app points at under NOT SCANNED, and `--list-apps`
+  adds them as `site:<domain>` lines in `app-owners.txt` for whoever should get
+  the scan set up.
 
 ### Upgrade
 

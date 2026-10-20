@@ -2425,7 +2425,7 @@ for a in "$@"; do
   esac
   next=""
   case "$a" in
-    --out|--text-out|--csv-out|--actions-out|--seen-out|--tickets-out) next=out ;;
+    --out|--text-out|--csv-out|--actions-out|--seen-out|--tickets-out|--websites-out) next=out ;;
     --subject-out) next=subj ;;
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
@@ -2566,6 +2566,8 @@ class RunnersToDev(unittest.TestCase):
                 self.assertLess(jira, stamp, calls)
                 self.assertLess(stamp, send, "the email went before the ticket was stamped")
                 self.assertIn("--ref-out", calls[jira])
+                self.assertIn("--websites-out", calls[idx(lambda c: c.startswith("cti-domains --") and "--out" in c)],
+                              "the AppSec coverage check needs the domains lane's website list")
                 self.assertEqual("--for-real" in calls[jira], real,
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
 

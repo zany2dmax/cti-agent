@@ -212,7 +212,10 @@ The domain inventory: one domain per line, followed by any of the markers
 .B unknown
 and
 .B legacy
-(space- or comma-separated) that choose its profile,
+(space- or comma-separated) that choose its profile, plus
+.BR landing ,
+which marks a live website as a landing page so the AppSec lane does not
+ask for a web application scan of it, and
 .B #
 for comments. Names are normalised (scheme, path, port and case removed);
 lines that are not hostnames, duplicates and unknown markers are listed in
@@ -259,6 +262,20 @@ and why, plus counts and a hash of the list.
 .B run\-domains
 passes it to
 .BR "cti\-jira \-\-domains\-actions" .
+Default:\~not written.
+.TP
+.BI \-\-websites\-out " FILE"
+Write the domains that serve a live website of their own, as JSON, mode
+0600: domain, the host the site ends up on, its final URL and page title.
+Not listed: redirects to another domain, registrar landers and Website
+Builder pages, parked or for-sale pages, and domains marked
+.BR landing .
+.B run\-domains
+writes
+.I $FLEET_HOME/state/domains\-websites.json
+for
+.BR cti\-appscan (1),
+which reports live websites that no Qualys WAS web app scans.
 Default:\~not written.
 .TP
 .B \-\-ticket\-slot
