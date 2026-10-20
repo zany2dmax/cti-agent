@@ -65,14 +65,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   was incomplete, failed to log in, or its detail could not be fetched. The
   weekly email gains a JIRA TICKETS section and a one-line fix under each new
   finding. Dry runs and `--to-dev` preview only.
+- **`cti-appscan --list-apps`** prints a complete `app-owners.txt` from every
+  web app defined in Qualys WAS, keyed on web-app id: owners already on file
+  kept, new apps with an `OWNER@example.com` placeholder (refused by the
+  parser until replaced), stale lines listed. The weekly email names any web
+  app with no owner.
 
 ### Upgrade
 
 Pull, reinstall. Then:
 
-1. Create `/etc/cti-agent/app-owners.txt` (format in `fleet.env.example`
-   and `man cti-appscan`), mode 0640 root:ctiagent. Use the web-app
-   id from Qualys (`id:123456`) where you can.
+1. Create `/etc/cti-agent/app-owners.txt` from the scanner's list:
+   `sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt`, replace
+   every `OWNER@example.com`, then install it mode 0640 root:ctiagent
+   (RUNBOOK 11f has the commands).
 2. Give the Jira API account the **Browse users and groups** permission, or
    every ticket is filed unassigned.
 3. `sudo cti-agent run-appscan --to-dev` to preview the tickets, then let
