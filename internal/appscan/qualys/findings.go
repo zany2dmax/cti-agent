@@ -74,6 +74,24 @@ const maxPages = 40
 // the search returned zero findings, without error, and the report printed
 // "detail not available" for nearly every application.
 func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Time) ([]appscan.Finding, error) {
+	return a.findings(ctx, s, since, false)
+}
+
+// OpenFindings returns every finding the scanner still holds open for the
+// application - NEW, ACTIVE or REOPENED - however long ago it was last
+// detected.
+//
+// THIS, NOT Findings, IS WHAT A TICKET IS BUILT FROM. Findings filters on
+// "last detected this week", which is right for "what changed" and wrong for
+// "what is open": a finding the week's scan did not re-test (a page it did
+// not reach, a scan without the login) drops out of that window while
+// Qualys still has it open, and a ticket built from it would be told the
+// finding was fixed. Qualys marks a finding FIXED only after a retest.
+func (a *API) OpenFindings(ctx context.Context, s appscan.ScanResult) ([]appscan.Finding, error) {
+	return a.findings(ctx, s, time.Time{}, true)
+}
+
+func (a *API) findings(ctx context.Context, s appscan.ScanResult, since time.Time, open bool) ([]appscan.Finding, error) {
 	app := s.App
 	var out []appscan.Finding
 	lastID := 0
@@ -87,7 +105,7 @@ func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Tim
 					"list that would read as complete", maxPages, app)
 		}
 
-		body, err := a.search(ctx, s, since, lastID)
+		body, err := a.search(ctx, s, since, lastID, open)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +138,7 @@ func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Tim
 }
 
 // search POSTs one page of the finding search.
-func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time, afterID int) ([]byte, error) {
+func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time, afterID int, open bool) ([]byte, error) {
 	var crit strings.Builder
 	if s.AppID != "" {
 		fmt.Fprintf(&crit, `<Criteria field="webApp.id" operator="EQUALS">%s</Criteria>`,
@@ -138,6 +156,9 @@ func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time,
 		fmt.Fprintf(&crit,
 			`<Criteria field="lastDetectedDate" operator="GREATER">%s</Criteria>`,
 			since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	if open {
+		crit.WriteString(`<Criteria field="status" operator="IN">NEW,ACTIVE,REOPENED</Criteria>`)
 	}
 	if afterID > 0 {
 		fmt.Fprintf(&crit, `<Criteria field="id" operator="GREATER">%d</Criteria>`, afterID)
@@ -174,6 +195,35 @@ func (a *API) post(ctx context.Context, path, payload string) ([]byte, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Qualys WAS response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, a.authError(resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+// get sends one GET to the /api/... family (the KnowledgeBase) and returns
+// the body of a 2xx response. Same credentials and the same error advice as
+// post.
+func (a *API) get(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(a.username, a.password)
+	req.Header.Set("X-Requested-With", "cti-agent")
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("qualys KnowledgeBase request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	const limit = 64 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the Qualys KnowledgeBase response: %w", err)
+	}
+	if len(body) > limit {
+		return nil, fmt.Errorf("the Qualys KnowledgeBase response is over %d MB - not reading it", limit>>20)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, a.authError(resp.StatusCode, body)

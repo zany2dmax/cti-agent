@@ -22,6 +22,12 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
 .RB [ \-\-ref\-out
 .IR FILE ]
 .PP
+.B cti-jira \-\-appscan\-tickets
+.I FILE
+.RB [ \-\-for\-real ]
+.RB [ \-\-ref\-out
+.IR FILE ]
+.PP
 .B sudo cti\-agent cti\-jira
 .I mode
 .RI [ options ]
@@ -250,6 +256,32 @@ it prints what it would do and the ticket text. Subject to the
 write gate. Run by
 .BR run\-domains (1)
 before the weekly email, so the email can name the ticket.
+Default:\~empty.
+.TP
+.BI \-\-appscan\-tickets " FILE"
+File or update ONE ticket per application from this
+.B cti\-appscan \-\-tickets\-out
+file (labels
+.BR cti\-agent ,
+.B cti\-appscan
+and
+.BI cti\-appscan\- id\fR).
+No open ticket and findings: file one, assigned to the owner's Jira account
+(looked up by email; exactly one active match or it stays unassigned, and
+the report says so), with the owner's component if one is given. If Jira
+refuses the assignee or component, it is filed without them. Open ticket
+and the findings changed: one comment listing what is new (in full) and what
+is no longer detected. Same findings: nothing. Nothing left: say so once.
+An application marked to be left alone is not touched. Every finding says
+where it is, the risk, what the scanner found and how to fix it, and the
+full list is attached as text. Without
+.B \-\-for\-real
+it prints what it would file. Subject to the
+.B JIRA_ALLOW_CREATE
+write gate; up to ten minutes. The API account needs "Browse users and
+groups" to look owners up. Run by
+.BR run\-appscan (1)
+before the weekly email.
 Default:\~empty.
 .TP
 .BI \-\-ref\-out " FILE"

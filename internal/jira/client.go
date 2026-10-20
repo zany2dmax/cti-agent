@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -63,6 +64,12 @@ type IssueRequest struct {
 	Summary     string
 	Description string
 	Labels      []string
+	// AssigneeAccountID assigns the new issue; "" leaves it unassigned.
+	AssigneeAccountID string
+	// Components are component NAMES; one that does not exist in the
+	// project makes Jira refuse the whole create, so callers that pass one
+	// retry without it.
+	Components []string
 }
 
 // IssueResult identifies a created or found issue.
@@ -81,14 +88,23 @@ func (c *Client) BrowseURL(key string) string {
 
 // CreateIssue files a new issue and returns its key.
 func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, error) {
-	body := map[string]any{
-		"fields": map[string]any{
-			"project":     map[string]string{"key": r.ProjectKey},
-			"issuetype":   map[string]string{"name": r.IssueType},
-			"summary":     r.Summary,
-			"description": r.Description,
-			"labels":      r.Labels,
-		},
+	fields := map[string]any{
+		"project":     map[string]string{"key": r.ProjectKey},
+		"issuetype":   map[string]string{"name": r.IssueType},
+		"summary":     r.Summary,
+		"description": r.Description,
+		"labels":      r.Labels,
+	}
+	body := map[string]any{"fields": fields}
+	if r.AssigneeAccountID != "" {
+		fields["assignee"] = map[string]string{"accountId": r.AssigneeAccountID}
+	}
+	if len(r.Components) > 0 {
+		var cs []map[string]string
+		for _, c := range r.Components {
+			cs = append(cs, map[string]string{"name": c})
+		}
+		fields["components"] = cs
 	}
 	var out IssueResult
 	if err := c.do(ctx, http.MethodPost, "/rest/api/2/issue", body, &out); err != nil {
@@ -98,6 +114,58 @@ func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, 
 		return IssueResult{}, fmt.Errorf("jira accepted the create but returned no issue key")
 	}
 	return out, nil
+}
+
+// AccountIDForEmail finds the Jira user with exactly this email address.
+//
+// Jira's user search matches on name and email fragments, so the result is
+// accepted only when exactly one ACTIVE user's address equals the email
+// (case-insensitively) - or, when the tenant hides addresses from the API,
+// when the search returned exactly one active user and its address is hidden. Anything else is
+// "not found": assigning an Urgent finding to the wrong person is worse than
+// leaving it unassigned and saying so. Needs the "Browse users and groups"
+// permission for the API account.
+func (c *Client) AccountIDForEmail(ctx context.Context, email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return "", fmt.Errorf("no email to look up")
+	}
+	var users []struct {
+		AccountID    string `json:"accountId"`
+		EmailAddress string `json:"emailAddress"`
+		Active       bool   `json:"active"`
+		AccountType  string `json:"accountType"`
+	}
+	path := "/rest/api/3/user/search?query=" + url.QueryEscape(email) + "&maxResults=10"
+	if err := c.do(ctx, http.MethodGet, path, nil, &users); err != nil {
+		return "", err
+	}
+	var exact, active, hidden []string
+	for _, u := range users {
+		if !u.Active || u.AccountID == "" || (u.AccountType != "" && u.AccountType != "atlassian") {
+			continue
+		}
+		active = append(active, u.AccountID)
+		if strings.TrimSpace(u.EmailAddress) == "" {
+			hidden = append(hidden, u.AccountID)
+		}
+		if strings.EqualFold(strings.TrimSpace(u.EmailAddress), email) {
+			exact = append(exact, u.AccountID)
+		}
+	}
+	switch {
+	case len(exact) == 1:
+		return exact[0], nil
+	case len(exact) > 1:
+		return "", fmt.Errorf("%d Jira users have the address %s", len(exact), email)
+	case len(active) == 1 && len(hidden) == 1:
+		// The one match's address is hidden by the tenant's privacy
+		// settings, so it cannot be compared - but it is the only active
+		// user the search found. A VISIBLE address that differs (a prefix
+		// match, jsmith@ vs jsmith@...au) is never accepted.
+		return hidden[0], nil
+	}
+	return "", fmt.Errorf("no single active Jira user found for %s (%d match(es))", email, len(active))
 }
 
 // Search runs a JQL query and returns the matching issues.
@@ -294,9 +362,9 @@ func checkStatus(resp *http.Response, what string) error {
 	// says the word. Jira puts the replacement path in the body, so the body
 	// is preserved verbatim below.
 	if resp.StatusCode == http.StatusGone {
-		return fmt.Errorf("%s failed: THIS ENDPOINT HAS BEEN REMOVED by Atlassian "+
+		return &StatusError{Code: resp.StatusCode, Err: fmt.Errorf("%s failed: THIS ENDPOINT HAS BEEN REMOVED by Atlassian "+
 			"(HTTP 410) - this needs a code change, not a config change: %s",
-			what, strings.TrimSpace(string(raw)))
+			what, strings.TrimSpace(string(raw)))}
 	}
 
 	var parsed struct {
@@ -313,12 +381,30 @@ func checkStatus(resp *http.Response, what string) error {
 			parts = append(parts, k+": "+parsed.Errors[k])
 		}
 		if len(parts) > 0 {
-			return fmt.Errorf("%s failed: %s (HTTP %d)",
-				what, strings.Join(parts, "; "), resp.StatusCode)
+			return &StatusError{Code: resp.StatusCode, Err: fmt.Errorf("%s failed: %s (HTTP %d)",
+				what, strings.Join(parts, "; "), resp.StatusCode)}
 		}
 	}
-	return fmt.Errorf("%s failed: HTTP %d: %s",
-		what, resp.StatusCode, strings.TrimSpace(string(raw)))
+	return &StatusError{Code: resp.StatusCode, Err: fmt.Errorf("%s failed: HTTP %d: %s",
+		what, resp.StatusCode, strings.TrimSpace(string(raw)))}
+}
+
+// StatusError is a non-2xx answer from Jira. A caller that must tell "Jira
+// refused this request" (a 400: nothing was created) from "the request may
+// or may not have landed" (a timeout, a 5xx) checks Code - retrying the
+// second kind can file a duplicate.
+type StatusError struct {
+	Code int
+	Err  error
+}
+
+func (e *StatusError) Error() string { return e.Err.Error() }
+func (e *StatusError) Unwrap() error { return e.Err }
+
+// IsBadRequest reports whether err is Jira refusing the request outright.
+func IsBadRequest(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusBadRequest
 }
 
 func sortedKeys(m map[string]string) []string {

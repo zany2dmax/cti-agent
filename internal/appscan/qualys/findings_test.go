@@ -316,3 +316,22 @@ func TestPotentialAndIgnoredAreRead(t *testing.T) {
 		t.Errorf("Param = %q; the real response carries none at top level", got[0].Param)
 	}
 }
+
+func TestOpenFindingsAskForEveryOpenFindingNotThisWeeks(t *testing.T) {
+	// A ticket built from "detected this week" would be told a finding the
+	// week's scan did not re-test was fixed.
+	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
+	if _, err := api.OpenFindings(context.Background(), appscan.ScanResult{App: "App", AppID: "42"}); err != nil {
+		t.Fatal(err)
+	}
+	b := (*bodies)[0]
+	if strings.Contains(b, "lastDetectedDate") {
+		t.Errorf("open findings were limited to recent detections:\n%s", b)
+	}
+	if !strings.Contains(b, `<Criteria field="status" operator="IN">NEW,ACTIVE,REOPENED</Criteria>`) {
+		t.Errorf("open findings not filtered on status:\n%s", b)
+	}
+	if !strings.Contains(b, `field="webApp.id" operator="EQUALS">42<`) {
+		t.Errorf("not keyed on the application id:\n%s", b)
+	}
+}
