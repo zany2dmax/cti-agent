@@ -45,14 +45,29 @@ is written to them, and deletes today's authentication-failure file, whose
 absence after the run is itself a signal.
 .TP
 .B 2. Report
-.B cti\-appscan \-\-out \-\-text\-out \-\-auth\-fail\-out
-reads the scan notifications in the CTI mailbox and the WAS findings API and
-writes the report. Fatal on a non-zero exit.
+.B cti\-appscan \-\-out \-\-text\-out \-\-auth\-fail\-out \-\-seen\-out \-\-tickets\-out \-\-ticket\-slot
+reads the scan notifications in the CTI mailbox, the WAS findings API and
+the KnowledgeBase's fix for each QID, and writes the report and each
+application's ticket input. Fatal on a non-zero exit.
 .TP
 .B 3. Subject
 .B cti\-appscan \-\-subject\-only
 is run as a second, separate collection. Fatal if it fails or prints
 nothing.
+.TP
+.B 3a. Application tickets (non-fatal)
+.B cti\-jira \-\-appscan\-tickets
+with the tickets file and
+.BR \-\-ref\-out ,
+plus
+.B \-\-for\-real
+on a real run only - a dry run or
+.B \-\-to\-dev
+previews. Then
+.B cti\-appscan \-\-stamp\-tickets
+adds a JIRA TICKETS section to the report naming each application's ticket.
+Before the send so the email names them; a Jira failure becomes "not
+updated this run" and the email still goes.
 .TP
 .B 4. Send
 .B cti\-mailer \-\-lane was
@@ -151,6 +166,11 @@ is the UTC date.
 .TP
 .IR appscan\-DATE.html ", " appscan\-DATE.txt
 The report, 0600. A second run on the same day replaces them.
+.TP
+.IR appscan\-tickets\-DATE.json ", " appscan\-tickets\-ref\-DATE.json
+Each application's ticket input, and what
+.B cti\-jira
+did with it; 0600, deleted at the start of the next run.
 .TP
 .I appscan\-authfail\-DATE.tsv
 One line per scan whose configured credential failed, application first;

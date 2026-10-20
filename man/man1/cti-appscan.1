@@ -172,6 +172,48 @@ calls it only after a real send, never on a dry run or a
 test. Needs
 .BR FLEET_HOME .
 Default:\~empty.
+.TP
+.BI \-\-tickets\-out " FILE"
+Write one Jira ticket's input per application, as JSON, mode 0600, for
+.BR "cti\-jira \-\-appscan\-tickets" :
+every active, confirmed finding of Serious severity or above (not
+potential, not ignored, not fixed), grouped by QID with every URL and
+parameter it was seen at, and the fix from the Qualys KnowledgeBase -
+Diagnosis, Consequence and Solution for the QID. The owner comes from
+.BR APPSCAN_OWNERS_FILE .
+The findings are every one the scanner still holds open (NEW, ACTIVE,
+REOPENED) however long ago last detected - not only this week's
+detections, which would read a finding the week's scan did not re-test as
+fixed. An application is marked to be left alone that week when its scan
+did not complete, failed to authenticate, was a discovery scan, was not
+matched to the scanner's scan list (no web-app id), or its open findings
+could not be fetched - so its ticket is never told everything was fixed. Not written
+with
+.BR \-\-subject\-only .
+Default:\~not written.
+.TP
+.B \-\-ticket\-slot
+Leave an invisible slot in the report for
+.B \-\-stamp\-tickets
+to fill with a JIRA TICKETS section.
+.B run\-appscan
+passes it. Default:\~off.
+.TP
+.BI \-\-stamp\-tickets " FILE"
+Read a
+.B cti\-jira \-\-ref\-out
+file and stamp one line per application - filed, updated, unchanged,
+nothing left, not updated and why, or (dry run) what would happen - into
+the
+.B \-\-out
+and
+.B \-\-text\-out
+reports already written, using the
+.B \-\-tickets\-out
+file named alongside it; then exit. A missing or unreadable
+.I FILE
+says each status is unavailable. Links are only https Jira browse links.
+Default:\~empty.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from
@@ -202,6 +244,16 @@ and a note says so. A
 that does not map to a known Qualys portal leaves report links as plain
 text. Section 2.
 .TP
+.B APPSCAN_OWNERS_FILE
+The application owners file. Default:\~\fI/etc/cti\-agent/app\-owners.txt\fR.
+One line per application:
+.IR "application " | " owner email " [ "| Jira component" ],
+where the application is the scanner's web-app id
+.RB ( id:123456 ,
+which survives a rename) or its exact name; # starts a comment. A missing
+file, or an application not in it, means its ticket is filed unassigned and
+the report says so. Never in the repository.
+.TP
 .B FLEET_ORG
 Organisation name in the report banner. Default:\~\fBSecurity\fR.
 Section 4.
@@ -224,6 +276,10 @@ not by this command.
 .TP
 .I /etc/cti\-agent/fleet.env
 Graph and Qualys credentials.
+.TP
+.I /etc/cti\-agent/app\-owners.txt
+Who owns each application; see
+.BR APPSCAN_OWNERS_FILE .
 .TP
 .I /var/lib/cti\-agent/state/appscan\-YYYY\-MM\-DD.{html,txt}
 The report files written by

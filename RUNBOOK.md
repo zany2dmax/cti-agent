@@ -1034,6 +1034,47 @@ A dry run leaves the rendered report at
 the timer: it names which applications have open Urgent findings, so it is a
 map of where to look, and it is handled like the VM reports for that reason.
 
+### One Jira ticket per application
+
+Before the weekly email goes, `cti-jira --appscan-tickets` keeps ONE open
+ticket per application (label `cti-appscan-<web app id>`), and the email's
+**JIRA TICKETS** section names each one:
+
+- **What is on it:** every active, confirmed finding of Qualys severity 5-3
+  (Urgent, Critical, Serious) - not potential, not ignored, not fixed - grouped
+  by QID, with every URL and parameter, and for each: **Risk**, **What the
+  scanner found** and **How to fix it**, from the Qualys KnowledgeBase entry
+  for the QID. Medium and Minimal are a count. The full list is attached.
+- **Who it is assigned to:** the owner in `/etc/cti-agent/app-owners.txt`
+  (`APPSCAN_OWNERS_FILE`), looked up in Jira by email. Not listed, or not
+  exactly one active Jira user with that address: filed **unassigned**, and the
+  email says so. If Jira refuses the assignee or component, it is filed
+  without them.
+- **Each week:** a comment only when the findings changed (what is new, in
+  full; what is no longer detected); nothing when they did not; "nothing of
+  Serious or above left - it can be closed" once.
+- **Built from every open finding** Qualys holds (NEW, ACTIVE, REOPENED),
+  however long ago last detected - not just this week's detections, which would
+  read a page the week's scan did not reach as fixed.
+- **Left alone** that week when the scan did not complete, failed to
+  authenticate, was a discovery scan, was not matched to the WAS scan list, or
+  the open findings could not be fetched - a scan that did not cover the
+  application must not tell its ticket everything was fixed.
+- `--dry-run` and `--to-dev` preview only, writing the would-be ticket text to
+  `state/appscan-tickets-preview-DATE.txt` (0600), not the journal. Jira
+  trouble never stops the email.
+
+Set up the owners file once, then add a line whenever an application is
+added in Qualys:
+
+```bash
+sudo install -o root -g ctiagent -m 0640 /tmp/app-owners.txt /etc/cti-agent/app-owners.txt
+sudo cti-agent run-appscan --to-dev        # the JIRA TICKETS section previews every app
+```
+
+The Jira API account needs the **Browse users and groups** global permission
+to look owners up; without it every ticket is filed unassigned.
+
 ### A different audience, enforced in code
 
 This mail goes to the people who own application code — not the people who

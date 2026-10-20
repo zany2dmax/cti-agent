@@ -137,6 +137,7 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time, port
 // notified result.
 func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
 	r.AppID = s.WebAppID
+	r.ScanType = s.Type
 	if s.WebAppName != "" {
 		r.App = s.WebAppName
 	}

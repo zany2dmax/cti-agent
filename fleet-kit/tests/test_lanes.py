@@ -2253,6 +2253,9 @@ class TestFileShape(unittest.TestCase):
         # repository is the list this lane exists to keep private.
         tracked = [p for p in root.rglob("domains.txt") if ".git" not in p.parts]
         self.assertEqual(tracked, [], "a domains.txt is inside the repository tree")
+        # Same for the AppSec lane's owners: people's names and emails.
+        owners = [p for p in root.rglob("app-owners.txt") if ".git" not in p.parts]
+        self.assertEqual(owners, [], "an app-owners.txt is inside the repository tree")
 
     def test_the_appscan_report_does_not_call_a_public_site_a_coverage_gap(self):
         """An unauthenticated scan is a label, not a defect.
@@ -2422,7 +2425,7 @@ for a in "$@"; do
   esac
   next=""
   case "$a" in
-    --out|--text-out|--csv-out|--actions-out|--seen-out) next=out ;;
+    --out|--text-out|--csv-out|--actions-out|--seen-out|--tickets-out) next=out ;;
     --subject-out) next=subj ;;
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
@@ -2565,6 +2568,22 @@ class RunnersToDev(unittest.TestCase):
                 self.assertIn("--ref-out", calls[jira])
                 self.assertEqual("--for-real" in calls[jira], real,
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
+
+    def test_appscan_files_its_application_tickets_before_the_send(self):
+        for args, real in (([], True), (["--to-dev"], False), (["--dry-run"], False)):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appscan", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
+                jira = idx(lambda c: c.startswith("cti-jira ") and "--appscan-tickets" in c)
+                stamp = idx(lambda c: "--stamp-tickets" in c)
+                send = idx(lambda c: c.startswith("cti-mailer "))
+                self.assertLess(jira, stamp, calls)
+                self.assertLess(stamp, send, "the email went before its tickets were stamped")
+                self.assertEqual("--for-real" in calls[jira], real,
+                                 f"{args}: Jira written on a run that must not write: {calls[jira]}")
+                self.assertIn("--ticket-slot", calls[idx(lambda c: c.startswith("cti-appscan --out"))])
 
     def test_no_dev_address_is_refused_before_any_work(self):
         for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):

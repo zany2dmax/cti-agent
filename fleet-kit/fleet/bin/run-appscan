@@ -17,7 +17,7 @@
 #   fall back to the digest audience.
 #
 # USAGE
-#   run-appscan              render and send
+#   run-appscan              render, file/update one Jira ticket per application, send
 #   run-appscan --dry-run    render, print the subject, send nothing
 #   run-appscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
 #                            subject, auth-failure alert to you too
@@ -91,6 +91,12 @@ AUTHFAIL="$STATE/appscan-authfail-$STAMP.tsv"
 # - never on a dry run or a test send.
 SEEN="$STATE/appscan-seen-$STAMP.json"
 rm -f "$SEEN"
+# One Jira ticket per application: the input cti-appscan writes, and what
+# cti-jira did with it. Both deleted first, so a stale one is never stamped.
+TICKETS="$STATE/appscan-tickets-$STAMP.json"
+TICKETREF="$STATE/appscan-tickets-ref-$STAMP.json"
+JIRA="$FLEET_CODE/bin/cti-jira"
+rm -f "$TICKETS" "$TICKETREF"
 
 # Mode set BEFORE anything is written. A report naming which applications have
 # open Urgent findings, and which are scanned without authentication, is a map
@@ -114,12 +120,39 @@ rm -f "$SEEN"
 rm -f "$AUTHFAIL"
 
 "$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" --seen-out "$SEEN" \
+  --tickets-out "$TICKETS" --ticket-slot \
   || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
 
 SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line"
 [ -n "$SUBJECT" ] || fail "empty subject - refusing to send a report nobody can triage from the subject"
 
 log "subject: $SUBJECT"
+
+# The application tickets, BEFORE the send, so the email names each one.
+# Never fatal: Jira trouble becomes a "not updated" line, and the email goes.
+# A dry run or a test send only previews - nothing is written to Jira.
+if [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
+  if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
+    # The would-be ticket text names URLs and parameters on our own
+    # applications: a 0600 file, not the journal.
+    PREVIEW="$STATE/appscan-tickets-preview-$STAMP.txt"
+    : > "$PREVIEW"; chmod 0600 "$PREVIEW"
+    log "tickets: preview only - nothing will be filed or commented; would-be text in $PREVIEW"
+    "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$TICKETREF" > "$PREVIEW" \
+      || log "WARNING: application ticket preview failed"
+  else
+    "$JIRA" --appscan-tickets "$TICKETS" --for-real --ref-out "$TICKETREF" \
+      || log "WARNING: application tickets not all filed or updated - see the lines above"
+  fi
+  "$APPSCAN" --stamp-tickets "$TICKETREF" --tickets-out "$TICKETS" --out "$HTML" --text-out "$TXT" \
+    || { log "WARNING: could not stamp the tickets into the report; removing the slot"
+         sed -i.bak 's/<!--CTI_APPSCAN_TICKETS-->//g' "$HTML" "$TXT" 2>/dev/null || true
+         rm -f "$HTML.bak" "$TXT.bak"; }
+else
+  [ -x "$JIRA" ] || log "cti-jira not installed - no application tickets"
+  sed -i.bak 's/<!--CTI_APPSCAN_TICKETS-->//g' "$HTML" "$TXT" 2>/dev/null || true
+  rm -f "$HTML.bak" "$TXT.bak"
+fi
 
 if [ -n "$TODEV" ]; then
   # FLEET_DEV_EMAIL only. WAS_TO / WAS_ALLOW_TO are not consulted, so a test

@@ -65,7 +65,18 @@ const maxDetail = 12
 // themselves name attacker-reachable paths on our own sites. Neither belongs
 // in an anchor.
 func Render(week []ScanResult, weekEnding time.Time) Block {
-	r := &report{weekEnding: weekEnding, org: orgName()}
+	return renderReport(week, weekEnding, false)
+}
+
+// RenderWithTicketSlot is Render plus an invisible slot for
+// StampTickets: the per-application Jira tickets, filed after rendering and
+// before the send.
+func RenderWithTicketSlot(week []ScanResult, weekEnding time.Time) Block {
+	return renderReport(week, weekEnding, true)
+}
+
+func renderReport(week []ScanResult, weekEnding time.Time, slot bool) Block {
+	r := &report{weekEnding: weekEnding, org: orgName(), slot: slot}
 	r.scans = append([]ScanResult(nil), week...)
 	sortScans(r.scans)
 
@@ -95,7 +106,14 @@ func Render(week []ScanResult, weekEnding time.Time) Block {
 			r.counted = append(r.counted, s)
 		}
 	}
-	return Block{Subject: r.subject(), Text: r.text(), HTML: r.html()}
+	// A slot marker inside observed data (a finding title, a URL) is not a
+	// stamp site: remove every one, then turn the renderer's sentinel into
+	// the single real slot.
+	fix := func(s string) string {
+		s = strings.ReplaceAll(s, TicketsSlot, "")
+		return strings.ReplaceAll(s, ticketsSentinel, TicketsSlot)
+	}
+	return Block{Subject: r.subject(), Text: fix(r.text()), HTML: fix(r.html())}
 }
 
 // report is one rendering's worth of state, so the text and HTML paths read
@@ -107,6 +125,7 @@ type report struct {
 	unnotified []ScanResult // the scanner ran it, no email arrived: no counts at all
 	weekEnding time.Time
 	org        string
+	slot       bool // leave a TicketsSlot for StampTickets
 }
 
 // orgName is the banner label, shared with the daily brief's FLEET_ORG.
@@ -498,6 +517,9 @@ func detailLines(s ScanResult) []string {
 			}
 		}
 		out = append(out, line)
+		if fix := FixSummary(f.Remedy); fix != "" {
+			out = append(out, "  fix: "+fix)
+		}
 	}
 	if len(s.Findings) == 0 {
 		out = append(out, "(per-finding detail not available for this run - "+
@@ -642,6 +664,9 @@ func (r *report) text() string {
 		fmt.Fprintf(&b, "  %s\n", lowerOnlyNote(lowerOnly))
 	}
 
+	if r.slot {
+		b.WriteString(ticketsSentinel)
+	}
 	fmt.Fprintf(&b, "\n%s\n%s\n%s\n", scaleNote, activeNote, r.credit())
 	return b.String()
 }
@@ -828,6 +853,9 @@ func (r *report) html() string {
 	}
 	if lowerOnly > 0 {
 		itemHTML(&b, lowerOnlyNote(lowerOnly))
+	}
+	if r.slot {
+		b.WriteString(ticketsSentinel)
 	}
 
 	b.WriteString(`
