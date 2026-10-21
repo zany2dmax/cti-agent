@@ -200,8 +200,18 @@ exit: one line per application keyed on its web-app id, with the owner
 already on file where there is one and
 .B OWNER@example.com
 where there is not (the parser refuses that placeholder, so an unedited line
-means "no owner", never an assignment). Live websites from the domains lane that no web app's URL points at
-(matched on host, www. ignored) follow in a NOT SCANNED section as
+means "no owner", never an assignment). Each web app keeps its
+.B covers=
+entry; a web app whose URL looks like a staging or test host (a hosting
+provider's staging domain, or a first label such as
+.BR staging ,
+.BR dev ,
+.BR test ,
+.BR uat )
+and has none gets a comment asking what production site it stands in for.
+Production sites covered only through a stand-in are listed as comments.
+Live websites from the domains lane that no web app's URL points at
+(matched on host, www. ignored), and no stand-in covers, follow in a NOT SCANNED section as
 .BI site: domain
 lines - the owner there is who should get a scan set up, and the line goes
 away once a web app covers the site. Lines in the current file that match
@@ -209,8 +219,11 @@ nothing are listed at the end as comments. Read-only; needs the
 Qualys credentials. A weekly run with
 .B \-\-tickets\-out
 also checks every web app against the file and names the unowned ones in the
-report's JIRA TICKETS section, and lists the live websites nothing scans in
-a NOT SCANNED section.
+report's JIRA TICKETS section, lists the live websites nothing scans in
+a NOT SCANNED section, and the production sites covered only by a stand-in
+in a COVERED VIA STAGING section - a stand-in tests the code, not
+production's own edge, WAF, TLS or headers, so it is never reported as a
+scan of production.
 Default:\~off.
 .TP
 .B \-\-ticket\-slot
@@ -268,12 +281,42 @@ text. Section 2.
 .B APPSCAN_OWNERS_FILE
 The application owners file. Default:\~\fI/etc/cti\-agent/app\-owners.txt\fR.
 One line per application:
-.IR "application " | " owner email " [ "| Jira component" ],
+.IR "application " | " owner email " [ "| Jira component" "] [" "| covers=host[,host...]" ],
 where the application is the scanner's web-app id
 .RB ( id:123456 ,
 which survives a rename) or its exact name; # starts a comment. A missing
 file, or an application not in it, means its ticket is filed unassigned and
 the report says so. Never in the repository.
+.IP
+.B covers=
+marks a web app as a stand-in for production sites - a staging or test
+copy scanned instead of the live site, such as a WP Engine
+.I *.wpenginepowered.com
+install. Hosts are compared without
+.BR www. .
+Each covered site is reported under COVERED VIA STAGING instead of NOT
+SCANNED, and the web app's ticket says it stands in for production and that
+the fix goes into the code, plugins or configuration and is then deployed.
+A site a web app scans directly is never listed as via staging.
+.B covers=
+on a line whose owner is still the placeholder is kept, so regenerating the
+file with
+.B \-\-list\-apps
+does not lose it.
+.IP
+.BI site: domain
+lines name who should get a scan set up for a live website nothing scans
+yet; see
+.BR \-\-list\-apps .
+.IP
+Example:
+.RS
+.nf
+id:123456              | dev.lead@example.com | Web Portal
+id:777777              | dev.lead@example.com | Web | covers=www.example.com
+site:brochure.example.net | web.team@example.com
+.fi
+.RE
 .TP
 .B APPSCAN_WEBSITES_FILE
 The domains lane's live-website list. Default:\~\fI$FLEET_HOME/state/domains\-websites.json\fR,

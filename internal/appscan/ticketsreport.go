@@ -44,6 +44,9 @@ func FixSummary(r *Remedy) string {
 // none). ok is false when there is nothing worth a line.
 func TicketLine(t AppTicket, r *ticketref.Ref) (line, url string, ok bool) {
 	app := strings.Join(strings.Fields(t.App), " ")
+	if len(t.Covers) > 0 {
+		app += " (stands in for " + strings.Join(t.Covers, ", ") + ")"
+	}
 	owner := ""
 	if !t.OwnerListed {
 		owner = " No owner in app-owners.txt."
@@ -136,6 +139,32 @@ func StampTickets(body string, isHTML bool, tf TicketsFile, refs map[string]tick
 	}
 	var out strings.Builder
 
+	writeStandIn := func() {
+		if len(tf.ViaStandIn) == 0 {
+			return
+		}
+		title := fmt.Sprintf("COVERED VIA STAGING (%d)", len(tf.ViaStandIn))
+		intro := "Production sites whose web application scan runs against a stand-in copy " +
+			"(covers= in app-owners.txt). The code and plugins are tested; production's own " +
+			"configuration - edge, WAF, TLS, headers, anything changed only there - is not."
+		var lines []string
+		for _, v := range tf.ViaStandIn {
+			lines = append(lines, fmt.Sprintf("%s - via %s (%s, web app id %s); production not scanned directly.",
+				ticketref.Clean(v.Domain), ticketref.Clean(v.AppHost), ticketref.Clean(v.AppName), ticketref.Clean(v.AppID)))
+		}
+		if isHTML {
+			sectionHTML(&out, title, "#4a5568")
+			itemHTML(&out, intro)
+			for _, l := range lines {
+				itemHTML(&out, l)
+			}
+			return
+		}
+		fmt.Fprintf(&out, "\n%s\n%s\n  %s\n", title, strings.Repeat("-", len(title)), intro)
+		for _, l := range lines {
+			fmt.Fprintf(&out, "  %s\n", l)
+		}
+	}
 	writeGap := func() {
 		if len(gap) == 0 {
 			return
@@ -185,5 +214,6 @@ func StampTickets(body string, isHTML bool, tf TicketsFile, refs map[string]tick
 		}
 	}
 	writeGap()
+	writeStandIn()
 	return strings.ReplaceAll(body, TicketsSlot, out.String())
 }

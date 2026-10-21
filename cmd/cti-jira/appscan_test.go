@@ -284,3 +284,12 @@ func TestATimeoutIsNotRetriedIntoADuplicate(t *testing.T) {
 		t.Error("a 400 not recognised")
 	}
 }
+
+func TestAStagingTicketSaysTheFixGoesThroughDeployment(t *testing.T) {
+	tk := appTicket(xss("https://site-stg.example.com/a"))
+	tk.Covers = []string{"example.com"}
+	body := appscanBody(tk, time.Now())
+	if !strings.Contains(body, "*Stands in for:* {{example.com}}") || !strings.Contains(body, "then deploy") {
+		t.Errorf("staging ticket does not say where the fix lands:\n%s", body)
+	}
+}

@@ -1089,6 +1089,53 @@ owner there is who should get a web application scan set up. The line drops
 out once a web app covers the site. If a listed site is really a landing page,
 mark it `landing` in `domains.txt` instead.
 
+### Staging copies that stand in for production
+
+Some production sites are scanned through a staging or test copy instead of
+directly - a WordPress site on WP Engine, say, whose Qualys WAS web app points
+at the `*.wpenginepowered.com` staging install, because intrusive DAST tests
+belong on staging, not on the live site. Without telling the fleet, the
+production site shows under NOT SCANNED, which is wrong, and the staging web
+app's ticket reads as if staging were the thing to fix, which is also wrong.
+
+**Record it on the staging web app's line** in `app-owners.txt`:
+
+```
+id:777777 | dev.lead@example.com | Web | covers=www.example.com
+```
+
+(`covers=` takes several hosts, comma-separated; `www.` is ignored. It can sit
+with or without a Jira component.) From then on:
+
+- **The weekly email** moves the production site from NOT SCANNED to
+  **COVERED VIA STAGING**, naming the staging host and web app id, with
+  "production not scanned directly".
+- **The staging web app's ticket** carries a *Stands in for* line: fix it in
+  the code, plugins or configuration, then deploy - and check anything
+  configured only on production.
+- **`--list-apps`** keeps `covers=` when it regenerates the file (even on a line
+  whose owner is still the placeholder), lists the covered-via-staging sites
+  as comments, and flags any web app whose URL *looks* like staging (a
+  hosting provider's staging domain, or a host starting `staging`, `dev`,
+  `test`, `uat`, `qa`...) that has no `covers=` yet.
+- A site that a web app also scans **directly** is reported as scanned, never
+  as via staging.
+
+**What a stand-in does not tell you.** It tests the code and plugins. It does
+not test production's own edge, CDN, WAF, TLS settings, security headers,
+caching, or anything installed or changed only on production. Two things are
+worth doing for every stand-in:
+
+1. **Lock the staging copy down.** A public staging site with production
+   content is a second, less-watched copy of the site - drafts, debug output,
+   old plugins. Put it behind the host's password protection (WP Engine has a
+   per-install switch) and `noindex`.
+2. **Add a light scan of production** - a Qualys WAS web app for the live URL
+   on a crawl-only / non-intrusive option profile. It catches configuration
+   drift without attack payloads against the live site. The production site
+   then shows as scanned directly, and the stand-in still carries the
+   intrusive tests.
+
 ### A different audience, enforced in code
 
 This mail goes to the people who own application code — not the people who

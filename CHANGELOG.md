@@ -77,6 +77,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   that no Qualys WAS web app points at under NOT SCANNED, and `--list-apps`
   adds them as `site:<domain>` lines in `app-owners.txt` for whoever should get
   the scan set up.
+- **Staging copies that stand in for production.** `covers=<host>` on a web
+  app's line in `app-owners.txt` says that web app - typically a staging copy
+  such as a WP Engine `*.wpenginepowered.com` install - is scanned instead of
+  the production site. The production site moves from NOT SCANNED to a new
+  COVERED VIA STAGING section ("production not scanned directly"), the web
+  app's ticket says the fix goes into the code and is then deployed, and
+  `--list-apps` keeps `covers=` and flags staging-looking web apps that have
+  none. RUNBOOK 11f covers what a stand-in does not test and recommends
+  password-protecting the staging copy and adding a non-intrusive scan of
+  production.
 
 ### Upgrade
 

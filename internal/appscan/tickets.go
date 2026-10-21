@@ -43,7 +43,18 @@ type TicketsFile struct {
 	// in the scanner points at: a coverage gap. SitesAsOf is when the
 	// domains lane observed them.
 	NotScanned []NotScanned `json:"notScanned,omitempty"`
+	// ViaStandIn are live websites covered only by a stand-in web app
+	// (covers=): listed, because "covered via staging" is not "scanned".
+	ViaStandIn []ViaStandIn `json:"viaStandIn,omitempty"`
 	SitesAsOf  time.Time    `json:"sitesAsOf,omitempty"`
+}
+
+// ViaStandIn is one production site and the web app that stands in for it.
+type ViaStandIn struct {
+	Domain  string `json:"domain"`
+	AppID   string `json:"appId"`
+	AppName string `json:"appName"`
+	AppHost string `json:"appHost"`
 }
 
 // NotScanned is one live website with no web application scan.
@@ -69,6 +80,10 @@ type AppTicket struct {
 	Owner       string `json:"owner,omitempty"` // email, from app-owners.txt
 	Component   string `json:"component,omitempty"`
 	OwnerListed bool   `json:"ownerListed"`
+	// Covers are production sites this web app stands in for (covers= in
+	// app-owners.txt): the ticket says the fix goes into the code and then
+	// gets deployed, because production itself is not what was scanned.
+	Covers []string `json:"covers,omitempty"`
 
 	// Skip, when set, is why Jira must not be touched for this application
 	// this week: the scan did not complete or failed to authenticate, or the
@@ -222,6 +237,7 @@ func BuildTickets(scans []ScanResult, owners Owners, now time.Time) TicketsFile 
 		if w, ok := owners.For(s.AppID, s.App); ok {
 			t.Owner, t.Component, t.OwnerListed = w.Email, w.Component, true
 		}
+		t.Covers = owners.CoversFor(s.AppID, s.App)
 		switch {
 		case strings.TrimSpace(s.AppID) == "":
 			t.Skip = "the scan was not matched to an application in the scanner's scan list, so its findings could not be looked up reliably"

@@ -151,3 +151,17 @@ func TestTheEmailListsLiveWebsitesNobodyScans(t *testing.T) {
 		}
 	}
 }
+
+func TestTheEmailSaysWhatIsCoveredOnlyViaStaging(t *testing.T) {
+	tf := TicketsFile{ViaStandIn: []ViaStandIn{{Domain: "example.com", AppID: "500", AppName: "Site (staging)",
+		AppHost: "site-stg.wpenginepowered.com"}},
+		Tickets: []AppTicket{{Key: "id:500", App: "Site (staging)", Covers: []string{"example.com"}}}}
+	refs := map[string]ticketref.Ref{"id:500": {Action: "unchanged", Key: "SEC-1"}}
+	got := StampTickets(TicketsSlot, false, tf, refs)
+	for _, w := range []string{"COVERED VIA STAGING (1)", "example.com - via site-stg.wpenginepowered.com",
+		"production not scanned directly", "Site (staging) (stands in for example.com): SEC-1"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("missing %q:\n%s", w, got)
+		}
+	}
+}

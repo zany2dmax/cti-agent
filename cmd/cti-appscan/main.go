@@ -180,12 +180,17 @@ func run() int {
 				for _, a := range unowned {
 					tf.Unowned = append(tf.Unowned, a.Name)
 				}
-				for _, s := range appscan.Unscanned(sites, toApps(apps)) {
+				gap, proxied := appscan.Coverage(sites, toApps(apps), owners)
+				for _, s := range gap {
 					ns := appscan.NotScanned{Domain: s.Domain, URL: s.URL}
 					if w, ok := owners.ForSite(s.Domain); ok {
 						ns.Owner = w.Email
 					}
 					tf.NotScanned = append(tf.NotScanned, ns)
+				}
+				for _, p := range proxied {
+					tf.ViaStandIn = append(tf.ViaStandIn, appscan.ViaStandIn{Domain: p.Site.Domain,
+						AppID: p.App.ID, AppName: p.App.Name, AppHost: appscan.HostOf(p.App.URL)})
 				}
 				tf.SitesAsOf = asOf
 				if n := len(tf.NotScanned); n > 0 {
@@ -603,9 +608,10 @@ func doListApps(cfg config.Config) int {
 	sites, _ := loadSites()
 	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
 	fmt.Print(text)
+	gap, proxied := appscan.Coverage(sites, toApps(apps), owners)
 	logf("apps   : %d web app(s) in the scanner, %d with no owner yet, %d live website(s) not scanned, "+
-		"%d owners-file line(s) matching nothing", len(apps), len(unowned),
-		len(appscan.Unscanned(sites, toApps(apps))), len(stale))
+		"%d covered only via a stand-in (covers=), %d owners-file line(s) matching nothing",
+		len(apps), len(unowned), len(gap), len(proxied), len(stale))
 	return exitOK
 }
 
