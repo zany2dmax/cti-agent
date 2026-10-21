@@ -272,7 +272,11 @@ the report says so), with the owner's component if one is given. If Jira
 refuses the assignee or component, it is filed without them. Open ticket
 and the findings changed: one comment listing what is new (in full) and what
 is no longer detected. Same findings: nothing. Nothing left: say so once.
-An application marked to be left alone is not touched. Every finding says
+A web app marked
+.B covers=
+in app-owners.txt (a staging copy scanned instead of production) gets a
+"Stands in for" line saying the fix goes into the code and is then
+deployed. An application marked to be left alone is not touched. Every finding says
 where it is, the risk, what the scanner found and how to fix it, and the
 full list is attached as text. Without
 .B \-\-for\-real

@@ -229,6 +229,14 @@ URL and parameter. Same handling: written `0600` by `cti-appscan`, kept under
 applications and say which are scanned without a login, and this repository is
 public.
 
+**A stand-in scan is reported as a stand-in.** Where a staging copy is scanned
+instead of production (`covers=` in `app-owners.txt`), the report says
+"covered via staging - production not scanned directly", never "scanned": a
+staging scan tests the code, not production's edge, WAF, TLS or headers. The
+mapping, like the owners, lives only in `/etc/cti-agent`. RUNBOOK 11f recommends
+password-protecting such staging copies and adding a non-intrusive scan of
+production.
+
 **The domains check is a target list, and its input never enters the
 repository.** The report names every domain we own and which of them can be
 spoofed or taken over; the inventory says which ones send mail. So the
