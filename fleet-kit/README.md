@@ -1565,6 +1565,11 @@ and needs no credentials at all. An API is a second, optional interface,
   finding with where, risk, what was found and how to fix it. Commented only
   when the findings change; left alone the week a scan was not trustworthy.
   See [RUNBOOK 11f](../RUNBOOK.md#one-jira-ticket-per-application).
+- **NOT SCANNED** - live websites from the domains lane that no Qualys WAS web
+  app covers - and **COVERED VIA STAGING** - production sites scanned only
+  through a staging copy marked `covers=` in `app-owners.txt`, which tests the
+  code but not production's own configuration. See
+  [RUNBOOK 11f](../RUNBOOK.md#staging-copies-that-stand-in-for-production).
 - **New and reopened at Serious or above** get per-finding detail - URL and
   parameter - capped at twelve per application.
 - **Its severities are Qualys's, not the fleet's.** The palette matches the
