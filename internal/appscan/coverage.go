@@ -55,6 +55,9 @@ func LoadSites(path string) ([]Site, time.Time, error) {
 	return f.Sites, f.Generated, nil
 }
 
+// HostOf is hostOf, for callers outside the package.
+func HostOf(s string) string { return hostOf(s) }
+
 // hostOf is a comparable host: lower case, no port, no leading "www.".
 func hostOf(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -67,6 +70,38 @@ func hostOf(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimPrefix(strings.TrimSuffix(s, "."), "www.")
+}
+
+// Proxied is a live website covered only by a stand-in web app (covers=).
+type Proxied struct {
+	Site Site
+	App  App
+}
+
+// Coverage splits the live websites into the ones nothing scans and the ones
+// covered only through a stand-in. A site a web app scans directly is in
+// neither: direct beats a proxy.
+func Coverage(sites []Site, apps []App, o Owners) (unscanned []Site, proxied []Proxied) {
+	stand := map[string]App{}
+	for _, a := range apps {
+		for _, h := range o.CoversFor(a.ID, a.Name) {
+			if _, ok := stand[h]; !ok {
+				stand[h] = a
+			}
+		}
+	}
+	for _, s := range Unscanned(sites, apps) {
+		a, ok := stand[hostOf(s.Domain)]
+		if !ok {
+			a, ok = stand[hostOf(s.Host)]
+		}
+		if ok {
+			proxied = append(proxied, Proxied{Site: s, App: a})
+			continue
+		}
+		unscanned = append(unscanned, s)
+	}
+	return unscanned, proxied
 }
 
 // Unscanned are the live websites no web application's URL points at,

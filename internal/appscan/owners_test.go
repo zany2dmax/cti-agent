@@ -113,3 +113,76 @@ func TestLiveWebsitesWithNoWebAppAreListedOnce(t *testing.T) {
 		t.Errorf("site line did not round-trip: %+v", w)
 	}
 }
+
+func TestAStagingWebAppCanStandInForProduction(t *testing.T) {
+	o, problems, _ := ParseOwners(strings.NewReader(`
+id:500 | web@example.com | Web | covers=www.example.com, shop.example.com
+id:600 | OWNER@example.com | covers=other.example.org
+id:700 | web@example.com | covers=notahost
+site:x.example.net | web@example.com | covers=y.example.net
+`))
+	if got := o.CoversFor("500", ""); len(got) != 2 || got[0] != "example.com" || got[1] != "shop.example.com" {
+		t.Errorf("covers %v (www. is ignored)", got)
+	}
+	if w, _ := o.For("500", ""); w.Component != "Web" {
+		t.Errorf("covers= was taken for the component: %+v", w)
+	}
+	if got := o.CoversFor("600", ""); len(got) != 1 {
+		t.Errorf("covers= on a placeholder line must survive: %v", got)
+	}
+	want := map[string]bool{"covers=notahost": false, "site: line": false, "no owner yet": false}
+	for _, p := range problems {
+		for k := range want {
+			if strings.Contains(p, k) {
+				want[k] = true
+			}
+		}
+	}
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("no problem reported for %q: %v", k, problems)
+		}
+	}
+
+	apps := []App{{ID: "500", Name: "Site (staging)", URL: "https://site-stg.wpenginepowered.com/"},
+		{ID: "800", Name: "Shop", URL: "https://shop.example.com/"}}
+	sites := []Site{{Domain: "example.com", Host: "www.example.com"}, {Domain: "shop.example.com", Host: "shop.example.com"},
+		{Domain: "lonely.example.com", Host: "lonely.example.com"}}
+	gap, proxied := Coverage(sites, apps, o)
+	if len(gap) != 1 || gap[0].Domain != "lonely.example.com" {
+		t.Errorf("gap %+v", gap)
+	}
+	if len(proxied) != 1 || proxied[0].Site.Domain != "example.com" || proxied[0].App.ID != "500" {
+		t.Errorf("a directly scanned site must not be listed as via staging; proxied %+v", proxied)
+	}
+	text, _, _ := OwnersSkeleton(apps, sites, o)
+	for _, w := range []string{"id:500 | web@example.com | Web | covers=example.com,shop.example.com",
+		"Covered only through a stand-in", "example.com  via id:500"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("skeleton missing %q:\n%s", w, text)
+		}
+	}
+	o2, _, _ := ParseOwners(strings.NewReader(text))
+	if len(o2.CoversFor("500", "")) != 2 {
+		t.Error("covers= did not survive regenerating the file")
+	}
+}
+
+func TestStagingLookingHostsAreFlagged(t *testing.T) {
+	for _, u := range []string{"https://site.wpenginepowered.com/", "https://staging.example.com", "https://app-dev.example.com",
+		"https://uat.example.com/login", "https://x.kinsta.cloud"} {
+		if !stagingHint(u) {
+			t.Errorf("%s should be flagged", u)
+		}
+	}
+	for _, u := range []string{"https://www.example.com", "https://developer.example.com", "https://testimonials.example.com"} {
+		if stagingHint(u) {
+			t.Errorf("%s flagged as staging", u)
+		}
+	}
+	o, _, _ := ParseOwners(strings.NewReader(""))
+	text, _, _ := OwnersSkeleton([]App{{ID: "1", Name: "x", URL: "https://x.wpenginepowered.com"}}, nil, o)
+	if !strings.Contains(text, "add | covers=") {
+		t.Errorf("no prompt for an unrecorded staging host:\n%s", text)
+	}
+}

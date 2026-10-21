@@ -387,6 +387,12 @@ func appscanHeader(t appscan.AppTicket) string {
 	if t.Target != "" {
 		fmt.Fprintf(&b, "*Target:* {{%s}}\n", wikiEscape(clip(t.Target, maxField)))
 	}
+	if len(t.Covers) > 0 {
+		fmt.Fprintf(&b, "*Stands in for:* {{%s}} - this is a staging/test copy scanned instead of production. "+
+			"Fix it in the code, plugins or configuration here, then deploy: production itself is not "+
+			"scanned, so check that anything configured only on production (edge, WAF, TLS, headers) "+
+			"matches.\n", wikiEscape(strings.Join(t.Covers, ", ")))
+	}
 	fmt.Fprintf(&b, "*Last scan:* %s (%s)\n", t.Scanned.UTC().Format("2006-01-02"), wikiEscape(t.ScanLabel))
 	if strings.HasPrefix(t.PortalURL, "https://") {
 		fmt.Fprintf(&b, "*In Qualys:* [open the application|%s]\n", wikiURL(t.PortalURL))
