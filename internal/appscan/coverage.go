@@ -40,7 +40,7 @@ func DefaultSitesFile() string {
 
 // LoadSites reads the domains lane's list and when it was written.
 func LoadSites(path string) ([]Site, time.Time, error) {
-	// #nosec G304 -- APPSCAN_WEBSITES_FILE or the fleet's own state file.
+	// #nosec G304,G703 -- APPSCAN_WEBSITES_FILE or the fleet's own state file.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, time.Time{}, err
