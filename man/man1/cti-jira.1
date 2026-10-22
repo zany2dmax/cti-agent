@@ -283,7 +283,11 @@ full list is attached as text. Without
 it prints what it would file. Subject to the
 .B JIRA_ALLOW_CREATE
 write gate; up to ten minutes. The API account needs "Browse users and
-groups" to look owners up. Run by
+groups" to look owners up. A
+.B watchers=
+field in app-owners.txt (up to 10 emails) adds each as a watcher on the
+ticket, on create and on every weekly comment; one not found, invalid or
+refused is logged and skipped. That needs "Manage watcher list". Run by
 .BR run\-appscan (1)
 before the weekly email.
 Default:\~empty.

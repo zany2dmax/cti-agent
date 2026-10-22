@@ -1080,6 +1080,24 @@ sudo cti-agent run-appscan --to-dev        # the JIRA TICKETS section previews e
 The Jira API account needs the **Browse users and groups** global permission
 to look owners up; without it every ticket is filed unassigned.
 
+**Watchers.** A line may add `watchers=a@example.com,b@example.com` (up to 10,
+any field order) to copy others on the application's ticket. The owner field
+stays ONE email - the assignee. `cti-jira` adds each watcher on create and on
+every weekly comment, so watchers added to the file later are picked up. Each
+is looked up by email like the owner; one not found, invalid, or refused is
+logged and skipped and never blocks the ticket. Needs the **Manage watcher
+list** permission on the Jira API account. Watchers are not shown in the
+weekly email. Separate emails with commas, spaces or `;`. Adding is one-way:
+removing someone from the file does not remove them in Jira, and someone who
+unwatches there is re-added at the next weekly comment. `watchers=` on a
+placeholder-owner line is ignored until a real owner is set (and lost when
+`--list-apps` regenerates the file); on a `site:` line it is ignored with a
+problem line. `--list-apps` keeps it on lines with a real owner.
+
+```
+id:123456 | dev.lead@example.com | Web Portal | watchers=a@example.com,b@example.com
+```
+
 **Coverage: live websites nothing scans.** The domains lane writes our live
 websites to `state/domains-websites.json` each week (redirects, registrar
 landers, parked pages and domains marked `landing` in `domains.txt` left out).
