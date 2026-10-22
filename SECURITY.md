@@ -237,6 +237,14 @@ mapping, like the owners, lives only in `/etc/cti-agent`. RUNBOOK 11f recommends
 password-protecting such staging copies and adding a non-intrusive scan of
 production.
 
+**Ticket watchers are best-effort and need one more Jira permission.** An
+optional `watchers=` field in `app-owners.txt` (max 10 emails, file outside the
+repo) makes `cti-jira` add each as a watcher on the application's ticket. That
+needs "Manage watcher list" on the Jira API account (plus "Browse users and
+groups" for the lookup). A watcher that is not found, invalid or refused is
+logged and skipped; it never blocks a ticket, and watchers are not put in the
+weekly email.
+
 **The domains check is a target list, and its input never enters the
 repository.** The report names every domain we own and which of them can be
 spoofed or taken over; the inventory says which ones send mail. So the

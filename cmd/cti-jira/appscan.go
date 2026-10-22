@@ -295,6 +295,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 				name, res.Key, safelog.Line(err.Error()))
 		}
 		logf("appscan: %s: filed %s", name, res.Key)
+		addWatchers(ctx, c, res.Key, name, t.Watchers, accounts, logf)
 		r := refFor("created", &jira.Issue{Key: res.Key}, note)
 		r.Assignee = assignee
 		return r
@@ -310,6 +311,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		if err := c.SetProperty(ctx, open.Key, appscanPropKey, st); err != nil {
 			logf("appscan: %s: could not record the findings on %s: %s", name, open.Key, safelog.Line(err.Error()))
 		}
+		addWatchers(ctx, c, open.Key, name, t.Watchers, accounts, logf)
 		return refFor("commented", open, "")
 
 	case appDone:
@@ -331,6 +333,37 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return refFor("resolved", open, "")
 	}
 	return refFor("none", nil, "")
+}
+
+// addWatchers adds each email in app-owners.txt's watchers= as a watcher.
+// Best effort: a watcher who cannot be found or added is logged and skipped -
+// it must never cost the ticket. Adding an existing watcher is harmless, so
+// this runs on create and on every comment, which also picks up watchers
+// added to the file later. Account lookups are shared with the assignee's.
+func addWatchers(ctx context.Context, c *jira.Client, key, app string, emails []string,
+	accounts map[string]string, logf func(string, ...any)) {
+	if len(emails) > appscan.MaxWatchers { // the parser caps it; the file is also input here
+		emails = emails[:appscan.MaxWatchers]
+	}
+	for _, e := range emails {
+		id, ok := accounts[e]
+		if !ok {
+			var err error
+			id, err = c.AccountIDForEmail(ctx, e)
+			if err != nil {
+				logf("appscan: %s: watcher %s not found in Jira, skipped: %s", app,
+					safelog.Line(e), safelog.Line(err.Error()))
+				id = ""
+			}
+			accounts[e] = id
+		}
+		if id == "" {
+			continue
+		}
+		if err := c.AddWatcher(ctx, key, id); err != nil {
+			logf("appscan: %s: adding watcher %s to %s failed: %s", app, safelog.Line(e), key, safelog.Line(err.Error()))
+		}
+	}
 }
 
 func appscanSummary(t appscan.AppTicket) string {

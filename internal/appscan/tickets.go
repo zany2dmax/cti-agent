@@ -84,6 +84,9 @@ type AppTicket struct {
 	// app-owners.txt): the ticket says the fix goes into the code and then
 	// gets deployed, because production itself is not what was scanned.
 	Covers []string `json:"covers,omitempty"`
+	// Watchers are extra emails to add as Jira watchers (watchers= in
+	// app-owners.txt).
+	Watchers []string `json:"watchers,omitempty"`
 
 	// Skip, when set, is why Jira must not be touched for this application
 	// this week: the scan did not complete or failed to authenticate, or the
@@ -236,6 +239,7 @@ func BuildTickets(scans []ScanResult, owners Owners, now time.Time) TicketsFile 
 			PortalURL: s.PortalURL, Scanned: s.Finished, ScanLabel: s.Auth.Label()}
 		if w, ok := owners.For(s.AppID, s.App); ok {
 			t.Owner, t.Component, t.OwnerListed = w.Email, w.Component, true
+			t.Watchers = w.Watchers
 		}
 		t.Covers = owners.CoversFor(s.AppID, s.App)
 		switch {

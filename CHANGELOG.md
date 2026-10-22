@@ -87,6 +87,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   none. RUNBOOK 11f covers what a stand-in does not test and recommends
   password-protecting the staging copy and adding a non-intrusive scan of
   production.
+- **Watchers on application tickets.** An optional
+  `watchers=a@example.com,b@example.com` field (max 10, any field order) on a
+  line in `app-owners.txt` adds each as a Jira watcher on that application's
+  ticket, on create and on every weekly comment (idempotent). Looked up by
+  email like the owner; one not found, invalid or refused is logged and
+  skipped, never blocking the ticket. The owner field stays one email.
+  `--list-apps` keeps `watchers=` on lines with a real owner.
 
 ### Upgrade
 
@@ -97,7 +104,8 @@ Pull, reinstall. Then:
    every `OWNER@example.com`, then install it mode 0640 root:ctiagent
    (RUNBOOK 11f has the commands).
 2. Give the Jira API account the **Browse users and groups** permission, or
-   every ticket is filed unassigned.
+   every ticket is filed unassigned. Using `watchers=` (optional, no action
+   otherwise) also needs **Manage watcher list**.
 3. `sudo cti-agent run-appscan --to-dev` to preview the tickets, then let
    Monday's run file them.
 

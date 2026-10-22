@@ -1570,6 +1570,11 @@ and needs no credentials at all. An API is a second, optional interface,
   through a staging copy marked `covers=` in `app-owners.txt`, which tests the
   code but not production's own configuration. See
   [RUNBOOK 11f](../RUNBOOK.md#staging-copies-that-stand-in-for-production).
+- **Watchers** - an optional `watchers=a@example.com,b@example.com` field on an
+  app's line in `app-owners.txt` (max 10) adds each as a Jira watcher on its
+  ticket, on create and every weekly comment. Best-effort: a watcher not found
+  or refused is logged and skipped. Needs "Manage watcher list" on the Jira
+  API account.
 - **New and reopened at Serious or above** get per-finding detail - URL and
   parameter - capped at twelve per application.
 - **Its severities are Qualys's, not the fleet's.** The palette matches the
