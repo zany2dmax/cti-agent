@@ -186,3 +186,75 @@ func TestStagingLookingHostsAreFlagged(t *testing.T) {
 		t.Errorf("no prompt for an unrecorded staging host:\n%s", text)
 	}
 }
+
+func TestWatchersParse(t *testing.T) {
+	o, problems, _ := ParseOwners(strings.NewReader(`
+id:1 | a@example.com | watchers=Qa@Example.com, pm@example.com;qa@example.com | Web | covers=www.example.org
+id:2 | a@example.com | covers=shop.example.org | watchers=x@example.com | Web
+id:3 | a@example.com | watchers=notanemail,OWNER@example.com,ok@example.com
+id:4 | a@example.com,b@example.com | watchers=x@example.com
+`))
+	w1, _ := o.For("1", "")
+	if len(w1.Watchers) != 2 || w1.Watchers[0] != "qa@example.com" || w1.Watchers[1] != "pm@example.com" {
+		t.Errorf("watchers %v", w1.Watchers)
+	}
+	if w1.Component != "Web" || len(w1.Covers) != 1 {
+		t.Errorf("other fields disturbed: %+v", w1)
+	}
+	w2, _ := o.For("2", "")
+	if len(w2.Watchers) != 1 || w2.Watchers[0] != "x@example.com" || w2.Component != "Web" || len(w2.Covers) != 1 {
+		t.Errorf("order of fields matters: %+v", w2)
+	}
+	w3, _ := o.For("3", "")
+	if len(w3.Watchers) != 1 || w3.Watchers[0] != "ok@example.com" {
+		t.Errorf("invalid watchers kept: %v", w3.Watchers)
+	}
+	if n := strings.Count(strings.Join(problems, "\n"), "watchers="); n != 2 {
+		t.Errorf("want 2 bad-watcher problems, got %d: %v", n, problems)
+	}
+	if _, ok := o.For("4", ""); ok {
+		t.Error("a comma list in the owner field must still be rejected")
+	}
+}
+
+func TestTooManyWatchersAreAProblem(t *testing.T) {
+	var l []string
+	for i := 0; i < MaxWatchers+2; i++ {
+		l = append(l, "w"+string(rune('a'+i))+"@example.com")
+	}
+	o, problems, _ := ParseOwners(strings.NewReader("id:1 | a@example.com | watchers=" + strings.Join(l, ",") + "\n"))
+	w, _ := o.For("1", "")
+	if len(w.Watchers) != MaxWatchers {
+		t.Errorf("kept %d watchers", len(w.Watchers))
+	}
+	if len(problems) != 2 || !strings.Contains(problems[0], "at most") {
+		t.Errorf("problems %v", problems)
+	}
+}
+
+func TestTheSkeletonRoundTripsWatchers(t *testing.T) {
+	o, _, _ := ParseOwners(strings.NewReader("id:101 | lead@example.com | Web | watchers=qa@example.com,pm@example.com\n"))
+	text, _, _ := OwnersSkeleton([]App{{ID: "101", Name: "Portal"}}, nil, o)
+	o2, problems, err := ParseOwners(strings.NewReader(text))
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("%v %v\n%s", err, problems, text)
+	}
+	w, _ := o2.For("101", "")
+	if len(w.Watchers) != 2 || w.Watchers[0] != "qa@example.com" || w.Watchers[1] != "pm@example.com" || w.Component != "Web" {
+		t.Errorf("round trip: %+v\n%s", w, text)
+	}
+}
+
+func TestWatchersOnASiteLineAreIgnoredWithAProblem(t *testing.T) {
+	o, problems, err := ParseOwners(strings.NewReader("site:www.example.com | web@example.com | watchers=qa@example.com\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, ok := o.ForSite("www.example.com")
+	if !ok || len(w.Watchers) != 0 {
+		t.Errorf("site owner %+v ok=%v", w, ok)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "watchers=") {
+		t.Errorf("problems %v", problems)
+	}
+}

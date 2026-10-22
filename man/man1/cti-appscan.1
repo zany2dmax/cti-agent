@@ -281,7 +281,7 @@ text. Section 2.
 .B APPSCAN_OWNERS_FILE
 The application owners file. Default:\~\fI/etc/cti\-agent/app\-owners.txt\fR.
 One line per application:
-.IR "application " | " owner email " [ "| Jira component" "] [" "| covers=host[,host...]" ],
+.IR "application " | " owner email " [ "| Jira component" "] [" "| covers=host[,host...]" "] [" "| watchers=email[,email...]" ],
 where the application is the scanner's web-app id
 .RB ( id:123456 ,
 which survives a rename) or its exact name; # starts a comment. A missing
@@ -303,6 +303,15 @@ on a line whose owner is still the placeholder is kept, so regenerating the
 file with
 .B \-\-list\-apps
 does not lose it.
+.IP
+.B watchers=
+lists up to 10 emails added as Jira watchers on the application's ticket
+(the owner field stays one email, the assignee). Best-effort: one not found
+or refused is skipped. Needs "Manage watcher list" on the Jira API account.
+Not shown in the report.
+.B \-\-list\-apps
+keeps it on lines with a real owner; a placeholder-owner line loses it when
+regenerated.
 .IP
 .BI site: domain
 lines name who should get a scan set up for a live website nothing scans

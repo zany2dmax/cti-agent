@@ -165,3 +165,12 @@ func TestTheEmailSaysWhatIsCoveredOnlyViaStaging(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildTicketsCarriesTheWatchers(t *testing.T) {
+	o, _, _ := ParseOwners(strings.NewReader("id:101 | lead@example.com | watchers=qa@example.com,pm@example.com\n"))
+	s := scanWith("Portal", "101", Finding{ID: "1", Severity: 4, Status: "ACTIVE", URL: "u"})
+	a := BuildTickets([]ScanResult{s}, o, time.Now()).Tickets[0]
+	if len(a.Watchers) != 2 || a.Watchers[0] != "qa@example.com" || a.Watchers[1] != "pm@example.com" {
+		t.Errorf("watchers %v", a.Watchers)
+	}
+}
