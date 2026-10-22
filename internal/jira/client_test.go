@@ -301,3 +301,23 @@ func TestBrowseURLIsForHumansNotTheAPI(t *testing.T) {
 		t.Errorf("BrowseURL = %q", got)
 	}
 }
+
+func TestAddWatcherPostsABareJSONString(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "svc@example.com", "tok")
+	if err := c.AddWatcher(context.Background(), "SEC-7", "acc-9"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/api/2/issue/SEC-7/watchers" {
+		t.Errorf("%s %s", gotMethod, gotPath)
+	}
+	if strings.TrimSpace(gotBody) != `"acc-9"` {
+		t.Errorf("body %q, want a bare JSON string", gotBody)
+	}
+}

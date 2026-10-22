@@ -259,6 +259,15 @@ func (c *Client) AddComment(ctx context.Context, key, text string) error {
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
+// AddWatcher adds a user to an issue's watchers. Adding someone already
+// watching is harmless, so callers may repeat it every run. Needs the "Manage
+// watcher list" permission (or the user adding themselves).
+func (c *Client) AddWatcher(ctx context.Context, key, accountID string) error {
+	// The API takes a bare JSON string: json.Marshal of a Go string is that.
+	path := "/rest/api/2/issue/" + url.PathEscape(key) + "/watchers"
+	return c.do(ctx, http.MethodPost, path, accountID, nil)
+}
+
 // Attach uploads a file to an issue.
 //
 // Two things here are non-obvious and both are required by Jira:

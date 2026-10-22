@@ -32,6 +32,8 @@ type appJira struct {
 	refuseFix bool // refuse a create that carries an assignee or components
 	users     []map[string]any
 	next      int
+	watchers  map[string][]string // issue key -> accountIds posted
+	failWatch bool                // answer every watchers POST with 403
 }
 
 func newAppJira(t *testing.T) (*appJira, *jira.Client) {
@@ -82,6 +84,19 @@ func newAppJira(t *testing.T) (*appJira, *jira.Client) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"key": key, "id": "1"})
+		case r.Method == http.MethodPost && strings.HasSuffix(p, "/watchers"):
+			if fj.failWatch {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			key := strings.Split(strings.TrimPrefix(p, "/rest/api/2/issue/"), "/")[0]
+			var id string
+			_ = json.Unmarshal(body, &id)
+			if fj.watchers == nil {
+				fj.watchers = map[string][]string{}
+			}
+			fj.watchers[key] = append(fj.watchers[key], id)
+			w.WriteHeader(http.StatusNoContent)
 		case strings.Contains(p, "/properties/"):
 			key := strings.Split(strings.TrimPrefix(p, "/rest/api/2/issue/"), "/")[0]
 			if r.Method == http.MethodGet {
@@ -291,5 +306,76 @@ func TestAStagingTicketSaysTheFixGoesThroughDeployment(t *testing.T) {
 	body := appscanBody(tk, time.Now())
 	if !strings.Contains(body, "*Stands in for:* {{example.com}}") || !strings.Contains(body, "then deploy") {
 		t.Errorf("staging ticket does not say where the fix lands:\n%s", body)
+	}
+}
+
+func watchUsers() []map[string]any {
+	return []map[string]any{
+		{"accountId": "acc-1", "emailAddress": "lead@example.com", "active": true, "accountType": "atlassian"},
+		{"accountId": "acc-2", "emailAddress": "qa@example.com", "active": true, "accountType": "atlassian"},
+		{"accountId": "acc-3", "emailAddress": "pm@example.com", "active": true, "accountType": "atlassian"},
+	}
+}
+
+func TestWatchersAreAddedOnCreateAndMissingOnesSkipped(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.users = watchUsers()
+	tk := appTicket(xss("https://app.example.com/a"))
+	tk.Watchers = []string{"qa@example.com", "ghost@example.com", "pm@example.com"}
+	r := runApp(t, c, true, tk)["id:101"]
+	if r.Action != "created" {
+		t.Fatalf("ref %+v", r)
+	}
+	got := fj.watchers[r.Key]
+	if len(got) != 2 || got[0] != "acc-2" || got[1] != "acc-3" {
+		t.Errorf("watchers %v (the unknown one must be skipped, the ticket still filed)", got)
+	}
+}
+
+func TestAFailingWatcherCallDoesNotChangeTheOutcome(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.users = watchUsers()
+	fj.failWatch = true
+	tk := appTicket(xss("https://app.example.com/a"))
+	tk.Watchers = []string{"qa@example.com"}
+	r := runApp(t, c, true, tk)["id:101"]
+	if r.Action != "created" || r.Key == "" || len(fj.watchers) != 0 {
+		t.Errorf("ref %+v watchers %v", r, fj.watchers)
+	}
+}
+
+func TestWatchersAreReAddedOnAComment(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.users = watchUsers()
+	week1 := appTicket(xss("https://app.example.com/a"))
+	week1.Watchers = []string{"qa@example.com"}
+	key := runApp(t, c, true, week1)["id:101"].Key
+	week2 := appTicket(xss("https://app.example.com/b"))
+	week2.Watchers = []string{"qa@example.com", "pm@example.com"}
+	if r := runApp(t, c, true, week2)["id:101"]; r.Action != "commented" {
+		t.Fatalf("ref %+v", r)
+	}
+	got := fj.watchers[key]
+	if len(got) != 3 || got[0] != "acc-2" || got[1] != "acc-2" || got[2] != "acc-3" {
+		t.Errorf("watchers %v", got)
+	}
+}
+
+func TestDryRunAndSkippedAppsAddNoWatchers(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.users = watchUsers()
+	sk := appTicket(xss("u"))
+	sk.Skip = "the scan did not complete"
+	sk.Watchers = []string{"qa@example.com"}
+	other := appTicket(xss("u"))
+	other.Key, other.App = "id:202", "Shop"
+	other.Watchers = []string{"pm@example.com"}
+	runApp(t, c, false, sk, other)
+	if len(fj.watchers) != 0 {
+		t.Errorf("watchers added on a dry run: %v", fj.watchers)
+	}
+	runApp(t, c, true, sk)
+	if len(fj.watchers) != 0 {
+		t.Errorf("watchers added for a skipped app: %v", fj.watchers)
 	}
 }
