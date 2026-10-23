@@ -420,12 +420,13 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   client (the module has no dependencies) and confirming the stream's
   back-fill window
 - Certificate expiry lane: a weekly email to IT listing certificates about to
-  expire, from Qualys certificate data (Certificate View / CertView, if the
-  subscription includes it; otherwise the scanner's certificate detections).
-  Group by days left (expired, 30, 60, 90), name the host, issuer and owner,
-  and mention changes since last week. Read-only API account, its own
-  per-lane recipient list that fails closed (like `WAS_*`/`DOM_*`), Go
-  standard library only. Open questions: which Qualys module and API the
-  account can reach, and whether IT wants a Jira ticket per certificate
+  expire, from Qualys Certificate View (CertView; the subscription has it and
+  the fleet's existing Qualys credentials reach it). Group by days left
+  (expired, 30, 60, 90), name the host, issuer and owner, and mention changes
+  since last week. Read-only, its own per-lane recipient list that fails
+  closed (like `WAS_*`/`DOM_*`), Go standard library only. Open questions:
+  the exact CertView API endpoints and fields (to be checked against a live
+  call, as the sandbox cannot reach Qualys), and whether IT wants a Jira
+  ticket per certificate
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
