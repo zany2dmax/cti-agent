@@ -428,5 +428,9 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   the exact CertView API endpoints and fields (to be checked against a live
   call, as the sandbox cannot reach Qualys), and whether IT wants a Jira
   ticket per certificate
+- Weekly Qualys scan summary: check the two weekly scans Qualys runs on
+  Thursday and summarize both in one email on Friday. Noted only, not
+  designed; which two scans (and which audience) to be settled when it is
+  picked up
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
