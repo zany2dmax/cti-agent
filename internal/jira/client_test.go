@@ -321,3 +321,119 @@ func TestAddWatcherPostsABareJSONString(t *testing.T) {
 		t.Errorf("body %q, want a bare JSON string", gotBody)
 	}
 }
+
+const testCloudID = "11111111-2222-3333-4444-555555555555"
+
+func TestCloudGatewayAcceptsOnlyAUUID(t *testing.T) {
+	want := "https://api.atlassian.com/ex/jira/" + testCloudID
+	for _, in := range []string{testCloudID, strings.ToUpper(testCloudID), "  " + testCloudID + "\n"} {
+		got, err := CloudGateway(in)
+		if err != nil || got != want {
+			t.Errorf("CloudGateway(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "not-a-uuid", testCloudID + "/../x", "evil.example.com",
+		testCloudID + "/rest", testCloudID + "?x=1", testCloudID + "#f", "https://" + testCloudID} {
+		if got, err := CloudGateway(in); err == nil {
+			t.Errorf("CloudGateway(%q) = %q, want an error", in, got)
+		}
+	}
+}
+
+func TestAPIBaseRoutesCallsButNotBrowseLinks(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if strings.Contains(r.URL.Path, "/properties/") {
+			_, _ = w.Write([]byte(`{"key":"k","value":{"a":1}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"accountId":"abc","issues":[]}`))
+	}))
+	defer srv.Close()
+
+	c := New("https://example.atlassian.net", "svc@example.com", "tok")
+	c.APIBase = srv.URL
+	ctx := context.Background()
+
+	if _, err := c.Myself(ctx); err != nil {
+		t.Fatalf("Myself: %v", err)
+	}
+	if _, err := c.Search(ctx, "project = CR", 5); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if err := c.Attach(ctx, "CR-1", "f.txt", []byte("x")); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	var v map[string]any
+	if ok, err := c.GetProperty(ctx, "CR-1", "p", &v); err != nil || !ok {
+		t.Fatalf("GetProperty = %v, %v", ok, err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("APIBase server saw %d requests, want 4: %v", len(paths), paths)
+	}
+	if got := c.BrowseURL("CR-1"); got != "https://example.atlassian.net/browse/CR-1" {
+		t.Errorf("BrowseURL = %q, must stay on BaseURL", got)
+	}
+}
+
+func TestWithoutAPIBaseCallsGoToBaseURL(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_, _ = w.Write([]byte(`{"accountId":"abc"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "svc@example.com", "tok")
+	if _, err := c.Myself(context.Background()); err != nil || !hit {
+		t.Fatalf("Myself err=%v hit=%v", err, hit)
+	}
+}
+
+func TestMyPermissionsParsesAndSendsTheQuery(t *testing.T) {
+	var gotPath string
+	var gotQ map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQ = r.URL.Path, r.URL.Query()
+		_, _ = w.Write([]byte(`{"permissions":{"BROWSE_PROJECTS":{"havePermission":true},"MANAGE_WATCHERS":{"havePermission":false}}}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "svc@example.com", "tok")
+	perms := []string{"BROWSE_PROJECTS", "MANAGE_WATCHERS", "USER_PICKER"}
+	got, err := c.MyPermissions(context.Background(), "CR", perms)
+	if err != nil {
+		t.Fatalf("MyPermissions: %v", err)
+	}
+	if gotPath != "/rest/api/2/mypermissions" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotQ["projectKey"][0] != "CR" || gotQ["permissions"][0] != "BROWSE_PROJECTS,MANAGE_WATCHERS,USER_PICKER" {
+		t.Errorf("query = %v", gotQ)
+	}
+	if !got["BROWSE_PROJECTS"] || got["MANAGE_WATCHERS"] || got["USER_PICKER"] {
+		t.Errorf("got = %v", got)
+	}
+	if _, ok := got["USER_PICKER"]; !ok {
+		t.Error("absent key should be present and false")
+	}
+}
+
+func TestRedirectsMustStayOnHTTPS(t *testing.T) {
+	plain, _ := http.NewRequest(http.MethodGet, "http://api.example.com/x", nil)
+	if httpsOnly(plain, nil) == nil {
+		t.Error("a redirect to http was allowed")
+	}
+	tls, _ := http.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	if err := httpsOnly(tls, nil); err != nil {
+		t.Errorf("an https redirect was refused: %v", err)
+	}
+}
+
+func TestCloudGatewayRejectsEmbeddedNewlineAndFullwidth(t *testing.T) {
+	for _, id := range []string{"11111111-2222-3333-4444-555555555555\nx", "１1111111-2222-3333-4444-555555555555"} {
+		if _, err := CloudGateway(id); err == nil {
+			t.Errorf("accepted %q", id)
+		}
+	}
+}

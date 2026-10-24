@@ -94,6 +94,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   email like the owner; one not found, invalid or refused is logged and
   skipped, never blocking the ticket. The owner field stays one email.
   `--list-apps` keeps `watchers=` on lines with a real owner.
+- **Scoped Jira API token support (`JIRA_CLOUD_ID`).** Optional. Set it and
+  Jira API calls go through `https://api.atlassian.com/ex/jira/<cloud id>`,
+  which an Atlassian scoped token on a service account requires (three scopes:
+  `read:jira-work`, `write:jira-work`, `read:jira-user`); email links still use
+  `JIRA_BASE_URL`. UUID only. Unset changes nothing. `cti-jira --check` now
+  also prints each Jira permission the fleet uses as ok or MISSING, writing
+  nothing. RUNBOOK 11c has the setup, switch and rollback.
 
 ### Upgrade
 
@@ -108,6 +115,8 @@ Pull, reinstall. Then:
    otherwise) also needs **Manage watcher list**.
 3. `sudo cti-agent run-appscan --to-dev` to preview the tickets, then let
    Monday's run file them.
+4. Optional: nothing to do unless you switch to a scoped Jira token (RUNBOOK
+   11c, "Using a scoped service-account token").
 
 ## 1.3.2 — 2026-10-19
 
