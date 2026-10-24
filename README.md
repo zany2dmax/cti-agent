@@ -97,7 +97,7 @@ same set. **Run by hand for now:** both article sites refuse the server, so the
 operator saves the two articles into the release's inbox folder and starts the
 run ([CHEATSHEET.md](CHEATSHEET.md) section 7a); the timer stays disabled.
 
-**A weekly AppSec report.** Mondays, to a separate list — the people who own
+**A weekly AppSec report.** Fridays, to a separate list — the people who own
 application code, not the people who patch servers, and the split is enforced
 in code. Built from the DAST scanner's own scan-completion mail (Qualys WAS
 today, any scanner behind `internal/appscan`) plus its API for per-finding
@@ -108,7 +108,7 @@ application's Jira ticket can also carry the scanner's own report as an
 attachment (off by default, `WAS_ATTACH_REPORT=1`), and lists the scanner's
 unconfirmed Critical and Urgent findings in a separate "please verify" section.
 
-**A weekly domains check.** Mondays, security team only. For every domain in an
+**A weekly domains check.** Tuesdays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
 repository): still registered in the GoDaddy account, and is the account
 holding domains nobody listed (INVENTORY vs GODADDY); which domains have a live

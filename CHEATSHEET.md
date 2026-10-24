@@ -70,8 +70,8 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Daily digest | `cti-agent-digest` | every day 06:00 | digest audience |
 | Weekly digest | `cti-agent-weekly` | Mondays 07:00 | digest audience |
 | Mailbox cleanup | `cti-agent-mailbox` | every day 07:00 | nobody (moves mail) |
-| AppSec weekly | `cti-agent-appscan` | Mondays 07:30 | App Dev audience |
-| Domains weekly | `cti-agent-domains` | Mondays 08:00 | domains audience |
+| AppSec weekly | `cti-agent-appscan` | Fridays 07:30 | App Dev audience |
+| Domains weekly | `cti-agent-domains` | Tuesdays 08:00 | domains audience |
 | Patch Tuesday (by hand for now, section 7a) | `cti-agent-patchtuesday` (disabled) | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
@@ -160,7 +160,7 @@ sudo cti-agent run-digest daily                    # refuses if today's already 
 
 - The daily, weekly and Patch Tuesday lanes record each send and will not send
   the same day or month twice.
-- The domains run replaces last week's baseline, so the next Monday's "changed
+- The domains run replaces last week's baseline, so the next Tuesday's "changed
   since last week" compares with today.
 - **Never re-run a digest that exited 3.** It was sent but not recorded; the
   journal prints the exact `fleet-db sent ...` command to record it instead.
