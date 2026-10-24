@@ -114,7 +114,10 @@ func run() int {
 	defer cancel()
 
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
-	msgs, err := g.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder,
+	// HTML, not text: the notification parser reads the report link out of
+	// its <a href> and the fields off its line breaks, neither of which
+	// survives Graph's conversion to text.
+	msgs, err := g.RecentMessagesHTML(ctx, cfg.GraphMailbox, cfg.GraphFolder,
 		time.Now().Add(-*since))
 	if err != nil {
 		return die("reading the mailbox: %s", safelog.Line(err.Error()))
@@ -344,12 +347,16 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			if !p.Recognises(m.From, m.Subject) {
 				continue
 			}
-			s, probs := p.Parse(m.BodyText)
+			body := m.BodyHTML
+			if body == "" {
+				body = m.BodyText
+			}
+			s, probs := p.Parse(body)
 			// Claimed for the mailbox cleanup only when it parsed into a scan
 			// this report covers - a notice that did not parse was not reported
 			// on, and stays in the inbox for a person. Duplicates of a parsed
 			// scan are claimed too: each is a message this lane has read.
-			if s.Reference != "" {
+			if qualys.WellFormedReference(s.Reference) {
 				seenMsgs = append(seenMsgs, mailbox.Processed{
 					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
