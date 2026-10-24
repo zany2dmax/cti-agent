@@ -306,6 +306,17 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   only** - it never launches a scan, edits a web application or touches an
   authentication record - so the role it needs is read access to WAS, and
   granting more is not required.
+- **Jira: a scoped token on a service account is the least-privilege option.**
+  Optional `JIRA_CLOUD_ID` sends API calls through
+  `https://api.atlassian.com/ex/jira/<cloud id>`, which an Atlassian scoped API
+  token requires. Use a service account (not the organisation Settings > API
+  keys page, whose `:admin` scopes administer the organisation) with exactly
+  three classic scopes: `read:jira-work`, `write:jira-work`, `read:jira-user`.
+  No delete, transition or admin scope is granted because the fleet never
+  deletes or moves a ticket. The value must be a UUID, so the credentials can
+  only be sent to `api.atlassian.com` and never to a host an edited
+  `fleet.env` names. Tokens expire within 365 days. `cti-jira --check` reports
+  each permission as ok or MISSING without writing anything.
 - **`CLIENT_SECRET` also keys the self-sent header signature** (below,
   Mailbox modification). Rotating it is still the right response to exposure;
   the cost is that fleet mail already in the inbox stops verifying and is
