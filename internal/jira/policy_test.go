@@ -376,3 +376,55 @@ func TestATableCellSurvivesAHostileDescription(t *testing.T) {
 		t.Error("a newline survived into a table row")
 	}
 }
+
+// A CVSS 9.0+ finding earns a ticket whether or not it is on KEV, and is
+// filed without --approve. The case that prompted it: a CVSS 9.8, not on KEV,
+// low EPSS, ranked Sev4 - two weeks with a digest line and no ticket.
+func TestCriticalCVSSEarnsATicketWithoutKEV(t *testing.T) {
+	f := Finding{CVE: "CVE-2025-27918", Severity: 4, CVSS: "9.8", HostCount: 3}
+	if !ShouldFile(f) {
+		t.Fatal("a CVSS 9.8 Sev4 was not filed")
+	}
+	if NeedsApproval(f) {
+		t.Error("a CVSS 9.8 was held for approval; it should file automatically")
+	}
+	labels := strings.Join(Labels(f), " ")
+	if !strings.Contains(labels, "cvss-critical") || strings.Contains(labels, "cisa-kev") {
+		t.Errorf("labels %q", labels)
+	}
+	if s := Summary(f, now); !strings.Contains(s, ", CVSS 9.8") {
+		t.Errorf("summary %q does not say why it was filed", s)
+	}
+}
+
+func TestTheCVSSBoundary(t *testing.T) {
+	cases := []struct {
+		cvss string
+		file bool
+	}{
+		{"9.0", true}, {"10", true}, {" 9.1 ", true},
+		{"8.9", false}, {"", false}, {"n/a", false}, {"99", false}, {"-1", false},
+	}
+	for _, c := range cases {
+		f := Finding{CVE: "CVE-2026-00001", Severity: 4, CVSS: c.cvss}
+		if got := ShouldFile(f); got != c.file {
+			t.Errorf("CVSS %q: ShouldFile=%v, want %v", c.cvss, got, c.file)
+		}
+		if !c.file && strings.Contains(strings.Join(Labels(f), " "), "cvss-critical") {
+			t.Errorf("CVSS %q labelled cvss-critical", c.cvss)
+		}
+	}
+}
+
+// The approval gate is unchanged for what it was for: a non-KEV Sev5 below
+// CVSS 9.0 is the fleet's own judgement, and still waits for a person.
+func TestANonKEVSev5BelowCriticalStillWaits(t *testing.T) {
+	f := Finding{CVE: "CVE-2026-00002", Severity: 5, CVSS: "7.5"}
+	if !ShouldFile(f) || !NeedsApproval(f) {
+		t.Errorf("ShouldFile=%v NeedsApproval=%v, want true true", ShouldFile(f), NeedsApproval(f))
+	}
+	k := Finding{CVE: "CVE-2026-00003", Severity: 3, KEV: true, CVSS: "6.1"}
+	if !ShouldFile(k) || NeedsApproval(k) {
+		t.Errorf("KEV: ShouldFile=%v NeedsApproval=%v, want true false", ShouldFile(k), NeedsApproval(k))
+	}
+}

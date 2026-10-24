@@ -1,6 +1,6 @@
 .TH CTI-JIRA 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
 .SH NAME
-cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
+cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5 or CVSS 9.0+ exposure
 .SH SYNOPSIS
 .B cti-jira \-\-check
 .PP
@@ -78,11 +78,13 @@ appears in
 runs read-only: existing tickets are still found and linked from the digest,
 and the follow-up pass prints what it would have said.
 .TP
-.B Non-KEV findings wait for a person
-A Sev5 that is not on CISA KEV is filed only with
+.B Some findings wait for a person
+A Sev5 that is not on CISA KEV and has a CVSS base score below 9.0 is filed
+only with
 .BR \-\-approve .
 That is a command-line flag, never a setting, and the scheduled run does
-not pass it, so the automatic path files KEV entries only.
+not pass it, so the automatic path files KEV entries and CVSS 9.0+ entries
+only.
 .TP
 .B Never transitions
 It never closes, reopens, assigns or transitions a ticket. Remediation, and
@@ -101,8 +103,11 @@ and
 .B \-\-follow\-up
 turn every failure into a WARNING and exit 0.
 .SS What it files
-A finding from the enriched file earns a ticket when it is on CISA KEV or
-rated Sev5 (the old P1 also counts as Sev5) and its status is PRESENT.
+A finding from the enriched file earns a ticket when it is on CISA KEV,
+rated Sev5 (the old P1 also counts as Sev5), or has a CVSS base score of 9.0
+or more (CVSS's own Critical band), and its status is PRESENT.
+KEV and CVSS 9.0+ findings are filed automatically; they are left unassigned
+for triage.
 Its full host list is then fetched from Qualys; a lookup that fails drops
 that finding with a warning. Findings are handled worst first.
 .PP
@@ -112,7 +117,9 @@ once a KEV due date has passed) and description, the labels
 .BR cti\-cve\-... ,
 .BR cti\-agent ,
 .B cisa\-kev
-(when on KEV) and
+(when on KEV),
+.B cvss\-critical
+(when the CVSS base score is 9.0 or more) and
 .BR sev N,
 a CSV of every host
 .RI ( cve\-yyyy\-nnnn\-hosts\-YYYY\-MM\-DD.csv ,
@@ -241,8 +248,8 @@ a remediation note through
 Default:\~empty.
 .TP
 .B \-\-approve
-Also file new tickets for Sev5 findings that are not on CISA KEV. Without
-it they are logged as held for approval. Only affects new tickets.
+Also file new tickets for Sev5 findings that are not on CISA KEV and are
+below CVSS 9.0. Without it they are logged as held for approval. Only affects new tickets.
 Default:\~off.
 .TP
 .BI \-\-domains\-actions " FILE"
@@ -523,7 +530,7 @@ What tomorrow's run would say to every open ticket, writing nothing:
 sudo cti\-agent cti\-jira \-\-follow\-up
 .EE
 .PP
-File today's held non-KEV Sev5 findings after reviewing them:
+File today's held Sev5 findings (not KEV, CVSS below 9.0) after reviewing them:
 .PP
 .EX
 sudo cti\-agent cti\-jira \-\-approve \e

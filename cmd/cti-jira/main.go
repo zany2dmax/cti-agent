@@ -59,7 +59,7 @@ func run() int {
 	forReal := flag.Bool("for-real", false,
 		"actually create it; without this, nothing is written")
 	fromEnriched := flag.String("from-enriched", "",
-		"file tickets for the KEV and Sev5 findings in this enriched JSON")
+		"file tickets for the present KEV, Sev5 and CVSS 9.0+ findings in this enriched JSON")
 	approve := flag.Bool("approve", false,
 		"also file the findings that would otherwise wait for a human: "+
 			"Sev5 findings that are not on CISA KEV")
@@ -592,7 +592,7 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 	findings := selectForTicketing(ctx, ef.Findings, fill,
 		func(format string, a ...any) { logf("WARNING: "+format, a...) })
 
-	logf("%d of %d findings qualify for a ticket (KEV or Sev5, and present)",
+	logf("%d of %d findings qualify for a ticket (KEV, Sev5 or CVSS 9.0+, and present)",
 		len(findings), len(ef.Findings))
 
 	tm := TicketMap{Generated: now.Format(time.RFC3339), Tickets: map[string]TicketRef{}}
@@ -727,16 +727,16 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 		return ref, nil
 	}
 
-	// A non-KEV Sev5 is the fleet's own judgement rather than an external
-	// deadline, so it waits for a person - unless a person said so.
+	// A non-KEV Sev5 below CVSS 9.0 is the fleet's own judgement rather than
+	// an external measure, so it waits for a person - unless a person said so.
 	//
 	// --approve is the person saying so, and it is a FLAG rather than a
 	// config setting on purpose: the scheduled run in run-digest does not
-	// pass it, so the automatic path can only ever file KEV entries. Putting
+	// pass it, so the automatic path only ever files KEV and CVSS 9.0+. Putting
 	// this in fleet.env would make "the fleet decided to file this" a thing
 	// that happens at 10:00 with nobody watching.
 	if jira.NeedsApproval(f) && !approve {
-		logf("%s is Sev5 but not on KEV - held for approval "+
+		logf("%s is Sev5 but neither on KEV nor CVSS 9.0+ - held for approval "+
 			"(re-run with --approve to file it)", f.CVE)
 		return TicketRef{}, nil
 	}

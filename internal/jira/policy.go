@@ -22,7 +22,9 @@ package jira
 import (
 	"encoding/csv"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -101,6 +103,9 @@ func Labels(f Finding) []string {
 	if f.KEV {
 		out = append(out, "cisa-kev")
 	}
+	if IsCriticalCVSS(f) {
+		out = append(out, "cvss-critical")
+	}
 	out = append(out, fmt.Sprintf("sev%d", f.Severity))
 	return out
 }
@@ -142,6 +147,11 @@ func Summary(f Finding, now time.Time) string {
 
 	if f.KEV {
 		b.WriteString(", CISA KEV")
+	}
+	if v, ok := CVSSScore(f); ok && v >= CriticalCVSS {
+		// The reason it was filed, when KEV is not: a queue reader should not
+		// have to open it to see why a "Sev4" is a ticket.
+		b.WriteString(", CVSS " + strconv.FormatFloat(v, 'f', -1, 64))
 	}
 	if t := strings.TrimSpace(f.Title); t != "" {
 		b.WriteString(" - " + t)
@@ -329,17 +339,48 @@ func CheckAllowed(projectKey, allowRaw string) error {
 		projectKey, allowRaw)
 }
 
-// ShouldFile decides whether a finding earns a ticket.
+// CriticalCVSS is the CVSS base score at and above which a finding earns a
+// ticket whether or not it is on CISA KEV: the bottom of CVSS's own
+// "Critical" band.
+const CriticalCVSS = 9.0
+
+// CVSSScore parses the finding's CVSS base score. ok is false when there is
+// none or it is not a number between 0 and 10.
+func CVSSScore(f Finding) (score float64, ok bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(f.CVSS), 64)
+	if err != nil || math.IsNaN(v) || v < 0 || v > 10 {
+		return 0, false
+	}
+	return v, true
+}
+
+// IsCriticalCVSS reports a CVSS base score of CriticalCVSS or more.
+func IsCriticalCVSS(f Finding) bool {
+	v, ok := CVSSScore(f)
+	return ok && v >= CriticalCVSS
+}
+
+// ShouldFile decides whether a finding earns a ticket: on CISA KEV, Sev5, or
+// a CVSS base score of 9.0 or more.
 //
-// KEV or Sev5, per the operator's choice. Note what is NOT here: anything
-// about how many tickets already exist, or how busy IT is. Volume control is
-// IdempotencyLabel's job - one ticket per CVE, forever - and mixing the two
-// would mean a genuine new Sev5 could be suppressed because the week was busy.
-func ShouldFile(f Finding) bool { return f.KEV || f.Severity >= 5 }
+// The CVSS rule exists because KEV-or-Sev5 missed CVE-2025-27918, a CVSS 9.8
+// in a remote-access tool present on three workstations, for two weeks: not
+// on KEV and a low EPSS ranked it Sev4, and a Sev4 earns a digest line, not a
+// ticket. "Not on KEV" means nobody has confirmed exploitation yet, not that
+// it is safe to leave.
+//
+// Note what is NOT here: anything about how many tickets already exist, or
+// how busy IT is. Volume control is IdempotencyLabel's job - one ticket per
+// CVE, forever - and mixing the two would mean a genuine new finding could be
+// suppressed because the week was busy.
+func ShouldFile(f Finding) bool { return f.KEV || f.Severity >= 5 || IsCriticalCVSS(f) }
 
 // NeedsApproval reports whether a human must confirm before this is filed.
 //
-// KEV entries carry an external deadline, so delay is the larger risk and they
-// go automatically. Everything else drafts and waits, which matches the
-// fleet's standing rule: auto-send scheduled reports, gate everything else.
-func NeedsApproval(f Finding) bool { return !f.KEV }
+// KEV entries carry an external deadline, and a CVSS 9.0+ is critical by the
+// standard's own measure, so for both delay is the larger risk and they go
+// automatically, unassigned for triage. What is left - a non-KEV Sev5 below
+// CVSS 9.0, which is the fleet's own scoring rather than an external one -
+// drafts and waits, which matches the fleet's standing rule: auto-send
+// scheduled reports, gate everything else.
+func NeedsApproval(f Finding) bool { return !f.KEV && !IsCriticalCVSS(f) }
