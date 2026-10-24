@@ -228,14 +228,14 @@ func TestAFailedLoginIsNotCountedAmongTheOrdinaryUnauthenticatedScans(t *testing
 
 func TestTheSubjectNamesTheFleet(t *testing.T) {
 	// It used to read "[AppSec] Week of Oct 4: ...", which nowhere says where
-	// the mail came from. Every other message the fleet sends opens with CTI.
+	// the mail came from. It now opens "<FLEET_ORG> AppSec Weekly".
 	for _, b := range []Block{
 		render(t, deepScan()),
 		render(t, failedLogin()),
 		render(t),
 	} {
-		if !strings.Contains(b.Subject, "CTI Fleet") {
-			t.Errorf("Subject = %q - it does not say it is from the CTI fleet",
+		if !strings.Contains(b.Subject, "Security AppSec Weekly") {
+			t.Errorf("Subject = %q - it does not say which organisation's AppSec weekly it is",
 				b.Subject)
 		}
 	}
@@ -282,7 +282,7 @@ func TestTheHtmlMatchesTheDailyBriefsLayout(t *testing.T) {
 			t.Errorf("the HTML does not carry %q from the daily's style", want)
 		}
 	}
-	if !strings.Contains(b.HTML, "CTI AppSec Weekly") {
+	if !strings.Contains(b.HTML, "Security AppSec Weekly") {
 		t.Error("the header band does not name the report")
 	}
 }
