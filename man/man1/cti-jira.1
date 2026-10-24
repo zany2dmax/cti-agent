@@ -167,8 +167,12 @@ or
 .B \-\-domains\-actions
 is required; with none, the usage is printed and the exit status is 1.
 .B \-\-check
-runs first when combined with another mode, and a failed check stops the
-run.
+also prints each Jira permission the fleet uses (BROWSE_PROJECTS, CREATE_ISSUES,
+ADD_COMMENTS, CREATE_ATTACHMENTS, EDIT_ISSUES, ASSIGN_ISSUES, MANAGE_WATCHERS,
+and the global USER_PICKER) as ok or MISSING, without writing anything. A
+MISSING permission, or permissions that cannot be read, fails the check
+(exit 1). It runs first when combined with another mode, and a failed check
+stops the run; no runner passes it.
 .B \-\-test\-ticket
 takes precedence over
 .B \-\-from\-enriched
@@ -334,6 +338,16 @@ The Jira site and the account the token belongs to; the token carries all
 of that account's permissions. Required.
 .I fleet.env
 section 9.
+.TP
+.B JIRA_CLOUD_ID
+Optional. The site's cloud id (a UUID only; see
+.IR https://SITE.atlassian.net/_edge/tenant_info ).
+When set, API calls go through
+.I https://api.atlassian.com/ex/jira/CLOUD_ID
+as an Atlassian scoped API token requires; links in email still use
+.BR JIRA_BASE_URL .
+Unset, both use
+.BR JIRA_BASE_URL .
 .TP
 .B JIRA_PROJECT_KEY
 The project tickets are searched for and filed in. Required, no default.

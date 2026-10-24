@@ -41,7 +41,10 @@ type Config struct {
 	// still finds it where they left it.
 	MailboxMinAge time.Duration
 
-	JiraBaseURL    string
+	JiraBaseURL string
+	// JiraCloudID, when set, sends API calls through the Atlassian gateway
+	// (required by a scoped API token); JiraBaseURL still makes the links.
+	JiraCloudID    string
 	JiraEmail      string
 	JiraAPIToken   string
 	JiraProjectKey string
@@ -208,6 +211,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		MailboxMinAge:     time.Duration(mailboxMinAgeHours) * time.Hour,
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
+		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),
 		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
 		// No defaults, on purpose. "Task" would have been the obvious one and

@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 		"QUALYS_KB_CACHE", "QUALYS_KB_MAX_AGE_HOURS",
 		"REPORT_PATH",
 		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS",
-		"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
+		"JIRA_BASE_URL", "JIRA_CLOUD_ID", "JIRA_EMAIL", "JIRA_API_TOKEN",
 		"JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_ALLOW_CREATE",
 	} {
 		_ = os.Unsetenv(k)
@@ -377,5 +377,27 @@ func TestTheCleanupCannotArchiveMailTheDigestStillNeeds(t *testing.T) {
 			!strings.Contains(err.Error(), "does nothing at all") {
 			t.Errorf("%s: the error does not explain the consequence: %v", tc.why, err)
 		}
+	}
+}
+
+func TestJiraCloudIDIsRead(t *testing.T) {
+	blank(t)
+	set(t, append(append([]string{}, qualysVars...), "JIRA_BASE_URL", "JIRA_EMAIL",
+		"JIRA_API_TOKEN", "JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE")...)
+	t.Setenv("JIRA_CLOUD_ID", "")
+	cfg, err := LoadJira()
+	if err != nil {
+		t.Fatalf("LoadJira: %v", err)
+	}
+	if cfg.JiraCloudID != "" {
+		t.Errorf("JiraCloudID = %q, want empty when unset", cfg.JiraCloudID)
+	}
+	t.Setenv("JIRA_CLOUD_ID", "11111111-2222-3333-4444-555555555555")
+	cfg, err = LoadJira()
+	if err != nil {
+		t.Fatalf("LoadJira: %v", err)
+	}
+	if cfg.JiraCloudID != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("JiraCloudID = %q", cfg.JiraCloudID)
 	}
 }
