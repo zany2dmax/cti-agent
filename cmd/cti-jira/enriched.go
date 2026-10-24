@@ -206,13 +206,22 @@ func selectForTicketing(ctx context.Context, rows []enrichedRow, fill hostFiller
 			warn("could not fetch hosts for %s, skipping it: %s", f.CVE, err)
 			continue
 		}
+		// The stored status is what the digest concluded when it read the
+		// advisory; the lookup is now. A backfill over a 30-day rollup would
+		// otherwise file a fresh ticket, with no hosts, for something fixed
+		// since. Only the scanner saying PRESENT today earns a ticket.
+		if !strings.EqualFold(strings.TrimSpace(res.Status), vulnlookup.StatusPresent) {
+			warn("%s was present when reported but the scanner now says %s - not filed",
+				f.CVE, res.Status)
+			continue
+		}
 		// The scanner's count beats the digest's, being the fresher of the
 		// two and the one the host names came from. Shared with the
 		// follow-up pass, so both compare a ticket on the same numbers.
 		applyLookup(&f, res)
 		out = append(out, f)
 	}
-	// Worst first, so a truncated run files the biggest exposure.
+	// Worst first, so the biggest exposure is filed (and logged) first.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Severity != out[j].Severity {
 			return out[i].Severity > out[j].Severity
