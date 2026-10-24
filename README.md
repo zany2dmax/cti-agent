@@ -438,5 +438,13 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   Thursday and summarize both in one email on Friday. Noted only, not
   designed; which two scans (and which audience) to be settled when it is
   picked up
+- Fleet housekeeping: watch and trim the fleet's own data so the box never
+  fills up quietly - the orchestrator's `board.md` and its archive (rotate or
+  trim by size/age), `state/memory.db` (size, rollup and pruning, periodic
+  VACUUM), free disk on the volumes the fleet uses with a warning before it
+  is critical, journal and log rotation for the fleet's units, and the dated
+  reports, ticket files, previews and KB cache that build up in `state/`.
+  Problems and growth trends reported through the existing alert path or the
+  check-in. Noted only, not designed
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
