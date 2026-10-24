@@ -156,7 +156,7 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		if hasLabel(issue.Fields.Labels, domainsLabel) {
 			lockdown++
 			r := refFor(c, issue, "")
-			r.Outcome = "the weekly domains lock-down ticket - updated by the Monday domains run"
+			r.Outcome = "the weekly domains lock-down ticket - updated by the weekly domains run"
 			r.Kind = "domains-lockdown"
 			refs[lockdownRefKey] = r
 			continue

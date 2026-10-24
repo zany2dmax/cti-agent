@@ -1531,7 +1531,7 @@ own detections.
 
 ## The weekly AppSec report
 
-`@appscan`, `cti-agent-appscan.timer`, Mondays 07:30. Operating detail is in
+`@appscan`, `cti-agent-appscan.timer`, Fridays 07:30. Operating detail is in
 [RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application-security-lane); this is
 the shape of it.
 
@@ -1623,7 +1623,7 @@ application still gets one row, from its newest scan.
 
 ## The weekly domains check
 
-`@domains`, `cti-agent-domains.timer`, Mondays 08:00, security team only
+`@domains`, `cti-agent-domains.timer`, Tuesdays 08:00, security team only
 (`cti-mailer --lane dom`: `DOM_TO` against `DOM_ALLOW_TO`, no fallback).
 Operating detail is in
 [RUNBOOK 11g](../RUNBOOK.md#11g-the-weekly-domains-lane). No model is involved.
@@ -1688,7 +1688,7 @@ failure is logged and never costs the report.
 ### Dry run
 
 `run-domains --dry-run` probes and renders but passes `--no-state-write`, so
-the Monday run still reports the week's changes, and it only previews the
+the Tuesday run still reports the week's changes, and it only previews the
 lock-down ticket.
 
 ---
@@ -1706,8 +1706,8 @@ enforced in three independent places, because a prompt alone isn't a control.
 
 **No approval needed:** running lanes; reading mailbox, scanner, NVD, EPSS, KEV,
 feeds; writing to memory, reports, logs, board; sending the scheduled daily and
-weekly digests to `SECURITY_DL`, the Monday AppSec report to `WAS_TO`, and the
-Monday domains check to `DOM_TO`. Both Monday reports are sent by their timers;
+weekly digests to `SECURITY_DL`, the Friday AppSec report to `WAS_TO`, and the
+Tuesday domains check to `DOM_TO`. Both reports are sent by their timers;
 the orchestrator cannot run `run-appscan` or `run-domains` at all.
 
 **Approval required:** any off-cycle email, including an "urgent" one; any
@@ -1771,9 +1771,9 @@ python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
 | Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
 | Wed after the 2nd Tuesday, 07:30 | Microsoft Patch Tuesday synopsis. **Run by hand for now**; the timer is disabled | `cti-agent-patchtuesday.timer` (disabled) |
-| Mon 07:30 | AppSec report to `WAS_TO` | `cti-agent-appscan.timer` |
+| Fri 07:30 | AppSec report to `WAS_TO` | `cti-agent-appscan.timer` |
 | 07:00 daily | mailbox cleanup | `cti-agent-mailbox.timer` |
-| Mon 08:00 | domains check to `DOM_TO`, CSV attached; then the Jira lock-down ticket | `cti-agent-domains.timer` |
+| Tue 08:00 | domains check to `DOM_TO`, CSV attached; then the Jira lock-down ticket | `cti-agent-domains.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then

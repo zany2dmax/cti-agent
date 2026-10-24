@@ -244,7 +244,7 @@ func domainsBody(af domains.ActionsFile, now time.Time) string {
 		"are one ticket.\n\n")
 	b.WriteString("*Exact changes* can be applied as written. *To review* needs a decision " +
 		"first - usually who really sends mail as the domain. The attached CSV has the same " +
-		"list. The check runs every Monday and comments here when the list changes.\n\n")
+		"list. The check runs weekly and comments here when the list changes.\n\n")
 	b.WriteString("*Before setting a null MX* (MX {{0 .}}), confirm no mailbox, alias or " +
 		"forwarder uses the domain: it makes every sender's mail to it fail at once.\n\n")
 

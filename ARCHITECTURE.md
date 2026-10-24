@@ -32,7 +32,7 @@ our estate, with the affected hostnames and a Jira ticket already open for IT.
 
 Everything else is counted and not discussed.
 
-The **application-security lane**: every Monday a separate email goes to the
+The **application-security lane**: every Friday a separate email goes to the
 people who own our **application code**: what the web application scanner found open on each of
 our sites, which findings are new since the last scan, and whether each scan
 logged in or covered only the public pages. Different audience, different
@@ -141,8 +141,8 @@ flowchart TB
         SCOUT["feed poll<br/>every 4 hours"]
         PT["Patch Tuesday<br/>monthly, by hand for now"]
         CLEAN["mailbox cleanup<br/>07:00"]
-        APPSEC["AppSec report<br/>Monday 07:30"]
-        DOMS["domains check<br/>Monday 08:00"]
+        APPSEC["AppSec report<br/>Friday 07:30"]
+        DOMS["domains check<br/>Tuesday 08:00"]
     end
 
     subgraph GO["Shared Go packages — the lanes' toolbox"]

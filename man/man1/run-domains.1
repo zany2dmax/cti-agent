@@ -23,7 +23,7 @@ It is run by
 .B cti\-agent\-domains.service
 from
 .B cti\-agent\-domains.timer
-every Monday at 08:00
+every Tuesday at 08:00
 .RB ( Persistent=true ),
 after the weekly rollup and the AppSec report. The unit runs as
 .BR ctiagent ,
@@ -204,7 +204,7 @@ sudo cti\-agent run\-domains \-\-dry\-run
 sudo less /var/lib/cti\-agent/state/domains\-$(date \-u +%F).txt
 .EE
 .PP
-Send it now instead of waiting for Monday:
+Send it now instead of waiting for Tuesday:
 .PP
 .EX
 sudo cti\-agent run\-domains

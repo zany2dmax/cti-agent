@@ -138,7 +138,7 @@ Concretely, a quiet beat should pick up one of these:
   escalate for a re-run - `sudo cti-agent run-patchtuesday` is the operator's.
   Do not summarise that email as though the estate were clean, and do not
   repeat any claim about the KnowledgeBase from a run that never reached it.
-- If the Monday AppSec report raised an **authentication failure**, a `HOLD`
+- If the Friday AppSec report raised an **authentication failure**, a `HOLD`
   from `cti-agent-appscan.service` has already emailed the operator. Do not
   re-escalate it. Track it on the board until a later run shows that
   application authenticating again, and never describe that week's counts for
@@ -182,7 +182,7 @@ Patch Tuesday manifest sent; those are the lanes' and the operator's.
   and the board.
 - **Sending the scheduled digests** to `$DIGEST_TO` — the daily brief, the
   Monday weekly, and the monthly Patch Tuesday synopsis. These are pre-approved
-  standing sends. The Monday AppSec report goes to `$WAS_TO`, and the Monday
+  standing sends. The Friday AppSec report goes to `$WAS_TO`, and the Tuesday
   domains check to `$DOM_TO`; their **timers** send them; you neither send nor
   re-send either.
 
@@ -296,8 +296,8 @@ operator runs by hand. You read what they did; you do not run them.
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Poll vendor advisories and RSS for CVEs the mailbox missed |
 | `@brief` | `$FLEET_CODE/lanes/brief.py` | Render the HTML digest from enriched findings |
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly, **run by the operator by hand for now** (both article sites block the box, so the articles are saved in a browser into `$FLEET_HOME/inbox/patchtuesday/YYYY-MM/`; the timer is disabled): read Microsoft's release data (MSRC API), cross-check BleepingComputer and (optionally) the Qualys blog, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL. The table is **one row per QID** (a QID is one update somebody installs), not per CVE. It also writes the release manifest the daily digest reads - see below |
-| `@appscan` | `$FLEET_CODE/bin/run-appscan` | Weekly, Mondays: read the DAST scanner's own scan-completion emails (Qualys WAS today), pull per-finding detail from its API where credentials allow, and send the application-security report to `$WAS_TO` - the people who own application code, **not** the digest audience. See "The AppSec report" below |
-| `@domains` | `$FLEET_CODE/bin/run-domains` | Weekly, Mondays 08:00: every domain in the operator's inventory checked against the GoDaddy account, DNS, the web and its mail records, diffed against last week, sent to `$DOM_TO` (security team), then the DNS changes it lists (DNS CHANGES FOR IT) filed by `cti-jira --domains-actions` as one Jira lock-down ticket for IT, commented on only when the list changes. No model involved. A run advances the week-over-week baseline, which is one more reason it is not yours to re-run |
+| `@appscan` | `$FLEET_CODE/bin/run-appscan` | Weekly, Fridays: read the DAST scanner's own scan-completion emails (Qualys WAS today), pull per-finding detail from its API where credentials allow, and send the application-security report to `$WAS_TO` - the people who own application code, **not** the digest audience. See "The AppSec report" below |
+| `@domains` | `$FLEET_CODE/bin/run-domains` | Weekly, Tuesdays 08:00: every domain in the operator's inventory checked against the GoDaddy account, DNS, the web and its mail records, diffed against last week, sent to `$DOM_TO` (security team), then the DNS changes it lists (DNS CHANGES FOR IT) filed by `cti-jira --domains-actions` as one Jira lock-down ticket for IT, commented on only when the list changes. No model involved. A run advances the week-over-week baseline, which is one more reason it is not yours to re-run |
 | `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive mail its owning lane has read - CTI advisories the agent took a CVE from, Qualys WAS notices the AppSec weekly reported on - and the fleet's own reports (only when their `X-CTI-Agent-Sent` header is correctly signed), move automatic replies (headers or subject prefix) to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. The scheduled runners invoke this. **You cannot** - it is not in your allowlist. Escalate with `cti-alert` instead. |
 
@@ -381,7 +381,7 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run [--month YYYY-MM]` | yes | Renders the synopsis and writes nothing. Use this, not the runner, to look at a month |
 | `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. The operator runs it by hand for now (timer disabled); a `--dry-run` never writes the manifest; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
 | `journalctl -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
-| `journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Mondays running is worth one escalation: the GoDaddy token has probably expired |
+| `journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |
