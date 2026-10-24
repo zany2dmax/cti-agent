@@ -238,6 +238,9 @@ account's session cookies**. So it is: written `0600` in a directory created
 state by `run-appscan` once `cti-jira` has attached it; fetched only for
 tickets about to be filed or commented; and off by default. The ticket says it
 is attached and that it contains cookies, so whoever opens it knows. The
+rehearsal ticket (`cti-jira --appscan-test`) is unassigned and untracked by
+state, but still attaches the cookies-bearing report: delete it in Jira, and the
+local copy, when done. The
 attachment is visible to everyone who can see the Jira project, so the
 scan account should be a dedicated, low-privilege test login whose sessions are
 cheap to expire. `cti-appreport --probe-findings` prints raw finding fields for

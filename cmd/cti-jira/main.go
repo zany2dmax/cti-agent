@@ -81,8 +81,15 @@ func run() int {
 		"with --appscan-tickets: a cti-appreport --out-dir; each application's zipped "+
 			"scanner report listed in its reports.json is attached when its ticket is "+
 			"filed or its findings change")
+	appscanTest := flag.String("appscan-test", "",
+		"with --appscan-tickets: preview, or with --for-real file, ONE clearly-labelled test "+
+			"ticket for this scanner web-app id - what a developer would get, with the report "+
+			"from --appscan-reports attached; unassigned, never tracked by the weekly run")
 	flag.Parse()
 
+	if *appscanTest != "" && *appscanTickets == "" {
+		return die("--appscan-test needs --appscan-tickets (the cti-appscan --tickets-out file)")
+	}
 	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
 		*appscanTickets == "" {
 		flag.Usage()
@@ -138,6 +145,9 @@ func run() int {
 	}
 	if *domainsActions != "" {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
+	}
+	if *appscanTest != "" {
+		return doAppscanTest(ctx, c, cfg, *appscanTickets, *appscanTest, *appscanReports, *forReal, time.Now())
 	}
 	if *appscanTickets != "" {
 		return doAppscanTickets(ctx, c, cfg, *appscanTickets, *forReal, time.Now(), *refOut, *appscanReports)

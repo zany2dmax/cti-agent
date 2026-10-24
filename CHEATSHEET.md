@@ -125,6 +125,9 @@ sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file fro
 #   staging copy scanned instead of production: on its line add  | covers=www.example.com
 #   copy others on an app's ticket: add  | watchers=a@example.com,b@example.com  (Jira "Manage watcher list")
 #   scanner report on each ticket (off until tested, RUNBOOK 11f): sudo cti-agent cti-appreport --list-ids, then --check
+#   rehearse one ticket: cti-appreport --app-id 1234 --out-dir /tmp/report, then
+#   cti-jira --appscan-tickets <state/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]
+#   (files an unassigned "[TEST]" ticket; delete it in Jira and rm -rf /tmp/report afterwards)
 #   then WAS_ATTACH_REPORT=1 in fleet.env; reports carry session cookies, deleted after attaching
 sudo cti-agent run-domains --to-dev
 sudo cti-agent run-patchtuesday --to-dev

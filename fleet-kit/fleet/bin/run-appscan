@@ -151,8 +151,28 @@ if [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
     PREVIEW="$STATE/appscan-tickets-preview-$STAMP.txt"
     : > "$PREVIEW"; chmod 0600 "$PREVIEW"
     log "tickets: preview only - nothing will be filed or commented; would-be text in $PREVIEW"
-    "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$TICKETREF" > "$PREVIEW" \
+    # A test send rehearses the attachment too: the scanner reports are
+    # fetched (and deleted again in the scanner) exactly as a real run would,
+    # so the preview names each file and its size. A dry run skips this - it
+    # creates reports in the scanner, and a dry run creates nothing.
+    if [ -n "$TODEV" ] && [ -z "$DRY" ] && [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
+      if [ -x "$APPREPORT" ]; then
+        if "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$PLAN" > /dev/null \
+           && "$APPREPORT" --tickets "$TICKETS" --only-ref "$PLAN" --out-dir "$REPORTS"; then
+          REPORTARGS=(--appscan-reports "$REPORTS")
+        else
+          log "WARNING: scanner reports not fetched - the preview shows no report attachments"
+        fi
+      else
+        log "WAS_ATTACH_REPORT=1 but cti-appreport is not installed - rerun the installer"
+      fi
+    elif [ -n "$DRY" ] && [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
+      log "tickets: scanner reports are not fetched on --dry-run; --to-dev rehearses the attachments"
+    fi
+    "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$TICKETREF" \
+      ${REPORTARGS[@]+"${REPORTARGS[@]}"} > "$PREVIEW" \
       || log "WARNING: application ticket preview failed"
+    rm -rf "$PLAN" "$REPORTS"
   else
     if [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
       if [ -x "$APPREPORT" ]; then
