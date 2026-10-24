@@ -347,3 +347,31 @@ func TestTheApplicationNameComesFromTheTargetLine(t *testing.T) {
 		t.Errorf("App = %q, want the Target line rather than the title", r.App)
 	}
 }
+
+func TestWellFormedReference(t *testing.T) {
+	if !WellFormedReference("was/1111111111111.22222222") {
+		t.Error("a real reference was refused")
+	}
+	for _, bad := range []string{"", "was/1111111111111. 22222222 Start Date : 10/21/2026", "was/abc.1", "x was/1.2"} {
+		if WellFormedReference(bad) {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+// The layouts a mail system may re-write the notice into: spaced styles on a
+// hidden span preheader, <br> with attributes, table rows. Each field must
+// still land on its own line.
+func TestRewrittenLayoutsStillSplitIntoFields(t *testing.T) {
+	body := `<html><head><style>p{}</style></head><body>
+<span style="display: none !important; mso-hide: all">Scan Title : Preheader Copy Run #1 Scan Reference : was/9.9</span>
+<table><tr><td>Scan Title : Example Site Run #48<br clear="all">Scan Reference : was/1111111111111.22222222</td></tr>
+<tr><td>Target : Example Homepage</td></tr><tr><td>Scan Status : Finished : OK</td></tr></table>
+<div>If you wish to view these scan results, click here : <a href="https://urldefense.com/v3/__https://qualysguard.qg3.apps.qualys.com/was/*/reports/online-reports/email-report/scan/25080057__;Iw!!A!B$">link</a></div>
+</body></html>`
+	r, _ := Provider{}.Parse(body)
+	if r.Reference != "was/1111111111111.22222222" || r.ScanTitle != "Example Site Run #48" ||
+		r.Target != "Example Homepage" || !r.Complete || r.ReportURL == "" {
+		t.Errorf("parsed %+v", r)
+	}
+}

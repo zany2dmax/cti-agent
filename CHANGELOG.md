@@ -39,6 +39,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **AppSec read the Qualys notices as Graph's plain-text conversion**, which
+  ran every field onto one line and dropped the report link, so no scan
+  matched the WAS scan list and every application was left alone.
+  `cti-appscan` now reads the HTML body the parser was written for (the
+  digest and mailbox cleanup still read text), splits re-written layouts
+  (table rows, `<br>` with attributes, spaced hidden preheaders) into fields,
+  and claims a notice as read only when its scan reference is well-formed.
+
 - **The domains email now names its Jira lock-down ticket.** `run-domains`
   filed the ticket after the email had gone, so the report never said which
   ticket IT was working from. The ticket is now filed or updated first

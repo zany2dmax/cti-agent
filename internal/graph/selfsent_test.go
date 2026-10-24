@@ -250,3 +250,38 @@ func TestTheHeaderNameIsValidForGraph(t *testing.T) {
 		t.Errorf("SelfHeader = %q, must start with X-", SelfHeader)
 	}
 }
+
+func TestRecentMessagesHTMLAsksForAndKeepsTheHTMLBody(t *testing.T) {
+	var prefer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/oauth2/v2.0/token") {
+			_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":3599}`))
+			return
+		}
+		prefer = r.Header.Get("Prefer")
+		_, _ = w.Write([]byte(`{"value":[{"id":"1","subject":"s","receivedDateTime":"2026-10-03T10:03:00Z",
+			"from":{"emailAddress":{"address":"noreply@example.com"}},
+			"body":{"contentType":"html","content":"<div>Scan Reference : was/1.2</div>"}}]}`))
+	}))
+	defer srv.Close()
+	c := New("tenant", "client", "secret")
+	c.tokenEndpoint = srv.URL + "/tenant/oauth2/v2.0/token"
+	c.graphBase = srv.URL
+	msgs, err := c.RecentMessagesHTML(context.Background(), fleetMailbox, "inbox",
+		time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("msgs %v err %v", msgs, err)
+	}
+	if prefer != `outlook.body-content-type="html"` {
+		t.Errorf("Prefer %q", prefer)
+	}
+	if msgs[0].BodyHTML != "<div>Scan Reference : was/1.2</div>" || msgs[0].BodyText != "" {
+		t.Errorf("html %q text %q", msgs[0].BodyHTML, msgs[0].BodyText)
+	}
+	// The text reader is unchanged: whatever Graph labels it, it gets BodyText.
+	if got := fetch(t, `{"id":"2","subject":"s","receivedDateTime":"2026-10-03T10:03:00Z",
+		"from":{"emailAddress":{"address":"a@example.com"}},"body":{"contentType":"HTML","content":"x"}}`); got[0].BodyText != "x" {
+		t.Errorf("text body %q", got[0].BodyText)
+	}
+}

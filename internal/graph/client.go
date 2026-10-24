@@ -53,7 +53,10 @@ type Message struct {
 	Subject          string    `json:"subject"`
 	ReceivedDateTime time.Time `json:"receivedDateTime"`
 	From             string
-	BodyText         string
+	// BodyText is set by RecentMessages, BodyHTML by RecentMessagesHTML -
+	// whichever format Graph returned.
+	BodyText string
+	BodyHTML string
 
 	// SelfSent is true when the fleet sent this message: it carries a
 	// correctly signed SelfHeader, or it is from the mailbox being read (the
@@ -281,7 +284,21 @@ func graphError(status int, body []byte, endpoint string) error {
 	return fmt.Errorf("graph messages request failed: HTTP %d: %s", status, trimmed)
 }
 
+// RecentMessages reads messages with plain-text bodies (BodyText), which is
+// what the digest and the mailbox cleanup want.
 func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, since time.Time) ([]Message, error) {
+	return c.recentMessages(ctx, mailbox, folder, since, "text")
+}
+
+// RecentMessagesHTML reads messages with their HTML bodies (BodyHTML), for a
+// parser written against the HTML a sender actually sends. Graph's text
+// conversion is not that: the Qualys WAS notice came back as one run-on line
+// with no link, so nothing in it could be parsed.
+func (c *Client) RecentMessagesHTML(ctx context.Context, mailbox, folder string, since time.Time) ([]Message, error) {
+	return c.recentMessages(ctx, mailbox, folder, since, "html")
+}
+
+func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, since time.Time, bodyType string) ([]Message, error) {
 	tok, err := c.token(ctx)
 	if err != nil {
 		return nil, err
@@ -296,7 +313,7 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
-		req.Header.Set("Prefer", `outlook.body-content-type="text"`)
+		req.Header.Set("Prefer", `outlook.body-content-type="`+bodyType+`"`)
 
 		resp, err := c.http.Do(req)
 		if err != nil {
@@ -328,7 +345,13 @@ func (c *Client) RecentMessages(ctx context.Context, mailbox, folder string, sin
 				Subject:          m.Subject,
 				ReceivedDateTime: m.ReceivedDateTime,
 				From:             from,
-				BodyText:         m.Body.Content,
+			}
+			// By what was asked for, not by the contentType Graph reports:
+			// a text reader must never be handed an empty body.
+			if bodyType == "html" {
+				msg.BodyHTML = m.Body.Content
+			} else {
+				msg.BodyText = m.Body.Content
 			}
 			for _, h := range m.InternetMessageHeaders {
 				switch strings.ToLower(strings.TrimSpace(h.Name)) {

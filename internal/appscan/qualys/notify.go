@@ -67,12 +67,15 @@ func qualysDomain(d string) bool {
 }
 
 var (
-	tagRE  = regexp.MustCompile(`(?s)<[^>]*>`)
-	brRE   = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|td|th|h[1-6]|li)>`)
+	tagRE = regexp.MustCompile(`(?s)<[^>]*>`)
+	// Line breaks: <br> with or without attributes, the end of a block, and
+	// the start of a table row or block - so text never runs on into the
+	// next field, whichever way the mail system re-wrote the layout.
+	brRE   = regexp.MustCompile(`(?i)<br\b[^>]*>|</(p|div|tr|td|th|h[1-6]|li|table|ul|ol|center)>|<(hr|tr|table|div|p)\b[^>]*>`)
 	dropRE = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>` +
 		`|<script[^>]*>.*?</script>` +
 		`|<head[^>]*>.*?</head>`) // RE2: no backreferences, so spelled out
-	hiddenRE    = regexp.MustCompile(`(?is)<div[^>]*(?:display:none|visibility:hidden)[^>]*>.*?</div>`)
+	hiddenRE    = regexp.MustCompile(`(?is)<(div|span)[^>]*(?:display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all)[^>]*>.*?</(?:div|span)>`)
 	pfptRE      = regexp.MustCompile(`(?is)<div[^>]+id=["']?pfptBanner[^>]*>.*?</div>`)
 	reportRE    = regexp.MustCompile(`(?is)view these scan results[^<]*<a[^>]+href\s*=\s*["']([^"']+)["']`)
 	sevLineRE   = regexp.MustCompile(`^Severity\s+([1-5])\s+"[^"]*"\s*:\s*(-?\d+)(?:\s*\(\s*([-+=]?\s*\d*)\s*\))?(.*)$`)
@@ -360,3 +363,11 @@ func atoiOr(s string, def int) int {
 	}
 	return n
 }
+
+var referenceRE = regexp.MustCompile(`^was/\d+\.\d+$`)
+
+// WellFormedReference reports whether ref looks like a real scan reference
+// ("was/<digits>.<digits>"). A notice whose fields ran together parses a
+// reference with the rest of the email attached; it must not be claimed as
+// read, or the mailbox cleanup would file away a notice nobody reported on.
+func WellFormedReference(ref string) bool { return referenceRE.MatchString(ref) }
