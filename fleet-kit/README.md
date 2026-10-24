@@ -65,7 +65,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 ├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 ├── @brief    lanes/brief.py          enriched JSON → HTML digest
-├── @jira     cti-jira (Go)           KEV/Sev5 tickets, daily re-check, lock-down ticket
+├── @jira     cti-jira (Go)           KEV/Sev5/CVSS 9.0+ tickets, daily re-check, lock-down ticket
 ├── @ptuesday cti-patchtuesday (Go)   Microsoft release + scanner → monthly synopsis
 ├── @appscan  cti-appscan (Go)        DAST scan mail + API → AppSec report
 │             cti-appreport (Go)    scanner's own report, attached to tickets (opt-in)
