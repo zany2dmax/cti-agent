@@ -123,7 +123,7 @@ func planApp(open *jira.Issue, prev appscanState, t appscan.AppTicket) (appPlan,
 }
 
 func doAppscanTickets(ctx context.Context, c *jira.Client, cfg config.Config,
-	path string, forReal bool, now time.Time, refOut string) int {
+	path string, forReal bool, now time.Time, refOut, reportsDir string) int {
 
 	refs := AppscanRefs{Apps: map[string]ticketref.Ref{}}
 	save := func() {
@@ -150,7 +150,7 @@ func doAppscanTickets(ctx context.Context, c *jira.Client, cfg config.Config,
 	accounts := map[string]string{} // email -> accountId, "" when not found
 	failed := 0
 	for _, t := range tf.Tickets {
-		r := appscanOne(ctx, c, cfg, t, forReal, gateErr, now, accounts)
+		r := appscanOne(ctx, c, cfg, t, forReal, gateErr, now, accounts, reportsDir)
 		refs.Apps[t.Key] = r
 		if r.Action == "error" {
 			failed++
@@ -163,7 +163,7 @@ func doAppscanTickets(ctx context.Context, c *jira.Client, cfg config.Config,
 }
 
 func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appscan.AppTicket,
-	forReal bool, gateErr error, now time.Time, accounts map[string]string) ticketref.Ref {
+	forReal bool, gateErr error, now time.Time, accounts map[string]string, reportsDir string) ticketref.Ref {
 
 	name := safelog.Line(t.App)
 	refFor := func(action string, is *jira.Issue, note string) ticketref.Ref {
@@ -212,6 +212,13 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return refFor("unchanged", open, "")
 	}
 
+	if !forReal && gateErr != nil && (plan == appCreate || plan == appComment) {
+		// Said in the preview too, so nothing downstream (cti-appreport
+		// --only-ref) spends scanner calls on a ticket the real run will
+		// not touch.
+		logf("appscan: %s: WRITE GATE CLOSED - the real run would not file or comment", name)
+		return refFor("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
+	}
 	if !forReal {
 		// The would-be text goes to stdout, which the runner writes to a
 		// 0600 preview file rather than the journal: it names URLs and
@@ -235,13 +242,34 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 	file := fmt.Sprintf("appscan-%s.txt", now.Format("2006-01-02"))
 	full := []byte(appscanFullText(t, now))
 
+	// The scanner's own report, when cti-appreport fetched one. Optional:
+	// without it the ticket carries every finding, and says nothing about
+	// an attachment that is not there.
+	rep, hasRep := appscan.Report{}, false
+	if plan == appCreate || plan == appComment {
+		var err error
+		rep, hasRep, err = appscan.LoadReport(reportsDir, t.Key, t.AppID)
+		if err != nil {
+			logf("appscan: %s: scanner report not attached: %s", name, safelog.Line(err.Error()))
+		}
+	}
+	repName := fmt.Sprintf("%s-report-%s.zip", rep.Provider, now.Format("2006-01-02"))
+	attachReport := func(key string) {
+		if !hasRep {
+			return
+		}
+		if err := c.Attach(ctx, key, repName, rep.Body); err != nil {
+			logf("appscan: %s: the scanner report did not attach to %s: %s", name, key, safelog.Line(err.Error()))
+		}
+	}
+
 	switch plan {
 	case appCreate:
 		req := jira.IssueRequest{
 			ProjectKey:  cfg.JiraProjectKey,
 			IssueType:   cfg.JiraIssueType,
 			Summary:     appscanSummary(t),
-			Description: appscanBody(t, now),
+			Description: appscanBody(t, now) + reportNote(hasRep, repName),
 			Labels:      []string{"cti-agent", appscanLabel, label},
 		}
 		assignee, note := "", ""
@@ -290,6 +318,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		if err := c.Attach(ctx, res.Key, file, full); err != nil {
 			logf("appscan: %s: %s created but the full list did not attach: %s", name, res.Key, safelog.Line(err.Error()))
 		}
+		attachReport(res.Key)
 		if err := c.SetProperty(ctx, res.Key, appscanPropKey, st); err != nil {
 			logf("appscan: %s: could not record the findings on %s - next week will comment again: %s",
 				name, res.Key, safelog.Line(err.Error()))
@@ -301,13 +330,14 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return r
 
 	case appComment:
-		if err := c.AddComment(ctx, open.Key, appscanComment(t, prev, now)); err != nil {
+		if err := c.AddComment(ctx, open.Key, appscanComment(t, prev, now)+reportNote(hasRep, repName)); err != nil {
 			logf("appscan: %s: commenting on %s failed: %s", name, open.Key, safelog.Line(err.Error()))
 			return refFor("error", open, "the comment with this week's findings was refused")
 		}
 		if err := c.Attach(ctx, open.Key, file, full); err != nil {
 			logf("appscan: %s: comment posted but the full list did not attach: %s", name, safelog.Line(err.Error()))
 		}
+		attachReport(open.Key)
 		if err := c.SetProperty(ctx, open.Key, appscanPropKey, st); err != nil {
 			logf("appscan: %s: could not record the findings on %s: %s", name, open.Key, safelog.Line(err.Error()))
 		}
@@ -333,6 +363,19 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return refFor("resolved", open, "")
 	}
 	return refFor("none", nil, "")
+}
+
+// reportNote is the line that tells the reader the scanner's report is
+// attached, and what it is - including that it carries the scan account's
+// session cookies, which is why it stays inside the project.
+func reportNote(has bool, file string) string {
+	if !has {
+		return ""
+	}
+	return "\n\n*Attached:* " + wikiEscape(file) + " - the scanner's own report for this application " +
+		"(zipped HTML: open vulnerabilities, with the request and response the scanner used for each; " +
+		"potential findings are marked *Potential* there too). It includes session cookies from the " +
+		"scan account - do not forward it outside this project."
 }
 
 // addWatchers adds each email in app-owners.txt's watchers= as a watcher.
@@ -367,9 +410,30 @@ func addWatchers(ctx context.Context, c *jira.Client, key, app string, emails []
 }
 
 func appscanSummary(t appscan.AppTicket) string {
-	return fmt.Sprintf("AppSec: %s - %d finding(s) to fix (worst %s)",
-		oneLine(t.App, 80), len(t.Findings), appscan.SeverityName(t.Worst()))
+	confirmed, potential := appscan.Split(t.Findings)
+	if len(confirmed) == 0 {
+		return fmt.Sprintf("AppSec: %s - %d POTENTIAL finding(s) to verify (worst %s, unconfirmed)",
+			oneLine(t.App, 80), len(potential), appscan.SeverityName(appscan.AppTicket{Findings: potential}.Worst()))
+	}
+	s := fmt.Sprintf("AppSec: %s - %d finding(s) to fix", oneLine(t.App, 80), len(confirmed))
+	if len(potential) > 0 {
+		s += fmt.Sprintf(", %d potential to verify", len(potential))
+	}
+	return s + fmt.Sprintf(" (worst %s)", appscan.SeverityName(appscan.AppTicket{Findings: confirmed}.Worst()))
 }
+
+// potentialPanel is the callout above the potential findings. Explicit on
+// purpose: an unconfirmed finding left to speak for itself gets answered
+// with "the scanner didn't confirm it, so it isn't there".
+const potentialPanel = "{panel:title=POTENTIAL findings - unconfirmed by the scanner, listed here on purpose}\n" +
+	"Qualys reports the findings below as *potential*: it saw behaviour that matches the " +
+	"vulnerability but could not prove it with a working exploit. They are on this ticket " +
+	"*deliberately*, because they are rated Critical or Urgent - too severe to leave unread. " +
+	"\"Not confirmed\" does *not* mean \"not there\": they are in the scan results, and they are " +
+	"marked *Potential* in Qualys and in the attached Qualys report.\n\n" +
+	"*Please look at each one:* fix it if it is real, or comment on this ticket that it is a false " +
+	"positive and why, so AppSec can mark it in Qualys and it stops coming back.\n" +
+	"{panel}\n"
 
 func oneLine(s string, max int) string {
 	return clip(strings.Join(strings.Fields(s), " "), max)
@@ -405,7 +469,7 @@ func appscanBody(t appscan.AppTicket, now time.Time) string {
 		"ticket gets a comment only when it changes, and the attached file always has the full "+
 		"current list.\n\n", wikiEscape(t.App))
 	b.WriteString(appscanHeader(t))
-	writeFindings(&b, t.Findings, maxBody-b.Len())
+	writeAll(&b, t.Findings, maxBody-b.Len())
 	fmt.Fprintf(&b, "\n_Generated %s; findings %s._", now.UTC().Format("2006-01-02 15:04 UTC"), t.Hash)
 	return capText(b.String())
 }
@@ -430,8 +494,9 @@ func appscanHeader(t appscan.AppTicket) string {
 	if strings.HasPrefix(t.PortalURL, "https://") {
 		fmt.Fprintf(&b, "*In Qualys:* [open the application|%s]\n", wikiURL(t.PortalURL))
 	}
+	confirmed, potential := appscan.Split(t.Findings)
 	counts := map[appscan.Severity]int{}
-	for _, f := range t.Findings {
+	for _, f := range confirmed {
 		counts[f.Severity]++
 	}
 	var parts []string
@@ -448,9 +513,44 @@ func appscanHeader(t appscan.AppTicket) string {
 	if t.Lower > 0 {
 		fmt.Fprintf(&b, " (plus %d Medium/Minimal, not listed)", t.Lower)
 	}
+	if len(potential) > 0 {
+		pc := map[appscan.Severity]int{}
+		for _, f := range potential {
+			pc[f.Severity]++
+		}
+		var pp []string
+		for _, s := range []appscan.Severity{5, 4} {
+			if pc[s] > 0 {
+				pp = append(pp, fmt.Sprintf("%d %s", pc[s], appscan.SeverityName(s)))
+			}
+		}
+		fmt.Fprintf(&b, "\n*To verify:* %s *POTENTIAL* (unconfirmed by the scanner) - listed in their own "+
+			"section below, not left out", strings.Join(pp, ", "))
+	}
 	b.WriteString("\n_Severity is Qualys WAS's own 1-5 scale, about one HTTP response - not the fleet's Sev1-Sev5._\n\n")
 	return b.String()
 }
+
+// writeAll writes the confirmed findings, then the potential ones under
+// their callout. Potentials are never folded in among the confirmed: the
+// panel is what stops them being read as either certain or absent.
+func writeAll(b *strings.Builder, fs []appscan.TicketFinding, budget int) {
+	confirmed, potential := appscan.Split(fs)
+	start := b.Len()
+	reserve := 0
+	if len(potential) > 0 {
+		// Room for the callout and at least a line per potential: a long
+		// confirmed list must not push the panel out of the text.
+		reserve = len(potentialHead) + len(potentialPanel) + 2000
+	}
+	writeFindings(b, confirmed, budget-reserve)
+	if len(potential) > 0 {
+		b.WriteString(potentialHead + potentialPanel)
+		writeFindings(b, potential, budget-(b.Len()-start))
+	}
+}
+
+const potentialHead = "h2. POTENTIAL - please verify\n"
 
 // writeFindings writes full detail while it fits in budget, then one line
 // per remaining finding pointing at the attachment - those lines budgeted
@@ -463,7 +563,7 @@ func writeFindings(b *strings.Builder, fs []appscan.TicketFinding, budget int) {
 			b.WriteString(head)
 			budget -= len(head)
 			for j, g := range fs[i:] {
-				line := fmt.Sprintf("* \\[%s\\] %s (QID %s), %d place(s)\n", appscan.SeverityName(g.Severity),
+				line := fmt.Sprintf("* \\[%s\\] %s (QID %s), %d place(s)\n", sevLabel(g),
 					wikiEscape(oneLine(g.Title, 120)), wikiEscape(g.ID), len(g.Instances))
 				if len(line) > budget-200 {
 					fmt.Fprintf(b, "* ...and %d more - see the attached file\n", len(fs)-i-j)
@@ -479,9 +579,18 @@ func writeFindings(b *strings.Builder, fs []appscan.TicketFinding, budget int) {
 	}
 }
 
+// sevLabel is the bracketed severity; a potential finding says so in the
+// label itself, so the word travels with any line quoted on its own.
+func sevLabel(f appscan.TicketFinding) string {
+	if f.Potential {
+		return "POTENTIAL " + appscan.SeverityName(f.Severity) + " - unconfirmed, please verify"
+	}
+	return appscan.SeverityName(f.Severity)
+}
+
 func findingBlock(f appscan.TicketFinding) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "h3. \\[%s\\] %s (QID %s) - %s\n", appscan.SeverityName(f.Severity),
+	fmt.Fprintf(&b, "h3. \\[%s\\] %s (QID %s) - %s\n", sevLabel(f),
 		wikiEscape(oneLine(f.Title, 200)), wikiEscape(f.ID), wikiEscape(strings.ToLower(f.Status)))
 	if !f.FirstSeen.IsZero() {
 		fmt.Fprintf(&b, "First seen %s.\n", f.FirstSeen.UTC().Format("2006-01-02"))
@@ -543,7 +652,7 @@ func appscanComment(t appscan.AppTicket, prev appscanState, now time.Time) strin
 	for _, f := range t.Findings {
 		isNew := false
 		for _, in := range f.Instances {
-			if !before[stateKey(f.ID+"|"+in.URL+"|"+in.Param)] {
+			if !before[stateKey(f.InstanceKey(in))] {
 				isNew = true
 				newCount++
 			}
@@ -558,7 +667,7 @@ func appscanComment(t appscan.AppTicket, prev appscanState, now time.Time) strin
 		t.Scanned.UTC().Format("2006-01-02"), wikiEscape(t.ScanLabel), newCount, gone, len(t.Findings))
 	if len(fresh) > 0 {
 		b.WriteString("h3. New or newly seen\n")
-		writeFindings(&b, fresh, maxBody-b.Len()-3000)
+		writeAll(&b, fresh, maxBody-b.Len()-3000)
 	}
 	if gone > 0 {
 		b.WriteString("h3. No longer detected\n")
@@ -582,14 +691,15 @@ func appscanComment(t appscan.AppTicket, prev appscanState, now time.Time) strin
 // appscanFullText is the attachment: every finding, every place, plain text.
 func appscanFullText(t appscan.AppTicket, now time.Time) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s - application security findings, Serious and above\nGenerated %s\n",
+	fmt.Fprintf(&b, "%s - application security findings, Serious and above "+
+		"(plus POTENTIAL Critical/Urgent, marked)\nGenerated %s\n",
 		t.App, now.UTC().Format("2006-01-02 15:04 UTC"))
 	if t.Target != "" {
 		fmt.Fprintf(&b, "Target: %s\n", t.Target)
 	}
 	fmt.Fprintf(&b, "Last scan: %s (%s)\n\n", t.Scanned.UTC().Format("2006-01-02"), t.ScanLabel)
 	for _, f := range t.Findings {
-		fmt.Fprintf(&b, "== [%s] %s (QID %s) - %s\n", appscan.SeverityName(f.Severity), f.Title, f.ID,
+		fmt.Fprintf(&b, "== [%s] %s (QID %s) - %s\n", sevLabel(f), f.Title, f.ID,
 			strings.ToLower(f.Status))
 		for _, in := range f.Instances {
 			if in.Param != "" {

@@ -13,7 +13,7 @@ func scanWith(app, id string, fs ...Finding) ScanResult {
 		Finished: time.Date(2026, 10, 19, 2, 0, 0, 0, time.UTC), Open: fs, OpenFetched: true}
 }
 
-func TestOnlyActiveConfirmedSeriousAndAboveAreTicketed(t *testing.T) {
+func TestOnlyActiveConfirmedSeriousAndAboveArePlusPotentialCritical(t *testing.T) {
 	fix := &Remedy{Solution: "Encode output."}
 	s := scanWith("Portal", "101",
 		Finding{ID: "150001", Title: "XSS", Severity: 5, Status: "NEW", URL: "https://app.example.com/a", Param: "q", Remedy: fix},
@@ -21,6 +21,7 @@ func TestOnlyActiveConfirmedSeriousAndAboveAreTicketed(t *testing.T) {
 		Finding{ID: "150001", Title: "XSS", Severity: 5, Status: "ACTIVE", URL: "https://app.example.com/a", Param: "q"}, // duplicate place
 		Finding{ID: "150002", Title: "SQLi", Severity: 4, Status: "REOPENED", URL: "https://app.example.com/c"},
 		Finding{ID: "150003", Title: "Potential", Severity: 5, Status: "NEW", Potential: true},
+		Finding{ID: "150008", Title: "Potential serious", Severity: 3, Status: "NEW", Potential: true},
 		Finding{ID: "150004", Title: "Ignored", Severity: 5, Status: "ACTIVE", Ignored: true},
 		Finding{ID: "150005", Title: "Fixed", Severity: 5, Status: "FIXED"},
 		Finding{ID: "150006", Title: "Cookie flag", Severity: 2, Status: "ACTIVE"},
@@ -31,7 +32,7 @@ func TestOnlyActiveConfirmedSeriousAndAboveAreTicketed(t *testing.T) {
 		t.Fatalf("tickets %d", len(tf.Tickets))
 	}
 	tk := tf.Tickets[0]
-	if tk.Skip != "" || len(tk.Findings) != 2 || tk.Lower != 2 {
+	if tk.Skip != "" || len(tk.Findings) != 3 || tk.Lower != 2 {
 		t.Fatalf("skip %q findings %d lower %d", tk.Skip, len(tk.Findings), tk.Lower)
 	}
 	x := tk.Findings[0]
@@ -40,6 +41,10 @@ func TestOnlyActiveConfirmedSeriousAndAboveAreTicketed(t *testing.T) {
 	}
 	if tk.Findings[1].ID != "150002" {
 		t.Errorf("not ordered by severity: %+v", tk.Findings)
+	}
+	// The potential Urgent is listed, last and marked; the potential Serious is not.
+	if p := tk.Findings[2]; p.ID != "150003" || !p.Potential {
+		t.Errorf("potential Urgent not listed last and marked: %+v", p)
 	}
 	if tk.OwnerListed {
 		t.Error("an owner appeared from nowhere")
@@ -172,5 +177,26 @@ func TestBuildTicketsCarriesTheWatchers(t *testing.T) {
 	a := BuildTickets([]ScanResult{s}, o, time.Now()).Tickets[0]
 	if len(a.Watchers) != 2 || a.Watchers[0] != "qa@example.com" || a.Watchers[1] != "pm@example.com" {
 		t.Errorf("watchers %v", a.Watchers)
+	}
+}
+
+// A QID seen both confirmed and potential stays two entries, so neither is
+// relabelled; Split separates them for the ticket text.
+func TestPotentialAndConfirmedOfOneQIDStayApart(t *testing.T) {
+	s := scanWith("Portal", "101",
+		Finding{ID: "150010", Title: "SQLi", Severity: 5, Status: "ACTIVE", URL: "https://app.example.com/a"},
+		Finding{ID: "150010", Title: "SQLi", Severity: 5, Status: "NEW", URL: "https://app.example.com/b", Potential: true},
+		Finding{ID: "150011", Title: "Path traversal", Severity: 4, Status: "NEW", URL: "https://app.example.com/c", Potential: true},
+	)
+	tk := BuildTickets([]ScanResult{s}, Owners{}, time.Now()).Tickets[0]
+	confirmed, potential := Split(tk.Findings)
+	if len(confirmed) != 1 || confirmed[0].Potential || len(confirmed[0].Instances) != 1 {
+		t.Fatalf("confirmed = %+v", confirmed)
+	}
+	if len(potential) != 2 || potential[0].ID != "150010" || potential[1].ID != "150011" {
+		t.Fatalf("potential = %+v", potential)
+	}
+	if potential[0].Instances[0].URL != "https://app.example.com/b" {
+		t.Errorf("potential instance mixed with the confirmed one: %+v", potential[0])
 	}
 }

@@ -583,6 +583,12 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-appscan"
   ok "built $CODE_DIR/bin/cti-appscan"
 
+  # The scanner's own report per application, for the AppSec tickets. Writes
+  # files only; run-appscan calls it when WAS_ATTACH_REPORT=1.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-appreport" ./cmd/cti-appreport )
+  chmod 0755 "$CODE_DIR/bin/cti-appreport"
+  ok "built $CODE_DIR/bin/cti-appreport"
+
   # Weekly domains check. Sends through cti-mailer --lane dom, which refuses
   # unless DOM_TO and DOM_ALLOW_TO are both set, so installing it does not arm it.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-domains" ./cmd/cti-domains )
@@ -783,7 +789,7 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-domains|cti-appscan|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
@@ -838,7 +844,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" \
-         "$CODE_DIR/bin/cti-domains" \
+         "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

@@ -229,6 +229,22 @@ URL and parameter. Same handling: written `0600` by `cti-appscan`, kept under
 applications and say which are scanned without a login, and this repository is
 public.
 
+**The scanner's own report is more sensitive still, and is short-lived.** With
+`WAS_ATTACH_REPORT=1` the AppSec lane fetches Qualys's per-application report
+(`cti-appreport`) and attaches it to the application's Jira ticket. That report
+holds the request and response behind each finding, which includes **the scan
+account's session cookies**. So it is: written `0600` in a directory created
+`0700`; deleted from Qualys immediately after download; deleted from local
+state by `run-appscan` once `cti-jira` has attached it; fetched only for
+tickets about to be filed or commented; and off by default. The ticket says it
+is attached and that it contains cookies, so whoever opens it knows. The
+attachment is visible to everyone who can see the Jira project, so the
+scan account should be a dedicated, low-privilege test login whose sessions are
+cheap to expire. `cti-appreport --probe-findings` prints raw finding fields for
+testing; `Redact()` strips `Cookie`, `Set-Cookie` and `Authorization` values from
+that output, but the rest is still evidence from our own application, so it is
+redirected to a `0600` file and kept off tickets.
+
 **A stand-in scan is reported as a stand-in.** Where a staging copy is scanned
 instead of production (`covers=` in `app-owners.txt`), the report says
 "covered via staging - production not scanned directly", never "scanned": a
@@ -304,8 +320,12 @@ is unset, but the pseudonyms in it are not meaningfully protective.
   the VM lane's `QUALYS_USERNAME`/`QUALYS_PASSWORD` against the WAS API, which
   needs the WAS module on that account's role. It issues **search requests
   only** - it never launches a scan, edits a web application or touches an
-  authentication record - so the role it needs is read access to WAS, and
-  granting more is not required.
+  authentication record - with one optional exception: `cti-appreport`
+  (`WAS_ATTACH_REPORT=1`) creates a WAS report and deletes it again, so it
+  needs the permission to create reports. Leave the feature off and the role
+  needs read access to WAS only. Its Qualys API calls share the subscription's
+  rate limit, which `internal/qualysrl` reads from the response headers and
+  respects, leaving `QUALYS_RL_RESERVE` calls for the VM lane.
 - **Jira: a scoped token on a service account is the least-privilege option.**
   Optional `JIRA_CLOUD_ID` sends API calls through
   `https://api.atlassian.com/ex/jira/<cloud id>`, which an Atlassian scoped API

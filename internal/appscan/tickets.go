@@ -15,7 +15,8 @@ import (
 // The weekly email tells App Dev what changed; a ticket is what somebody is
 // assigned and works. One open ticket per application, assigned to the owner
 // in app-owners.txt, carrying every active, confirmed finding of Serious
-// severity or above with WHERE it is, WHAT the scanner saw, the RISK, and HOW
+// severity or above - and every POTENTIAL one of Critical or Urgent, in a
+// section of its own (see PotentialMinSeverity) - with WHERE it is, WHAT the scanner saw, the RISK, and HOW
 // TO FIX IT - the knowledge base's own solution text. Each week the ticket is
 // commented only when that set of findings changed, and told once when
 // nothing is left.
@@ -27,6 +28,15 @@ import (
 // TicketMinSeverity is the lowest severity that goes on a ticket: Serious.
 // Medium and Minimal are counted on the ticket, not listed.
 const TicketMinSeverity = 3
+
+// PotentialMinSeverity is the lowest severity at which a POTENTIAL finding -
+// one the scanner reports as possible but could not confirm - goes on the
+// ticket: Critical. Listed in its own section, marked as unconfirmed on every
+// line, so a developer verifies it rather than either fixing a false positive
+// blind or being told "the scanner didn't confirm it" means it isn't there.
+// At Critical and Urgent an unconfirmed finding is still worth a person's
+// look; below that, potentials are left out as before.
+const PotentialMinSeverity = 4
 
 // maxInstances is how many URL/parameter instances one finding lists before
 // "and N more". A finding on 400 pages of the same template is one fix.
@@ -113,6 +123,9 @@ type TicketFinding struct {
 	Instances []Instance `json:"instances"`
 	More      int        `json:"more,omitempty"` // instances beyond the listed ones
 	Remedy    *Remedy    `json:"remedy,omitempty"`
+	// Potential: the scanner reports it as possible, not confirmed. Only at
+	// PotentialMinSeverity and above, and always rendered as such.
+	Potential bool `json:"potential,omitempty"`
 }
 
 // Instance is one place a finding was seen.
@@ -127,11 +140,23 @@ func (t AppTicket) InstanceKeys() []string {
 	var out []string
 	for _, f := range t.Findings {
 		for _, in := range f.Instances {
-			out = append(out, f.ID+"|"+in.URL+"|"+in.Param)
+			out = append(out, f.InstanceKey(in))
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// InstanceKey fingerprints one place. A potential finding's key ends "|p",
+// so one that becomes confirmed (or the reverse) reads as changed and the
+// ticket is told, rather than keeping its old label. The QID stays first:
+// the ticket state keeps it in clear.
+func (f TicketFinding) InstanceKey(in Instance) string {
+	k := f.ID + "|" + in.URL + "|" + in.Param
+	if f.Potential {
+		k += "|p"
+	}
+	return k
 }
 
 // SeverityName is the scanner's word for a severity.
@@ -189,8 +214,26 @@ func AppLabel(key string) string {
 	return "cti-appscan-" + slug + "-" + hex.EncodeToString(sum[:])[:6]
 }
 
+// Split returns the ticket's confirmed and potential findings, in order.
+func Split(fs []TicketFinding) (confirmed, potential []TicketFinding) {
+	for _, f := range fs {
+		if f.Potential {
+			potential = append(potential, f)
+		} else {
+			confirmed = append(confirmed, f)
+		}
+	}
+	return confirmed, potential
+}
+
 func ticketable(f Finding) bool {
-	if f.Severity < TicketMinSeverity || f.Potential || f.Ignored {
+	if f.Ignored {
+		return false
+	}
+	if f.Potential && f.Severity < PotentialMinSeverity {
+		return false
+	}
+	if f.Severity < TicketMinSeverity {
 		return false
 	}
 	switch f.Status {
@@ -276,11 +319,18 @@ func group(fs []Finding) ([]TicketFinding, int) {
 		if !ticketable(f) {
 			continue
 		}
-		g, ok := byID[f.ID]
+		// Confirmed and potential instances of one QID are kept apart, so
+		// a confirmed finding is never relabelled "unconfirmed" or the
+		// reverse.
+		gk := f.ID
+		if f.Potential {
+			gk = "potential|" + f.ID
+		}
+		g, ok := byID[gk]
 		if !ok {
 			g = &TicketFinding{ID: f.ID, Title: f.Title, Severity: f.Severity,
-				Status: f.Status, FirstSeen: f.FirstSeen, Remedy: f.Remedy}
-			byID[f.ID] = g
+				Status: f.Status, FirstSeen: f.FirstSeen, Remedy: f.Remedy, Potential: f.Potential}
+			byID[gk] = g
 		}
 		if f.Severity > g.Severity {
 			g.Severity = f.Severity
@@ -294,7 +344,7 @@ func group(fs []Finding) ([]TicketFinding, int) {
 		if g.Remedy == nil {
 			g.Remedy = f.Remedy
 		}
-		ik := f.ID + "|" + f.URL + "|" + f.Param
+		ik := gk + "|" + f.URL + "|" + f.Param
 		if seen[ik] {
 			continue
 		}
@@ -315,6 +365,9 @@ func group(fs []Finding) ([]TicketFinding, int) {
 		out = append(out, *g)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Potential != out[j].Potential {
+			return !out[i].Potential // confirmed first
+		}
 		if out[i].Severity != out[j].Severity {
 			return out[i].Severity > out[j].Severity
 		}

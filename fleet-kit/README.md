@@ -68,6 +68,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 ├── @jira     cti-jira (Go)           KEV/Sev5 tickets, daily re-check, lock-down ticket
 ├── @ptuesday cti-patchtuesday (Go)   Microsoft release + scanner → monthly synopsis
 ├── @appscan  cti-appscan (Go)        DAST scan mail + API → AppSec report
+│             cti-appreport (Go)    scanner's own report, attached to tickets (opt-in)
 │                                     (own audience: WAS_TO, not SECURITY_DL)
 └── @domains  cti-domains (Go)        inventory + GoDaddy + DNS → domains check
                                       (own audience: DOM_TO)
@@ -1587,6 +1588,24 @@ attacker-reachable paths on our own sites, and the mail came to a published
 address. The one exception is a link this lane **builds** from the scanner's API
 record into its own UI - that is clickable, after an https and host check
 against hosts registered for that scanner.
+
+### The scanner's own report, attached to each ticket
+
+Optional and **off by default**: `WAS_ATTACH_REPORT=1` in `fleet.env`. On a real
+run (not `--dry-run` or `--to-dev`) `run-appscan` previews the tickets to a plan
+file, has `cti-appreport` fetch the scanner's report only for applications whose
+ticket will be filed or commented, runs `cti-jira --for-real --appscan-reports`
+to attach them, then deletes the reports. The scanner is chosen by
+`APPSCAN_REPORT_PROVIDER` (default `qualys-was`) behind `appscan.ReportFetcher`.
+The reports contain the scan account's session cookies, so they are `0600`,
+deleted from the scanner on download and from local state after attaching.
+Qualys API use is metered from its response headers (`QUALYS_RL_RESERVE`,
+`QUALYS_RL_MAX_WAIT`). It never stops the email: no report, no attachment. Test
+it by hand first, in the order in RUNBOOK 11f.
+
+Tickets also list the scanner's **unconfirmed** Critical and Urgent findings in
+their own "POTENTIAL - please verify" section; potential Serious and below stay
+out.
 
 ### Two weeks instead of one
 

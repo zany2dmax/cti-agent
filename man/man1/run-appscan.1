@@ -69,6 +69,28 @@ adds a JIRA TICKETS section to the report naming each application's ticket.
 Before the send so the email names them; a Jira failure becomes "not
 updated this run" and the email still goes.
 .TP
+.B 3b. Scanner reports (non-fatal, off by default)
+Only with
+.B WAS_ATTACH_REPORT=1
+and on a real run (not a dry run or
+.BR \-\-to\-dev ).
+Before step 3a files anything, runs
+.B cti\-jira \-\-appscan\-tickets
+as a preview to a plan file, then
+.B cti\-appreport \-\-tickets \-\-only\-ref
+with that plan and
+.B \-\-out\-dir
+under
+.IR $FLEET_HOME/state ,
+so only applications whose ticket will be filed or commented get a report.
+.B cti\-jira
+then runs with
+.BR "\-\-for\-real \-\-appscan\-reports" ,
+and the reports directory and plan are deleted afterwards: the reports
+carry session cookies. A failure, or a missing
+.BR cti\-appreport ,
+is logged and the tickets go out without a report.
+.TP
 .B 4. Send
 .B cti\-mailer \-\-lane was
 with the HTML, text and subject, plus
@@ -154,6 +176,16 @@ The audience and its allowlist, read by
 Where
 .B cti\-alert
 sends an authentication fault (section 4).
+.TP
+.B WAS_ATTACH_REPORT
+.B 1
+attaches each application's own scanner report to its Jira ticket (step 3b).
+Anything else leaves it off.
+Default:\~\fB0\fR.
+.TP
+.BR APPSCAN_REPORT_PROVIDER ", " QUALYS_RL_RESERVE ", " QUALYS_RL_MAX_WAIT
+Read by
+.BR cti\-appreport (1).
 .PP
 Graph and Qualys credentials (sections 1 and 2) are read by
 .BR cti\-appscan (1).
@@ -171,6 +203,12 @@ The report, 0600. A second run on the same day replaces them.
 Each application's ticket input, and what
 .B cti\-jira
 did with it; 0600, deleted at the start of the next run.
+.TP
+.IR appscan\-tickets\-plan\-DATE.json ", " appscan\-reports\-DATE/
+With
+.BR WAS_ATTACH_REPORT=1 :
+the preview plan and the fetched reports (directory 0700, files 0600).
+Deleted as soon as the tickets are done.
 .TP
 .I appscan\-authfail\-DATE.tsv
 One line per scan whose configured credential failed, application first;
@@ -211,6 +249,7 @@ sudo cat /var/lib/cti\-agent/state/appscan\-authfail\-$(date \-u +%F).tsv
 .EE
 .SH SEE ALSO
 .BR cti\-appscan (1),
+.BR cti\-appreport (1),
 .BR cti\-mailer (1),
 .BR cti\-alert (1),
 .BR cti\-agent (1)

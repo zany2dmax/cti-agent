@@ -124,6 +124,8 @@ sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you
 sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys, plus site: lines for live sites nothing scans
 #   staging copy scanned instead of production: on its line add  | covers=www.example.com
 #   copy others on an app's ticket: add  | watchers=a@example.com,b@example.com  (Jira "Manage watcher list")
+#   scanner report on each ticket (off until tested, RUNBOOK 11f): sudo cti-agent cti-appreport --check
+#   then WAS_ATTACH_REPORT=1 in fleet.env; reports carry session cookies, deleted after attaching
 sudo cti-agent run-domains --to-dev
 sudo cti-agent run-patchtuesday --to-dev
 sudo cti-agent run-patchtuesday --month 2026-09 --to-dev   # replay to yourself, no --for-real needed

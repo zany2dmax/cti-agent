@@ -124,7 +124,9 @@ The account needs API access to:
 - **Host Detection List** — which QIDs have assets against them
 
 Nothing else. The agent never writes to Qualys: no tickets, no exceptions, no
-scan configuration.
+scan configuration. The one exception is optional: with `WAS_ATTACH_REPORT=1`
+(section 11f) it creates a WAS report for an application and deletes it again
+after downloading, which needs the WAS report permission on the account.
 
 To run without a scanner at all — useful for separating "can we read the
 mailbox" from "does the scanner answer", two failures that look identical
@@ -1081,10 +1083,18 @@ ticket per application (label `cti-appscan-<web app id>`), and the email's
 **JIRA TICKETS** section names each one:
 
 - **What is on it:** every active, confirmed finding of Qualys severity 5-3
-  (Urgent, Critical, Serious) - not potential, not ignored, not fixed - grouped
+  (Urgent, Critical, Serious) - not ignored, not fixed - grouped
   by QID, with every URL and parameter, and for each: **Risk**, **What the
   scanner found** and **How to fix it**, from the Qualys KnowledgeBase entry
   for the QID. Medium and Minimal are a count. The full list is attached.
+- **Potential findings, listed on purpose:** the scanner's own
+  **unconfirmed** findings of severity 4 (Critical) and 5 (Urgent) get a
+  separate "POTENTIAL - please verify" section under a callout saying they are
+  not confirmed - and that not confirmed does not mean not there. Each line is
+  labelled `POTENTIAL <sev> - unconfirmed, please verify`, and the ticket header
+  and email count them apart ("To verify: ..."). Potential Serious and below
+  are still left out. They are part of the findings fingerprint, so an open
+  ticket gets one comment the first time a potential appears or goes away.
 - **Who it is assigned to:** the owner in `/etc/cti-agent/app-owners.txt`
   (`APPSCAN_OWNERS_FILE`), looked up in Jira by email. Not listed, or not
   exactly one active Jira user with that address: filed **unassigned**, and the
@@ -1100,6 +1110,8 @@ ticket per application (label `cti-appscan-<web app id>`), and the email's
   authenticate, was a discovery scan, was not matched to the WAS scan list, or
   the open findings could not be fetched - a scan that did not cover the
   application must not tell its ticket everything was fixed.
+- **Optionally, the scanner's own report is attached** (`WAS_ATTACH_REPORT=1`,
+  off by default): see "Attaching the scanner's report" below.
 - `--dry-run` and `--to-dev` preview only, writing the would-be ticket text to
   `state/appscan-tickets-preview-DATE.txt` (0600), not the journal. Jira
   trouble never stops the email.
@@ -1285,6 +1297,45 @@ sudo cti-agent cti-mailer --lane was --to you@example.com \
 
 The copy still says "this week", and each application still gets one row from
 its newest scan. An address outside `WAS_ALLOW_TO` needs `--approve`.
+
+### Attaching the scanner's report
+
+`cti-appreport` fetches the scanner's own per-application report (Qualys WAS:
+create, poll, download as HTML_ZIPPED, delete) and `cti-jira --appscan-reports`
+attaches it when the ticket is filed or its findings change. Each report is
+about five API calls, so only the applications about to be filed or commented
+are fetched. **The report contains the scan account's session cookies**: it is
+`0600` in a `0700` directory, deleted from Qualys after download, and the
+runner deletes the directory after `cti-jira` has attached it.
+
+The Qualys Report API element names are not verified against a live account in
+this repository, so test on the box in this order before turning it on:
+
+```bash
+sudo cti-agent cti-appreport --check                       # credentials, API budget
+sudo cti-agent cti-appreport --app-id <id> --dump-request  # the body it would send; nothing sent
+sudo cti-agent cti-appreport --app-id <id> --out-dir /tmp/r --keep   # one real report, left in Qualys to inspect
+sudo cti-agent cti-appreport --app-id <id> --out-dir /tmp/r          # again, now deleted from Qualys
+(umask 077; sudo cti-agent cti-appreport --probe-findings <id> > /tmp/probe.xml)   # raw finding fields, redacted, 0600
+sudo rm -rf /tmp/r /tmp/probe.xml
+```
+
+If the request is rejected, correct the field in a copy of the dumped body and
+send it with `--request-file FILE` (`{{APP_ID}}` and `{{NAME}}` are filled in)
+instead of rebuilding. Check the unzipped report opens and the probe shows the
+fields you expect, then set `WAS_ATTACH_REPORT=1` in `fleet.env` and run
+`sudo cti-agent run-appscan --to-dev` (previews only; nothing is attached on a
+dry run or `--to-dev`). Monday's real run attaches. A report that cannot be
+fetched is logged and the ticket goes out without it; it never stops the email.
+
+The other settings are in `fleet.env` section 2 and rarely need touching.
+`QUALYS_RL_RESERVE` (default 5) is how many API calls the report work leaves for
+the VM lane and KnowledgeBase lookups; when only that many remain, reports give
+way. `QUALYS_RL_MAX_WAIT` (default 5m) is the longest it sleeps out a rate-limit
+refusal. It follows the limits Qualys reports in its response headers, so there
+is nothing to change when the contract's limits are raised.
+`APPSCAN_REPORT_PROVIDER` (default `qualys-was`) names the scanner; another
+one implements `appscan.ReportFetcher` and is added in `cmd/cti-appreport`.
 
 ### Adding a second scanner
 
