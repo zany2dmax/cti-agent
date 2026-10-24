@@ -94,6 +94,18 @@ and a value may follow
 .B =
 or a space.
 .TP
+.B \-\-list\-ids
+Print the web application id, name, confirmed and potential finding counts,
+and whether a report would be fetched, for every application in the newest
+.I $FLEET_HOME/state/appscan\-tickets\-<date>.json
+(the weekly run's tickets file), or in the
+.B \-\-tickets
+file when one is given; then exit. Reads the file only: no scanner calls,
+no credentials. The ids to try
+.B \-\-app\-id
+with.
+Default:\~off.
+.TP
 .B \-\-check
 Make one cheap authenticated call, print whether the credentials work, how
 many web applications are defined, and the scanner's rate-limit position,

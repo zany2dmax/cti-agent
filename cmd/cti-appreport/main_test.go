@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +112,53 @@ func TestUnknownProviderNamesTheInterface(t *testing.T) {
 	t.Setenv("APPSCAN_REPORT_PROVIDER", "invicti")
 	_, err := reportProvider(config.Config{})
 	if err == nil || !strings.Contains(err.Error(), "appscan.ReportFetcher") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// --list-ids reads the newest weekly file, never a -ref-, -plan- or -preview-
+// sibling, and says which applications would get a report.
+func TestListIDsUsesTheNewestWeeklyFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, tf appscan.TicketsFile) {
+		if err := os.WriteFile(filepath.Join(dir, name), tf.JSON(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("appscan-tickets-2026-10-12.json", appscan.TicketsFile{})
+	write("appscan-tickets-2026-10-19.json", appscan.TicketsFile{Tickets: []appscan.AppTicket{
+		{Key: "id:22", AppID: "22", App: "Shop", Findings: []appscan.TicketFinding{{ID: "1"}, {ID: "2", Potential: true}}},
+		{Key: "id:11", AppID: "11", App: "Admin portal", Skip: "scan incomplete"},
+		{Key: "name:x", App: "Unmatched"},
+	}})
+	write("appscan-tickets-ref-2026-10-26.json", appscan.TicketsFile{})
+	write("appscan-tickets-plan-2026-10-26.json", appscan.TicketsFile{})
+
+	path, err := newestTicketsFile(dir)
+	if err != nil || filepath.Base(path) != "appscan-tickets-2026-10-19.json" {
+		t.Fatalf("path %q err %v", path, err)
+	}
+	b, _ := os.ReadFile(path)
+	var tf appscan.TicketsFile
+	_ = json.Unmarshal(b, &tf)
+	out := listIDs(tf, path)
+	for _, want := range []string{"APP ID", "Admin portal", "skipped this week", "no id",
+		"1 of 3 application(s) would get a report"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Admin portal") > strings.Index(out, "Shop") {
+		t.Errorf("not sorted by name:\n%s", out)
+	}
+	if !regexp.MustCompile(`(?m)^22\s+1\s+1\s+yes\s+Shop$`).MatchString(out) {
+		t.Errorf("Shop row wrong:\n%s", out)
+	}
+}
+
+func TestListIDsWithNoFileSaysHowToMakeOne(t *testing.T) {
+	_, err := newestTicketsFile(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "run-appscan --dry-run") {
 		t.Fatalf("err = %v", err)
 	}
 }

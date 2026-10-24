@@ -128,7 +128,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   reports directory is deleted. Never fatal. Files 0600, directory 0700. The
   scanner is chosen by `APPSCAN_REPORT_PROVIDER` (default `qualys-was`) behind
   the Go interface `appscan.ReportFetcher`, so Invicti or Wiz is a package and
-  one case. Flags for testing against a live account: `--check`,
+  one case. Flags for testing against a live account: `--list-ids` (the
+  application ids from the last weekly run's tickets file; no API calls), `--check`,
   `--dump-request`, `--request-file`, `--probe-findings` (output passes through
   `Redact()`, which strips Cookie, Set-Cookie and Authorization). The live
   Qualys Report API element names have **not** been verified yet; that is what
