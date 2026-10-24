@@ -1,6 +1,7 @@
 // cti-appreport fetches the DAST scanner's own report for each application,
 // zipped, for cti-jira to attach to the application's ticket.
 //
+//	cti-appreport --list-ids                                # app ids from the last weekly run; no API
 //	cti-appreport --check                                   # credentials + rate-limit headers
 //	cti-appreport --app-id 1234 --dump-request              # the request body, nothing sent
 //	cti-appreport --app-id 1234 --out-dir /tmp/r            # one report: create, poll, download, delete
@@ -36,7 +37,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
@@ -102,9 +107,16 @@ func run() int {
 	probe := flag.String("probe-findings", "",
 		"print the scanner's verbose finding search for this web application id (3 open "+
 			"vulnerabilities), with Cookie, Set-Cookie and Authorization redacted, and exit")
+	listIDs := flag.Bool("list-ids", false,
+		"print the web application id, name and findings of every application in the newest "+
+			"$FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; "+
+			"reads the file only - no scanner calls, no credentials")
 	flag.Parse()
 
 	fleetenv.Load()
+	if *listIDs {
+		return doListIDs(*tickets)
+	}
 	// The scanner's settings only: no mailbox, no Jira.
 	cfg, err := config.LoadVulnLookup()
 	if err != nil {
@@ -334,4 +346,87 @@ func fetchAll(ctx context.Context, f appscan.ReportFetcher, dir string, targets 
 		logf("error  : writing %s: %s", appscan.ManifestName, safelog.Line(err.Error()))
 	}
 	return m, len(m.Failed)
+}
+
+// ticketsFileRE is the weekly run's tickets file - not its -ref-, -plan- or
+// -preview- siblings.
+var ticketsFileRE = regexp.MustCompile(`^appscan-tickets-\d{4}-\d{2}-\d{2}\.json$`)
+
+// newestTicketsFile is the most recent weekly tickets file in the state
+// directory. The date is in the name, so the newest name is the newest run.
+func newestTicketsFile(stateDir string) (string, error) {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.Type().IsRegular() && ticketsFileRE.MatchString(e.Name()) {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("no appscan-tickets-<date>.json in %s - has run-appscan run since "+
+			"application tickets were added? (sudo cti-agent run-appscan --dry-run writes one)", stateDir)
+	}
+	sort.Strings(names)
+	return filepath.Join(stateDir, names[len(names)-1]), nil
+}
+
+// doListIDs prints the ids to try --app-id with. From the weekly run's own
+// file, so it costs no API calls and needs no credentials.
+func doListIDs(path string) int {
+	if path == "" {
+		home := os.Getenv("FLEET_HOME")
+		if home == "" {
+			return die("FLEET_HOME is not set - run it as `sudo cti-agent cti-appreport --list-ids`, " +
+				"or name the file with --tickets")
+		}
+		var err error
+		if path, err = newestTicketsFile(filepath.Join(home, "state")); err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+	}
+	// #nosec G304 G703 -- the runner's own tickets file, or one the operator named
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	var tf appscan.TicketsFile
+	if err := json.Unmarshal(b, &tf); err != nil {
+		return die("%s is not a cti-appscan tickets file: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	fmt.Print(listIDs(tf, path))
+	return exitOK
+}
+
+func listIDs(tf appscan.TicketsFile, path string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From %s (written %s)\n\n", filepath.Base(path), tf.Generated.UTC().Format("2006-01-02 15:04 UTC"))
+	ts := append([]appscan.AppTicket(nil), tf.Tickets...)
+	sort.SliceStable(ts, func(i, j int) bool { return strings.ToLower(ts[i].App) < strings.ToLower(ts[j].App) })
+	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "APP ID\tTO FIX\tPOTENTIAL\tREPORT?\tAPPLICATION")
+	ready := 0
+	for _, t := range ts {
+		confirmed, potential := appscan.Split(t.Findings)
+		id := strings.TrimSpace(t.AppID)
+		state := "yes"
+		switch {
+		case id == "":
+			id, state = "-", "no id"
+		case t.Skip != "":
+			state = "skipped this week"
+		case len(t.Findings) == 0:
+			state = "nothing to attach"
+		default:
+			ready++
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\n", safelog.Line(id), len(confirmed), len(potential),
+			state, safelog.Line(t.App))
+	}
+	_ = w.Flush()
+	fmt.Fprintf(&b, "\n%d of %d application(s) would get a report. Try one with:\n"+
+		"  sudo cti-agent cti-appreport --app-id <APP ID> --dump-request\n", ready, len(ts))
+	return b.String()
 }
