@@ -1312,6 +1312,7 @@ The Qualys Report API element names are not verified against a live account in
 this repository, so test on the box in this order before turning it on:
 
 ```bash
+sudo cti-agent cti-appreport --list-ids                    # app ids from the last weekly run; no API calls
 sudo cti-agent cti-appreport --check                       # credentials, API budget
 sudo cti-agent cti-appreport --app-id <id> --dump-request  # the body it would send; nothing sent
 sudo cti-agent cti-appreport --app-id <id> --out-dir /tmp/r --keep   # one real report, left in Qualys to inspect
