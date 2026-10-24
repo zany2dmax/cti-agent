@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ type appJira struct {
 	next      int
 	watchers  map[string][]string // issue key -> accountIds posted
 	failWatch bool                // answer every watchers POST with 403
+	attached  map[string][]string // issue key -> attachment file names
 }
 
 func newAppJira(t *testing.T) (*appJira, *jira.Client) {
@@ -120,6 +122,13 @@ func newAppJira(t *testing.T) (*appJira, *jira.Client) {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{}`)
 		case strings.HasSuffix(p, "/attachments"):
+			key := strings.Split(strings.TrimPrefix(p, "/rest/api/2/issue/"), "/")[0]
+			if m := regexp.MustCompile(`filename="([^"]+)"`).FindSubmatch(body); m != nil {
+				if fj.attached == nil {
+					fj.attached = map[string][]string{}
+				}
+				fj.attached[key] = append(fj.attached[key], string(m[1]))
+			}
 			_, _ = io.WriteString(w, `[]`)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, p)
@@ -160,7 +169,7 @@ func runApp(t *testing.T, c *jira.Client, forReal bool, tks ...appscan.AppTicket
 		t.Fatal(err)
 	}
 	ref := filepath.Join(dir, "ref.json")
-	if rc := doAppscanTickets(context.Background(), c, testCfg, in, forReal, time.Now(), ref); rc != exitOK {
+	if rc := doAppscanTickets(context.Background(), c, testCfg, in, forReal, time.Now(), ref, ""); rc != exitOK {
 		t.Fatalf("rc %d", rc)
 	}
 	var got AppscanRefs

@@ -164,6 +164,8 @@ func TestRateLimitingSaysWhatIsStillAvailable(t *testing.T) {
 	api, _ := stub(t, func(string, int) (int, string) {
 		return http.StatusTooManyRequests, "slow down"
 	})
+	// No waiting here: the limiter's retry is tested in internal/qualysrl.
+	api.limiter.MaxWait = 0
 	_, err := api.Findings(context.Background(), appscan.ScanResult{App: "App"}, time.Time{})
 	if err == nil || !strings.Contains(err.Error(), "still has the counts") {
 		t.Errorf("err = %v", err)

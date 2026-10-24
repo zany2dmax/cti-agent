@@ -103,7 +103,10 @@ in code. Built from the DAST scanner's own scan-completion mail (Qualys WAS
 today, any scanner behind `internal/appscan`) plus its API for per-finding
 detail. Open counts per application, what is new since the last scan, and a
 label on every count saying whether that scan logged in. A scanner credential
-that stops working alerts the operator rather than the developers.
+that stops working alerts the operator rather than the developers. Each
+application's Jira ticket can also carry the scanner's own report as an
+attachment (off by default, `WAS_ATTACH_REPORT=1`), and lists the scanner's
+unconfirmed Critical and Urgent findings in a separate "please verify" section.
 
 **A weekly domains check.** Mondays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
@@ -140,6 +143,7 @@ quiet day — which only holds if a broken pipeline is loud.
 | `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
 | `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
 | `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails, with the KnowledgeBase fix for each finding and one Jira ticket per application (filed by `cti-jira --appscan-tickets`, assigned to the owner in `app-owners.txt`, with optional `watchers=`). Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
+| `cti-appreport` | `run-appscan` when `WAS_ATTACH_REPORT=1`; by hand to test | Fetches the DAST scanner's own per-application report (Qualys WAS: create, poll, download, delete) as a zip for `cti-jira --appscan-reports` to attach. Writes files only; the report carries the scan account's session cookies, so it is `0600` and deleted after attaching. The scanner is chosen by `APPSCAN_REPORT_PROVIDER` through `appscan.ReportFetcher` |
 | `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom`. `--actions-out` writes the DNS changes for `cti-jira --domains-actions` |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
 | `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
@@ -320,6 +324,7 @@ by Limited Edition Jonathan. This repository applies it to threat intel.
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
 cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
 cmd/cti-appscan/               weekly application-security report from DAST email
+cmd/cti-appreport/             the scanner's own per-application report, zipped, for the Jira ticket
 cmd/cti-domains/               weekly domains check: registrar, DNS, web, mail records
 cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
 cmd/cti-jira/                  files and updates one ticket per KEV or Sev5 CVE
@@ -346,7 +351,8 @@ internal/defender/             Defender for Cloud attack-path notification parsi
 internal/safelink/             Proofpoint/redirector unwrapping with a host allowlist
 internal/shellgate/            shell lint: the patterns that make a runner exit quietly
 internal/appscan/              DAST boundary: scan results, auth state, the report
-internal/appscan/qualys/       Qualys WAS: notification parser and Findings API
+internal/appscan/qualys/       Qualys WAS: notification parser, Findings API, report download
+internal/qualysrl/             header-driven Qualys API rate limiter (WAS client)
 internal/domains/              inventory, probes, findings by role, week-over-week diff
 internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
 internal/vulnlookup/           provider-neutral lookup interface and result types

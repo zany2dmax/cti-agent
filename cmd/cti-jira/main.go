@@ -77,6 +77,10 @@ func run() int {
 		"with --domains-actions: write what happened to the lock-down ticket (key, "+
 			"status, action) here as JSON, for cti-domains --stamp-ticket; with "+
 			"--appscan-tickets, one entry per application for cti-appscan --stamp-tickets")
+	appscanReports := flag.String("appscan-reports", "",
+		"with --appscan-tickets: a cti-appreport --out-dir; each application's zipped "+
+			"scanner report listed in its reports.json is attached when its ticket is "+
+			"filed or its findings change")
 	flag.Parse()
 
 	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
@@ -136,7 +140,7 @@ func run() int {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
 	}
 	if *appscanTickets != "" {
-		return doAppscanTickets(ctx, c, cfg, *appscanTickets, *forReal, time.Now(), *refOut)
+		return doAppscanTickets(ctx, c, cfg, *appscanTickets, *forReal, time.Now(), *refOut, *appscanReports)
 	}
 	// --follow-up on its own is allowed: re-checking the open tickets needs
 	// the scanner and Jira, not today's findings.

@@ -27,6 +27,8 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
 .RB [ \-\-for\-real ]
 .RB [ \-\-ref\-out
 .IR FILE ]
+.RB [ \-\-appscan\-reports
+.IR DIR ]
 .PP
 .B sudo cti\-agent cti\-jira
 .I mode
@@ -294,7 +296,31 @@ ticket, on create and on every weekly comment; one not found, invalid or
 refused is logged and skipped. That needs "Manage watcher list". Run by
 .BR run\-appscan (1)
 before the weekly email.
+.IP
+Besides the confirmed findings, a ticket lists the scanner's
+.B POTENTIAL
+(unconfirmed) findings of severity 4 (Critical) and 5 (Urgent) in their own
+section, "POTENTIAL - please verify", under a callout saying they are
+deliberately listed, are not confirmed, and that not confirmed does not mean
+not there. Each line is labelled "POTENTIAL \fIsev\fR - unconfirmed, please
+verify", and the header and summary count them separately ("To verify").
+Potential findings of Serious and below are left out. They are part of the
+findings fingerprint, so an open ticket gets one comment when they first
+appear.
 Default:\~empty.
+.TP
+.BI \-\-appscan\-reports " DIR"
+With
+.BR \-\-appscan\-tickets :
+a
+.BR cti\-appreport (1)
+output directory. Each application's zipped scanner report listed in
+.IR DIR /reports.json
+is attached when its ticket is filed and when its findings change; the
+ticket text then says it is attached and that it contains scan-account
+session cookies. An application with no listed report is filed or commented
+as usual. The reports are not deleted by this command.
+Default:\~empty (nothing attached).
 .TP
 .BI \-\-ref\-out " FILE"
 With

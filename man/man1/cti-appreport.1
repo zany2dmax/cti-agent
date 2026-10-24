@@ -1,0 +1,271 @@
+.TH CTI-APPREPORT 1 "2026-10-24" "cti-agent 1.4" "CTI Fleet Manual"
+.SH NAME
+cti-appreport \- fetch the scanner's own report for each web application, zipped, to attach to its AppSec Jira ticket
+.SH SYNOPSIS
+.B cti-appreport \-\-check
+.PP
+.B cti-appreport
+.BI \-\-app\-id " ID"
+.RB [ \-\-dump\-request ]
+.RB [ \-\-request\-file
+.IR FILE ]
+.RB [ \-\-app\-name
+.IR NAME ]
+.PP
+.B cti-appreport
+.BI \-\-app\-id " ID"
+.BI \-\-out\-dir " DIR"
+.RB [ \-\-app\-name
+.IR NAME ]
+.RB [ \-\-keep ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-request\-file
+.IR FILE ]
+.PP
+.B cti-appreport
+.BI \-\-tickets " FILE"
+.BI \-\-out\-dir " DIR"
+.RB [ \-\-only\-ref
+.IR FILE ]
+.RB [ \-\-max\-reports
+.IR N ]
+.RB [ \-\-keep ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.PP
+.B cti-appreport
+.BI \-\-probe\-findings " ID"
+.PP
+.B sudo cti\-agent cti\-appreport
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-appreport
+asks the DAST scanner for its own report on a web application (the request
+and response behind each finding, laid out the way the scanner documents
+them) and writes it as a zip file for
+.BR "cti\-jira \-\-appscan\-reports" .
+For Qualys WAS the report is created, polled until it is ready, downloaded
+as HTML_ZIPPED, and deleted from Qualys again. Only vulnerabilities in the
+open states (NEW, ACTIVE, REOPENED) are reported.
+.PP
+It is normally run by
+.BR run\-appscan (1)
+when
+.B WAS_ATTACH_REPORT=1
+and by hand while testing. It writes files and never writes to Jira: a
+report reaches a ticket only if
+.I reports.json
+in the output directory lists it.
+.PP
+The scanner is chosen by
+.BR APPSCAN_REPORT_PROVIDER .
+The commands reach it only through the Go interface
+.IR appscan.ReportFetcher ,
+so supporting another scanner is a package implementing that interface and
+one case in the command's provider switch; nothing in
+.BR cti\-jira (1)
+or the runner changes.
+.PP
+.B Each report carries the scan account's session cookies
+(the scanner records the requests it sent). Treat the directory like a
+credential: files are written 0600 in a directory created 0700, the report
+is deleted from the scanner after download (unless
+.BR \-\-keep ),
+and
+.B run\-appscan
+deletes the directory once the tickets are done.
+.PP
+.B It spends the shared Qualys API budget.
+A report is about five calls. Every response's rate-limit and concurrency
+headers are read (see
+.BR QUALYS_RL_RESERVE ):
+a short refusal is waited out, and the optional report work gives way when
+only the reserve is left, so the vulnerability lane and KnowledgeBase
+lookups are not starved. In the weekly run only applications whose ticket
+will be filed or commented are fetched.
+.PP
+A report that cannot be fetched is not fatal: the ticket still carries
+every finding and says nothing about an attachment that is not there.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-check ),
+and a value may follow
+.B =
+or a space.
+.TP
+.B \-\-check
+Make one cheap authenticated call, print whether the credentials work, how
+many web applications are defined, and the scanner's rate-limit position,
+then exit. Writes nothing.
+Default:\~off.
+.TP
+.BI \-\-app\-id " ID"
+Fetch the report for this one web application id (a test). Needs
+.B \-\-out\-dir
+unless
+.B \-\-dump\-request
+is given.
+Default:\~empty.
+.TP
+.BI \-\-app\-name " NAME"
+With
+.BR \-\-app\-id :
+the name used in messages and the report title.
+Default:\~\fBweb app\fR \fIID\fR.
+.TP
+.BI \-\-tickets " FILE"
+Fetch a report for every application in this
+.B cti\-appscan \-\-tickets\-out
+file that has findings and was not skipped. Needs
+.BR \-\-out\-dir .
+Default:\~empty.
+.TP
+.BI \-\-only\-ref " FILE"
+With
+.BR \-\-tickets :
+a
+.B cti\-jira \-\-ref\-out
+preview file; fetch only the applications whose ticket would be filed or
+commented (would-create, would-comment), never the unchanged ones.
+Default:\~empty (every eligible application).
+.TP
+.BI \-\-out\-dir " DIR"
+Write each report as
+.IR LABEL .zip
+and
+.I reports.json
+here, mode 0600; the directory is created 0700 if missing.
+.I reports.json
+lists what was fetched and, separately, what failed and why.
+Default:\~empty.
+.TP
+.BI \-\-max\-reports " N"
+Fetch at most this many reports in one run; the rest are listed as not
+fetched.
+Default:\~\fB30\fR.
+.TP
+.B \-\-keep
+Leave each report in the scanner instead of deleting it (debugging). Reports
+left behind count against the scanner's report limit; delete them in the
+Qualys console.
+Default:\~off.
+.TP
+.BI \-\-timeout " DURATION"
+Give up on one report after this long, create to download, as a Go
+duration.
+Default:\~\fB10m0s\fR.
+.TP
+.B \-\-dump\-request
+With
+.BR \-\-app\-id :
+print the request that creates the report and send nothing.
+Default:\~off.
+.TP
+.BI \-\-request\-file " FILE"
+Send this create-report body instead of the built-in one.
+.B {{APP_ID}}
+and
+.B {{NAME}}
+are filled in. For correcting a field name while probing the live API,
+without a rebuild.
+Default:\~empty.
+.TP
+.BI \-\-probe\-findings " ID"
+Print the scanner's verbose finding search for this web application id
+(three open vulnerabilities) and exit. Cookie, Set-Cookie and Authorization
+values are redacted from the output, which is still evidence from the
+organisation's own application: redirect it to a 0600 file and keep it off
+tickets.
+Default:\~empty.
+.SH ENVIRONMENT
+.I fleet.env
+is loaded at start from
+.B FLEET_ENV
+(else
+.IR $FLEET_HOME/fleet.env ,
+else
+.IR /var/lib/cti\-agent/fleet.env );
+variables already in the environment win. Only the scanner's settings are
+needed: no mailbox and no Jira.
+.TP
+.BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
+The WAS API. Required for the
+.B qualys\-was
+provider. Section 2.
+.TP
+.B APPSCAN_REPORT_PROVIDER
+Which scanner's report to fetch. Default:\~\fBqualys\-was\fR (also
+.BR qualys ).
+An unknown name is an error that lists the known ones.
+.TP
+.B QUALYS_RL_RESERVE
+Calls to leave unspent in the current rate-limit window for the vulnerability
+lane and KnowledgeBase lookups. When only this many remain, report work
+stops and the rest is listed as not fetched.
+Default:\~\fB5\fR.
+.TP
+.B QUALYS_RL_MAX_WAIT
+The longest the client will sleep for a rate-limit or concurrency refusal,
+as a Go duration. A longer wait is reported as an error instead.
+Default:\~\fB5m\fR.
+.PP
+The limiter follows the limits Qualys reports in its response headers, so
+there is nothing to change when the subscription's limits are raised.
+.SH FILES
+.TP
+.IR DIR /reports.json
+The manifest:
+provider, generation time, each fetched report (file, size, scanner report
+id) and each failure. 0600.
+.TP
+.IR DIR / LABEL .zip
+One application's report, 0600. The label is the ticket label
+.RB ( cti\-appscan\- \fIid\fR ).
+.SH EXIT STATUS
+.TP
+.B 0
+The command did what was asked. With
+.BR \-\-tickets ,
+reports that could not be fetched are a warning, not a failure.
+.TP
+.B 1
+Configuration missing or invalid, an unknown provider, a rejected option
+combination, the scanner refused, or (with
+.BR \-\-app\-id )
+the report was not fetched.
+.TP
+.B 2
+An unknown option or an unparseable duration.
+.SH EXAMPLES
+Check the credentials and the rate-limit position:
+.PP
+.EX
+sudo cti\-agent cti\-appreport \-\-check
+.EE
+.PP
+Show the request without sending it:
+.PP
+.EX
+sudo cti\-agent cti\-appreport \-\-app\-id 123456 \-\-dump\-request
+.EE
+.PP
+Fetch one report, leave it in Qualys to look at, then do it again cleanly:
+.PP
+.EX
+sudo cti\-agent cti\-appreport \-\-app\-id 123456 \-\-out\-dir /tmp/r \-\-keep
+sudo cti\-agent cti\-appreport \-\-app\-id 123456 \-\-out\-dir /tmp/r
+.EE
+.PP
+Look at the raw finding fields (redacted) in a private file:
+.PP
+.EX
+(umask 077; sudo cti\-agent cti\-appreport \-\-probe\-findings 123456 > /tmp/probe.xml)
+.EE
+.SH SEE ALSO
+.BR run\-appscan (1),
+.BR cti\-jira (1),
+.BR cti\-appscan (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md section 11f; fleet\-kit/README.md, "The weekly AppSec report".
