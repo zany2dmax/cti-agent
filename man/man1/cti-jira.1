@@ -29,6 +29,8 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV or Sev5 exposure
 .IR FILE ]
 .RB [ \-\-appscan\-reports
 .IR DIR ]
+.RB [ \-\-appscan\-test
+.IR ID ]
 .PP
 .B sudo cti\-agent cti\-jira
 .I mode
@@ -320,7 +322,38 @@ is attached when its ticket is filed and when its findings change; the
 ticket text then says it is attached and that it contains scan-account
 session cookies. An application with no listed report is filed or commented
 as usual. The reports are not deleted by this command.
+Without
+.B \-\-for\-real
+the preview ends each would-create and would-comment with "would attach
+appscan-DATE.txt (N KB)" and, when
+.I DIR
+holds that application's report, "would attach qualys-was-report-DATE.zip
+(N KB)", otherwise "no scanner report to attach".
 Default:\~empty (nothing attached).
+.TP
+.BI \-\-appscan\-test " ID"
+With
+.B \-\-appscan\-tickets
+(and usually
+.BR \-\-appscan\-reports ):
+rehearse the ticket for one scanner web-app
+.IR ID .
+Without
+.B \-\-for\-real
+it previews; with it, files ONE new ticket whose summary starts "[TEST]",
+labelled
+.B cti\-agent\-test
+only (so the weekly run never finds or comments on it and the Jira follow-up
+skips it), unassigned, with no component, no watchers and nothing recorded in
+state, carrying the findings text and the scanner report as attachments.
+The
+.B JIRA_ALLOW_CREATE
+gate applies. Refuses an
+.I ID
+that is not in the file, or one the weekly run would leave alone. The ticket
+is yours to delete in Jira afterwards; the report holds scan-account session
+cookies.
+Default:\~empty.
 .TP
 .BI \-\-ref\-out " FILE"
 With

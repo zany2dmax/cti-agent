@@ -72,8 +72,14 @@ updated this run" and the email still goes.
 .B 3b. Scanner reports (non-fatal, off by default)
 Only with
 .B WAS_ATTACH_REPORT=1
-and on a real run (not a dry run or
-.BR \-\-to\-dev ).
+and on a real run, or on
+.B \-\-to\-dev
+as a rehearsal: the reports are fetched (created and deleted in Qualys, as
+on a real run) so the preview file
+.I appscan\-tickets\-preview\-DATE.txt
+names each attachment and its size, and nothing is attached.
+.B \-\-dry\-run
+does not fetch them (it creates nothing in Qualys) and says so.
 Before step 3a files anything, runs
 .B cti\-jira \-\-appscan\-tickets
 as a preview to a plan file, then
