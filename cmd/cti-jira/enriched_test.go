@@ -279,3 +279,32 @@ func TestTheRemediationNoteNamesTheTicketAndLinksIt(t *testing.T) {
 		t.Error("a ref with no key produced a note")
 	}
 }
+
+// A PRESENT CVSS 9.0+ Sev4 is selected; a NOT_PRESENT one is not - the CVSS
+// rule widens what earns a ticket, not the requirement that it be here.
+func TestAPresentCriticalCVSSIsTicketed(t *testing.T) {
+	crit := row("CVE-6", "Sev4", "PRESENT", 0, 3)
+	crit.CVSS = 9.8
+	gone := row("CVE-7", "Sev4", "NOT_PRESENT", 0, 0)
+	gone.CVSS = 9.8
+	low := row("CVE-8", "Sev4", "PRESENT", 0, 3)
+	low.CVSS = 8.9
+	got := selectForTicketing(context.Background(), []enrichedRow{crit, gone, low},
+		stubFill([]string{"a.example.com"}, 1, false), quiet)
+	if len(got) != 1 || got[0].CVE != "CVE-6" {
+		t.Fatalf("selected %+v, want only CVE-6", got)
+	}
+}
+
+// A finding stored as PRESENT that the scanner no longer finds is not filed:
+// the backfill over a rollup must not ticket what has been fixed since.
+func TestAStoredPresentThatIsNowGoneIsNotFiled(t *testing.T) {
+	r := row("CVE-9", "Sev4", "PRESENT", 0, 3)
+	r.CVSS = 9.8
+	gone := func(_ context.Context, cve string) (vulnlookup.Result, error) {
+		return vulnlookup.Result{CVE: cve, Status: vulnlookup.StatusNotPresent}, nil
+	}
+	if got := selectForTicketing(context.Background(), []enrichedRow{r}, gone, quiet); len(got) != 0 {
+		t.Fatalf("filed %+v for a CVE the scanner no longer finds", got)
+	}
+}

@@ -816,11 +816,15 @@ cannot catch.
 file and writes nothing. A dry run that quietly filed real tickets would be
 the September dropped-`--dry-run` incident again, with a longer cleanup.
 
-What gets a ticket: a finding that is **KEV or Sev5** *and* **PRESENT** in the
+What gets a ticket: a finding that is **KEV, Sev5, or CVSS 9.0 or more** *and* **PRESENT** in the
 estate. Not-present and unknown-coverage findings are skipped — a ticket for a
 CVE the scanner cannot find carries no host list, which is the thing that makes
-a ticket useless. Non-KEV Sev5 findings are reported but held for approval
-rather than filed.
+a ticket useless. A CVSS base score of 9.0 or more (CVSS's own Critical band)
+files whether or not the CVE is on KEV: a CVSS 9.8 with low EPSS ranks Sev4
+and would otherwise get a digest line and no ticket. Those tickets carry the
+label `cvss-critical` and "CVSS 9.8" (the score) in the summary, and are
+unassigned for triage. A Sev5 that is not on KEV and is below CVSS 9.0 is
+reported but held for approval rather than filed.
 
 Host names come from a fresh Qualys lookup, not from the enriched file — that
 file carries only a ten-host sample. Only the selected CVEs are looked up, so
@@ -847,9 +851,11 @@ sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date
 That is a dry run — it reports what it would file and writes nothing. Add
 `--for-real` once the list looks right.
 
-**KEV findings file automatically; a Sev5 that is not on KEV is held.** The
-reason is that a KEV entry carries an external deadline, so delay is the
-larger risk, whereas a Sev5 the fleet scored itself is a judgement call and
+**KEV and CVSS 9.0+ findings file automatically; a Sev5 that is neither is
+held.** The reason is that a KEV entry carries an external deadline and a
+CVSS 9.0+ is critical by the standard's own measure (NVD's score, or the
+CNA's when NVD has none), so delay is the larger risk,
+whereas a Sev5 the fleet scored itself is a judgement call and
 the larger risk is a scoring bug becoming a pile of tickets IT has to close.
 To file the held ones deliberately:
 
@@ -859,7 +865,7 @@ sudo cti-agent cti-jira --from-enriched <file> --for-real --approve
 
 `--approve` is a command-line flag and not a `fleet.env` setting on purpose:
 `run-digest` never passes it, so the scheduled 06:00 run can only ever file
-KEV entries. Making it configuration would turn "the fleet decided to file
+KEV and CVSS 9.0+ entries. Making it configuration would turn "the fleet decided to file
 this" into something that happens overnight with nobody watching.
 
 ### What happens on the runs after the first
