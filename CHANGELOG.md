@@ -209,9 +209,14 @@ Then:
    Qualys account needs permission to create WAS reports.
 7. CVSS 9.0+ ticketing: nothing to configure. CVEs already past their first
    daily are not re-read by the daily, so a one-off backfill picks them up:
-   `(umask 077; sudo cti-agent fleet-db rollup --days 30 > /tmp/rollup.json)`,
-   then `sudo cti-agent cti-jira --from-enriched /tmp/rollup.json` (preview),
-   the same with `--for-real`, then `rm /tmp/rollup.json`. Only CVEs the
+   `sudo cti-agent fleet-db rollup --days 30 | sudo -u ctiagent sh -c 'umask
+   077; cat > /var/lib/cti-agent/state/rollup-backfill.json'`, then
+   `sudo cti-agent cti-jira --from-enriched
+   /var/lib/cti-agent/state/rollup-backfill.json` (preview), the same with
+   `--for-real`, then `sudo rm -f /var/lib/cti-agent/state/rollup-backfill*.json`.
+   The file goes in the state directory, owned by the service account,
+   because `cti-agent` runs every command as that account - a 0600 file of
+   yours in /tmp is unreadable to it. Only CVEs the
    scanner still finds today are filed, and a CVE that already has a ticket is
    updated, not filed again. Existing tickets keep their summary and labels.
 8. **Existing AppSec tickets will get one comment** on the next run listing the
