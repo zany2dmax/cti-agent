@@ -219,16 +219,26 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		logf("appscan: %s: WRITE GATE CLOSED - the real run would not file or comment", name)
 		return refFor("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
 	}
+	// The scanner's own report, when cti-appreport fetched one. Optional:
+	// without it the ticket carries every finding, and says nothing about
+	// an attachment that is not there. Loaded before the preview, so a
+	// preview shows exactly what a real run would attach.
+	file := fmt.Sprintf("appscan-%s.txt", now.Format("2006-01-02"))
+	full := []byte(appscanFullText(t, now))
+	rep, hasRep, repName := loadAppReport(t, plan == appCreate || plan == appComment, reportsDir, now, name)
+
 	if !forReal {
 		// The would-be text goes to stdout, which the runner writes to a
 		// 0600 preview file rather than the journal: it names URLs and
 		// parameters on our own applications.
 		switch plan {
 		case appCreate:
-			fmt.Printf("===== would create for %s\n%s\n", oneLine(t.App, 80), appscanBody(t, now))
+			fmt.Printf("===== would create for %s\n%s%s\n%s", oneLine(t.App, 80), appscanBody(t, now),
+				reportNote(hasRep, repName), attachPreview(hasRep, repName, rep.Body, file, full))
 			return refFor("would-create", nil, "")
 		case appComment:
-			fmt.Printf("===== would comment on %s\n%s\n", open.Key, appscanComment(t, prev, now))
+			fmt.Printf("===== would comment on %s\n%s\n%s", open.Key, appscanComment(t, prev, now),
+				attachPreview(hasRep, repName, rep.Body, file, full))
 			return refFor("would-comment", open, "")
 		}
 		return refFor("would-resolve", open, "")
@@ -239,21 +249,6 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 	}
 
 	st := appscanState{Hash: t.Hash, Keys: stateKeys(t), PostedAt: now}
-	file := fmt.Sprintf("appscan-%s.txt", now.Format("2006-01-02"))
-	full := []byte(appscanFullText(t, now))
-
-	// The scanner's own report, when cti-appreport fetched one. Optional:
-	// without it the ticket carries every finding, and says nothing about
-	// an attachment that is not there.
-	rep, hasRep := appscan.Report{}, false
-	if plan == appCreate || plan == appComment {
-		var err error
-		rep, hasRep, err = appscan.LoadReport(reportsDir, t.Key, t.AppID)
-		if err != nil {
-			logf("appscan: %s: scanner report not attached: %s", name, safelog.Line(err.Error()))
-		}
-	}
-	repName := fmt.Sprintf("%s-report-%s.zip", rep.Provider, now.Format("2006-01-02"))
 	attachReport := func(key string) {
 		if !hasRep {
 			return
@@ -363,6 +358,38 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return refFor("resolved", open, "")
 	}
 	return refFor("none", nil, "")
+}
+
+// loadAppReport reads an application's zipped scanner report from the
+// cti-appreport directory, when one was fetched and it is wanted.
+func loadAppReport(t appscan.AppTicket, wanted bool, reportsDir string, now time.Time, name string) (appscan.Report, bool, string) {
+	rep, hasRep := appscan.Report{}, false
+	if wanted {
+		var err error
+		rep, hasRep, err = appscan.LoadReport(reportsDir, t.Key, t.AppID)
+		if err != nil {
+			logf("appscan: %s: scanner report not attached: %s", name, safelog.Line(err.Error()))
+		}
+	}
+	return rep, hasRep, fmt.Sprintf("%s-report-%s.zip", rep.Provider, now.Format("2006-01-02"))
+}
+
+// attachPreview says what a real run would attach, by name and size.
+func attachPreview(hasRep bool, repName string, repBody []byte, file string, full []byte) string {
+	out := fmt.Sprintf("----- would attach %s (%s)\n", file, kb(len(full)))
+	if hasRep {
+		out += fmt.Sprintf("----- would attach %s (%s)\n", repName, kb(len(repBody)))
+	} else {
+		out += "----- no scanner report to attach (none fetched for this application)\n"
+	}
+	return out
+}
+
+func kb(n int) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d bytes", n)
+	}
+	return fmt.Sprintf("%d KB", (n+1023)/1024)
 }
 
 // reportNote is the line that tells the reader the scanner's report is

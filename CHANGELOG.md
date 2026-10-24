@@ -73,6 +73,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Rehearse an AppSec ticket before Friday:** `cti-jira --appscan-tickets`
+  previews now end each would-create and would-comment with the attachments
+  ("would attach appscan-DATE.txt (N KB)", the scanner report or "no scanner
+  report to attach"). `--appscan-test <web-app id>` files (with `--for-real`)
+  ONE "[TEST]" ticket for that application, labelled `cti-agent-test` only,
+  unassigned, no component or watchers, nothing in state, with the findings
+  text and report attached; `JIRA_ALLOW_CREATE` applies. `run-appscan --to-dev`
+  with `WAS_ATTACH_REPORT=1` now fetches the reports so the preview file names
+  each attachment and size (`--dry-run` does not). **Upgrade:** reinstall;
+  nothing to configure.
+
 - **One Jira ticket per application, assigned to its owner, with the fix.**
   The AppSec weekly now keeps one live ticket per application
   (`cti-jira --appscan-tickets`, filed before the email goes): every active,

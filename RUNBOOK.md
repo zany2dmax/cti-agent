@@ -1325,9 +1325,34 @@ If the request is rejected, correct the field in a copy of the dumped body and
 send it with `--request-file FILE` (`{{APP_ID}}` and `{{NAME}}` are filled in)
 instead of rebuilding. Check the unzipped report opens and the probe shows the
 fields you expect, then set `WAS_ATTACH_REPORT=1` in `fleet.env` and run
-`sudo cti-agent run-appscan --to-dev` (previews only; nothing is attached on a
-dry run or `--to-dev`). Friday's real run attaches. A report that cannot be
+`sudo cti-agent run-appscan --to-dev` (previews only; nothing is attached).
+`--to-dev` fetches the reports, as a real run does (created and deleted in
+Qualys), so `appscan-tickets-preview-<date>.txt` names each attachment and its
+size; `--dry-run` fetches nothing and says so. Friday's real run attaches. A report that cannot be
 fetched is logged and the ticket goes out without it; it never stops the email.
+
+To see exactly what a developer would receive, file one clearly-labelled test
+ticket for a single application:
+
+```bash
+sudo cti-agent run-appscan --dry-run     # leaves /var/lib/cti-agent/state/appscan-tickets-<date>.json
+sudo cti-agent cti-appreport --app-id 1234 --out-dir /tmp/report
+T=/var/lib/cti-agent/state/appscan-tickets-$(date -u +%F).json
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report              # preview
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report --for-real  # files it
+sudo rm -rf /tmp/report
+```
+
+The test ticket is "[TEST] ...", labelled `cti-agent-test` only (the weekly
+run never finds or comments on it, the follow-up skips it), unassigned, with no
+component or watchers, and nothing is recorded in state. The fleet notifies
+nobody, though Jira's own notification scheme (or a default assignee, if the
+project sets one) still applies to any new issue. It carries the findings
+text and the scanner report. `JIRA_ALLOW_CREATE` still gates it; an id not in
+the file, or one the weekly run would leave alone, is refused. Afterwards delete
+the ticket in Jira and `/tmp/report`: the report holds the scan account's
+session cookies. If you used `--keep`, also delete that report in Qualys under
+WAS > Reports.
 
 The other settings are in `fleet.env` section 2 and rarely need touching.
 `QUALYS_RL_RESERVE` (default 5) is how many API calls the report work leaves for
