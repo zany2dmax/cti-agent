@@ -1061,7 +1061,7 @@ kept archiving a mailbox the new host is reading.
 
 ## 11f. The weekly application-security lane
 
-`cti-agent-appscan.timer`, Mondays 07:30. Reads the DAST scanner's own
+`cti-agent-appscan.timer`, Fridays 07:30. Reads the DAST scanner's own
 completion notifications out of the CTI mailbox, pulls per-finding detail from
 the Qualys WAS Findings API where credentials allow, and mails the result
 through `cti-mailer --lane was`.
@@ -1326,7 +1326,7 @@ send it with `--request-file FILE` (`{{APP_ID}}` and `{{NAME}}` are filled in)
 instead of rebuilding. Check the unzipped report opens and the probe shows the
 fields you expect, then set `WAS_ATTACH_REPORT=1` in `fleet.env` and run
 `sudo cti-agent run-appscan --to-dev` (previews only; nothing is attached on a
-dry run or `--to-dev`). Monday's real run attaches. A report that cannot be
+dry run or `--to-dev`). Friday's real run attaches. A report that cannot be
 fetched is logged and the ticket goes out without it; it never stops the email.
 
 The other settings are in `fleet.env` section 2 and rarely need touching.
@@ -1350,7 +1350,7 @@ the report.
 
 ## 11g. The weekly domains lane
 
-`cti-agent-domains.timer`, Mondays 08:00, to the security team through
+`cti-agent-domains.timer`, Tuesdays 08:00, to the security team through
 `cti-mailer --lane dom`. What it checks is in
 [fleet-kit/README.md → The weekly domains check](fleet-kit/README.md#the-weekly-domains-check).
 
@@ -1410,7 +1410,7 @@ sudo systemctl enable --now cti-agent-domains.timer
 ```
 
 The first real run says *"First run: no previous week to compare with"*. The
-week-over-week section starts the Monday after. State is
+week-over-week section starts the Tuesday after. State is
 `$FLEET_HOME/state/domains-state.json` (0600); move it aside to start over.
 
 ### 3b. What the report contains, and the lock-down ticket
@@ -1431,7 +1431,7 @@ that ticket is already open it adds a comment only if the list has changed,
 and says once when nothing is left. A dry run only previews the ticket; with
 `JIRA_ALLOW_CREATE` empty nothing is written; a Jira failure is logged and
 never stops the report. Read DNS CHANGES FOR IT in a `--dry-run` before the
-first Monday run: every unmarked domain gets a null MX in it.
+first Tuesday run: every unmarked domain gets a null MX in it.
 
 ### 4. Public DNS, and outbound port 53
 
