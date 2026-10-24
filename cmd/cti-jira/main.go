@@ -99,6 +99,16 @@ func run() int {
 	}
 
 	c := jira.New(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)
+	if cfg.JiraCloudID != "" {
+		// A scoped API token is refused at the site URL; it must go through
+		// the gateway. Unset, nothing changes: calls go to JIRA_BASE_URL.
+		gw, err := jira.CloudGateway(cfg.JiraCloudID)
+		if err != nil {
+			return die("%s", err.Error())
+		}
+		c.APIBase = gw
+		logf("jira: API calls via the Atlassian gateway (JIRA_CLOUD_ID set); links use JIRA_BASE_URL")
+	}
 	// Two minutes covers the morning path's handful of tickets. The follow-up
 	// makes one scanner lookup and up to three Jira calls per open ticket, and
 	// a deadline that cut it off part-way would re-check a sample while the
@@ -225,6 +235,27 @@ func doCheck(ctx context.Context, c *jira.Client, cfg config.Config) int {
 		return die("the duplicate-detection search failed: %s", safelog.Line(err.Error()))
 	}
 	logf("  duplicate search works (%d matches for the test CVE)", len(hits))
+
+	// What the lanes will do, checked without doing it. A token's scopes cap
+	// what it may do, but the account's Jira permissions decide what it can:
+	// a missing one shows up here rather than as a failed run.
+	have, err := c.MyPermissions(ctx, cfg.JiraProjectKey, jira.FleetPermissions)
+	if err != nil {
+		logf("  could not read the account's permissions: %s", safelog.Line(err.Error()))
+		return exitFailure
+	}
+	missing := 0
+	for _, p := range jira.FleetPermissions {
+		mark := "ok"
+		if !have[p] {
+			mark, missing = "MISSING", missing+1
+		}
+		logf("    permission %-20s %s", p, mark)
+	}
+	if missing > 0 {
+		logf("  %d permission(s) MISSING - see RUNBOOK (Jira service account)", missing)
+		return exitFailure
+	}
 	return exitOK
 }
 

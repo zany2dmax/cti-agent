@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -35,10 +36,37 @@ import (
 // account behind JIRA_EMAIL should be one that can create issues in the
 // allowlisted project and little else. See SECURITY.md.
 type Client struct {
-	BaseURL string // https://example.atlassian.net
+	BaseURL string // https://example.atlassian.net - the site; browse links use it
+	// APIBase, when set, is where API calls go instead of BaseURL: the
+	// Atlassian gateway, which a SCOPED API token requires (it is refused at
+	// the site URL). Browse links stay on BaseURL, because the gateway serves
+	// no web pages. See CloudGateway.
+	APIBase string
 	Email   string
 	Token   string
 	HTTP    *http.Client
+}
+
+// api is where API requests go.
+func (c *Client) api() string {
+	if c.APIBase != "" {
+		return c.APIBase
+	}
+	return c.BaseURL
+}
+
+var cloudIDRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// CloudGateway is the API base for a scoped token: the Atlassian gateway for
+// this cloud id (JIRA_CLOUD_ID, from https://<site>/_edge/tenant_info). Only a
+// UUID is accepted, so the value can never steer the credentials anywhere but
+// api.atlassian.com.
+func CloudGateway(cloudID string) (string, error) {
+	id := strings.ToLower(strings.TrimSpace(cloudID))
+	if !cloudIDRE.MatchString(id) {
+		return "", fmt.Errorf("JIRA_CLOUD_ID is not a cloud id (a UUID, from https://<site>/_edge/tenant_info)")
+	}
+	return "https://api.atlassian.com/ex/jira/" + id, nil
 }
 
 // New builds a client with a timeout that is bounded but generous: attachment
@@ -49,8 +77,21 @@ func New(baseURL, email, token string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Email:   email,
 		Token:   token,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		HTTP:    &http.Client{Timeout: 60 * time.Second, CheckRedirect: httpsOnly},
 	}
+}
+
+// httpsOnly refuses a redirect to anything but https. Go drops Authorization
+// on a redirect to another host, but not on a same-host downgrade to http,
+// which would send the token in clear.
+func httpsOnly(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect to %s://%s: not https", req.URL.Scheme, req.URL.Host)
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 func (c *Client) authHeader() string {
@@ -292,7 +333,7 @@ func (c *Client) Attach(ctx context.Context, key, name string, content []byte) e
 		return fmt.Errorf("closing the attachment form: %w", err)
 	}
 
-	path := c.BaseURL + "/rest/api/2/issue/" + url.PathEscape(key) + "/attachments"
+	path := c.api() + "/rest/api/2/issue/" + url.PathEscape(key) + "/attachments"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, &buf)
 	if err != nil {
 		return fmt.Errorf("building the attachment request: %w", err)
@@ -320,7 +361,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.api()+path, body)
 	if err != nil {
 		return fmt.Errorf("building the %s request: %w", path, err)
 	}
@@ -453,6 +494,33 @@ func (c *Client) Myself(ctx context.Context) (Account, error) {
 	return a, nil
 }
 
+// FleetPermissions are the Jira permissions the fleet uses: in the project
+// (find, file, comment, attach, record state, assign, add watchers) and the
+// global one for looking owners up by email.
+var FleetPermissions = []string{"BROWSE_PROJECTS", "CREATE_ISSUES", "ADD_COMMENTS",
+	"CREATE_ATTACHMENTS", "EDIT_ISSUES", "ASSIGN_ISSUES", "MANAGE_WATCHERS", "USER_PICKER"}
+
+// MyPermissions reports which of perms the token's account has in a project.
+// Read-only: it answers "would the fleet's writes be allowed?" without
+// writing anything.
+func (c *Client) MyPermissions(ctx context.Context, projectKey string, perms []string) (map[string]bool, error) {
+	var out struct {
+		Permissions map[string]struct {
+			HavePermission bool `json:"havePermission"`
+		} `json:"permissions"`
+	}
+	path := "/rest/api/2/mypermissions?projectKey=" + url.QueryEscape(projectKey) +
+		"&permissions=" + url.QueryEscape(strings.Join(perms, ","))
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, p := range perms {
+		have[p] = out.Permissions[p].HavePermission
+	}
+	return have, nil
+}
+
 // IssueTypeMeta is one creatable issue type in a project.
 type IssueTypeMeta struct {
 	ID      string `json:"id"`
@@ -545,7 +613,7 @@ func ResolveIssueType(types []IssueTypeMeta, name string) (IssueTypeMeta, error)
 // before state existed. Treating it as a failure would make the first update
 // after deploying this look like a broken integration.
 func (c *Client) GetProperty(ctx context.Context, issueKey, propKey string, out any) (bool, error) {
-	path := c.BaseURL + "/rest/api/2/issue/" + url.PathEscape(issueKey) +
+	path := c.api() + "/rest/api/2/issue/" + url.PathEscape(issueKey) +
 		"/properties/" + url.PathEscape(propKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {

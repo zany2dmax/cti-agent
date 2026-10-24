@@ -242,7 +242,7 @@ sudo cti-agent fleet-db was-sent 2026-October patchtuesday   # the month as the 
 ## 9. Jira tickets
 
 ```bash
-sudo cti-agent cti-jira --check                         # account, project, write gate
+sudo cti-agent cti-jira --check                         # account, project, write gate, permissions ok/MISSING
 E=/var/lib/cti-agent/state/enriched-$(date +%F).json
 sudo cti-agent cti-jira --from-enriched "$E" --follow-up           # preview, changes nothing
 sudo python3 -m json.tool "${E%.json}-tickets.json" | less   # today's ticket list (no jq here)
@@ -257,7 +257,8 @@ sudo cti-agent cti-jira --domains-actions "$A"        # preview the ticket, chan
 ```
 
 `WRITE GATE CLOSED` in the output means `JIRA_ALLOW_CREATE` does not list the
-project, so nothing is filed or commented.
+project, so nothing is filed or commented. `MISSING` beside a permission means
+the API account lacks it. With a scoped token, `JIRA_CLOUD_ID` must be set.
 
 ## 10. Heartbeat, board and memory
 

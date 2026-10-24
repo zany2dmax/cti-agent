@@ -701,7 +701,8 @@ sudo cti-agent cti-jira --check
 
 Reports the account the API token belongs to, whether the write gate is open,
 whether `JIRA_ISSUE_TYPE` exists in the project, which fields the create screen
-marks required, and whether the duplicate-detection search works.
+marks required, whether the duplicate-detection search works, and each Jira
+permission the fleet uses as `ok` or `MISSING` (nothing is written).
 
 That last one is not padding. A duplicate check runs before every create, so a
 broken search breaks the whole lane — and it broke once already: Atlassian
@@ -756,6 +757,45 @@ label-based duplicate check catches it.
 the queue your team actually works from? A JSM project can accept an issue over
 the plain issue API and leave it out of the agent queues, and that is invisible
 from the command's point of view. Close and delete the ticket when done.
+
+### Using a scoped service-account token (optional)
+
+A classic API token carries everything its account can do. A scoped token on a
+service account is narrower, but Atlassian refuses it at the site URL, so set
+`JIRA_CLOUD_ID` and the fleet calls the gateway
+`https://api.atlassian.com/ex/jira/<cloud id>` instead (email links still use
+`JIRA_BASE_URL`). Unset, nothing changes.
+
+Setup:
+
+1. Create a **service account** at admin.atlassian.com > Directory > Service
+   accounts. Not the organisation Settings > API keys page: its `:admin`
+   scopes administer the organisation and must not be used here.
+2. Give it Jira product access on the **production** site (not a sandbox).
+3. Add it to the project (Project settings > People/Access) in a role that can
+   work issues, e.g. Member in a team-managed project. Owners named in
+   `app-owners.txt` must be Assignable users in that project.
+4. Put it in a group that is granted the global **Browse users and groups**.
+5. Create its API token with exactly three classic scopes: `read:jira-work`,
+   `write:jira-work`, `read:jira-user`. Tokens expire within 365 days: diary
+   the renewal.
+6. Find the cloud id (a UUID) at `https://<site>.atlassian.net/_edge/tenant_info`.
+
+Switch: in `fleet.env` set `JIRA_EMAIL` to the service account's own address
+(`...@serviceaccount.atlassian.com`, not a person's), `JIRA_API_TOKEN` to its
+token, and `JIRA_CLOUD_ID=11111111-2222-3333-4444-555555555555` (your own
+UUID). Then `sudo cti-agent cti-jira --check` (every permission should read
+`ok`), a `--to-dev` run, then a real run.
+
+Roll back: remove `JIRA_CLOUD_ID` and restore the old email and token.
+
+Symptoms:
+
+- HTTP 401 with `X-Failure-Category: FAILURE_CLIENT_AUTH`: wrong `JIRA_EMAIL`
+  (it must be the service account's address).
+- A JQL search returning `"issues":[]` for a key you know exists: the account
+  cannot browse the project (BROWSE_PROJECTS `MISSING`).
+- `USER_PICKER` `MISSING`: tickets are filed unassigned.
 
 ### The automatic path
 
