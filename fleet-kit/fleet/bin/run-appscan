@@ -97,6 +97,19 @@ TICKETS="$STATE/appscan-tickets-$STAMP.json"
 TICKETREF="$STATE/appscan-tickets-ref-$STAMP.json"
 JIRA="$FLEET_CODE/bin/cti-jira"
 rm -f "$TICKETS" "$TICKETREF"
+# The scanner's own report per application, attached to the ticket when
+# WAS_ATTACH_REPORT=1. Fetched only for tickets about to be filed or
+# commented (PLAN is a cti-jira preview), and deleted after cti-jira: each
+# report carries the scan account's session cookies.
+APPREPORT="$FLEET_CODE/bin/cti-appreport"
+PLAN="$STATE/appscan-tickets-plan-$STAMP.json"
+REPORTS="$STATE/appscan-reports-$STAMP"
+rm -rf "$PLAN" "$REPORTS"
+# And on every way out - a timeout or SIGTERM included - plus any left by an
+# earlier run that was killed before it could clean up.
+trap 'rm -rf "$PLAN" "$REPORTS"' EXIT
+find "$STATE" -maxdepth 1 -name 'appscan-reports-*' -type d -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+REPORTARGS=()
 
 # Mode set BEFORE anything is written. A report naming which applications have
 # open Urgent findings, and which are scanned without authentication, is a map
@@ -141,8 +154,24 @@ if [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
     "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$TICKETREF" > "$PREVIEW" \
       || log "WARNING: application ticket preview failed"
   else
+    if [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
+      if [ -x "$APPREPORT" ]; then
+        # Never fatal: without the report each ticket still carries every
+        # finding. The preview's would-be text is not wanted here.
+        if "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$PLAN" > /dev/null \
+           && "$APPREPORT" --tickets "$TICKETS" --only-ref "$PLAN" --out-dir "$REPORTS"; then
+          REPORTARGS=(--appscan-reports "$REPORTS")
+        else
+          log "WARNING: scanner reports not fetched - tickets go out without them"
+        fi
+      else
+        log "WAS_ATTACH_REPORT=1 but cti-appreport is not installed - rerun the installer"
+      fi
+    fi
     "$JIRA" --appscan-tickets "$TICKETS" --for-real --ref-out "$TICKETREF" \
+      ${REPORTARGS[@]+"${REPORTARGS[@]}"} \
       || log "WARNING: application tickets not all filed or updated - see the lines above"
+    rm -rf "$PLAN" "$REPORTS"
   fi
   "$APPSCAN" --stamp-tickets "$TICKETREF" --tickets-out "$TICKETS" --out "$HTML" --text-out "$TXT" \
     || { log "WARNING: could not stamp the tickets into the report; removing the slot"
