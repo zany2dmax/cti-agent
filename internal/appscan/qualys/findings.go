@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
+	"github.com/zany2dmax/cti-agent/internal/qualysrl"
 )
 
 // API is the Qualys WAS Findings client.
@@ -35,17 +37,38 @@ type API struct {
 	username string
 	password string
 	http     *http.Client
+	// limiter reads the rate-limit headers on every response; shared by
+	// every client in the process for the same Qualys host.
+	limiter        *qualysrl.Limiter
+	reportTemplate string
 }
 
 // NewAPI builds a WAS client from the same credentials the VM lane uses.
 func NewAPI(baseURL, username, password string) *API {
+	l := qualysrl.Shared(baseURL)
+	if l.Logf == nil {
+		l.Logf = warnf
+	}
 	return &API{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		username: username,
 		password: password,
-		http:     &http.Client{Timeout: 120 * time.Second},
+		// The overall timeout has to cover the limiter's own waits, or a
+		// five-minute rate-limit wait dies at two minutes looking like a
+		// network fault. A hung server is still caught per attempt, by the
+		// limiter's transport (ResponseHeaderTimeout).
+		http:    &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l},
+		limiter: l,
 	}
 }
+
+// warnf is where the client's own warnings go: stderr, which every command
+// sends to the journal. Numbers and Qualys ids only - never a credential.
+func warnf(format string, a ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, "[qualys] "+format+"\n", a...)
+}
+
+func (a *API) warnf(format string, a2 ...any) { warnf(format, a2...) }
 
 // pageSize is how many findings to request per call.
 //
@@ -253,9 +276,10 @@ func (a *API) authError(status int, body []byte) error {
 			status, trimmed)
 	case http.StatusTooManyRequests:
 		return fmt.Errorf(
-			"qualys WAS rate-limited this request (HTTP 429). The weekly report "+
-				"still has the counts from the notification emails; only the "+
-				"per-finding detail is missing.\nresponse: %s", trimmed)
+			"qualys WAS rate-limited this request (HTTP %d) and the wait was longer "+
+				"than QUALYS_RL_MAX_WAIT. The weekly report still has the counts from "+
+				"the notification emails; only the per-finding detail is missing.\n"+
+				"response: %s", status, trimmed)
 	}
 	return fmt.Errorf("qualys WAS request failed: HTTP %d: %s", status, trimmed)
 }

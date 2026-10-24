@@ -116,6 +116,43 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `JIRA_BASE_URL`. UUID only. Unset changes nothing. `cti-jira --check` now
   also prints each Jira permission the fleet uses as ok or MISSING, writing
   nothing. RUNBOOK 11c has the setup, switch and rollback.
+- **`cti-appreport`: the scanner's own report on each AppSec ticket.** New
+  command (`sudo cti-agent cti-appreport ...`) that fetches the DAST scanner's
+  per-application report - Qualys WAS: create, poll, download as HTML_ZIPPED,
+  delete - for `cti-jira --appscan-reports DIR` to attach when a ticket is
+  filed or its findings change. The ticket text says it is attached and that
+  it contains scan-account session cookies. `run-appscan` does this when
+  `WAS_ATTACH_REPORT=1` (default **off**) on a real run: a `cti-jira` preview
+  decides which applications need one, `cti-appreport --tickets --only-ref`
+  fetches only those, `cti-jira --for-real --appscan-reports` attaches, and the
+  reports directory is deleted. Never fatal. Files 0600, directory 0700. The
+  scanner is chosen by `APPSCAN_REPORT_PROVIDER` (default `qualys-was`) behind
+  the Go interface `appscan.ReportFetcher`, so Invicti or Wiz is a package and
+  one case. Flags for testing against a live account: `--check`,
+  `--dump-request`, `--request-file`, `--probe-findings` (output passes through
+  `Redact()`, which strips Cookie, Set-Cookie and Authorization). The live
+  Qualys Report API element names have **not** been verified yet; that is what
+  the probe sequence in RUNBOOK 11f is for.
+- **Qualys API rate limiter (`internal/qualysrl`).** The WAS client used by
+  `cti-appscan` and `cti-appreport` now reads Qualys's `X-RateLimit-*` and
+  `X-Concurrency-Limit-*` headers on every response, waits out a short
+  refusal, and gives way when only `QUALYS_RL_RESERVE` calls (default 5) are
+  left, so the optional report work never starves the VM lane or KnowledgeBase
+  lookups. `QUALYS_RL_MAX_WAIT` (default 5m) is the longest it sleeps; longer is
+  an error. It follows limit increases automatically: nothing to change when
+  the Qualys contract raises limits. The VM-lane client is not wired to it.
+- **AppSec tickets list potential Critical and Urgent findings.** The
+  scanner's unconfirmed (POTENTIAL) findings of severity 4 and 5 now appear in
+  their own "POTENTIAL - please verify" section under a callout saying they are
+  deliberately listed, not confirmed, and that not confirmed does not mean not
+  there. Each line reads "POTENTIAL <sev> - unconfirmed, please verify", and the
+  summary and header count them separately ("To verify: ..."). Potential
+  Serious and below are still left out. A finding that moves between potential
+  and confirmed counts as changed, so its ticket is told.
+- **`cti-jira --appscan-tickets` preview honours the write gate.** With
+  `JIRA_ALLOW_CREATE` closed, a preview now reports `gate-closed` instead of
+  `would-create`/`would-comment`, so no scanner report is fetched for a ticket
+  the real run would not touch.
 
 ### Upgrade
 
@@ -132,6 +169,17 @@ Pull, reinstall. Then:
    Monday's run file them.
 4. Optional: nothing to do unless you switch to a scoped Jira token (RUNBOOK
    11c, "Using a scoped service-account token").
+5. Rebuild and install (`install-fedora.sh`): there is a new binary,
+   `cti-appreport`. Nothing else to configure.
+6. `WAS_ATTACH_REPORT` is **off by default**; the lane behaves as before until
+   you set `WAS_ATTACH_REPORT=1`. Run the probe sequence first (RUNBOOK 11f,
+   "Attaching the scanner's report": `cti-appreport --check`, `--dump-request`,
+   one report with `--keep` then without, `--probe-findings`), because the
+   Report API field names are not yet verified against a live account. The
+   Qualys account needs permission to create WAS reports.
+7. **Existing AppSec tickets will get one comment** on the next run listing the
+   newly included potential Critical and Urgent findings (the findings
+   fingerprint now includes them). That is expected, not a fault.
 
 ## 1.3.2 — 2026-10-19
 
