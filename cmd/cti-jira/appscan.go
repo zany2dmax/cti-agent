@@ -94,6 +94,62 @@ func appscanJQL(projectKey, label string) string {
 		projectKey, label)
 }
 
+// priorJQL finds this application's most recent CLOSED ticket, for a new
+// ticket to point back to when the findings return.
+func priorJQL(projectKey, label string) string {
+	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory = Done ORDER BY created DESC`,
+		projectKey, label)
+}
+
+// priorTicket is a resolved or closed ticket for the same application.
+type priorTicket struct {
+	Key    string
+	Status string
+	Back   int // findings on the new ticket that were also on this one when it was last told
+}
+
+// findPrior looks for the application's last closed ticket. Best effort: a
+// failure costs the back-reference, never the new ticket.
+func findPrior(ctx context.Context, c *jira.Client, cfg config.Config, label string,
+	t appscan.AppTicket, name string) *priorTicket {
+	issues, err := c.Search(ctx, priorJQL(cfg.JiraProjectKey, label), 1)
+	if err != nil {
+		logf("appscan: %s: could not look for an earlier closed ticket: %s", name, safelog.Line(err.Error()))
+		return nil
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+	p := &priorTicket{Key: issues[0].Key, Status: issues[0].Fields.Status.Name}
+	var st appscanState
+	if found, err := c.GetProperty(ctx, p.Key, appscanPropKey, &st); err == nil && found {
+		was := map[string]bool{}
+		for _, k := range st.Keys {
+			was[k] = true
+		}
+		for _, k := range stateKeys(t) {
+			if was[k] {
+				p.Back++
+			}
+		}
+	}
+	return p
+}
+
+// priorNote is the line on a new ticket that names the closed one before it.
+func priorNote(p *priorTicket) string {
+	if p == nil {
+		return ""
+	}
+	s := fmt.Sprintf("\n\n*Recurring:* this application's previous ticket, %s, is %s.",
+		wikiEscape(p.Key), wikiEscape(oneLine(p.Status, 40)))
+	if p.Back > 0 {
+		s += fmt.Sprintf(" %d of the findings below were on it when it was last updated - they are back, "+
+			"or were never fixed.", p.Back)
+	}
+	return s
+}
+
 type appPlan string
 
 const (
@@ -225,6 +281,12 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 	// preview shows exactly what a real run would attach.
 	file := fmt.Sprintf("appscan-%s.txt", now.Format("2006-01-02"))
 	full := []byte(appscanFullText(t, now))
+	var prior *priorTicket
+	if plan == appCreate && (!forReal || gateErr == nil) {
+		// Not when a real run is about to stop at the closed write gate:
+		// the lookup would be wasted calls.
+		prior = findPrior(ctx, c, cfg, label, t, name)
+	}
 	rep, hasRep, repName := loadAppReport(t, plan == appCreate || plan == appComment, reportsDir, now, name)
 
 	if !forReal {
@@ -233,8 +295,9 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		// parameters on our own applications.
 		switch plan {
 		case appCreate:
-			fmt.Printf("===== would create for %s\n%s%s\n%s", oneLine(t.App, 80), appscanBody(t, now),
-				reportNote(hasRep, repName), attachPreview(hasRep, repName, rep.Body, file, full))
+			fmt.Printf("===== would create for %s\n%s%s%s\n%s%s", oneLine(t.App, 80), appscanBody(t, now),
+				priorNote(prior), reportNote(hasRep, repName), attachPreview(hasRep, repName, rep.Body, file, full),
+				linkPreview(prior))
 			return refFor("would-create", nil, "")
 		case appComment:
 			fmt.Printf("===== would comment on %s\n%s\n%s", open.Key, appscanComment(t, prev, now),
@@ -264,7 +327,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 			ProjectKey:  cfg.JiraProjectKey,
 			IssueType:   cfg.JiraIssueType,
 			Summary:     appscanSummary(t),
-			Description: appscanBody(t, now) + reportNote(hasRep, repName),
+			Description: appscanBody(t, now) + priorNote(prior) + reportNote(hasRep, repName),
 			Labels:      []string{"cti-agent", appscanLabel, label},
 		}
 		assignee, note := "", ""
@@ -319,6 +382,14 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 				name, res.Key, safelog.Line(err.Error()))
 		}
 		logf("appscan: %s: filed %s", name, res.Key)
+		if prior != nil {
+			if err := c.LinkIssues(ctx, jira.RelatesLink, res.Key, prior.Key); err != nil {
+				logf("appscan: %s: %s says it follows %s, but the Jira link was refused: %s",
+					name, res.Key, prior.Key, safelog.Line(err.Error()))
+			} else {
+				logf("appscan: %s: linked %s to the earlier %s", name, res.Key, prior.Key)
+			}
+		}
 		addWatchers(ctx, c, res.Key, name, t.Watchers, accounts, logf)
 		r := refFor("created", &jira.Issue{Key: res.Key}, note)
 		r.Assignee = assignee
@@ -372,6 +443,15 @@ func loadAppReport(t appscan.AppTicket, wanted bool, reportsDir string, now time
 		}
 	}
 	return rep, hasRep, fmt.Sprintf("%s-report-%s.zip", rep.Provider, now.Format("2006-01-02"))
+}
+
+// linkPreview says which closed ticket a real run would link to.
+func linkPreview(p *priorTicket) string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("----- would link to %s (%s), the application's earlier closed ticket\n",
+		oneLine(p.Key, 40), oneLine(p.Status, 40))
 }
 
 // attachPreview says what a real run would attach, by name and size.
