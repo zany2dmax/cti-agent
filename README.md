@@ -59,6 +59,7 @@ decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
 | **check it is up and working** from an SSH session: health, version, timers, dry runs, logs | **[CHEATSHEET.md](CHEATSHEET.md)** — `task cheatsheet:pdf` prints it to `CHEATSHEET.pdf` |
 | understand *why* it is shaped this way — orchestrator, executor lanes, heartbeat, message board, persistent memory | **[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md)** |
 | the full fleet reference: every command, every setting, the schedule, troubleshooting | **[fleet-kit/README.md](fleet-kit/README.md)** |
+| **swap in a different scanner, registrar or ticketing tool** - every Go interface the fleet is built on, how complete each one is, and where new ones could go | **[INTERFACES.md](INTERFACES.md)** |
 | **one command's every flag, environment variable, file and exit code** | **[man/man1/](man/man1/)** — `man cti-domains` on the box; `man ./man/man1/cti-domains.1` in a checkout. Conventions: [man/STYLE.md](man/STYLE.md) |
 | know what the always-on orchestrator is allowed to do, and what it must never do | [fleet-kit/fleet/CLAUDE.md](fleet-kit/fleet/CLAUDE.md) |
 | the individual agent playbooks | [skills/](fleet-kit/fleet/skills/): [checkin](fleet-kit/fleet/skills/checkin/SKILL.md), [cti-digest](fleet-kit/fleet/skills/cti-digest/SKILL.md), [scout-sweep](fleet-kit/fleet/skills/scout-sweep/SKILL.md), [patch-tuesday](fleet-kit/fleet/skills/patch-tuesday/SKILL.md) |
@@ -398,6 +399,30 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
 ## Ideas not yet built
 
 - More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
+- **Interface work** (the full reasoning, with the current gaps, is in
+  [INTERFACES.md](INTERFACES.md); build each when a second implementation is
+  real, not before):
+  - Finish `vulnlookup.LookupProvider`: `cti-jira` (`scannerFor`) and
+    `cti-patchtuesday` build the Qualys client directly and ignore
+    `LOOKUP_PROVIDER`. Small for `cti-jira` (share `buildLookupProvider`)
+  - `LOOKUP_PROVIDER`-style setting for the registrar (`registrarFor` is fixed
+    to GoDaddy)
+  - Mail transport interfaces (read, send, move) so a fleet on Google
+    Workspace or SMTP/IMAP can run it; Microsoft Graph is used directly by five
+    commands plus `mailer.py`. The recipient allowlist stays above the
+    interface in `cti-mailer`. Largest, most valuable
+  - A ticket-tracker interface (`tickets.Tracker`) so ServiceNow, Azure
+    DevOps or GitHub Issues can replace Jira. Needs an answer for state kept
+    as a Jira issue property and for the Jira wiki-markup text
+  - A notification channel interface (`alert.Notifier`) for `cti-alert`:
+    Teams, Slack, a pager. Smallest, a good first one
+  - An ownership source interface (`appscan.OwnerSource`) so a CMDB or
+    identity group can replace `app-owners.txt`
+  - An advisory/exploit feed interface for new feeds (EPSS, vendor lists);
+    whether the Python CISA KEV fetch moves under it is a separate decision
+  - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
+    scanner detection IDs) for the Patch Tuesday correlation, which is
+    Qualys-only today
 - Qualys severity bands beside the QDS number, once the thresholds are verified
   against Qualys' own documentation rather than guessed
 - A container image for deployment
@@ -415,7 +440,9 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   services. Resolve every name and report only live hosts missing from
   `domains.txt`, dangling CNAMEs (takeover risk, High) and names new since
   last week; historical names that no longer resolve are dropped
-- Domains lane, the Proofpoint on Demand Log API half (the DNS half - not yet
+- Domains lane, the Proofpoint on Demand Log API half (define a
+  `domains.MailGateway` interface here, with PoD as its first implementation,
+  see [INTERFACES.md](INTERFACES.md)) (the DNS half - not yet
   on the gateway, other-tenant MX, leftovers - shipped in 1.3.2). Confirm a
   domain really sends from outbound mail in PoD's log stream (read-only
   cluster token, WebSocket) with that header From and the DKIM selector it
@@ -425,7 +452,8 @@ fleet](RUNBOOK.md#8-installing-the-fleet), and
   `domains.txt` needs only `saas` / `legacy` / `unknown`. Costs: a WebSocket
   client (the module has no dependencies) and confirming the stream's
   back-fill window
-- Certificate expiry lane: a weekly email to IT listing certificates about to
+- Certificate expiry lane (build it behind a `certs.Source` interface from
+  the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
   expire, from Qualys Certificate View (CertView; the subscription has it and
   the fleet's existing Qualys credentials reach it). Group by days left
   (expired, 30, 60, 90), name the host, issuer and owner, and mention changes
