@@ -139,7 +139,8 @@ rather than runs a task — read
 
 The pattern originates with [Build Your Own Claude Code Agent
 Fleet](https://www.limitededitionjonathan.com/docs/build-your-own-agent-fleet)
-by Limited Edition Jonathan. This repository applies it to threat intel.
+by Limited Edition Jonathan. This repository applies it to an information security 
+team's needs.
 
 ---
 
