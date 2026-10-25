@@ -197,7 +197,11 @@ detections, which would read a finding the week's scan did not re-test as
 fixed. An application is marked to be left alone that week when its scan
 did not complete, failed to authenticate, was a discovery scan, was not
 matched to the scanner's scan list (no web-app id), or its open findings
-could not be fetched - so its ticket is never told everything was fixed. Not written
+could not be fetched - so its ticket is never told everything was fixed.
+The open-findings search asks Qualys for the verbose record, so each finding
+also carries how the scanner found it: the request, any payload, the access
+path and an excerpt of the response (bounded, cookie lines redacted, request
+headers never read). Not written
 with
 .BR \-\-subject\-only .
 Default:\~not written.

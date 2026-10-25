@@ -1313,6 +1313,15 @@ sudo cti-agent cti-mailer --lane was --to you@example.com \
 The copy still says "this week", and each application still gets one row from
 its newest scan. An address outside `WAS_ALLOW_TO` needs `--approve`.
 
+### How the scanner found it
+
+Tickets now show how the scanner found each finding: the request it sent, the
+payload (when it injected one), the pages it crossed to reach it, and an
+excerpt of the response. The ticket shows one place in full; the attached file
+has it for every place. Request headers are never read, and `Cookie`,
+`Set-Cookie` and `Authorization` lines in a response excerpt are redacted, so
+this works without `WAS_ATTACH_REPORT`.
+
 ### Attaching the scanner's report
 
 `cti-appreport` fetches the scanner's own per-application report (Qualys WAS:

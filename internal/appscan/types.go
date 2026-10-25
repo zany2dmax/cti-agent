@@ -315,6 +315,23 @@ type Finding struct {
 	// this ID - the ticket then says the fix was not available, rather than
 	// leaving a developer with a severity and no next step.
 	Remedy *Remedy
+
+	// Evidence is how the scanner found it - the request it sent and what
+	// came back - when the scanner provides it. Already redacted and bounded.
+	Evidence *Evidence
+}
+
+// Evidence is one detection of a finding: enough for a developer to see it
+// for themselves. Credential headers are never carried (Cookie, Set-Cookie,
+// Authorization are removed by Redact before anything is kept), and every
+// field is bounded so one noisy response cannot crowd out the ticket.
+type Evidence struct {
+	Method        string   `json:"method,omitempty"`
+	Link          string   `json:"link,omitempty"`    // the URL the scanner requested
+	Payload       string   `json:"payload,omitempty"` // what it injected, when anything
+	Proof         string   `json:"proof,omitempty"`   // what it saw in the response
+	AccessPath    []string `json:"accessPath,omitempty"`
+	Authenticated bool     `json:"authenticated,omitempty"`
 }
 
 // Remedy is what a developer needs to fix a finding: what was found, why it
