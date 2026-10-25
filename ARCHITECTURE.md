@@ -270,5 +270,6 @@ anyone.
 |---|---|
 | The full design argument | [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) |
 | Run it, or fix it at 06:30 | [RUNBOOK.md](RUNBOOK.md) |
+| Swap in a different scanner, registrar or ticketing tool | [INTERFACES.md](INTERFACES.md) |
 | The threat model and accepted risks | [SECURITY.md](SECURITY.md) |
 | What changed, and what upgrading requires of you | [CHANGELOG.md](CHANGELOG.md) |

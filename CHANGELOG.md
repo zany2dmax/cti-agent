@@ -88,6 +88,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **`INTERFACES.md`.** One page listing every Go interface the fleet is built on
+  (`LookupProvider`, `appscan.Provider` and its capability interfaces,
+  `Registrar`, `Resolver`), how complete each is, the places where a command
+  still calls the Qualys client directly, and where new interfaces could go.
+  The proposals are on the README backlog. Documentation only.
+
 - **Recurring AppSec tickets link back to the last closed one:** a new
   application ticket now names the application's most recent closed ticket
   ("Recurring: ... previous ticket, KEY, is done"), says how many of its
