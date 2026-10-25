@@ -132,11 +132,18 @@ REPORTARGS=()
 # one would be read as this run's answer.
 rm -f "$AUTHFAIL"
 
+# The subject comes out of the same run. It used to be a second
+# `cti-appscan --subject-only`, which re-read the mailbox and repeated every
+# Qualys WAS call - twice the API load against the rate limit, for one line -
+# and could disagree with the report if a scan landed in between.
+SUBJFILE="$STATE/appscan-subject-$STAMP.txt"
+rm -f "$SUBJFILE"
 "$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" --seen-out "$SEEN" \
-  --tickets-out "$TICKETS" --ticket-slot \
+  --tickets-out "$TICKETS" --ticket-slot --subject-out "$SUBJFILE" \
   || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
 
-SUBJECT="$("$APPSCAN" --subject-only)" || fail "could not build the subject line"
+[ -s "$SUBJFILE" ] || fail "cti-appscan wrote no subject line"
+SUBJECT="$(head -n 1 "$SUBJFILE")"
 [ -n "$SUBJECT" ] || fail "empty subject - refusing to send a report nobody can triage from the subject"
 
 log "subject: $SUBJECT"

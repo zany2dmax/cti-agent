@@ -139,6 +139,16 @@ the
 file.
 Default:\~off.
 .TP
+.BI \-\-subject\-out " FILE"
+Also write the subject line to
+.IR FILE ,
+mode 0600, during a full run.
+.B run\-appscan
+uses this rather than a second
+.B \-\-subject\-only
+run, which would repeat every mailbox and Qualys WAS call.
+Default:\~empty (not written).
+.TP
 .BI \-\-auth\-fail\-out " FILE"
 Write one tab-separated line per scan whose configured credential failed:
 application, authentication record, status. Mode 0600, and written on every
