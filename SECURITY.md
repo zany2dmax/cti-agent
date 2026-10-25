@@ -264,6 +264,11 @@ groups" for the lookup). A watcher that is not found, invalid or refused is
 logged and skipped; it never blocks a ticket, and watchers are not put in the
 weekly email.
 
+**Recurring-ticket links are best-effort and need "Link issues".** A new
+application ticket is linked ("Relates") to that application's last closed
+ticket. A failed search or a refused link is logged and skipped; the ticket is
+still filed.
+
 **The domains check is a target list, and its input never enters the
 repository.** The report names every domain we own and which of them can be
 spoofed or taken over; the inventory says which ones send mail. So the

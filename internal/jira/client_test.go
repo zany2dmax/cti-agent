@@ -322,6 +322,32 @@ func TestAddWatcherPostsABareJSONString(t *testing.T) {
 	}
 }
 
+func TestLinkIssuesPostsTheTypeByNameAndBothKeys(t *testing.T) {
+	var gotMethod, gotPath string
+	var got struct {
+		Type         map[string]string `json:"type"`
+		InwardIssue  map[string]string `json:"inwardIssue"`
+		OutwardIssue map[string]string `json:"outwardIssue"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.Unmarshal(b, &got)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "svc@example.com", "tok")
+	if err := c.LinkIssues(context.Background(), RelatesLink, "SEC-13", "SEC-12"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/api/2/issueLink" {
+		t.Errorf("%s %s", gotMethod, gotPath)
+	}
+	if got.Type["name"] != "Relates" || got.InwardIssue["key"] != "SEC-13" || got.OutwardIssue["key"] != "SEC-12" {
+		t.Errorf("body %+v", got)
+	}
+}
+
 const testCloudID = "11111111-2222-3333-4444-555555555555"
 
 func TestCloudGatewayAcceptsOnlyAUUID(t *testing.T) {

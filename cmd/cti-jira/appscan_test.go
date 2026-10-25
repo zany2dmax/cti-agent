@@ -36,6 +36,12 @@ type appJira struct {
 	watchers  map[string][]string // issue key -> accountIds posted
 	failWatch bool                // answer every watchers POST with 403
 	attached  map[string][]string // issue key -> attachment file names
+
+	done         map[string]map[string]any // label -> closed issue, for the Done search
+	doneSearches int                       // how many Done-category searches were asked
+	failDone     bool                      // answer the Done search with a 500
+	links        []map[string]any          // issueLink bodies posted
+	failLink     bool                      // answer an issueLink POST with 403
 }
 
 func newAppJira(t *testing.T) (*appJira, *jira.Client) {
@@ -54,12 +60,35 @@ func newAppJira(t *testing.T) (*appJira, *jira.Client) {
 			}
 			_ = json.Unmarshal(body, &q)
 			var out []map[string]any
+			if strings.Contains(q.JQL, "statusCategory = Done") {
+				fj.doneSearches++
+				if fj.failDone {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				for label, is := range fj.done {
+					if strings.Contains(q.JQL, `"`+label+`"`) {
+						out = append(out, is)
+					}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"issues": out, "isLast": true})
+				return
+			}
 			for label, is := range fj.open {
 				if strings.Contains(q.JQL, `"`+label+`"`) {
 					out = append(out, is)
 				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"issues": out, "isLast": true})
+		case r.Method == http.MethodPost && p == "/rest/api/2/issueLink":
+			if fj.failLink {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			var l map[string]any
+			_ = json.Unmarshal(body, &l)
+			fj.links = append(fj.links, l)
+			w.WriteHeader(http.StatusCreated)
 		case r.Method == http.MethodGet && p == "/rest/api/3/user/search":
 			_ = json.NewEncoder(w).Encode(fj.users)
 		case r.Method == http.MethodPost && p == "/rest/api/2/issue":
@@ -386,5 +415,123 @@ func TestDryRunAndSkippedAppsAddNoWatchers(t *testing.T) {
 	runApp(t, c, true, sk)
 	if len(fj.watchers) != 0 {
 		t.Errorf("watchers added for a skipped app: %v", fj.watchers)
+	}
+}
+
+// closeApp registers a closed ticket for the application (label cti-appscan-101)
+// whose recorded state holds the given findings.
+func (fj *appJira) closeApp(label, key string, was ...appscan.AppTicket) {
+	if fj.done == nil {
+		fj.done = map[string]map[string]any{}
+	}
+	fj.done[label] = map[string]any{"key": key, "fields": map[string]any{
+		"summary": "old",
+		"status":  map[string]any{"name": "Done", "statusCategory": map[string]any{"key": "done"}}}}
+	var keys []string
+	for _, t := range was {
+		keys = append(keys, stateKeys(t)...)
+	}
+	b, _ := json.Marshal(appscanState{Hash: "old", Keys: keys, Resolved: true})
+	fj.props[key] = b
+}
+
+func TestARecurringTicketNamesAndLinksTheClosedOne(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.closeApp("cti-appscan-101", "SEC-12", appTicket(xss("https://app.example.com/a"), xss("https://app.example.com/old")))
+	refs := runApp(t, c, true, appTicket(xss("https://app.example.com/a", "https://app.example.com/new")))
+	if refs["id:101"].Action != "created" || len(fj.creates) != 1 {
+		t.Fatalf("refs %+v creates %d", refs, len(fj.creates))
+	}
+	desc := fj.creates[0]["description"].(string)
+	if !strings.Contains(desc, "*Recurring:* this application's previous ticket, SEC-12, is done.") ||
+		!strings.Contains(desc, " 1 of the findings below were on it") {
+		t.Errorf("description:\n%s", desc)
+	}
+	if len(fj.links) != 1 {
+		t.Fatalf("links %v", fj.links)
+	}
+	l := fj.links[0]
+	in, out := l["inwardIssue"].(map[string]any), l["outwardIssue"].(map[string]any)
+	if l["type"].(map[string]any)["name"] != "Relates" || in["key"] != refs["id:101"].Key || out["key"] != "SEC-12" {
+		t.Errorf("link %v", l)
+	}
+}
+
+func TestARecurringTicketCountsEveryOverlap(t *testing.T) {
+	fj, c := newAppJira(t)
+	both := appTicket(xss("https://app.example.com/a", "https://app.example.com/b"))
+	fj.closeApp("cti-appscan-101", "SEC-12", both)
+	runApp(t, c, true, both)
+	if d := fj.creates[0]["description"].(string); !strings.Contains(d, " 2 of the findings below were on it") {
+		t.Errorf("description:\n%s", d)
+	}
+}
+
+func TestAPriorWithNoSharedFindingsStillLinksWithoutACount(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.closeApp("cti-appscan-101", "SEC-12", appTicket(xss("https://app.example.com/old")))
+	runApp(t, c, true, appTicket(xss("https://app.example.com/new")))
+	d := fj.creates[0]["description"].(string)
+	if !strings.Contains(d, "SEC-12") || strings.Contains(d, "were on it") || len(fj.links) != 1 {
+		t.Errorf("links %d description:\n%s", len(fj.links), d)
+	}
+}
+
+func TestNoPriorMeansNoNoteAndNoLink(t *testing.T) {
+	fj, c := newAppJira(t)
+	runApp(t, c, true, appTicket(xss("https://app.example.com/a")))
+	if d := fj.creates[0]["description"].(string); strings.Contains(d, "Recurring") || len(fj.links) != 0 {
+		t.Errorf("links %d description:\n%s", len(fj.links), d)
+	}
+}
+
+func TestAFailedPriorSearchStillFilesTheTicketWithoutALink(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.failDone = true
+	refs := runApp(t, c, true, appTicket(xss("https://app.example.com/a")))
+	if refs["id:101"].Action != "created" || len(fj.creates) != 1 || len(fj.links) != 0 ||
+		strings.Contains(fj.creates[0]["description"].(string), "Recurring") {
+		t.Errorf("refs %+v creates %d links %d", refs, len(fj.creates), len(fj.links))
+	}
+}
+
+func TestARefusedLinkLeavesTheTicketCreated(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.closeApp("cti-appscan-101", "SEC-12", appTicket(xss("https://app.example.com/a")))
+	fj.failLink = true
+	refs := runApp(t, c, true, appTicket(xss("https://app.example.com/a")))
+	if refs["id:101"].Action != "created" || len(fj.creates) != 1 || len(fj.links) != 0 {
+		t.Errorf("refs %+v creates %d links %d", refs, len(fj.creates), len(fj.links))
+	}
+}
+
+func TestPreviewShowsTheLinkAndCreatesNothing(t *testing.T) {
+	fj, c := newAppJira(t)
+	fj.closeApp("cti-appscan-101", "SEC-12", appTicket(xss("https://app.example.com/a")))
+	in := ticketsFile(t, appTicket(xss("https://app.example.com/a")))
+	out := captureStdout(t, func() {
+		if rc := doAppscanTickets(context.Background(), c, testCfg, in, false, time.Now(), "", ""); rc != exitOK {
+			t.Errorf("rc %d", rc)
+		}
+	})
+	if !strings.Contains(out, "*Recurring:* this application's previous ticket, SEC-12") ||
+		!strings.Contains(out, "----- would link to SEC-12 (Done)") {
+		t.Errorf("preview:\n%s", out)
+	}
+	if len(fj.creates) != 0 || len(fj.links) != 0 {
+		t.Errorf("preview wrote: creates %d links %d", len(fj.creates), len(fj.links))
+	}
+}
+
+func TestACommentRunNeverLooksForAPrior(t *testing.T) {
+	fj, c := newAppJira(t)
+	runApp(t, c, true, appTicket(xss("https://app.example.com/a")))
+	before := fj.doneSearches
+	fj.closeApp("cti-appscan-101", "SEC-12")
+	if r := runApp(t, c, true, appTicket(xss("https://app.example.com/b")))["id:101"]; r.Action != "commented" {
+		t.Fatalf("ref %+v", r)
+	}
+	if fj.doneSearches != before || len(fj.links) != 0 {
+		t.Errorf("done searches %d -> %d, links %d", before, fj.doneSearches, len(fj.links))
 	}
 }

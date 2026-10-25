@@ -309,6 +309,20 @@ func (c *Client) AddWatcher(ctx context.Context, key, accountID string) error {
 	return c.do(ctx, http.MethodPost, path, accountID, nil)
 }
 
+// RelatesLink is Jira's stock "relates to" link type.
+const RelatesLink = "Relates"
+
+// LinkIssues links two issues with a link type by NAME. Needs the "Link
+// issues" project permission.
+func (c *Client) LinkIssues(ctx context.Context, linkType, inwardKey, outwardKey string) error {
+	body := map[string]any{
+		"type":         map[string]string{"name": linkType},
+		"inwardIssue":  map[string]string{"key": inwardKey},
+		"outwardIssue": map[string]string{"key": outwardKey},
+	}
+	return c.do(ctx, http.MethodPost, "/rest/api/2/issueLink", body, nil)
+}
+
 // Attach uploads a file to an issue.
 //
 // Two things here are non-obvious and both are required by Jira:
@@ -498,7 +512,7 @@ func (c *Client) Myself(ctx context.Context) (Account, error) {
 // (find, file, comment, attach, record state, assign, add watchers) and the
 // global one for looking owners up by email.
 var FleetPermissions = []string{"BROWSE_PROJECTS", "CREATE_ISSUES", "ADD_COMMENTS",
-	"CREATE_ATTACHMENTS", "EDIT_ISSUES", "ASSIGN_ISSUES", "MANAGE_WATCHERS", "USER_PICKER"}
+	"CREATE_ATTACHMENTS", "EDIT_ISSUES", "ASSIGN_ISSUES", "MANAGE_WATCHERS", "LINK_ISSUES", "USER_PICKER"}
 
 // MyPermissions reports which of perms the token's account has in a project.
 // Read-only: it answers "would the fleet's writes be allowed?" without
