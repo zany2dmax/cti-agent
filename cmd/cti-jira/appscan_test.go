@@ -443,7 +443,7 @@ func TestARecurringTicketNamesAndLinksTheClosedOne(t *testing.T) {
 		t.Fatalf("refs %+v creates %d", refs, len(fj.creates))
 	}
 	desc := fj.creates[0]["description"].(string)
-	if !strings.Contains(desc, "*Recurring:* this application's previous ticket, SEC-12, is done.") ||
+	if !strings.Contains(desc, "*Recurring:* this application's previous ticket, SEC-12, is Done.") ||
 		!strings.Contains(desc, " 1 of the findings below were on it") {
 		t.Errorf("description:\n%s", desc)
 	}
