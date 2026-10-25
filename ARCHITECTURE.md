@@ -344,6 +344,10 @@ task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then
 task --list             # everything else
 ```
 
+Go throughout, with Python only where a standard-library SQL driver is needed -
+[why that split is a security
+decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
+
 Go is gated by `gofmt`, `go vet`, `staticcheck`, `golangci-lint`, `gosec` and
 `govulncheck`. The Python lanes are gated by their own unit tests and a syntax
 check — **no linter, formatter, type checker or security scanner**. That

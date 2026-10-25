@@ -1,51 +1,42 @@
 # CTI Agent Fleet
 
-**An always-on junior analyst for a security team.** It does the recurring,
-tedious work that has to happen every day, every week or every month - read
-the mail, check the scanner, chase the tickets, look over the domains, write up
-Patch Tuesday - on schedule, without being reminded, and without a sick day, a
-vacation or a Friday afternoon. It started as a counter-threat-intelligence
-digest, which is where the name comes from; it is now a general way to hand
-routine security chores to software and get a report a person can act on.
+**An always-on junior analyst for a security team.** Every morning it reads the
+advisories, asks your scanner which of those CVEs are *actually on your
+machines*, and chases the open tickets. Every week it checks your web
+applications and your domains. Every month it measures Patch Tuesday against
+your estate. It has no sick days, no vacation and no Friday afternoon, and it
+never says "all clear" about something it did not check.
 
-Each chore is a **lane**: a small, deterministic program on a systemd timer
-that gathers facts, decides what matters, and writes it up for the right
-people. Today's lanes:
+**What lands in your inbox**
 
-- **Threat intel, daily and weekly** - reads the CTI advisories that land in a
-  shared Microsoft 365 mailbox, pulls out the CVEs, asks the vulnerability
-  scanner which are *actually present* here, and mails a prioritised digest
-  with CISA KEV deadlines.
-- **Jira follow-through** - files one ticket per confirmed KEV or critical
-  exposure, re-checks every open ticket against the scanner each morning, says
-  when the hosts are clean, and lists every ticket's status in the daily.
-- **Patch Tuesday** - a monthly synopsis of Microsoft's release from
-  Microsoft's own data, measured against what the scanner sees on our machines.
-- **Application security** - a weekly roll-up of the web-application scanner's
-  findings for the people who own the code.
-- **Domains** - a weekly check of every domain we own: registrar expiry and
-  locks, what is in the registrar account but not on our list, which domains
-  have a live website, TLS, and whether each domain's mail records match what
-  it is for - with the exact DNS changes filed for IT as one ticket.
-- **Housekeeping** - keeps the shared mailbox tidy, alerts the operator when
-  any lane fails, and an orchestrator heartbeat that watches the lanes and
-  escalates what it cannot settle on its own.
+- A ranked daily digest of what is really exposed, with CISA KEV deadlines.
+- A weekly web-application report, with one Jira ticket per application,
+  assigned to its owner and carrying the scanner's fix text (and, if you turn
+  it on, the scanner's own report).
+- The exact DNS changes IT needs to make, filed as a single ticket.
+- A monthly Patch Tuesday synopsis, built from Microsoft's own data.
 
-Adding a lane for the next tedious thing is the point:
-[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) is the recipe.
+**Why you can trust it.** Every claim comes from the system that owns it:
+presence only from the scanner, registration only from the registrar, a
+release's contents only from Microsoft. The report says plainly what it could
+not check, because a report that cannot tell "we looked and found nothing" from
+"we never looked" will publish the reassuring one. The reports are written by
+plain, deterministic code. AI only supervises: the orchestrator that watches
+the lanes can read and escalate, and is not given the runners or the mailer.
+Email goes only to allowlisted audiences, tickets only to an allowlisted
+project, and anything else waits for a person's approval. It does the legwork;
+people make the calls.
 
-It behaves like a careful junior analyst rather than an autonomous one.
-**Every claim has a source**: presence comes only from the scanner, registration
-only from the registrar, a release's contents only from Microsoft, and the
-report says plainly what it could not check - because a report that cannot
-tell "we looked and found nothing" from "we never looked" will publish the
-reassuring one. **It does the legwork; people make the calls**: email goes only
-to allowlisted audiences, tickets only to an allowlisted project, anything else
-waits for a human's approval. No lane needs a model to write its report, and
-the AI orchestrator that watches them can read and escalate but is not given
-the runners or the mailer. Go throughout, with Python only where a standard-library SQL
-driver is needed - [why that split is a security
-decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
+**Built to be reused.** Each chore is a *lane*: a small program on a systemd
+timer that gathers facts, decides what matters and writes it up for the right
+people. Today's lanes are threat intel, Jira follow-through, Patch Tuesday,
+application security, domains, and housekeeping. Adding a lane for the next
+tedious thing is the point: [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) is
+the recipe. It works with Qualys, Jira, Microsoft 365 and GoDaddy today, and
+the scanner, registrar and ticketing tool sit behind swappable Go interfaces:
+[INTERFACES.md](INTERFACES.md) shows where to plug yours in. Standard library
+only, no dependencies, one box. It started as a counter-threat-intelligence
+digest, which is where the name comes from.
 
 ---
 
