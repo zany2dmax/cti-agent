@@ -58,7 +58,12 @@ func run() int {
 		"how far back to look for scan notifications")
 	out := flag.String("out", "", "write the HTML here")
 	textOut := flag.String("text-out", "", "write the plain-text version here")
-	subjectOnly := flag.Bool("subject-only", false, "print the subject line and exit")
+	subjectOnly := flag.Bool("subject-only", false,
+		"print the subject line and exit (a full run: every scanner call is made again - "+
+			"the runner uses --subject-out instead)")
+	subjectOut := flag.String("subject-out", "",
+		"also write the subject line here, so the runner need not run a second time "+
+			"(and repeat every scanner call) just to learn it")
 	noDetail := flag.Bool("no-detail", false,
 		"skip the Qualys WAS API; report counts from the notifications only")
 	authFailOut := flag.String("auth-fail-out", "",
@@ -273,6 +278,7 @@ func run() int {
 	}{
 		{*out, block.HTML},
 		{*textOut, block.Text},
+		{*subjectOut, block.Subject + "\n"},
 	} {
 		if w.path == "" {
 			continue

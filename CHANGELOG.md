@@ -61,6 +61,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **The AppSec lane called the Qualys WAS API twice per run.** `run-appscan`
+  got its subject line from a second `cti-appscan --subject-only`, a full
+  re-run that re-read the mailbox and repeated every scanner call - double the
+  load against the rate limit, and log counts that disagreed. The subject now
+  comes out of the one run (`cti-appscan --subject-out`).
+
 - **AppSec read the Qualys notices as Graph's plain-text conversion**, which
   ran every field onto one line and dropped the report link, so no scan
   matched the WAS scan list and every application was left alone.

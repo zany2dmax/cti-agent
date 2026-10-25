@@ -2535,6 +2535,22 @@ class RunnersToDev(unittest.TestCase):
         self.assertEqual(len(alerts), 1, calls)
         self.assertIn("--to-dev", alerts[0])
 
+    def test_appscan_calls_the_scanner_once_per_run(self):
+        # The subject used to come from a second `cti-appscan --subject-only`
+        # - a full re-run that repeated every Qualys WAS call for one line.
+        # One report run per send, with --subject-out; --stamp-tickets and
+        # --commit-seen only read files and do not count.
+        for args in (["--to-dev"], ["--dry-run"], []):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appscan", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                runs = [c for c in calls if c.startswith("cti-appscan ")
+                        and "--stamp-tickets" not in c and "--commit-seen" not in c]
+                self.assertEqual(len(runs), 1, runs)
+                self.assertIn("--subject-out", runs[0])
+                self.assertNotIn("--subject-only", runs[0])
+
     def test_appscan_records_what_it_saw_only_after_a_real_send(self):
         # The mailbox cleanup archives a WAS notice once the AppSec lane has
         # "seen" it. That has to mean the report reached App Dev - a dry run
