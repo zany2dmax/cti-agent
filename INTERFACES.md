@@ -55,6 +55,16 @@ You hand it a CVE and ask whether the estate has it. It returns a normalised
 `Result` with a status of `PRESENT`, `NOT_PRESENT` or `UNKNOWN`, the affected
 hosts, and a reason.
 
+The rest of the app does not know whether a CVE was checked in Qualys,
+CrowdStrike or something else. Provider-specific identifiers such as Qualys
+QIDs come back as normalised `ExternalIDs`.
+
+| Provider | State |
+|---|---|
+| **Qualys VMDR** | Implemented. Two steps: a local KnowledgeBase cache mapping `CVE -> QID[]`, then the Host Detection List for active detections |
+| **CrowdStrike** | Placeholder at `internal/vulnlookup/crowdstrike`; returns `UNKNOWN` until a real lookup is added |
+| **noop / none** | Exercises mailbox reading and CVE extraction without calling a scanner. Useful for separating two failures that otherwise look identical |
+
 - **`UNKNOWN` is not `NOT_PRESENT`.** A provider that could not check says
   `UNKNOWN` with a reason. Reporting "not present" for a failed lookup is the
   failure this codebase is built to avoid. The no-op provider and the
@@ -88,15 +98,39 @@ anybody negotiates API access.
 - A provider that can click through to a portal registers its hosts with
   `appscan.AllowPortalHosts(name, hosts...)`. Without that, report links stay
   plain text. That is the safe failure.
+- The rest of the lane works with normalised `appscan.ScanResult` and
+  `appscan.Finding` values (application, scan, authentication state, counts by
+  severity, per-finding detail) and does not know which web-application
+  scanner produced them. `ScanResult.Provider` is a free-form key, and the
+  renderer is provider-neutral.
 - Scanner severity (1 to 5) is **not** the fleet's Sev1 to Sev5. Do not map
   one onto the other. A scanner's "Severity 5" describes one HTTP response; a
   fleet Sev1 means confirmed present *and* known exploited.
+
+| Scanner | State |
+|---|---|
+| **Qualys TotalAppSec (Web Application Scanning)** | Implemented in `internal/appscan/qualys`. `Provider` parses the WAS completion notification (`qualys-was`); `*qualys.API` implements `DetailFetcher` from the WAS Findings API, and adds a scan-list reconciliation that supplies the application's stable ID and flags scans whose notification never arrived |
+| **Others** (Invicti, Burp, ...) | Not yet |
 
 ### 1.3 `appscan.DetailFetcher`, `RemedyFetcher`, `ReportFetcher`
 
 Optional capabilities, each its own small interface, so a provider implements
 only what its API offers. A lane that cannot fetch a capability degrades
 instead of failing.
+
+```go
+// DetailFetcher is the optional half, for providers with an API:
+// per-finding detail for a scan's application.
+type DetailFetcher interface {
+    Findings(ctx context.Context, s ScanResult, since time.Time) ([]Finding, error)
+}
+```
+
+**Why `Provider` and `DetailFetcher` are separate.** Keeping them apart means
+the counts in the report come from the email alone and survive an API outage,
+an expired credential, or a scanner that has no API at all. Detail is added
+when it can be fetched, and its absence is stated, never read as "nothing
+found".
 
 | Interface | Gives | Used as an interface today? |
 |---|---|---|
@@ -167,7 +201,9 @@ claiming a second provider "just plugs in".
 `cmd/cti-appscan`'s `wasAPI` returns `*qualys.API`, and the lane also calls
 `Scans`, `WebApps`, `OpenFindings` and `Reconcile`. None of those is on any
 interface. The email-parsing half is vendor-neutral; the API half is Qualys.
-This is already on the README backlog.
+A second scanner's detail would go through `DetailFetcher` the same way, and
+scan-list reconciliation is an optional extra a provider with such an API can
+add. This is already on the [backlog](BACKLOG.md).
 
 ### 2.3 Domains has two single-vendor pieces with no interface
 
@@ -282,7 +318,7 @@ decision.
 
 ### 3.8 Mail-gateway evidence
 
-The domains lane's Proofpoint handling is hard-coded. The README backlog item
+The domains lane's Proofpoint handling is hard-coded. The [backlog](BACKLOG.md) item
 for the Proofpoint on Demand Log API would be the first real implementation
 of a `MailGateway` ("does this domain send mail, and from where"). Define the
 interface when that item is built, with PoD as implementation one, so the
@@ -291,7 +327,7 @@ shape follows a real API rather than a guess.
 ### 3.9 Exposure / attack-path source
 
 The `internal/defender` package parses Defender for Cloud attack-path emails.
-The backlog's attack-path lane is where an `exposure.Provider` would first be
+The [backlog](BACKLOG.md)'s attack-path lane is where an `exposure.Provider` would first be
 needed, as the second source after Defender.
 
 ### 3.10 Certificate inventory
@@ -348,6 +384,37 @@ Adding an implementation to an existing interface:
    names from a vendor's documentation are a hypothesis. Add a probe flag
    (see `cti-appreport --probe-findings` and `--request-file`) so the first
    live run is a diagnosis, not a guess.
+
+### 5.1 Adding a lookup provider
+
+1. Create a package under `internal/vulnlookup/<provider>`.
+2. Implement `Name()` and `LookupCVE(ctx, cve)`.
+3. Return normalised `vulnlookup.Result` values: `PRESENT`, `NOT_PRESENT` or
+   `UNKNOWN`, never a guess.
+4. Add the provider to `buildLookupProvider()` in `cmd/cti-agent/main.go`.
+5. Add provider-specific config to `internal/config` only if needed, and
+   require its credentials only when this provider is selected.
+
+`cmd/cti-jira` and `cmd/cti-patchtuesday` do not go through
+`buildLookupProvider` yet ([2.1](#21-vulnlookuplookupprovider-is-bypassed-by-two-commands)),
+so a new provider reaches the daily digest first and ticketing only after that
+gap is closed.
+
+### 5.2 Adding a DAST scanner
+
+1. Create `internal/appscan/<provider>` and implement `Provider` against the
+   vendor's completion email: `Recognises` from sender and subject, `Parse`
+   returning a normalised `ScanResult` with `Provider` set to its key.
+2. Add it to the `providers` list in `cmd/cti-appscan/main.go`. The email path
+   is complete at this point: counts, authentication state, attention.
+3. If the vendor has an API, implement `DetailFetcher` for per-finding detail.
+   `attachDetail` in `cmd/cti-appscan` takes the Qualys type today
+   ([2.2](#22-the-appsec-lane-calls-the-qualys-api-type-directly)), so a
+   second scanner's detail is the moment to finish that interface work.
+4. For the scanner's own report on each ticket, implement `ReportFetcher` and
+   add one case to `reportProvider` in `cmd/cti-appreport`. Nothing in
+   `cti-jira` or the runner changes.
+5. Credentials, if any, go in `internal/config` and `fleet.env`.
 
 ---
 

@@ -99,7 +99,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   (`LookupProvider`, `appscan.Provider` and its capability interfaces,
   `Registrar`, `Resolver`), how complete each is, the places where a command
   still calls the Qualys client directly, and where new interfaces could go.
-  The proposals are on the README backlog. Documentation only.
+  The proposals are on the backlog. **The README is now the front page:** its
+  design decisions, binaries table and project layout moved to
+  `ARCHITECTURE.md`, its lookup-provider and AppSec boundary sections moved into
+  `INTERFACES.md`, and its backlog became `BACKLOG.md`. Documentation only.
 
 - **Recurring AppSec tickets link back to the last closed one:** a new
   application ticket now names the application's most recent closed ticket
