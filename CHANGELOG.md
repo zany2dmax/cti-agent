@@ -88,6 +88,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Recurring AppSec tickets link back to the last closed one:** a new
+  application ticket now names the application's most recent closed ticket
+  ("Recurring: ... previous ticket, KEY, is done"), says how many of its
+  findings were on that ticket when it was last updated, and is linked to it
+  ("Relates"). The preview shows the note and a "would link to" line. Best
+  effort: a failed search or link is logged and the ticket is still filed.
+  `cti-jira --check` now lists LINK_ISSUES. **Upgrade:** grant the Jira API
+  account "Link issues" on the project; otherwise the link is skipped and
+  logged.
 - **Rehearse an AppSec ticket before Friday:** `cti-jira --appscan-tickets`
   previews now end each would-create and would-comment with the attachments
   ("would attach appscan-DATE.txt (N KB)", the scanner report or "no scanner
