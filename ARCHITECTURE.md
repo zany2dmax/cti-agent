@@ -2,7 +2,9 @@
 
 Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
-[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md).
+[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
+reference sections for people reading the code: the design decisions that will
+surprise you, the eleven binaries, and the project layout.
 
 ---
 
@@ -264,6 +266,162 @@ anyone.
 
 ---
 
+## Design decisions worth knowing
+
+These are the ones that will surprise you if you read the code without them.
+
+**Presence comes only from the scanner.** An advisory saying a CVE is exploited
+is context. Whether it is *here* is a separate question with a separate source,
+and the report never conflates them. Every CVE comes back as one of
+`PRESENT`, `NOT_PRESENT` or `UNKNOWN` — and `UNKNOWN` is load-bearing: it means
+the scanner had no answer, not that the estate is clean.
+
+**A QID is the unit of work, not a CVE.** Qualys maps every CVE in a monthly
+cumulative update to the same QID, so 353 "present" CVEs can be twelve missing
+patches. Keyed by CVE, the Patch Tuesday table was 353 rows stating one fact
+hundreds of times; keyed by QID it is a dozen rows that each mean *patch this*.
+
+**The vendor's own query leads.** The QQL Qualys publishes with each review,
+reproduced byte-for-byte, returns every QID in the release with assets against
+it. A query built from whatever this lane managed to correlate is a subset, and
+is labelled as one.
+
+**Four states, not three.** Exposure distinguishes "not measured" (the scanner
+was never reached) from "not yet measurable" (no QID mapping exists yet) from
+"measured, nothing open" from a real finding. An early version printed a
+confident diagnosis of a KnowledgeBase it had never contacted.
+
+**Suppression requires evidence.** The daily digest holds back a Patch Tuesday
+release's CVEs only when a manifest says that synopsis was *delivered* — never
+on a heuristic about vendors and dates, and never on a manifest from a run
+whose email failed.
+
+**Mailbox cleanup leaves things alone by default.** Only two kinds of message
+ever move: an advisory the agent took a CVE from, and a message whose own
+headers declare it an automatic reply. "The agent read it looking for CVEs and
+found none" is not "this has been dealt with."
+
+**Nothing can permanently delete mail.** `internal/graph` exposes
+move-to-folder and nothing else; Graph's `DELETE` and purge endpoints are
+deliberately not implemented.
+
+**Every failure falls open.** A missing manifest, an unreadable state file, an
+absent `FLEET_HOME` — each means *report more*, never *report less*. The
+recurring bug in this system was never a crash; it was a check that ran and had
+no effect, or a refusal indistinguishable from a quiet day.
+
+**Reports are targeting lists.** They pair "exploitable" with "these machines",
+are written `0600`, are gitignored, and go only to an allowlisted internal
+distribution list. See [RUNBOOK → Report
+sensitivity](RUNBOOK.md#13-report-sensitivity).
+
+---
+
+## The eleven binaries
+
+| Binary | Run by | Purpose |
+|---|---|---|
+| `cti-agent` | `run-digest`, or by hand | Reads the mailbox, extracts CVEs, asks the scanner what is present, writes markdown. Holds back CVEs already covered by a **sent** Patch Tuesday synopsis, and lists every one it held |
+| `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
+| `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails, with the KnowledgeBase fix for each finding and one Jira ticket per application (filed by `cti-jira --appscan-tickets`, assigned to the owner in `app-owners.txt`, with optional `watchers=`). Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
+| `cti-appreport` | `run-appscan` when `WAS_ATTACH_REPORT=1`; by hand to test | Fetches the DAST scanner's own per-application report (Qualys WAS: create, poll, download, delete) as a zip for `cti-jira --appscan-reports` to attach. Writes files only; the report carries the scan account's session cookies, so it is `0600` and deleted after attaching. The scanner is chosen by `APPSCAN_REPORT_PROVIDER` through `appscan.ReportFetcher` |
+| `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom`. `--actions-out` writes the DNS changes for `cti-jira --domains-actions` |
+| `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
+| `cti-kev` | by hand, or a quiet heartbeat | CISA KEV remediation deadlines for CVEs the scanner actually found |
+| `cti-patchtuesday` | `run-patchtuesday`, monthly (by hand for now) | The Patch Tuesday synopsis from Microsoft's release data (MSRC API), cross-checked against BleepingComputer: correlates the release against Host Detection using both the KnowledgeBase CVE→QID mapping **and** the QIDs Qualys publishes in the review's own QQL. One row per QID. Writes the release manifest the daily digest reads |
+| `cti-mailer` | every lane, and by hand | The **single outbound channel**. Holds the `VM_ALLOW_TO` recipient gate, which covers Cc as well as To. `--check` decodes the token and reports the roles the tenant actually consented to. `--to-dev` sends a preview to `FLEET_DEV_EMAIL` only, subject prefixed `[DEV TEST]`. A port of `mailer.py`; see [SECURITY.md](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision) |
+| `cti-mailbox` | `run-mailbox-cleanup`, daily | The only binary that **modifies** the mailbox. Dry-run unless `--for-real`. Needs `Mail.ReadWrite`; cannot permanently delete. Archives the fleet's own reports only when their `X-CTI-Agent-Sent` header carries a valid signature |
+| `cti-jira` | `run-digest`, between enrich and brief; `run-domains`, before the send (the email names the lock-down ticket) | Files one Jira ticket per confirmed KEV, Sev5 or CVSS 9.0+ CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. `--domains-actions` files the domains lane's DNS changes as one lock-down ticket, commenting on the open one only when the list changed. Writes nothing — no ticket, comment or attachment — without `--for-real` and a project in `JIRA_ALLOW_CREATE`. `--appscan-tickets` does the same per web application, and `--appscan-test <id>` files one unassigned, untracked `[TEST]` ticket to rehearse it. Optional `JIRA_CLOUD_ID` routes API calls through the Atlassian gateway for a scoped service-account token; `--check` also reports each Jira permission the fleet uses |
+
+All eleven are stdlib-only. `go.mod` has no dependencies, and adding one would make
+a C toolchain or a large generated tree a build-time requirement on the
+deployment host.
+
+```bash
+task build              # all eleven into bin/
+task test               # Go tests + Python lane tests
+task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
+task --list             # everything else
+```
+
+Go is gated by `gofmt`, `go vet`, `staticcheck`, `golangci-lint`, `gosec` and
+`govulncheck`. The Python lanes are gated by their own unit tests and a syntax
+check — **no linter, formatter, type checker or security scanner**. That
+asymmetry is known and tracked in
+[SECURITY.md → known gaps](SECURITY.md#known-gaps-and-accepted-risks).
+
+---
+
+## Project layout
+
+```text
+README.md                      the front page and the documentation map
+ARCHITECTURE.md                this page: how it works, the decisions, the layout
+INTERFACES.md                  the Go interfaces a new tool plugs into
+BACKLOG.md                     what is planned, and what is only an idea
+
+cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
+cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
+cmd/cti-appscan/               weekly application-security report from DAST email
+cmd/cti-appreport/             the scanner's own per-application report, zipped, for the Jira ticket
+cmd/cti-domains/               weekly domains check: registrar, DNS, web, mail records
+cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
+cmd/cti-jira/                  files and updates one ticket per KEV, Sev5 or CVSS 9.0+ CVE
+cmd/cti-kev/                   CISA KEV remediation deadline report
+cmd/cti-mailbox/               daily mailbox cleanup (the only writer)
+cmd/cti-mailer/                the single outbound channel, and the recipient gate
+cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
+
+internal/config/               environment/config loading, per-command requirements
+internal/fleetenv/             the single fleet.env reader every command uses
+internal/version/              the build stamp every command reports
+internal/safelog/              makes attacker-influenced text safe for a log record
+internal/cti/                  CTI parsing and CVE extraction
+internal/graph/                Microsoft Graph mailbox reader, sendMail, move
+internal/mailer/               per-lane recipient resolution and allowlist references
+internal/budget/               rolling-window and daily ceilings, backoff
+internal/kev/                  deadline bands, present-only filtering
+internal/jira/                 Jira client and the one-ticket-per-CVE policy
+internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
+internal/mailbox/              processed-message log and the cleanup decision table
+internal/report/               markdown report writer, hostname redaction
+internal/triage/              deterministic extractor, and the verifier over model JSON
+internal/defender/             Defender for Cloud attack-path notification parsing
+internal/ticketref/            what a Jira step tells a report: ticket key, action, link (validated)
+internal/safelink/             Proofpoint/redirector unwrapping with a host allowlist
+internal/shellgate/            shell lint: the patterns that make a runner exit quietly
+internal/appscan/              DAST boundary: scan results, auth state, the report
+internal/appscan/qualys/       Qualys WAS: notification parser, Findings API, report download
+internal/qualysrl/             header-driven Qualys API rate limiter (WAS client)
+internal/domains/              inventory, probes, findings by role, week-over-week diff
+internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
+internal/vulnlookup/           provider-neutral lookup interface and result types
+internal/vulnlookup/qualys/    Qualys implementation
+internal/vulnlookup/crowdstrike/ placeholder for a future implementation
+internal/vulnlookup/noop/      no scanner: exercises extraction only
+
+man/man1/                      a man page for every operator command
+
+fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
+fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
+fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
+fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
+                               run-appscan, run-domains, run-mailbox-cleanup,
+                               fleet-board, fleet-db
+fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
+fleet-kit/fleet/agents/        the triage agent definition
+fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
+fleet-kit/fleet/systemd/       service + timer pairs, generic layout
+fleet-kit/fleet/systemd-fedora/ same, FHS layout for Fedora/RHEL
+fleet-kit/install.sh           generic installer, everything under one directory
+fleet-kit/install-fedora.sh    FHS installer: /opt, /etc, /var/lib
+fleet-kit/tests/               lane tests (stdlib unittest, no network)
+scripts/                       history scrub, exposure remediation notes,
+                               cheatsheet-pdf.py (task cheatsheet:pdf)
+```
+
+---
+
 ## Where to go next
 
 | You want to | Read |
@@ -271,5 +429,6 @@ anyone.
 | The full design argument | [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) |
 | Run it, or fix it at 06:30 | [RUNBOOK.md](RUNBOOK.md) |
 | Swap in a different scanner, registrar or ticketing tool | [INTERFACES.md](INTERFACES.md) |
+| See what is planned | [BACKLOG.md](BACKLOG.md) |
 | The threat model and accepted risks | [SECURITY.md](SECURITY.md) |
 | What changed, and what upgrading requires of you | [CHANGELOG.md](CHANGELOG.md) |
