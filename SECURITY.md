@@ -229,6 +229,19 @@ URL and parameter. Same handling: written `0600` by `cti-appscan`, kept under
 applications and say which are scanned without a login, and this repository is
 public.
 
+**Evidence on tickets is bounded and scrubbed.** The open-findings search is
+verbose, so each finding carries its request, payload, access path and a
+response excerpt; request headers are never read. `Redact()` removes `Cookie`,
+`Set-Cookie`, `Authorization` and similar header values wherever they appear
+in a line, and token-named JSON values; `RedactURL()` blanks URL parameters
+named like a session or credential (`token=`, `sid=`, `;jsessionid=`, ...) in
+every URL a ticket shows; a base64 response that does not decode to readable
+text is dropped rather than passed on unchecked. Every field is clipped, the
+attachment carries evidence for at most 10 places per finding, and the proof
+is shown in a Jira `{noformat}` block so a response cannot become markup.
+Redaction is by pattern: a secret in an unrecognised form can still get
+through, which is one more reason the tickets' audience matters.
+
 **The scanner's own report is more sensitive still, and is short-lived.** With
 `WAS_ATTACH_REPORT=1` the AppSec lane fetches Qualys's per-application report
 (`cti-appreport`) and attaches it to the application's Jira ticket. That report

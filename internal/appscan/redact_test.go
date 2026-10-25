@@ -50,3 +50,30 @@ func TestRedactTagWithAttributes(t *testing.T) {
 		t.Fatalf("attributed tag passed: %s", out)
 	}
 }
+
+// Credentials mid-line and in JSON are caught, not only header lines.
+func TestRedactCatchesInlineHeadersAndJSONSecrets(t *testing.T) {
+	in := `<pre>HTTP/1.1 200 OK Set-Cookie: sid=abc123; Path=/</pre> {"access_token":"tok-xyz","user":"a"}`
+	out := Redact(in)
+	for _, leak := range []string{"abc123", "tok-xyz"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("%q survived: %s", leak, out)
+		}
+	}
+	if !strings.Contains(out, `"user":"a"`) {
+		t.Errorf("ordinary JSON was removed: %s", out)
+	}
+}
+
+func TestRedactURLScrubsSessionAndTokenParameters(t *testing.T) {
+	in := "https://app.example.com/a;jsessionid=S1?q=shoes&token=T2&sid=S3#x"
+	out := RedactURL(in)
+	for _, leak := range []string{"S1", "T2", "S3"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("%q survived: %s", leak, out)
+		}
+	}
+	if !strings.Contains(out, "q=shoes") {
+		t.Errorf("an ordinary parameter was removed: %s", out)
+	}
+}

@@ -2,6 +2,8 @@ package qualys
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -335,5 +337,147 @@ func TestOpenFindingsAskForEveryOpenFindingNotThisWeeks(t *testing.T) {
 	}
 	if !strings.Contains(b, `field="webApp.id" operator="EQUALS">42<`) {
 		t.Errorf("not keyed on the application id:\n%s", b)
+	}
+}
+
+// verboseFinding is the shape of a live verbose record, with invented values.
+// headers is the base64 request-header block; response is the raw response.
+func verboseFinding(response string) string {
+	headers := base64.StdEncoding.EncodeToString([]byte("Referer: x\nCookie: s=1\n"))
+	return `<Finding><id>1</id><qid>150222</qid><name><![CDATA[Reverse Tabnabbing]]></name>` +
+		`<type>VULNERABILITY</type><potential>false</potential>` +
+		`<resultList><count>1</count><list><Result><authentication>false</authentication>` +
+		`<accessPath><count>2</count><list><Url><![CDATA[https://app.example.com/]]></Url>` +
+		`<Url><![CDATA[https://app.example.com/a/]]></Url></list></accessPath><ajax>false</ajax>` +
+		`<payloads><count>1</count><list><PayloadInstance><payload><![CDATA[N/A]]></payload>` +
+		`<request><method><![CDATA[GET]]></method><link><![CDATA[https://app.example.com/a/b/]]></link>` +
+		`<headers><![CDATA[` + headers + `]]></headers></request>` +
+		`<response><![CDATA[` + response + `]]></response></PayloadInstance></list></payloads>` +
+		`</Result></list></resultList><severity>3</severity>` +
+		`<url><![CDATA[https://app.example.com/a/b/]]></url><status>ACTIVE</status></Finding>`
+}
+
+func openOne(t *testing.T, rec string) appscan.Finding {
+	t.Helper()
+	api, _ := stub(t, func(string, int) (int, string) { return 200, page(false, rec) })
+	got, err := api.OpenFindings(context.Background(), appscan.ScanResult{App: "App", AppID: "1234"})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	return got[0]
+}
+
+func TestVerboseEvidenceIsParsedAndHeadersAreNeverCarried(t *testing.T) {
+	f := openOne(t, verboseFinding(`Vulnerable blank target(s) found: <a href="https://x.example.org/" target="_blank">x</a>`))
+	e := f.Evidence
+	if e == nil {
+		t.Fatal("no evidence parsed")
+	}
+	if e.Method != "GET" || e.Link != "https://app.example.com/a/b/" {
+		t.Errorf("request = %s %s", e.Method, e.Link)
+	}
+	if len(e.AccessPath) != 2 {
+		t.Errorf("access path = %v", e.AccessPath)
+	}
+	if e.Payload != "" {
+		t.Errorf("payload N/A was kept: %q", e.Payload)
+	}
+	if !strings.Contains(e.Proof, "Vulnerable blank target") {
+		t.Errorf("proof = %q", e.Proof)
+	}
+	js, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(js), "s=1") || strings.Contains(string(js), "Cookie") {
+		t.Errorf("request headers leaked into the finding: %s", js)
+	}
+}
+
+func TestABase64ResponseIsDecoded(t *testing.T) {
+	enc := base64.StdEncoding.EncodeToString([]byte("Server error: stack trace for /a/b/ shown"))
+	f := openOne(t, verboseFinding(enc))
+	if f.Evidence == nil || !strings.Contains(f.Evidence.Proof, "stack trace for /a/b/") {
+		t.Errorf("response not decoded: %+v", f.Evidence)
+	}
+}
+
+func TestASetCookieLineInTheResponseIsRedacted(t *testing.T) {
+	f := openOne(t, verboseFinding("HTTP/1.1 200 OK\nSet-Cookie: abc=def\nContent-Type: text/html\n\nhello"))
+	if f.Evidence == nil {
+		t.Fatal("no evidence")
+	}
+	if strings.Contains(f.Evidence.Proof, "abc=def") {
+		t.Errorf("cookie survived: %q", f.Evidence.Proof)
+	}
+	if !strings.Contains(f.Evidence.Proof, "hello") {
+		t.Errorf("the rest of the proof was lost: %q", f.Evidence.Proof)
+	}
+}
+
+func TestALongProofIsClipped(t *testing.T) {
+	f := openOne(t, verboseFinding(strings.Repeat("é", 5000)))
+	if f.Evidence == nil {
+		t.Fatal("no evidence")
+	}
+	if n := len([]rune(f.Evidence.Proof)); n > 1500+len(" [...]") || n <= 1500 {
+		t.Errorf("proof is %d runes; want 1500 plus the cut marker", n)
+	}
+	if !strings.HasSuffix(f.Evidence.Proof, "[...]") {
+		t.Errorf("the cut is not marked: ...%q", f.Evidence.Proof[len(f.Evidence.Proof)-12:])
+	}
+}
+
+func TestANonVerboseRecordHasNoEvidence(t *testing.T) {
+	f := openOne(t, finding(1, 150085, "Cross-Site Scripting", "https://app.example.com/s", "ACTIVE", "5"))
+	if f.Evidence != nil {
+		t.Errorf("evidence invented: %+v", f.Evidence)
+	}
+}
+
+func TestOnlyTheOpenSearchIsVerbose(t *testing.T) {
+	api, bodies := stub(t, func(string, int) (int, string) { return 200, page(false) })
+	sr := appscan.ScanResult{App: "App", AppID: "1234"}
+	if _, err := api.OpenFindings(context.Background(), sr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Findings(context.Background(), sr, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	open, weekly := (*bodies)[0], (*bodies)[1]
+	if !strings.Contains(open, "<verbose>true</verbose>") || !strings.Contains(open, "<limitResults>100</limitResults>") {
+		t.Errorf("open search is not verbose with 100 per page:\n%s", open)
+	}
+	if strings.Contains(weekly, "verbose") {
+		t.Errorf("the weekly search asked for verbose:\n%s", weekly)
+	}
+}
+
+func TestAResponseOverTheLimitIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := []byte(strings.Repeat("a", 1<<20))
+		for i := 0; i < 65; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	api := NewAPI(srv.URL, "user", "pass")
+	_, err := api.OpenFindings(context.Background(), appscan.ScanResult{App: "App", AppID: "1234"})
+	if err == nil || !strings.Contains(err.Error(), "over 64 MB") {
+		t.Errorf("err = %v; want the size refusal", err)
+	}
+}
+
+// Base64 that does not decode to readable text is removed, not passed on
+// still encoded where no redaction can see inside it.
+func TestUnreadableBase64ResponseIsRemoved(t *testing.T) {
+	raw := base64.StdEncoding.EncodeToString([]byte("Set-Cookie: s=1\n\x80\x81\xfe\xff binary"))
+	if got := maybeBase64(raw); got != unreadable {
+		t.Errorf("got %q, want the unreadable marker", got)
+	}
+	if got := maybeBase64("plain text, not base64 at all"); got != "plain text, not base64 at all" {
+		t.Errorf("plain text changed: %q", got)
 	}
 }

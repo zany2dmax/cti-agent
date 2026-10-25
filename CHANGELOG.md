@@ -88,6 +88,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **How the scanner found it, on the ticket.** The AppSec open-findings search
+  is now verbose (100 per page, response capped at 64 MB). Each application
+  ticket shows one place in full - request, payload, access path and a response
+  excerpt in a `{noformat}` block - and the attached file shows every place.
+  Request headers are never read and `Cookie`/`Set-Cookie`/`Authorization`
+  lines are redacted. Evidence does not change a ticket's fingerprint.
+
 - **`INTERFACES.md`.** One page listing every Go interface the fleet is built on
   (`LookupProvider`, `appscan.Provider` and its capability interfaces,
   `Registrar`, `Resolver`), how complete each is, the places where a command

@@ -44,7 +44,29 @@ func Redact(s string) string {
 }
 
 func redactHeaders(s string) string {
-	return secretHeaderRE.ReplaceAllString(s, "$1 [redacted by cti-agent]")
+	s = secretHeaderRE.ReplaceAllString(s, "$1 [redacted by cti-agent]")
+	// The same headers mid-line - a header dump on one line, an echo inside
+	// HTML - and token-shaped JSON values, which no line anchor catches.
+	s = inlineHeaderRE.ReplaceAllString(s, "$1: [redacted by cti-agent]")
+	return jsonSecretRE.ReplaceAllString(s, `$1"[redacted by cti-agent]"`)
+}
+
+var (
+	inlineHeaderRE = regexp.MustCompile(
+		`(?i)\b(set-cookie|cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*:[^\r\n<"]*`)
+	jsonSecretRE = regexp.MustCompile(
+		`(?i)("(?:access_token|id_token|refresh_token|password|passwd|secret|client_secret|api_?key|session_?id|csrf_?token)"\s*:\s*)"[^"]*"`)
+	// urlSecretRE is a query or matrix (;jsessionid=) parameter whose name
+	// says it carries a credential or a session.
+	urlSecretRE = regexp.MustCompile(
+		`(?i)([?&;](?:pass|pwd|password|passwd|token|access_token|id_token|session|sess|sid|jsessionid|phpsessid|aspsessionid|auth|key|apikey|api_key|secret|code|signature|sig|csrf|csrf_token|nonce)=)[^&#;?\s"'<>]*`)
+)
+
+// RedactURL replaces the value of every URL parameter named like a
+// credential or session id (token=, sid=, ;jsessionid=, ...). The scan
+// account's session in a link is as live as its Cookie header.
+func RedactURL(s string) string {
+	return urlSecretRE.ReplaceAllString(s, "${1}[redacted]")
 }
 
 func printable(b []byte) bool {

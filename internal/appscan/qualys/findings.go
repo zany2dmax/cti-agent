@@ -2,6 +2,7 @@ package qualys
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"github.com/zany2dmax/cti-agent/internal/qualysrl"
@@ -76,6 +78,10 @@ func (a *API) warnf(format string, a2 ...any) { warnf(format, a2...) }
 // comfortably under any documented limit and keeps a single application's
 // backlog - which can run to four figures - to a handful of round trips.
 const pageSize = 500
+
+// verbosePageSize pages the verbose open-findings search, whose records
+// carry request and response evidence and run to kilobytes each.
+const verbosePageSize = 100
 
 // maxPages bounds the pagination loop.
 //
@@ -187,9 +193,17 @@ func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time,
 		fmt.Fprintf(&crit, `<Criteria field="id" operator="GREATER">%d</Criteria>`, afterID)
 	}
 
+	// The open-findings search is what tickets are built from, so it asks
+	// for the verbose record: each finding's request, payload and the proof
+	// in the response (shape confirmed with cti-appreport --probe-findings).
+	// Smaller pages: a verbose finding carries its evidence.
+	prefs := fmt.Sprintf(`<limitResults>%d</limitResults>`, pageSize)
+	if open {
+		prefs = fmt.Sprintf(`<verbose>true</verbose><limitResults>%d</limitResults>`, verbosePageSize)
+	}
 	payload := fmt.Sprintf(
-		`<ServiceRequest><preferences><limitResults>%d</limitResults></preferences>`+
-			`<filters>%s</filters></ServiceRequest>`, pageSize, crit.String())
+		`<ServiceRequest><preferences>%s</preferences>`+
+			`<filters>%s</filters></ServiceRequest>`, prefs, crit.String())
 
 	return a.post(ctx, "/qps/rest/3.0/search/was/finding/", payload)
 }
@@ -215,9 +229,15 @@ func (a *API) post(ctx context.Context, path, payload string) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	// Bounded: the verbose finding search carries evidence, and a response
+	// past this is a fault, not a page.
+	const limit = 64 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Qualys WAS response: %w", err)
+	}
+	if len(body) > limit {
+		return nil, fmt.Errorf("the Qualys WAS response is over %d MB - not reading it", limit>>20)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, a.authError(resp.StatusCode, body)
@@ -313,6 +333,94 @@ type wasFinding struct {
 	Param      string `xml:"param"`
 	Potential  bool   `xml:"potential"`
 	Ignored    bool   `xml:"isIgnored"`
+	// Verbose only. Request headers are deliberately not read: they carry
+	// the scan account's cookies, and nothing here needs them.
+	Results []struct {
+		Auth       bool     `xml:"authentication"`
+		AccessPath []string `xml:"accessPath>list>Url"`
+		Payloads   []struct {
+			Payload  string `xml:"payload"`
+			Method   string `xml:"request>method"`
+			Link     string `xml:"request>link"`
+			Response string `xml:"response"`
+		} `xml:"payloads>list>PayloadInstance"`
+	} `xml:"resultList>list>Result"`
+}
+
+// Evidence bounds, in runes. The proof is an excerpt: enough to recognise
+// what the scanner saw, not the page.
+const (
+	maxProof      = 1500
+	maxPayload    = 400
+	maxLink       = 600
+	maxAccessPath = 5
+)
+
+// evidence is the first detection's request and proof, redacted and bounded;
+// nil when the record is not verbose or has none.
+func (f wasFinding) evidence() *appscan.Evidence {
+	for _, r := range f.Results {
+		for _, p := range r.Payloads {
+			e := &appscan.Evidence{
+				Method:        clipRunes(strings.ToUpper(strings.TrimSpace(p.Method)), 16),
+				Link:          clipRunes(appscan.RedactURL(strings.TrimSpace(p.Link)), maxLink),
+				Authenticated: r.Auth,
+			}
+			if pl := strings.TrimSpace(p.Payload); pl != "" && !strings.EqualFold(pl, "N/A") {
+				e.Payload = clipRunes(appscan.RedactURL(appscan.Redact(pl)), maxPayload)
+			}
+			e.Proof = clipRunes(appscan.RedactURL(appscan.Redact(strings.TrimSpace(maybeBase64(p.Response)))), maxProof)
+			for i, u := range r.AccessPath {
+				if i >= maxAccessPath {
+					break
+				}
+				if u = strings.TrimSpace(u); u != "" {
+					e.AccessPath = append(e.AccessPath, clipRunes(appscan.RedactURL(u), maxLink))
+				}
+			}
+			if e.Link == "" && e.Proof == "" && e.Payload == "" {
+				continue
+			}
+			return e
+		}
+	}
+	return nil
+}
+
+// clipRunes cuts s to n runes, marking the cut.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + " [...]"
+}
+
+const unreadable = "[encoded response removed by cti-agent: not readable text, so it could not be checked for credentials]"
+
+// maybeBase64 decodes s when it is entirely base64 and decodes to readable
+// text - Qualys encodes some response bodies and not others. Anything else
+// is returned as it came.
+func maybeBase64(s string) string {
+	t := strings.Join(strings.Fields(s), "")
+	if len(t) < 16 || len(t)%4 != 0 || strings.Trim(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") != "" {
+		return s
+	}
+	dec, err := base64.StdEncoding.DecodeString(t)
+	if err != nil {
+		return s // not base64 after all: ordinary text, redacted as such
+	}
+	// Base64 that does not decode to readable text cannot be checked for a
+	// cookie, so it does not go out - fail closed, as Redact does.
+	if !utf8.Valid(dec) {
+		return unreadable
+	}
+	for _, r := range string(dec) {
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+			return unreadable
+		}
+	}
+	return string(dec)
 }
 
 func (f wasFinding) normalise() appscan.Finding {
@@ -331,6 +439,7 @@ func (f wasFinding) normalise() appscan.Finding {
 		LastSeen:  parseQualysAPITime(f.LastFound),
 		Potential: f.Potential,
 		Ignored:   f.Ignored,
+		Evidence:  f.evidence(),
 	}
 }
 
