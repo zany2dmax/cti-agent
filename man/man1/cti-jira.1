@@ -180,7 +180,7 @@ is required; with none, the usage is printed and the exit status is 1.
 .B \-\-check
 also prints each Jira permission the fleet uses (BROWSE_PROJECTS, CREATE_ISSUES,
 ADD_COMMENTS, CREATE_ATTACHMENTS, EDIT_ISSUES, ASSIGN_ISSUES, MANAGE_WATCHERS,
-and the global USER_PICKER) as ok or MISSING, without writing anything. A
+LINK_ISSUES, and the global USER_PICKER) as ok or MISSING, without writing anything. A
 MISSING permission, or permissions that cannot be read, fails the check
 (exit 1). It runs first when combined with another mode, and a failed check
 stops the run; no runner passes it.
@@ -286,7 +286,12 @@ No open ticket and findings: file one, assigned to the owner's Jira account
 the report says so), with the owner's component if one is given. If Jira
 refuses the assignee or component, it is filed without them. Open ticket
 and the findings changed: one comment listing what is new (in full) and what
-is no longer detected. Same findings: nothing. Nothing left: say so once.
+is no longer detected. When the new ticket is for an application that had
+an earlier closed ticket, the description says "Recurring" with that ticket's
+key and how many of the findings were on it, and the new ticket is linked to it
+with a Jira "Relates" link (needs "Link issues"; a refused link is logged and
+the ticket stands). The preview prints the note and a "would link to" line.
+Same findings: nothing. Nothing left: say so once.
 A web app marked
 .B covers=
 in app-owners.txt (a staging copy scanned instead of production) gets a

@@ -1165,6 +1165,15 @@ owner there is who should get a web application scan set up. The line drops
 out once a web app covers the site. If a listed site is really a landing page,
 mark it `landing` in `domains.txt` instead.
 
+Recurring tickets link back. When a new ticket is filed for an application
+that already had a closed one, the new ticket says "Recurring: this
+application's previous ticket, KEY, is done", says how many of its findings
+were on that ticket when it was last updated, and is linked to it with a Jira
+"Relates" link. The preview prints the same note and a "would link to" line.
+This needs the Jira "Link issues" permission, shown by `cti-jira --check` as
+`LINK_ISSUES`. Without it the link is skipped and logged; the ticket is still
+filed. A comment on an open ticket never looks for an earlier one.
+
 ### Staging copies that stand in for production
 
 Some production sites are scanned through a staging or test copy instead of
