@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -533,5 +534,78 @@ func TestACommentRunNeverLooksForAPrior(t *testing.T) {
 	}
 	if fj.doneSearches != before || len(fj.links) != 0 {
 		t.Errorf("done searches %d -> %d, links %d", before, fj.doneSearches, len(fj.links))
+	}
+}
+
+func withEvidence(proof string) appscan.TicketFinding {
+	f := xss("https://app.example.com/a/b/", "https://app.example.com/c/")
+	f.Instances[0].Evidence = &appscan.Evidence{Method: "GET", Link: "https://app.example.com/a/b/",
+		Payload: "<x>", AccessPath: []string{"https://app.example.com/", "https://app.example.com/a/"},
+		Proof: proof}
+	f.Instances[1].Evidence = &appscan.Evidence{Method: "POST", Link: "https://app.example.com/c/", Proof: "second"}
+	return f
+}
+
+func TestTheTicketShowsHowTheScannerFoundIt(t *testing.T) {
+	body := appscanBody(appTicket(withEvidence("Vulnerable blank target found")), time.Now())
+	for _, want := range []string{"*How the scanner found it*", "{{GET https://app.example.com/a/b/}}",
+		"Reached from:", "{noformat}", "Vulnerable blank target found"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("ticket body lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "POST https://app.example.com/c/") {
+		t.Error("the ticket shows more than one instance's evidence; the rest belongs in the attachment")
+	}
+}
+
+func TestAProofCannotEndItsNoformatBlockEarly(t *testing.T) {
+	blk := findingBlock(withEvidence("before {noformat}x after {NOFORMAT:y} end"))
+	if n := strings.Count(strings.ToLower(blk), "{noformat"); n != 2 {
+		t.Errorf("%d {noformat delimiters; want exactly the block's two:\n%s", n, blk)
+	}
+	if !strings.Contains(blk, "(noformat}x") {
+		t.Errorf("the proof text was lost rather than defused:\n%s", blk)
+	}
+}
+
+func TestTheAttachmentCarriesEveryInstancesEvidence(t *testing.T) {
+	txt := appscanFullText(appTicket(withEvidence("p")), time.Now())
+	for _, want := range []string{"request: GET https://app.example.com/a/b/", "request: POST https://app.example.com/c/"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("attachment lacks %q:\n%s", want, txt)
+		}
+	}
+}
+
+func TestEvidenceDoesNotChangeTheFingerprint(t *testing.T) {
+	a := appTicket(xss("https://app.example.com/a/b/", "https://app.example.com/c/"))
+	b := appTicket(withEvidence("some proof"))
+	if a.Hash != b.Hash {
+		t.Errorf("hash changed with evidence: %s vs %s", a.Hash, b.Hash)
+	}
+	if strings.Join(a.InstanceKeys(), "|") != strings.Join(b.InstanceKeys(), "|") {
+		t.Error("InstanceKeys changed with evidence")
+	}
+}
+
+// The attachment carries evidence for at most maxEvidencePerFinding places
+// per finding, and URL secrets are scrubbed in what it lists.
+func TestAttachmentEvidenceIsCappedAndURLsScrubbed(t *testing.T) {
+	var ins []appscan.Instance
+	for i := 0; i < maxEvidencePerFinding+5; i++ {
+		ins = append(ins, appscan.Instance{
+			URL:      fmt.Sprintf("https://app.example.com/p%d?token=SECRET%d", i, i),
+			Evidence: &appscan.Evidence{Method: "GET", Link: fmt.Sprintf("https://app.example.com/p%d", i)},
+		})
+	}
+	tk := appscan.AppTicket{App: "Portal", Findings: []appscan.TicketFinding{{ID: "150001", Title: "x",
+		Severity: 4, Status: "ACTIVE", Instances: ins}}}
+	full := appscanFullText(tk, time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC))
+	if n := strings.Count(full, "request: GET"); n != maxEvidencePerFinding {
+		t.Errorf("%d evidence blocks, want %d", n, maxEvidencePerFinding)
+	}
+	if strings.Contains(full, "SECRET") {
+		t.Error("a token in a URL reached the attachment")
 	}
 }

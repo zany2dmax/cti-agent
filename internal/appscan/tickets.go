@@ -132,6 +132,9 @@ type TicketFinding struct {
 type Instance struct {
 	URL   string `json:"url"`
 	Param string `json:"param,omitempty"`
+	// Evidence is not part of the fingerprint: a different response body
+	// for the same finding in the same place is not a change worth a comment.
+	Evidence *Evidence `json:"evidence,omitempty"`
 }
 
 // InstanceKeys are the fingerprints of a ticket's listed findings, for
@@ -349,7 +352,7 @@ func group(fs []Finding) ([]TicketFinding, int) {
 			continue
 		}
 		seen[ik] = true
-		g.Instances = append(g.Instances, Instance{URL: f.URL, Param: f.Param})
+		g.Instances = append(g.Instances, Instance{URL: f.URL, Param: f.Param, Evidence: f.Evidence})
 	}
 	out := make([]TicketFinding, 0, len(byID))
 	for _, g := range byID {

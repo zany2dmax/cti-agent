@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -708,11 +709,19 @@ func findingBlock(f appscan.TicketFinding) string {
 			fmt.Fprintf(&b, "* ...and %d more in the attached file\n", len(f.Instances)-i)
 			break
 		}
-		line := "* {{" + wikiEscape(clip(in.URL, maxField)) + "}}"
+		line := "* {{" + wikiEscape(clip(appscan.RedactURL(in.URL), maxField)) + "}}"
 		if in.Param != "" {
 			line += " parameter {{" + wikiEscape(clip(in.Param, maxField)) + "}}"
 		}
 		b.WriteString(line + "\n")
+	}
+	// One detection in full, the first that has evidence - enough to
+	// reproduce it. Every place's evidence is in the attached file.
+	for _, in := range f.Instances {
+		if in.Evidence != nil {
+			b.WriteString(evidenceWiki(in))
+			break
+		}
 	}
 	if r := f.Remedy; r != nil {
 		para := func(title, text string) {
@@ -730,6 +739,67 @@ func findingBlock(f appscan.TicketFinding) string {
 		b.WriteString("_The Qualys KnowledgeBase returned no remediation text for this QID this week - see the finding in Qualys._\n")
 	}
 	b.WriteString("\n")
+	return b.String()
+}
+
+var noformatRE = regexp.MustCompile(`(?i)\{noformat`)
+
+// evidenceWiki is how the scanner found one instance, in wiki markup. The
+// proof goes in a {noformat} block, where nothing is rendered - the one place
+// a response excerpt full of HTML cannot become markup - with any
+// "{noformat" in it defused so it cannot end the block early.
+func evidenceWiki(in appscan.Instance) string {
+	e := in.Evidence
+	var b strings.Builder
+	b.WriteString("*How the scanner found it*")
+	if e.Authenticated {
+		b.WriteString(" (logged in)")
+	}
+	b.WriteString(":\n")
+	if e.Link != "" {
+		req := e.Link
+		if e.Method != "" {
+			req = e.Method + " " + req
+		}
+		fmt.Fprintf(&b, "* Request: {{%s}}\n", wikiEscape(clip(req, maxField)))
+	}
+	if e.Payload != "" {
+		fmt.Fprintf(&b, "* Payload: {{%s}}\n", wikiEscape(clip(e.Payload, maxField)))
+	}
+	if len(e.AccessPath) > 0 {
+		var hops []string
+		for _, u := range e.AccessPath {
+			hops = append(hops, "{{"+wikiEscape(clip(u, maxField))+"}}")
+		}
+		fmt.Fprintf(&b, "* Reached from: %s\n", strings.Join(hops, " > "))
+	}
+	if p := strings.TrimSpace(e.Proof); p != "" {
+		b.WriteString("* What came back:\n{noformat}\n" + noformatRE.ReplaceAllString(p, "(noformat") + "\n{noformat}\n")
+	}
+	return b.String()
+}
+
+// maxEvidencePerFinding caps evidence in the attachment per finding.
+const maxEvidencePerFinding = 10
+
+// evidenceText is the same for the plain-text attachment.
+func evidenceText(e *appscan.Evidence) string {
+	var b strings.Builder
+	if e.Link != "" {
+		fmt.Fprintf(&b, "      request: %s %s\n", e.Method, e.Link)
+	}
+	if e.Payload != "" {
+		fmt.Fprintf(&b, "      payload: %s\n", e.Payload)
+	}
+	if len(e.AccessPath) > 0 {
+		fmt.Fprintf(&b, "      reached from: %s\n", strings.Join(e.AccessPath, " > "))
+	}
+	if e.Authenticated {
+		b.WriteString("      scanned logged in\n")
+	}
+	if p := strings.TrimSpace(e.Proof); p != "" {
+		fmt.Fprintf(&b, "      what came back:\n        %s\n", strings.ReplaceAll(p, "\n", "\n        "))
+	}
 	return b.String()
 }
 
@@ -808,11 +878,19 @@ func appscanFullText(t appscan.AppTicket, now time.Time) string {
 	for _, f := range t.Findings {
 		fmt.Fprintf(&b, "== [%s] %s (QID %s) - %s\n", sevLabel(f), f.Title, f.ID,
 			strings.ToLower(f.Status))
+		shown := 0
 		for _, in := range f.Instances {
 			if in.Param != "" {
-				fmt.Fprintf(&b, "  - %s  (parameter %s)\n", in.URL, in.Param)
+				fmt.Fprintf(&b, "  - %s  (parameter %s)\n", appscan.RedactURL(in.URL), in.Param)
 			} else {
-				fmt.Fprintf(&b, "  - %s\n", in.URL)
+				fmt.Fprintf(&b, "  - %s\n", appscan.RedactURL(in.URL))
+			}
+			// Evidence for the first few places per finding: the rest are
+			// the same flaw, and an application with a thousand places must
+			// not produce an attachment Jira refuses.
+			if in.Evidence != nil && shown < maxEvidencePerFinding {
+				b.WriteString(evidenceText(in.Evidence))
+				shown++
 			}
 		}
 		if r := f.Remedy; r != nil {
