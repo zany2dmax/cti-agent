@@ -56,6 +56,14 @@ type Config struct {
 	// are mistakes you cannot take back - a Jira issue, once created, has been
 	// seen by whatever automation watches that project.
 	JiraAllowCreate string
+	// JiraAllowClose is a second, separate allowlist for the one thing that
+	// changes a ticket's status: closing the AppSec ticket of an application
+	// that is no longer defined in the scanner. Same shape and same default
+	// as JiraAllowCreate (empty: never). JiraCloseTransition optionally names
+	// the workflow transition to use when a project has more than one that
+	// ends in a done status.
+	JiraAllowClose      string
+	JiraCloseTransition string
 }
 
 // Load returns the full configuration, Graph included. For commands that read
@@ -223,6 +231,9 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraProjectKey:  os.Getenv("JIRA_PROJECT_KEY"),
 		JiraIssueType:   os.Getenv("JIRA_ISSUE_TYPE"),
 		JiraAllowCreate: os.Getenv("JIRA_ALLOW_CREATE"),
+
+		JiraAllowClose:      os.Getenv("JIRA_ALLOW_CLOSE"),
+		JiraCloseTransition: os.Getenv("JIRA_CLOSE_TRANSITION"),
 	}
 
 	missing := []string{}

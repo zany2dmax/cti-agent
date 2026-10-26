@@ -216,6 +216,7 @@ func doAppscanTickets(ctx context.Context, c *jira.Client, cfg config.Config,
 	if failed > 0 {
 		logf("appscan: %d application ticket(s) could not be updated - see above", failed)
 	}
+	retireOrphans(ctx, c, cfg, tf, forReal, now)
 	return exitOK
 }
 

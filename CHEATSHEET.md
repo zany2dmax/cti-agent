@@ -128,6 +128,7 @@ sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file fro
 #   rehearse one ticket: cti-appreport --app-id 1234 --out-dir /tmp/report, then
 #   cti-jira --appscan-tickets <state/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]
 #   (files an unassigned "[TEST]" ticket; delete it in Jira and rm -rf /tmp/report afterwards)
+#   rehearse closing a retired app's ticket: cti-jira --appscan-close-test CR-NNN [--for-real]  (only a [TEST] ticket; needs JIRA_ALLOW_CLOSE)
 #   then WAS_ATTACH_REPORT=1 in fleet.env; reports carry session cookies, deleted after attaching
 sudo cti-agent run-domains --to-dev
 sudo cti-agent run-patchtuesday --to-dev
@@ -302,25 +303,17 @@ sudo install -o root -g ctiagent -m 0640 /tmp/domains.txt /etc/cti-agent/domains
 sudo cti-agent run-domains --dry-run
 ```
 
-A website is retired or now redirects elsewhere. The domains lane notices by
-itself on its next run (WEBSITES: "Redirects to another domain"), but nothing
-in the AppSec lane is removed for you. Clean up by hand, in this order:
+A website is retired or now redirects elsewhere. The domains lane only
+reports it (WEBSITES). The one manual step is in Qualys WAS: delete the web
+app, and delete or disable its scheduled scan. The next Friday run then closes
+the app's Jira ticket by itself (needs `JIRA_ALLOW_CLOSE`). Confirm, and tidy:
 
 ```bash
-# 1. Qualys WAS: delete (not just disable) the web app and its scheduled scans.
-# 2. Remove its line from the owners file (`id:<n> | ...`).
-sudo nano /etc/cti-agent/app-owners.txt
-# 3. Jira: close the app's open AppSec ticket (the lane never closes tickets).
-# 4. Confirm: no id: line for it, and "0 owners-file line(s) matching nothing".
-sudo cti-agent cti-appscan --list-apps 2>&1 | grep -iE 'name-of-site'
-sudo cti-agent cti-appscan --list-apps 2>&1 | grep 'apps  '
-# 5. After the next domains run, any `site:` line for it also disappears.
+sudo cti-agent cti-appscan --list-apps 2>&1 | grep -iE 'name-of-site'   # gone
+sudo nano /etc/cti-agent/app-owners.txt   # remove its line (harmless if left)
 ```
 
-Keep the domain in `domains.txt` while you still own it: registration and
-mail lock-down checks keep applying. Remove the line only when the domain
-itself is gone (dropped at the registrar). An owners line removed before the
-Qualys app only shows as "matching nothing", which is harmless.
+Keep the domain in `domains.txt` while you still own it.
 
 Pause or resume one lane:
 

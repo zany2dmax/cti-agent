@@ -57,6 +57,11 @@ type TicketsFile struct {
 	// (covers=): listed, because "covered via staging" is not "scanned".
 	ViaStandIn []ViaStandIn `json:"viaStandIn,omitempty"`
 	SitesAsOf  time.Time    `json:"sitesAsOf,omitempty"`
+	// ScannerApps are the ids of EVERY web app the scanner defines, set only
+	// when the whole list was fetched. cti-jira closes the ticket of an
+	// application whose id is missing from it, so an absent list (the fetch
+	// failed, or was skipped) must stay absent: "unknown" is never "gone".
+	ScannerApps []string `json:"scannerApps,omitempty"`
 }
 
 // ViaStandIn is one production site and the web app that stands in for it.
