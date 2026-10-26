@@ -272,7 +272,7 @@ Two things make this harder than it looks, and a design must answer both:
   `wikiEscape`. A tracker interface needs the renderer on the implementation
   side, not in the lane.
 
-The write gate (`--for-real`, `JIRA_ALLOW_CREATE`) is in `cti-jira` and must
+The write gates (`--for-real`, `JIRA_ALLOW_CREATE`, and `JIRA_ALLOW_CLOSE` for closing) are in `cti-jira` and must
 stay there, above the interface.
 
 ### 3.3 AppSec scanner API: finish the job

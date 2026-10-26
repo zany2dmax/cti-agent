@@ -183,6 +183,12 @@ func run() int {
 			if apps, err := api.WebApps(ctx); err != nil {
 				logf("warn   : web app list unavailable, owners not checked: %s", safelog.Line(err.Error()))
 			} else {
+				for _, a := range apps {
+					if id := strings.TrimSpace(a.ID); id != "" {
+						tf.ScannerApps = append(tf.ScannerApps, id)
+					}
+				}
+				sort.Strings(tf.ScannerApps)
 				sites, asOf := loadSites()
 				_, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
 				for _, a := range unowned {
