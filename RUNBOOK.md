@@ -1387,6 +1387,50 @@ is nothing to change when the contract's limits are raised.
 `APPSCAN_REPORT_PROVIDER` (default `qualys-was`) names the scanner; another
 one implements `appscan.ReportFetcher` and is added in `cmd/cti-appreport`.
 
+### Closing the ticket of a deleted web app
+
+When a web app is deleted in Qualys WAS, the Friday run closes its open Jira
+ticket with an explanatory comment (the domains lane still only reports a
+retired or redirecting site; deleting the web app and its scheduled scan is a
+manual step). Guards:
+
+- only when `cti-appscan` fetched the scanner's complete web-app list that run
+  (`scannerApps` in the `--tickets-out` file); a failed or skipped fetch closes
+  nothing;
+- only open tickets labelled `cti-appscan` and `cti-appscan-<numeric id>` that
+  also carry the fleet's own `cti-appscan` state property (a label alone can be
+  added by anyone who may edit a ticket); name-keyed apps are never closed;
+- the list must agree with the run: if an application scanned this week is
+  missing from it, nothing is closed; a tickets file more than 24 hours old
+  closes nothing;
+- at most 3 per run, and never more than half of the open AppSec tickets when
+  more than one: more would-be closures than that close NONE and log a warning
+  (that looks like lost scanner visibility, not retirements); a full search page
+  (100 open tickets) also skips;
+- the gate is `JIRA_ALLOW_CLOSE` (project keys, empty = never close),
+  independent of `JIRA_ALLOW_CREATE`, plus `--for-real`. `run-appscan --dry-run`
+  prints "===== would close KEY via transition ...";
+- the transition is the one whose destination status category is Done, not
+  picked by name; if several lead there set `JIRA_CLOSE_TRANSITION`
+  (case-insensitive). A transition needing a required field other than
+  resolution or comment is refused; a resolution field is set to "Done"; the
+  comment goes in the same request.
+
+The service account needs "Transition issues" in the project (`cti-jira
+--check` lists TRANSITION_ISSUES once `JIRA_ALLOW_CLOSE` is set). Closing is
+reversible by reopening; if the app returns with findings a new ticket is filed
+and linked (Relates) to the closed one. Afterwards the app's owners-file line
+can go (a line matching nothing is a harmless warning).
+
+Rehearse first, on a test ticket (it refuses any other, including the weekly
+run's own):
+
+```bash
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --for-real   # files a [TEST] ticket, say CR-NNN
+sudo cti-agent cti-jira --appscan-close-test CR-NNN                           # preview
+sudo cti-agent cti-jira --appscan-close-test CR-NNN --for-real                # closes it
+```
+
 ### Adding a second scanner
 
 `internal/appscan` is a provider boundary, like `internal/vulnlookup` for host

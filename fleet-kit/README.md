@@ -1549,6 +1549,21 @@ A new scanner (Invicti, Wiz) is a `Provider` - `Name`, `Recognises`, `Parse` -
 and needs no credentials at all. An API is a second, optional interface,
 `DetailFetcher`.
 
+### Closing the ticket of a deleted web app
+
+Delete the web app in Qualys (the one manual step) and the next Friday run
+closes its open Jira ticket with a comment. Guarded: only when the scanner's
+complete web-app list was fetched that run; only tickets labelled `cti-appscan`
+and `cti-appscan-<numeric id>` that carry the fleet's own state property; the
+list must agree with that run's scans and the tickets file be under 24 hours
+old; at most 3 per run and never most of the open queue (more closes none and
+warns); gated by `JIRA_ALLOW_CLOSE` (project keys, empty = never, separate from
+`JIRA_ALLOW_CREATE`) and `--for-real`. The transition is chosen by its Done
+status category; `JIRA_CLOSE_TRANSITION` names one when several qualify. Needs
+the Jira permission "Transition issues". Rehearse with `cti-jira
+--appscan-test <id> --for-real`, then `--appscan-close-test CR-NNN` (preview)
+and `--for-real`. Detail: [RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application-security-lane).
+
 ### What the email says
 
 - **Open counts, not lifecycle totals.** Qualys reports both and they differ by
