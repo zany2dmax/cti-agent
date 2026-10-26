@@ -85,16 +85,20 @@ func run() int {
 		"with --appscan-tickets: preview, or with --for-real file, ONE clearly-labelled test "+
 			"ticket for this scanner web-app id - what a developer would get, with the report "+
 			"from --appscan-reports attached; unassigned, never tracked by the weekly run")
+	appscanCloseTest := flag.String("appscan-close-test", "",
+		"preview, or with --for-real close, ONE ticket filed by --appscan-test (label "+
+			"cti-agent-test): the single labelled real test of how the weekly run closes the "+
+			"ticket of a retired application. Needs JIRA_ALLOW_CLOSE; refuses any other ticket")
 	flag.Parse()
 
 	if *appscanTest != "" && *appscanTickets == "" {
 		return die("--appscan-test needs --appscan-tickets (the cti-appscan --tickets-out file)")
 	}
 	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
-		*appscanTickets == "" {
+		*appscanTickets == "" && *appscanCloseTest == "" {
 		flag.Usage()
 		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up, " +
-			"--domains-actions or --appscan-tickets")
+			"--domains-actions, --appscan-tickets or --appscan-close-test")
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A
@@ -145,6 +149,9 @@ func run() int {
 	}
 	if *domainsActions != "" {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
+	}
+	if *appscanCloseTest != "" {
+		return doAppscanCloseTest(ctx, c, cfg, *appscanCloseTest, *forReal)
 	}
 	if *appscanTest != "" {
 		return doAppscanTest(ctx, c, cfg, *appscanTickets, *appscanTest, *appscanReports, *forReal, time.Now())
@@ -253,13 +260,19 @@ func doCheck(ctx context.Context, c *jira.Client, cfg config.Config) int {
 	// What the lanes will do, checked without doing it. A token's scopes cap
 	// what it may do, but the account's Jira permissions decide what it can:
 	// a missing one shows up here rather than as a failed run.
-	have, err := c.MyPermissions(ctx, cfg.JiraProjectKey, jira.FleetPermissions)
+	perms := append([]string{}, jira.FleetPermissions...)
+	if cfg.JiraAllowClose != "" {
+		// Only when closing is switched on: an install that does not close
+		// tickets should not fail its check for a permission it never uses.
+		perms = append(perms, jira.ClosePermissions...)
+	}
+	have, err := c.MyPermissions(ctx, cfg.JiraProjectKey, perms)
 	if err != nil {
 		logf("  could not read the account's permissions: %s", safelog.Line(err.Error()))
 		return exitFailure
 	}
 	missing := 0
-	for _, p := range jira.FleetPermissions {
+	for _, p := range perms {
 		mark := "ok"
 		if !have[p] {
 			mark, missing = "MISSING", missing+1

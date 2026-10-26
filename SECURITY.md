@@ -485,6 +485,17 @@ The orchestrator runs unattended. Its standing instructions
 Auto-sending is limited to scheduled reports on an established schedule to an
 allowlisted list. Everything else is proposed on the message board and waits.
 
+**Closing is a separate gate.** `JIRA_ALLOW_CLOSE` (project keys, empty = never)
+is independent of `JIRA_ALLOW_CREATE` and, with `--for-real`, lets the weekly
+AppSec run close the open ticket of a web app deleted from the scanner. It is
+the only place the fleet changes a ticket's status. Guards: only when the
+scanner's complete web-app list was fetched that run; only open tickets with the
+labels `cti-appscan` and `cti-appscan-<numeric id>` that also carry the fleet's
+state property (labels alone can be added by anyone who may edit a ticket); the
+list must agree with that run's scans and the tickets file be under 24 hours
+old; at most 3 per run and never most of the open queue (more closes none); a transition that needs a field other than resolution or
+comment is refused. `--appscan-close-test` closes only a `cti-agent-test` ticket.
+
 **The Jira write gate covers every write.** `cti-jira` writes nothing without
 `--for-real` and a project key in `JIRA_ALLOW_CREATE`. Until 1.3 an empty gate
 stopped new tickets only; comments, CSV attachments and stored exposure

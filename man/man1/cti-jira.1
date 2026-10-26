@@ -86,9 +86,13 @@ That is a command-line flag, never a setting, and the scheduled run does
 not pass it, so the automatic path files KEV entries and CVSS 9.0+ entries
 only.
 .TP
-.B Never transitions
-It never closes, reopens, assigns or transitions a ticket. Remediation, and
-deciding it is done, belong to the people working the ticket.
+.B Never transitions, except retired applications
+It never closes, reopens or transitions a ticket, with one exception: the
+open ticket of a scanner web app that has been deleted, under
+.B \-\-appscan\-tickets
+and its own gate
+.BR JIRA_ALLOW_CLOSE .
+Remediation, and deciding it is done, belong to the people working the ticket.
 .TP
 .B One ticket per CVE
 Every fleet ticket carries the label
@@ -180,7 +184,7 @@ is required; with none, the usage is printed and the exit status is 1.
 .B \-\-check
 also prints each Jira permission the fleet uses (BROWSE_PROJECTS, CREATE_ISSUES,
 ADD_COMMENTS, CREATE_ATTACHMENTS, EDIT_ISSUES, ASSIGN_ISSUES, MANAGE_WATCHERS,
-LINK_ISSUES, and the global USER_PICKER) as ok or MISSING, without writing anything. A
+LINK_ISSUES, TRANSITION_ISSUES (only when JIRA_ALLOW_CLOSE is set), and the global USER_PICKER) as ok or MISSING, without writing anything. A
 MISSING permission, or permissions that cannot be read, fails the check
 (exit 1). It runs first when combined with another mode, and a failed check
 stops the run; no runner passes it.
@@ -321,6 +325,41 @@ verify", and the header and summary count them separately ("To verify").
 Potential findings of Serious and below are left out. They are part of the
 findings fingerprint, so an open ticket gets one comment when they first
 appear.
+.IP
+Retired applications: when a web app has been deleted from the scanner, its
+open ticket is closed with an explanatory comment. Guards: it happens only
+when
+.BR cti\-appscan
+fetched the scanner's complete web-app list in that run (the
+.B scannerApps
+field of the tickets file; a failed or skipped fetch closes nothing); only
+open tickets labelled
+.B cti\-appscan
+and
+.BI cti\-appscan\- id
+with a numeric scanner id are considered (name-keyed applications are never
+closed) and that carry the fleet's own state property; the list must agree with
+that run's scans and the tickets file must be under 24 hours old; at most 3
+tickets are closed per run and never most of the open queue, and more would-be
+closures close none and log a warning (it looks like lost scanner visibility,
+not retirements); a full search page (100 open tickets) also skips. Closing
+needs its own gate,
+.BR JIRA_ALLOW_CLOSE ,
+independent of
+.BR JIRA_ALLOW_CREATE ,
+and
+.BR \-\-for\-real ;
+without
+.B \-\-for\-real
+the preview prints "would close KEY via transition ...". The transition is
+chosen by its destination status category (Done), not by name; if several
+lead there,
+.B JIRA_CLOSE_TRANSITION
+names the one to use. A transition that requires a field other than
+resolution or comment is refused; a resolution field on the screen is set to
+"Done"; the comment goes in the same request. Needs the Jira permission
+"Transition issues". Closing is reversible by reopening; if the application
+returns with findings, a new ticket is filed and linked to the closed one.
 Default:\~empty.
 .TP
 .BI \-\-appscan\-reports " DIR"
@@ -365,6 +404,19 @@ gate applies. Refuses an
 that is not in the file, or one the weekly run would leave alone. The ticket
 is yours to delete in Jira afterwards; the report holds scan-account session
 cookies.
+Default:\~empty.
+.TP
+.BI \-\-appscan\-close\-test " KEY"
+Rehearse closing a retired application's ticket. Without
+.B \-\-for\-real
+it previews the transition and comment; with it, closes ONE ticket, and only
+one filed by
+.B \-\-appscan\-test
+(label
+.BR cti\-agent\-test ).
+It refuses any other ticket, including the weekly run's own. The
+.B JIRA_ALLOW_CLOSE
+gate applies.
 Default:\~empty.
 .TP
 .BI \-\-ref\-out " FILE"
@@ -431,6 +483,18 @@ Section 9.
 .B JIRA_ALLOW_CREATE
 The write allowlist. Optional; empty means write nothing to Jira.
 Section 9.
+.TP
+.B JIRA_ALLOW_CLOSE
+The close allowlist: comma-separated project keys in which a retired
+application's ticket may be closed (see
+.BR \-\-appscan\-tickets ).
+Optional; empty means never close. Independent of
+.BR JIRA_ALLOW_CREATE .
+Section 9.
+.TP
+.B JIRA_CLOSE_TRANSITION
+Optional. The name (case-insensitive) of the transition to use when several
+lead to a Done-category status. Section 9.
 .TP
 .BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
 The scanner the host lists come from. Required when
