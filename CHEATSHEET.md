@@ -302,6 +302,26 @@ sudo install -o root -g ctiagent -m 0640 /tmp/domains.txt /etc/cti-agent/domains
 sudo cti-agent run-domains --dry-run
 ```
 
+A website is retired or now redirects elsewhere. The domains lane notices by
+itself on its next run (WEBSITES: "Redirects to another domain"), but nothing
+in the AppSec lane is removed for you. Clean up by hand, in this order:
+
+```bash
+# 1. Qualys WAS: delete (not just disable) the web app and its scheduled scans.
+# 2. Remove its line from the owners file (`id:<n> | ...`).
+sudo nano /etc/cti-agent/app-owners.txt
+# 3. Jira: close the app's open AppSec ticket (the lane never closes tickets).
+# 4. Confirm: no id: line for it, and "0 owners-file line(s) matching nothing".
+sudo cti-agent cti-appscan --list-apps 2>&1 | grep -iE 'name-of-site'
+sudo cti-agent cti-appscan --list-apps 2>&1 | grep 'apps  '
+# 5. After the next domains run, any `site:` line for it also disappears.
+```
+
+Keep the domain in `domains.txt` while you still own it: registration and
+mail lock-down checks keep applying. Remove the line only when the domain
+itself is gone (dropped at the registrar). An owners line removed before the
+Qualys app only shows as "matching nothing", which is harmless.
+
 Pause or resume one lane:
 
 ```bash
