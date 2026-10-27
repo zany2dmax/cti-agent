@@ -31,6 +31,10 @@ is real, not before. Finished work moves out of this file into
   - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
     scanner detection IDs) for the Patch Tuesday correlation, which is
     Qualys-only today
+- `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
+  age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
+  to include closed ones and `--json`. No write gate needed; it would also give
+  `--appscan-close-test` a way to find the test ticket's key
 - Qualys severity bands beside the QDS number, once the thresholds are verified
   against Qualys' own documentation rather than guessed
 - A container image for deployment
