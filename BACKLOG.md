@@ -31,6 +31,14 @@ is real, not before. Finished work moves out of this file into
   - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
     scanner detection IDs) for the Patch Tuesday correlation, which is
     Qualys-only today
+- AppSec tickets in their own Jira project: CR is the infrastructure help desk,
+  and the AppSec teams track their work in other projects, so the AppSec lane
+  should file there (project TBD) instead of CR. Points to settle when it is
+  designed: a separate project key for the lane (CVE and domains tickets stay in
+  CR), its own issue type and `JIRA_ALLOW_CREATE` / `JIRA_ALLOW_CLOSE` entries,
+  the service account's permissions in the new project (`--check` per project),
+  the searches that assume one project (open ticket, prior-ticket link, retired
+  app close), and moving the six existing AppSec tickets
 - `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
   age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
   to include closed ones and `--json`. No write gate needed; it would also give
