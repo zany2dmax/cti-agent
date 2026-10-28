@@ -13,6 +13,11 @@ config.local.yaml
 # The compiled binary shares its name with the repo, so it is easy to commit
 # by accident with `git add -A`. Anchored so it cannot match the directory.
 /cti-agent
+# A plain `go build ./cmd/cti-<name>` drops that binary in the repo root, where
+# `git add -A` takes it (cti-appreport was committed this way, 10 MB). Every
+# command is named cti-<name> and built from cmd/, so no file at the root may
+# carry that prefix. Anchored: cmd/cti-*/ and fleet-kit are unaffected.
+/cti-*
 # Anchored to the repo root - an unanchored "bin/" also matches nested
 # directories like fleet-kit/fleet/bin/, which silently excluded the fleet's
 # executables (run-digest, fleet-db, fleet-board) from being tracked.
