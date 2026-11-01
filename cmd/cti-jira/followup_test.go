@@ -356,6 +356,55 @@ func TestAScannerThatWillNotLoadStopsTheFollowUpAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestAHeldSev5ReachesTheDigestsTicketMap(t *testing.T) {
+	// CVE-2026-111497 was held for approval and the only trace was one journal
+	// line. The map the digest reads must name it, with its host count.
+	_, c := newFakeJira(t)
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		"CVE-2026-5555": present("host-a", "host-b", "host-c")}}
+	withScanner(t, sc)
+	path := writeEnriched(t, `{"findings":[{"cve":"CVE-2026-5555","status":"PRESENT","priority":"Sev5"}]}`)
+
+	doFromEnriched(context.Background(), c, testCfg, path, true, false, false)
+
+	raw, err := os.ReadFile(TicketMapPath(path))
+	if err != nil {
+		t.Fatalf("no ticket map written: %v", err)
+	}
+	var tm TicketMap
+	if err := json.Unmarshal(raw, &tm); err != nil {
+		t.Fatal(err)
+	}
+	if len(tm.Held) != 1 || tm.Held[0].CVE != "CVE-2026-5555" || tm.Held[0].Hosts != 3 {
+		t.Errorf("held = %+v, want CVE-2026-5555 with 3 hosts", tm.Held)
+	}
+	if len(tm.Tickets) != 0 {
+		t.Errorf("a held CVE must not appear as a ticket: %+v", tm.Tickets)
+	}
+}
+
+func TestOnlyAnUnapprovedSev5IsMarkedHeld(t *testing.T) {
+	_, c := newFakeJira(t)
+	f := jira.Finding{CVE: "CVE-2026-5556", Severity: 5, Hosts: []string{"host-a"}}
+	now := time.Now()
+
+	ref, err := fileOrUpdate(context.Background(), c, testCfg, f, now, false, false)
+	if err != nil || !ref.Held || ref.CVE != f.CVE || ref.Hosts != 1 {
+		t.Errorf("unapproved: ref=%+v err=%v, want held with 1 host", ref, err)
+	}
+	// Approved (a dry run, so nothing is written): no longer held.
+	ref, err = fileOrUpdate(context.Background(), c, testCfg, f, now, false, true)
+	if err != nil || ref.Held {
+		t.Errorf("approved: ref=%+v err=%v, want not held", ref, err)
+	}
+	// KEV files without approval, so it is never held either.
+	f.KEV = true
+	ref, _ = fileOrUpdate(context.Background(), c, testCfg, f, now, false, false)
+	if ref.Held {
+		t.Errorf("a KEV finding was marked held: %+v", ref)
+	}
+}
+
 func writeEnriched(t *testing.T, body string) string {
 	t.Helper()
 	p := t.TempDir() + "/enriched-2026-10-06.json"

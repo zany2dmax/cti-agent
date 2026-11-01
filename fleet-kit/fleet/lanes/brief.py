@@ -457,6 +457,61 @@ def fleet_tickets_section(data):
   </td></tr>"""
 
 
+def _approve_command(data):
+    return ("sudo cti-agent cti-jira --from-enriched "
+            f"{data.get('_enriched') or '<file>'} --for-real --approve")
+
+
+def held_section(data):
+    """HELD FOR APPROVAL: qualifying CVEs the scheduled run did not file."""
+    held = data.get("_held") or []
+    if not held:
+        return ""
+    rows = ''.join(
+        "<tr><td style=\"padding:3px 12px 3px 0;white-space:nowrap\">"
+        f"<b>{esc(h['cve'])}</b></td>"
+        f"<td style=\"padding:3px 12px 3px 0;white-space:nowrap\">"
+        f"{esc(_held_hosts(h))}</td>"
+        f"<td style=\"padding:3px 0;color:#4a5568\">{esc(h.get('title') or '')}</td></tr>"
+        for h in held)
+    return f"""
+  <tr><td style="padding:4px 20px 14px 20px;border-top:1px solid #e2e8f0">
+    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
+                color:#9c4221;margin:12px 0 6px 0;letter-spacing:.5px">
+      HELD FOR APPROVAL &mdash; {len(held)} Sev5 with no ticket</div>
+    <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
+                color:#2d3748;margin-bottom:6px">
+      Confirmed present and known exploited, but neither on CISA KEV nor CVSS 9.0+,
+      so the scheduled run does not file it. No ticket exists for these.</div>
+    <table cellpadding="0" cellspacing="0" role="presentation"
+           style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+      {rows}
+    </table>
+    <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
+                color:#2d3748;margin-top:6px">
+      To file them: <code>{esc(_approve_command(data))}</code></div>
+  </td></tr>"""
+
+
+def _held_hosts(h):
+    n = h.get("hosts") or 0
+    return f"{n} host{'s' if n != 1 else ''}"
+
+
+def held_text(data):
+    held = data.get("_held") or []
+    if not held:
+        return []
+    lines = [f"HELD FOR APPROVAL - {len(held)} Sev5 with no ticket", "-" * 68,
+             "  Confirmed present and known exploited, but neither on CISA KEV nor",
+             "  CVSS 9.0+, so the scheduled run does not file it."]
+    for h in held:
+        title = f"  {h['title']}" if h.get("title") else ""
+        lines.append(f"  {h['cve']:<16} {_held_hosts(h)}{title}")
+    lines += ["  To file them:", f"    {_approve_command(data)}", ""]
+    return lines
+
+
 def fleet_tickets_text(data):
     open_, closed = _fleet_tickets(data)
     if not open_ and not closed:
@@ -687,7 +742,7 @@ def render(data, kind):
       {degraded}{''.join(sections)}
     </table></td></tr>
 
-{fleet_tickets_section(data)}{subjects_section(data)}
+{held_section(data)}{fleet_tickets_section(data)}{subjects_section(data)}
   <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
     <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#718096">
@@ -714,15 +769,33 @@ def load_tickets(enriched_path):
     because Jira was down would turn an optional feature into an outage of
     the security email.
     """
+    return _ticket_map(enriched_path).get("tickets") or {}
+
+
+def _ticket_map(enriched_path):
     if enriched_path.endswith(".json"):
         path = enriched_path[:-5] + "-tickets.json"
     else:
         path = enriched_path + "-tickets.json"
     try:
         with open(path) as fh:
-            return (json.load(fh) or {}).get("tickets") or {}
+            got = json.load(fh)
     except (OSError, ValueError):
         return {}
+    return got if isinstance(got, dict) else {}
+
+
+def load_held(enriched_path):
+    """CVEs cti-jira held for approval, from the same map as the tickets.
+
+    A Sev5 that is neither on KEV nor CVSS 9.0+ is not filed by the scheduled
+    run. Without this the digest said nothing, and the reader could not tell a
+    ticket not filed from a ticket not wanted.
+    """
+    held = _ticket_map(enriched_path).get("held")
+    if not isinstance(held, list):
+        return []
+    return [h for h in held if isinstance(h, dict) and h.get("cve")]
 
 
 def ticket_cell_html(f, tickets):
@@ -797,6 +870,7 @@ def render_text(data, kind):
         if len(group) > limits[p]:
             lines.append(f"  +{len(group) - limits[p]} more {p} in the full report.")
         lines.append("")
+    lines += held_text(data)
     lines += fleet_tickets_text(data)
     lines.append("Presence determined solely by the vulnerability lookup provider.")
     lines.append("UNKNOWN means the scanner had no mapping - not that we are clean.")
@@ -835,6 +909,8 @@ def main():
     # Underscore-prefixed: renderer state, not part of the enriched
     # contract that enrich.py owns.
     data["_tickets"] = load_tickets(args.enriched)
+    data["_held"] = load_held(args.enriched)
+    data["_enriched"] = args.enriched
 
     if args.subject_only:
         print(subject(data, kind))

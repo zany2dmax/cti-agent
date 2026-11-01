@@ -868,6 +868,16 @@ sudo cti-agent cti-jira --from-enriched <file> --for-real --approve
 KEV and CVSS 9.0+ entries. Making it configuration would turn "the fleet decided to file
 this" into something that happens overnight with nobody watching.
 
+**A held CVE is named in the daily.** The digest carries a "HELD FOR APPROVAL"
+section (HTML and text) listing each held CVE with its host count and the exact
+`--approve` command for that day's file. No section means nothing was held.
+Before this the only trace was one journal line
+(`... held for approval (re-run with --approve to file it)`), so a Sev5
+confirmed present and exploited could go unticketed without anyone knowing.
+The list comes from the `held` array in the `-tickets.json` beside the enriched
+file, which only a `--for-real` run writes. A CVE is listed every day until
+someone approves it or the scanner stops finding it.
+
 ### What happens on the runs after the first
 
 The ticket is found by its `cti-<cve>` label and **updated in place** — the
