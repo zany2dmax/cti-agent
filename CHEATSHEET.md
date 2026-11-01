@@ -128,6 +128,7 @@ sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file fro
 #   rehearse one ticket: cti-appreport --app-id 1234 --out-dir /tmp/report, then
 #   cti-jira --appscan-tickets <state/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]
 #   (files an unassigned "[TEST]" ticket; delete it in Jira and rm -rf /tmp/report afterwards)
+#   weekly comment refused with an HTML 403? find the text: cti-jira --appscan-tickets <file> --appscan-test 1234 --appscan-comment-probe CR-NNN [--for-real]  (on a [TEST] ticket only)
 #   rehearse closing a retired app's ticket: cti-jira --appscan-close-test CR-NNN [--for-real]  (only a [TEST] ticket; needs JIRA_ALLOW_CLOSE)
 #   then WAS_ATTACH_REPORT=1 in fleet.env; reports carry session cookies, deleted after attaching
 sudo cti-agent run-domains --to-dev
