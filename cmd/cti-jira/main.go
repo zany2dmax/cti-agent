@@ -89,8 +89,15 @@ func run() int {
 		"preview, or with --for-real close, ONE ticket filed by --appscan-test (label "+
 			"cti-agent-test): the single labelled real test of how the weekly run closes the "+
 			"ticket of a retired application. Needs JIRA_ALLOW_CLOSE; refuses any other ticket")
+	appscanCommentProbe := flag.String("appscan-comment-probe", "",
+		"with --appscan-tickets and --appscan-test: post the weekly comment for that application onto "+
+			"this TEST ticket (filed by --appscan-test) and, if the gateway refuses it, bisect it by line "+
+			"to name the refused text. Preview unless --for-real")
 	flag.Parse()
 
+	if *appscanCommentProbe != "" && (*appscanTest == "" || *appscanTickets == "") {
+		return die("--appscan-comment-probe needs --appscan-tickets and --appscan-test (which application's comment to post)")
+	}
 	if *appscanTest != "" && *appscanTickets == "" {
 		return die("--appscan-test needs --appscan-tickets (the cti-appscan --tickets-out file)")
 	}
@@ -152,6 +159,9 @@ func run() int {
 	}
 	if *appscanCloseTest != "" {
 		return doAppscanCloseTest(ctx, c, cfg, *appscanCloseTest, *forReal)
+	}
+	if *appscanCommentProbe != "" {
+		return doAppscanCommentProbe(ctx, c, cfg, *appscanTickets, *appscanTest, *appscanCommentProbe, *forReal, time.Now())
 	}
 	if *appscanTest != "" {
 		return doAppscanTest(ctx, c, cfg, *appscanTickets, *appscanTest, *appscanReports, *forReal, time.Now())

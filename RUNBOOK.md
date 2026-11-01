@@ -1431,6 +1431,25 @@ sudo cti-agent cti-jira --appscan-close-test CR-NNN                           # 
 sudo cti-agent cti-jira --appscan-close-test CR-NNN --for-real                # closes it
 ```
 
+### When Jira refuses the weekly comment (HTTP 403, an HTML page)
+
+`commenting on CR-NNN failed: ... HTTP 403: <!DOCTYPE HTML ... ERROR: The request
+could not be satisfied` is a firewall's page in front of the Atlassian gateway,
+not a Jira permission. It can refuse a comment's text even though the same text
+was accepted as a ticket description. To find which lines, rehearse on a test
+ticket (it refuses any other, including the weekly run's own):
+
+```bash
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --for-real            # files a [TEST] ticket, say CR-NNN
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-comment-probe CR-NNN             # preview
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-comment-probe CR-NNN --for-real  # posts, bisects
+```
+
+It posts a one-line control, then the whole comment the weekly run would post
+for that application, and if that is refused it halves it by line until it names
+the refused lines (at most 80 comments on the test ticket). "Refused only as a
+group" means size or a combination, not one line. Delete the test ticket after.
+
 ### Adding a second scanner
 
 `internal/appscan` is a provider boundary, like `internal/vulnlookup` for host

@@ -31,6 +31,8 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5 or CVSS 9.0+
 .IR DIR ]
 .RB [ \-\-appscan\-test
 .IR ID ]
+.RB [ \-\-appscan\-comment\-probe
+.IR KEY ]
 .PP
 .B sudo cti\-agent cti\-jira
 .I mode
@@ -361,6 +363,24 @@ resolution or comment is refused; a resolution field on the screen is set to
 "Transition issues". Closing is reversible by reopening; if the application
 returns with findings, a new ticket is filed and linked to the closed one.
 Default:\~empty.
+.TP
+.BI \-\-appscan\-comment\-probe " KEY"
+With
+.B \-\-appscan\-tickets
+and
+.BR \-\-appscan\-test :
+post the comment the weekly run would post for that application onto the
+test ticket KEY (one filed by
+.BR \-\-appscan\-test ;
+any other ticket is refused) and, if the Atlassian gateway's firewall refuses it
+(an HTML "The request could not be satisfied" page with HTTP 403), halve it by
+line until the refused lines are named. A one-line control comment goes first; at
+most 80 comments are posted. A refusal that no half reproduces is reported as a
+group (size or a combination of lines). Without
+.B \-\-for\-real
+nothing is posted. Subject to the
+.B JIRA_ALLOW_CREATE
+write gate.
 .TP
 .BI \-\-appscan\-reports " DIR"
 With
