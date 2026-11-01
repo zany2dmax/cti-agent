@@ -250,6 +250,20 @@ type TicketRef struct {
 	Hosts   int    `json:"hosts"`             // today's count, when Checked
 	Outcome string `json:"outcome,omitempty"` // what this run did, in words
 	Kind    string `json:"kind,omitempty"`    // "domains-lockdown"; "" for a CVE ticket
+	Held    bool   `json:"-"`                 // no ticket: waiting for --approve (see HeldCVE)
+}
+
+// HeldCVE is a CVE that qualified for a ticket but is waiting for a person.
+//
+// A Sev5 that is neither on KEV nor CVSS 9.0+ is the fleet's own judgement, so
+// it is not filed by the scheduled run. Its only trace used to be one journal
+// line, and nobody reading the digest knew a ticket had not been opened
+// (CVE-2026-111497, 2026-10-27). The digest lists these so the person can say
+// yes with the command it prints.
+type HeldCVE struct {
+	CVE   string `json:"cve"`
+	Hosts int    `json:"hosts"`
+	Title string `json:"title,omitempty"`
 }
 
 // refFor builds the reference for an existing issue.
@@ -280,6 +294,7 @@ func pastTense(s string) string {
 type TicketMap struct {
 	Generated string               `json:"generated"`
 	Tickets   map[string]TicketRef `json:"tickets"`
+	Held      []HeldCVE            `json:"held,omitempty"`
 }
 
 // TicketMapPath is where it goes: next to the enriched file it describes, so
