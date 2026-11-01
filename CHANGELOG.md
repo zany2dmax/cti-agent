@@ -57,6 +57,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   is reversible; a returning app gets a new ticket linked to the closed one.
   The domains lane is unchanged.
 
+- `cti-jira --appscan-comment-probe KEY` (with `--appscan-tickets` and
+  `--appscan-test`): posts the weekly comment for one application onto an
+  `--appscan-test` ticket and, if the gateway refuses it (the firewall's HTTP 403
+  page seen on 2026-10-30), bisects it by line to name the refused text. Preview
+  unless `--for-real`; refuses any ticket that is not a test ticket; at most 80
+  comments.
+
 ### Changed
 
 - **One footer for every lane.** The daily and weekly briefs, Patch Tuesday and
