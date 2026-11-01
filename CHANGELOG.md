@@ -39,6 +39,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The daily names Sev5s held for approval.** A Sev5 that is neither on KEV nor
+  CVSS 9.0+ is still not filed by the scheduled run (the rule is unchanged), but
+  the digest now has a "HELD FOR APPROVAL" section with each CVE, its host count
+  and the `cti-jira --from-enriched <file> --for-real --approve` command. Before,
+  the only trace was a journal line (CVE-2026-111497, 2026-10-27). `cti-jira`
+  records them as `held` in the `-tickets.json` map; `brief.py` renders them.
+  **Upgrade:** pull and reinstall; nothing to configure.
+
 - **AppSec closes the ticket of a deleted web app.** When a Qualys WAS web app
   is deleted, the weekly `cti-jira --appscan-tickets` closes its open ticket
   with a comment. Guards: only when `cti-appscan` fetched the complete web-app

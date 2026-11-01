@@ -1311,6 +1311,67 @@ class DigestFleetTickets(unittest.TestCase):
         self.assertIn("not re-checked", html)
 
 
+class HeldForApproval(unittest.TestCase):
+    """A Sev5 held for approval is named in the digest, with the command.
+
+    CVE-2026-111497 was held and the only trace was a journal line, so the
+    reader could not tell "no ticket wanted" from "no ticket filed".
+    """
+    HELD = [{"cve": "CVE-2026-111497", "hosts": 14, "title": "Some <b>exploit</b>"}]
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.enriched = os.path.join(self.dir, "enriched-2026-10-02.json")
+        self.tickets = os.path.join(self.dir, "enriched-2026-10-02-tickets.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write_map(self, obj):
+        with open(self.tickets, "w") as fh:
+            json.dump(obj, fh)
+
+    def held_data(self, held=None):
+        d = {"findings": [], "counts": {}, "total": 0, "generated": "now", "_tickets": {}}
+        d["_held"] = self.HELD if held is None else held
+        d["_enriched"] = self.enriched
+        return d
+
+    def test_the_held_cve_the_hosts_and_the_command_reach_the_html(self):
+        html = brief.held_section(self.held_data())
+        self.assertIn("HELD FOR APPROVAL", html)
+        self.assertIn("CVE-2026-111497", html)
+        self.assertIn("14 hosts", html)
+        self.assertIn("--for-real --approve", html)
+        self.assertIn(self.enriched, html)
+
+    def test_titles_are_escaped(self):
+        html = brief.held_section(self.held_data())
+        self.assertNotIn("<b>exploit</b>", html)
+
+    def test_the_text_digest_names_it_too(self):
+        text = brief.render_text(self.held_data(), "daily")
+        self.assertIn("HELD FOR APPROVAL", text)
+        self.assertIn("CVE-2026-111497", text)
+        self.assertIn("--approve", text)
+
+    def test_nothing_held_means_no_section(self):
+        self.assertEqual(brief.held_section(self.held_data([])), "")
+        self.assertNotIn("HELD FOR APPROVAL",
+                         brief.render_text(self.held_data([]), "daily"))
+
+    def test_load_held_reads_the_map_and_survives_a_bad_one(self):
+        self.write_map({"tickets": {}, "held": self.HELD + ["junk", {"hosts": 2}]})
+        self.assertEqual(brief.load_held(self.enriched), self.HELD)
+        self.write_map({"tickets": {}, "held": "nope"})
+        self.assertEqual(brief.load_held(self.enriched), [])
+        self.write_map(["not", "a", "dict"])
+        self.assertEqual(brief.load_held(self.enriched), [])
+        self.assertEqual(brief.load_tickets(self.enriched), {})
+        os.remove(self.tickets)
+        self.assertEqual(brief.load_held(self.enriched), [])
+
+
 class RemediationNote(unittest.TestCase):
     """A ticketed finding must stop reporting as un-actioned.
 

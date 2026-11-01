@@ -630,6 +630,10 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 			logf("WARNING: %s: %s", f.CVE, safelog.Line(err.Error()))
 			continue
 		}
+		if ref.Held {
+			tm.Held = append(tm.Held, HeldCVE{CVE: ref.CVE, Hosts: ref.Hosts, Title: ref.Summary})
+			continue
+		}
 		if ref.Key != "" {
 			tm.Tickets[f.CVE] = ref
 			// Close the loop back to the findings table, so the orchestrator
@@ -761,7 +765,7 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	if jira.NeedsApproval(f) && !approve {
 		logf("%s is Sev5 but neither on KEV nor CVSS 9.0+ - held for approval "+
 			"(re-run with --approve to file it)", f.CVE)
-		return TicketRef{}, nil
+		return TicketRef{Held: true, CVE: f.CVE, Hosts: f.Count(), Summary: f.Title}, nil
 	}
 
 	if !forReal {

@@ -96,12 +96,3 @@ is real, not before. Finished work moves out of this file into
   check-in. Noted only, not designed
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
-- Held Sev5s invisible in the daily: a Sev5 that is neither on KEV nor CVSS
-  9.0+ is held for approval (`--approve`), and the only trace is one journal
-  line, so nobody reading the digest knows a ticket was not filed (found
-  2026-10-27, CVE-2026-111497). Recommended fix: a "Held for approval"
-  section in the daily (HTML and text) naming each held CVE, its host count
-  and the exact `--approve` command, with tests and RUNBOOK/CHANGELOG
-  updates; the rule itself stays. Alternative, not recommended: auto-file a
-  Sev5 that is confirmed present and exploited, which brings back the
-  overnight scoring-bug risk the hold exists to prevent
