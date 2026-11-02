@@ -55,8 +55,14 @@ is real, not before. Finished work moves out of this file into
   technology supplier arrived with no form at all, so it must also read the
   message text. The form does not yet carry the question; when it does, the
   lane checks the requester's answer and flags a "No" for a name that looks like
-  a technology provider. Open: where the verdict goes (digest section or a
-  ticket in a project TBD), and who reads it
+  a technology provider. Output decided: one item per request on the
+  security team's Kanban board (Jira project CYBR, a Task), assigned to the
+  Jira user named by a new `fleet.env` setting (an email, looked up like the
+  AppSec owners; an unknown user leaves it unassigned with a warning, never a
+  guess). Needs `CYBR` in `JIRA_ALLOW_CREATE`, a project-key setting for the
+  lane (the way the domains lane has its own), and the service account's
+  permissions in CYBR. Still open: whether a digest line also lists the day's
+  requests, and Unsure-means-Yes wording on the item
 - `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
   age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
   to include closed ones and `--json`. No write gate needed; it would also give
