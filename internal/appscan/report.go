@@ -102,7 +102,9 @@ func renderReport(week []ScanResult, weekEnding time.Time, slot bool) Block {
 		switch {
 		case s.NoNotification && !s.Fault():
 			r.unnotified = append(r.unnotified, s)
-		case s.Complete && !s.NoNotification:
+		case s.Complete && !s.NoNotification && !s.Unreachable():
+			// Unreachable is the second case with no numbers to print: the
+			// scan finished, but against a host that never answered.
 			r.counted = append(r.counted, s)
 		}
 	}
@@ -238,15 +240,20 @@ func (r *report) title() string {
 // were two independent loops over the same slice, which is how a subject ends
 // up saying something the body contradicts. A scan that is both incomplete and
 // unauthenticated counts as failed: that is the more specific fact.
-func (r *report) faultCounts() (failed, incomplete int) {
+func (r *report) faultCounts() (failed, incomplete, unreachable int) {
 	for _, s := range r.faults {
-		if s.Auth.Failed() {
+		// The same order faultLine uses, so a scan is counted under the
+		// heading it is listed under.
+		switch {
+		case s.Complete && s.Unreachable():
+			unreachable++
+		case s.Auth.Failed():
 			failed++
-		} else {
+		default:
 			incomplete++
 		}
 	}
-	return failed, incomplete
+	return failed, incomplete, unreachable
 }
 
 // subject names the most actionable thing in the mail.
@@ -270,13 +277,16 @@ func (r *report) subject() string {
 		return label + ": no completed scans this week"
 	}
 
-	failed, incomplete := r.faultCounts()
+	failed, incomplete, unreachable := r.faultCounts()
 	switch {
 	case failed > 0:
 		return fmt.Sprintf("[AUTH FAILED] %s: the scanner could not log in to "+
 			"%d application(s)", label, failed)
 	case incomplete > 0:
 		return fmt.Sprintf("[INCOMPLETE] %s: %d scan(s) did not finish", label, incomplete)
+	case unreachable > 0:
+		return fmt.Sprintf("[UNREACHABLE] %s: the scanner could not reach "+
+			"%d application(s)", label, unreachable)
 	}
 
 	urgent, apps := 0, 0
@@ -302,14 +312,17 @@ func (r *report) leadLine() string {
 	if len(r.scans) == 0 {
 		return emptyWeek
 	}
-	failed, incomplete := r.faultCounts()
-	if failed+incomplete > 0 {
+	failed, incomplete, unreachable := r.faultCounts()
+	if failed+incomplete+unreachable > 0 {
 		var p []string
 		if failed > 0 {
 			p = append(p, fmt.Sprintf("%d scan(s) could not authenticate", failed))
 		}
 		if incomplete > 0 {
 			p = append(p, fmt.Sprintf("%d did not finish", incomplete))
+		}
+		if unreachable > 0 {
+			p = append(p, fmt.Sprintf("%d could not reach the site", unreachable))
 		}
 		return fmt.Sprintf("%d application(s) scanned this week. %s - the counts "+
 			"for those are not comparable with last week's, and the fleet "+
@@ -330,6 +343,16 @@ func (r *report) leadLine() string {
 
 // faultLine is the headline and the explanation for one scan-level fault.
 func faultLine(s ScanResult) (head, detail string) {
+	if s.Complete && s.Unreachable() {
+		// Checked before authentication: with no host answering, a login
+		// could not have been attempted, so "authentication failed" would
+		// send somebody to fix a credential that may be fine.
+		return fmt.Sprintf("%s - no host answered (%d scanned, 0 active)", s.App, s.HostsScanned),
+			"The scan finished, but the scanner could not reach the site, so it " +
+				"tested nothing and its zeroes are not a result. Either the site was " +
+				"down when the scan ran or it is blocking the scanner. No counts are " +
+				"reported for this application."
+	}
 	if s.Auth.Failed() {
 		status := s.Auth.Status
 		if status == "" {
@@ -389,6 +412,26 @@ func unnotifiedNote(s ScanResult) string {
 		return fmt.Sprintf("%s, %d links crawled, counts unknown", when, s.LinksCrawled)
 	}
 	return when + ", counts unknown"
+}
+
+// rowNotes are the qualifiers on one OPEN NOW row: what a reader needs before
+// comparing its numbers with last week's. Empty for an ordinary scheduled
+// re-scan, which is most rows - a note on every row is a note on none.
+func rowNotes(s ScanResult) []string {
+	var notes []string
+	if s.FirstScan {
+		// "New" on a first scan is everything, and there is no baseline.
+		notes = append(notes, "first scan with this setup - no previous run to compare against")
+	}
+	if strings.EqualFold(s.Launch, "manual") {
+		notes = append(notes, "run by hand, not by the schedule")
+	}
+	if n := s.SensitiveCounts.Total(); n > 0 {
+		notes = append(notes, fmt.Sprintf("%d sensitive-content finding(s) this scan "+
+			"(data such as card numbers or credentials in a response): %s",
+			n, counts(s.SensitiveCounts)))
+	}
+	return notes
 }
 
 // openLabel is the authenticated/unauthenticated tag that travels with every
@@ -628,6 +671,9 @@ func (r *report) text() string {
 		// column pushed the counts out by one on exactly the row a reader is
 		// most likely to be comparing against the others.
 		fmt.Fprintf(&b, "  %-28s %-24s %s\n", s.App, openLabel(s), lead(s.AppState.Active))
+		for _, n := range rowNotes(s) {
+			fmt.Fprintf(&b, "      note: %s\n", n)
+		}
 		if text, _ := linkFor(s); text != "" {
 			fmt.Fprintf(&b, "      %s\n", text)
 		}
@@ -794,6 +840,11 @@ func (r *report) html() string {
               <td align="right" style="padding:6px 0 6px 8px;
                          border-bottom:1px solid #edf2f7;color:#1a202c">%s</td></tr>`,
 			e(s.App), linkHTML(s), e(s.Auth.Label()), e(lead(s.AppState.Active)))
+		for _, n := range rowNotes(s) {
+			fmt.Fprintf(&b, `
+          <tr><td colspan="3" style="padding:0 0 6px 12px;border-bottom:1px solid #edf2f7;
+                         color:#718096;font-size:11px">%s</td></tr>`, e(n))
+		}
 	}
 	b.WriteString(`
         </table></td></tr>`)

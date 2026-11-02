@@ -215,6 +215,16 @@ type ScanResult struct {
 	// exactly like an application with nothing new.
 	AppID string
 
+	// NoticeAppID is the application id the NOTIFICATION gave, from its
+	// application-status link. Kept apart from AppID on purpose.
+	//
+	// It arrived in mail at a published address, so it is good enough to
+	// tell two scans of one application apart (newestPerApp) and to be
+	// checked against the API's id, but not to drive a lookup: AppID is what
+	// fetches open findings for a ticket, and a forged notice must not be
+	// able to point a ticket at another application's findings.
+	NoticeAppID string
+
 	// NoNotification marks a scan the vendor's API reports but whose
 	// completion email never reached the mailbox.
 	//
@@ -244,11 +254,46 @@ type ScanResult struct {
 	Complete bool
 
 	LinksCrawled int
+	// LinksDelta is the vendor's change in links crawled against the previous
+	// scan. A crawl that shrinks sharply with the counts is a smaller surface,
+	// not a safer application.
+	LinksDelta int
+
+	// HostsScanned and ActiveHosts are the vendor's own figures. A scan that
+	// finished "OK" with no host answering measured nothing - see Unreachable.
+	// Both zero when the notification did not carry them.
+	HostsScanned int
+	ActiveHosts  int
+
+	// Launch is the vendor's launch type, verbatim: "Scheduled" or "Manual".
+	// A manual run is somebody at the console, and its title is often just a
+	// date, so it says nothing about whether the schedule is running.
+	Launch string
+	// LaunchedBy is the scanner account that launched it. Worth having when a
+	// notice turns up with the wrong sender: that setting is per account.
+	LaunchedBy string
+	// Profile is the scan's option profile, which decides what was tested.
+	Profile string
+	// Duration is how long the scan ran, zero when not reported.
+	Duration time.Duration
+
+	// FirstScan says the vendor had no earlier scan of this application with
+	// this authentication record to compare against. New and Reopened mean
+	// nothing on a first scan, and the deltas are absent rather than zero.
+	FirstScan bool
+	// PreviousRef is the reference of the scan the vendor compared against.
+	PreviousRef string
 
 	// ScanCounts is what this run found. ScanDelta is the vendor's own
 	// comparison against the previous scan, which saves keeping state.
 	ScanCounts Counts
 	ScanDelta  Counts
+	// SensitiveCounts is this run's sensitive-content findings (card numbers,
+	// credentials and the like in a response), which the vendor counts apart
+	// from vulnerabilities. InfoCounts is "information gathered": inventory
+	// rather than findings, and never part of a total.
+	SensitiveCounts Counts
+	InfoCounts      Counts
 
 	// AppState is the application-level lifecycle after this scan.
 	// Read Active for current exposure; Total is mostly history.
@@ -364,7 +409,26 @@ type RemedyFetcher interface {
 //
 // An unauthenticated scan with NO credential configured is not a fault. There
 // is nothing missing: the scan covered what there was to cover.
-func (s ScanResult) Fault() bool { return !s.Complete || s.Auth.Failed() }
+func (s ScanResult) Fault() bool { return !s.Complete || s.Auth.Failed() || s.Unreachable() }
+
+// Unreachable reports a scan that finished without reaching its target: the
+// vendor scanned a host and none answered. Its zeroes are no measurement at
+// all, so it is a fault rather than a clean result.
+//
+// Only from a notification, which is where the host figures come from. A
+// result built from the scan list has none, and zero of zero is not this.
+func (s ScanResult) Unreachable() bool {
+	return !s.NoNotification && s.HostsScanned > 0 && s.ActiveHosts == 0
+}
+
+// AppKey is the best identity this result has for its application: the
+// API's id, else the notification's, else empty.
+func (s ScanResult) AppKey() string {
+	if s.AppID != "" {
+		return s.AppID
+	}
+	return s.NoticeAppID
+}
 
 // Attention reports whether a human should look at this scan now.
 //
@@ -402,6 +466,19 @@ type Provider interface {
 	// the way is still worth reporting, and a vendor template change should
 	// announce itself rather than show up as a quietly thinner report.
 	Parse(body string) (ScanResult, []string)
+}
+
+// LookalikeDetector is implemented by a provider that can tell a message
+// carrying its notice's subject that did NOT come from it.
+//
+// Optional, and separate from Recognises, because the answer is not "ours".
+// Such a message is never parsed or claimed - the sender check is what keeps
+// a forged notice out of the report and out of the mailbox cleanup - but it is
+// never silently skipped either. The real case: a scanner account whose
+// notification sender was set to the team mailbox, so every scan it launched
+// looked like the fleet's own mail and vanished from the weekly.
+type LookalikeDetector interface {
+	Lookalike(sender, subject string) bool
 }
 
 // DetailFetcher is implemented only by providers with an API.

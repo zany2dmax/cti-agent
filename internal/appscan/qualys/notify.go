@@ -44,6 +44,22 @@ func (Provider) Recognises(sender, subject string) bool {
 		"web application vulnerability scan results")
 }
 
+// noticeSubject is how the vendor's own subject line starts.
+const noticeSubject = "qualys: web application vulnerability scan results"
+
+// Lookalike reports a message with the notice's own subject from an address
+// that is not Qualys's.
+//
+// A prefix match, so "FW:" and "RE:" - a person passing one on - are not
+// lookalikes; Recognises already declines those, and they need a human, not a
+// warning. Seen for real: a scanner account whose notification sender was the
+// team mailbox itself, so its notices arrived "from" the mailbox, read as the
+// fleet's own mail, and dropped out of the weekly without a word.
+func (Provider) Lookalike(sender, subject string) bool {
+	s := strings.ToLower(strings.TrimSpace(subject))
+	return strings.HasPrefix(s, noticeSubject) && !qualysDomain(senderDomain(sender))
+}
+
 // senderDomain is the domain of the address in "Name <addr>" or a bare addr.
 func senderDomain(sender string) string {
 	s := strings.TrimSpace(sender)
@@ -78,10 +94,15 @@ var (
 	hiddenRE    = regexp.MustCompile(`(?is)<(div|span)[^>]*(?:display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all)[^>]*>.*?</(?:div|span)>`)
 	pfptRE      = regexp.MustCompile(`(?is)<div[^>]+id=["']?pfptBanner[^>]*>.*?</div>`)
 	reportRE    = regexp.MustCompile(`(?is)view these scan results[^<]*<a[^>]+href\s*=\s*["']([^"']+)["']`)
+	statusRE    = regexp.MustCompile(`(?is)view application status[^<]*<a[^>]+href\s*=\s*["']([^"']+)["']`)
+	webappRE    = regexp.MustCompile(`/email-report/webapp/(\d+)$`)
 	sevLineRE   = regexp.MustCompile(`^Severity\s+([1-5])\s+"[^"]*"\s*:\s*(-?\d+)(?:\s*\(\s*([-+=]?\s*\d*)\s*\))?(.*)$`)
 	lifeRE      = regexp.MustCompile(`(\d+)\s+(New|Reopened|Active|Fixed|Ignored)`)
 	crawledRE   = regexp.MustCompile(`^Links Crawled\s*:\s*(\d+)`)
-	runSuffixRE = regexp.MustCompile(`\s+(?:Bimonthly\s+|Monthly\s+|Weekly\s+)?Run\s*#\s*\d+\s*$`)
+	linksDiffRE = regexp.MustCompile(`^Links Crawled\s*:\s*\d+\s*\(\s*([-+]?\s*\d+)\s*\)`)
+	prevRefRE   = regexp.MustCompile(`^Comparison has been made with scan .*reference:\s*(was/\d+\.\d+)`)
+	durationRE  = regexp.MustCompile(`^(\d+):([0-5]\d):([0-5]\d)$`)
+	runSuffixRE = regexp.MustCompile(`\s+(?:Bimonthly\s+|Biweekly\s+|Monthly\s+|Weekly\s+)?Run\s*#\s*\d+\s*$`)
 )
 
 // Section headings in the body, in the order Qualys emits them.
@@ -89,8 +110,12 @@ const (
 	secScanVulns = "Summary of Vulnerabilities"
 	secScanSens  = "Summary of Sensitive Contents"
 	secScanInfo  = "Summary of Information Gathered"
+	secAppStats  = "Web Application Statistics"
 	secAppVulns  = "Vulnerabilities (New, Reopened, Active, Fixed, Ignored)"
 	secAppSens   = "Sensitive Contents (New, Reopened, Active, Fixed, Ignored)"
+
+	// noTrends is the line a first scan carries in place of the comparison.
+	noTrends = "No trends are available"
 )
 
 // Parse reads one notification body.
@@ -116,6 +141,23 @@ func (p Provider) Parse(body string) (appscan.ScanResult, []string) {
 		problems = append(problems, "no scan report link found in the notification")
 	}
 
+	// The application-status link carries the scanner's id for the
+	// application. Verified the same way as the report link, and kept as
+	// NoticeAppID - an identity hint, never a lookup key (see its comment).
+	// Absent is not a problem: the lane managed without it until now.
+	if m := statusRE.FindStringSubmatch(body); m != nil {
+		u, err := UnwrapReportLink(html.UnescapeString(m[1]))
+		switch {
+		case err != nil:
+			problems = append(problems, "the application status link did not "+
+				"resolve to a Qualys host: "+err.Error())
+		default:
+			if id := webappRE.FindStringSubmatch(u); id != nil {
+				r.NoticeAppID = id[1]
+			}
+		}
+	}
+
 	lines := textLines(body)
 	field := func(label string) string { return fieldValue(lines, label) }
 
@@ -132,6 +174,20 @@ func (p Provider) Parse(body string) (appscan.ScanResult, []string) {
 		r.App = t
 	}
 	r.LinksCrawled = atoiOr(firstMatch(lines, crawledRE), 0)
+	r.LinksDelta = atoiOr(strings.ReplaceAll(firstMatch(lines, linksDiffRE), " ", ""), 0)
+	r.HostsScanned = atoiOr(field("Hosts Scanned"), 0)
+	r.ActiveHosts = atoiOr(field("Active Hosts"), 0)
+
+	r.Launch = field("Launch Type")
+	r.LaunchedBy = field("Launched By")
+	r.Profile = field("Option Profile")
+	r.Duration = parseDuration(field("Duration"))
+
+	// A first scan says so in place of the comparison line. Neither is a
+	// problem when missing: an older template carried neither, and the
+	// caller treats "not first, no reference" as "unknown", not "first".
+	r.PreviousRef = firstMatch(lines, prevRefRE)
+	r.FirstScan = r.PreviousRef == "" && hasLine(lines, noTrends)
 
 	r.Auth = appscan.Auth{
 		Record: notNone(field("Authentication Record")),
@@ -149,6 +205,11 @@ func (p Provider) Parse(body string) (appscan.ScanResult, []string) {
 	r.Finished = parseQualysTime(field("End Date"))
 
 	r.ScanCounts, r.ScanDelta = scanCounts(lines, secScanVulns, secScanSens)
+	r.SensitiveCounts, _ = scanCounts(lines, secScanSens, secScanInfo)
+	// Bounded by the application table's heading, whose severity lines would
+	// otherwise be read as information-gathered counts: "Severity 5 ... : 1
+	// ( 0 New, ..." matches the same pattern.
+	r.InfoCounts, _ = scanCounts(lines, secScanInfo, secAppStats)
 	r.AppState = lifecycle(lines, secAppVulns, secAppSens)
 
 	// Checks, not assumptions. Each of these has a specific way of being
@@ -345,6 +406,30 @@ func parseQualysTime(s string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// parseDuration reads "12:22:28". Hours are not capped at 24: a long crawl
+// runs past a day, and that is exactly the case worth seeing. Unreadable is
+// zero, which every reader treats as "not reported".
+func parseDuration(s string) time.Duration {
+	m := durationRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0
+	}
+	h, _ := strconv.Atoi(m[1])
+	mins, _ := strconv.Atoi(m[2])
+	sec, _ := strconv.Atoi(m[3])
+	return time.Duration(h)*time.Hour + time.Duration(mins)*time.Minute +
+		time.Duration(sec)*time.Second
+}
+
+func hasLine(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstMatch(lines []string, re *regexp.Regexp) string {
