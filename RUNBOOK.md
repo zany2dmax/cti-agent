@@ -1621,6 +1621,72 @@ should go (the mail gateway may provide an address). Until it is set the check
 is only that every sending domain has *some* `rua=`; once set, every sending
 domain's `rua=` must include it.
 
+### 7. The PoD Log API (planned, not built)
+
+The mail-side evidence for the domains lane will come from Proofpoint's *PoD
+Log API*. The vendor guide is **"Proofpoint on Demand (PoD) Log API", Revision
+I, August 2023** (Proofpoint Customer Success Center; the guide is
+proprietary, so it is not in this repository: keep your copy beside the
+fleet's other vendor documents and cite its page numbers when something here
+disagrees with it). This section records what the fleet relies on; the guide
+wins on any difference.
+
+**What to arrange with the Proofpoint admin**
+
+1. **A token for the fleet alone.** Email Protection portal, Settings > API
+   Key Management > Create New (or ask Proofpoint support). The service allows
+   **one session per token**: a second connection with the same token gets
+   HTTP 409, so never share it with a SIEM or a hand test. Store it in
+   `fleet.env` as `POD_API_TOKEN` (0600, never in the repository).
+2. **The cluster ID**, shown at the top right of the management interface next
+   to the release number. `fleet.env` setting `POD_CLUSTER_ID`.
+3. **Remote syslog licence.** A 401 can also mean the licence for the cluster
+   is missing or expired; ask that the `message` stream is enabled.
+4. **Egress** from the box to `logstream.proofpoint.com` on TCP 443.
+
+**How the service behaves (guide, "API Features" and "Connection Notes")**
+
+- Endpoint `wss://logstream.proofpoint.com/v1/stream?cid=<cluster>&type=
+  message|maillog|audit`, header `Authorization: Bearer <token>`, plain
+  WebSocket (RFC 6455). `message` carries the filter data the lane needs;
+  `maillog` is the MTA log; `audit` is portal audit events (not used).
+- It is a **live feed, not a query API.** Polling "every 15 minutes" returns
+  duplicates (the minimum is one hour of data) and can get the client locked
+  out. A reconnect within an hour resumes where the last session stopped; after
+  a longer gap you only get the last hour.
+- **Archive reads** use `sinceTime` and `toTime` (ISO 8601 with offset such as
+  `-0500`; rounded to the hour, 30 days back at most). The weekly lane is one
+  archive read of the last seven days, then a disconnect.
+- Compression (`permessage-deflate`, with `client_no_context_takeover` and
+  `server_no_context_takeover`) is optional; the fleet asks for none.
+- Events can arrive out of time order (an agent that finishes a slow message
+  later logs it later). Count, do not rely on order.
+- Errors: 400 malformed query, 401 bad token, cluster ID or licence, 404 bad
+  URL or protocol, 405 not a GET, 409 token already in use.
+
+**Fields the lane reads (guide, "Message Schema")**
+
+| Need | Field |
+| --- | --- |
+| Direction | `filter.routeDirection` (inbound, outbound, internal, external) |
+| Header From | `msg.header.from` |
+| Envelope sender | `envelope.from` |
+| DKIM signer and selector | `filter.modules.dkimv[]` (`domain`, `selector`, `result`) |
+| SPF | `filter.modules.spf.result` |
+| DMARC rollup and alignment | `filter.modules.dmarc` (`filterdResult`, `alignment`, `authResults`) |
+| Sending host | `connection.ip`, `connection.helo` |
+
+The lane keeps **aggregates only**: per domain and week, the outbound senders
+(header-From domain, DKIM selector, count) and the inbound messages that claim
+the domain but fail DMARC (count, top sending IPs). No subjects, recipients or
+per-message records are written to disk or sent in any report.
+
+**Before the first real run**
+
+Run one archive read for a single hour by hand and look at the output: the
+guide warns that archive data can contain control characters, and the field
+paths above are from the guide, not yet confirmed against this tenant.
+
 ---
 
 ## 11h. Man pages
