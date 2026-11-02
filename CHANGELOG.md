@@ -39,6 +39,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The domains lock-down ticket can live in another Jira project.** New
+  optional `JIRA_DOMAINS_PROJECT_KEY` and `JIRA_DOMAINS_ISSUE_TYPE` send only
+  the weekly domains ticket (INF, for IT); unset, it follows `JIRA_PROJECT_KEY`
+  and nothing changes. The write gate checks that project, and the digest's
+  FLEET TICKETS still lists the ticket from there. A hand-made ticket is
+  adopted only if it carries the labels `cti-agent` and `cti-domains-lockdown`.
+  **Upgrade:** nothing unless you want INF; see the RUNBOOK ("Filing the
+  lock-down ticket in another project").
+
 - **The daily names Sev5s held for approval.** A Sev5 that is neither on KEV nor
   CVSS 9.0+ is still not filed by the scheduled run (the rule is unchanged), but
   the digest now has a "HELD FOR APPROVAL" section with each CVE, its host count

@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,6 +50,14 @@ type Config struct {
 	JiraAPIToken   string
 	JiraProjectKey string
 	JiraIssueType  string
+	// JiraDomainsProject and JiraDomainsIssueType send the domains lane's
+	// weekly lock-down ticket somewhere other than JiraProjectKey: IT tracks
+	// that work in the INF project, while CVE and AppSec tickets stay where
+	// they are. Empty means "same as JIRA_PROJECT_KEY / JIRA_ISSUE_TYPE", so an
+	// install that never sets them behaves exactly as before. Read them through
+	// DomainsProject and DomainsIssueType.
+	JiraDomainsProject   string
+	JiraDomainsIssueType string
 	// JiraAllowCreate is the project-key allowlist, and it is deliberately the
 	// same shape as VM_ALLOW_TO: a comma-separated list the fleet may write
 	// to, with no default. A ticket filed into the wrong project is the same
@@ -64,6 +73,24 @@ type Config struct {
 	// ends in a done status.
 	JiraAllowClose      string
 	JiraCloseTransition string
+}
+
+// DomainsProject is where the domains lane files its lock-down ticket.
+func (c Config) DomainsProject() string {
+	if k := strings.TrimSpace(c.JiraDomainsProject); k != "" {
+		return k
+	}
+	return c.JiraProjectKey
+}
+
+// DomainsIssueType is the issue type for that ticket. It follows the project:
+// a separate project has its own issue types, so the main JIRA_ISSUE_TYPE is
+// not assumed to exist there.
+func (c Config) DomainsIssueType() string {
+	if t := strings.TrimSpace(c.JiraDomainsIssueType); t != "" {
+		return t
+	}
+	return c.JiraIssueType
 }
 
 // Load returns the full configuration, Graph included. For commands that read
@@ -231,6 +258,9 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraProjectKey:  os.Getenv("JIRA_PROJECT_KEY"),
 		JiraIssueType:   os.Getenv("JIRA_ISSUE_TYPE"),
 		JiraAllowCreate: os.Getenv("JIRA_ALLOW_CREATE"),
+
+		JiraDomainsProject:   os.Getenv("JIRA_DOMAINS_PROJECT_KEY"),
+		JiraDomainsIssueType: os.Getenv("JIRA_DOMAINS_ISSUE_TYPE"),
 
 		JiraAllowClose:      os.Getenv("JIRA_ALLOW_CLOSE"),
 		JiraCloseTransition: os.Getenv("JIRA_CLOSE_TRANSITION"),

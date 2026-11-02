@@ -500,6 +500,17 @@ Section 9.
 The issue type name exactly as the project spells it. Required, no default.
 Section 9.
 .TP
+.B JIRA_DOMAINS_PROJECT_KEY
+Optional. The project the domains lock-down ticket is searched for and filed in;
+unset means
+.BR JIRA_PROJECT_KEY .
+The project must also be in
+.BR JIRA_ALLOW_CREATE .
+.TP
+.B JIRA_DOMAINS_ISSUE_TYPE
+Optional. The issue type for that ticket in its project; unset means
+.BR JIRA_ISSUE_TYPE .
+.TP
 .B JIRA_ALLOW_CREATE
 The write allowlist. Optional; empty means write nothing to Jira.
 Section 9.
