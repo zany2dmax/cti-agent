@@ -39,6 +39,24 @@ is real, not before. Finished work moves out of this file into
   the service account's permissions in the new project (`--check` per project),
   the searches that assume one project (open ticket, prior-ticket link, retired
   app close), and moving the six existing AppSec tickets
+- Supplier-request triage for third-party risk: the security team's shared
+  mailbox is now on the supplier-request distribution list, and each request
+  has to be judged for "will this supplier have access to company data or
+  systems, or provide technology?" (unsure counts as yes). A lane would find the
+  new-supplier-form messages and read the form's fields deterministically (it is
+  an `.xlsx`, so `archive/zip` and `encoding/xml`: supplier name, branch,
+  expense or inventory, spend, free-text notes), then give Yes / No / Unsure
+  with reasons from the name and notes, through the no-tools triage agent
+  pattern, for the security team only. It must never open the W-9 and bank
+  attachments (tax ids and account numbers; the PDFs are scanned anyway), never
+  reply to the requester and never move their mail. Sampled 2026-11-02: only
+  about 4 of 10 threads were real new-supplier requests (the rest were credit
+  applications, approvals and intercompany accounts), and at least one
+  technology supplier arrived with no form at all, so it must also read the
+  message text. The form does not yet carry the question; when it does, the
+  lane checks the requester's answer and flags a "No" for a name that looks like
+  a technology provider. Open: where the verdict goes (digest section or a
+  ticket in a project TBD), and who reads it
 - `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
   age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
   to include closed ones and `--json`. No write gate needed; it would also give
