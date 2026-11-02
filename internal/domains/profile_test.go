@@ -155,10 +155,40 @@ func TestActionsFileAndCSV(t *testing.T) {
 		t.Error("different lists share a hash")
 	}
 	csv := string(ActionsCSV(a))
-	if !strings.HasPrefix(csv, "domain,chart_row,type,host,action,") || !strings.Contains(csv, "'@") {
+	if !strings.HasPrefix(csv, "domain,chart_row,type,host,action,") {
 		t.Errorf("csv =\n%s", csv)
+	}
+	// The zone apex is shown as typed, so IT is not told to enter '@ ...
+	if strings.Contains(csv, "'@") {
+		t.Errorf("a lone @ must not be guarded:\n%s", csv)
+	}
+	// ... while anything longer that starts with @ is still neutralised.
+	guarded := string(ActionsCSV([]Action{{Domain: "c.example", Type: "TXT", Host: "@SUM(1)", Set: "x", Why: "w"}}))
+	if !strings.Contains(guarded, "'@SUM(1)") {
+		t.Errorf("a formula-looking host lost its guard:\n%s", guarded)
 	}
 	if empty := NewActionsFile(time.Now(), nil); empty.Actions == nil {
 		t.Error("an empty list must serialise as [], not null")
+	}
+}
+
+func TestAnMXValueIsSplitForTheRegistrarForm(t *testing.T) {
+	x := Action{Domain: "aqquartz.com", Profile: "4/5. no mail", Type: "MX", Host: "@",
+		Set: "0 .", Why: "null MX"}
+	if got := SetWords(x); got != `priority 0, value "."` {
+		t.Errorf("SetWords = %q", got)
+	}
+	if got := SetWords(Action{Type: "TXT", Set: "v=spf1 -all"}); got != `"v=spf1 -all"` {
+		t.Errorf("a TXT value must pass through, got %q", got)
+	}
+	if !strings.Contains(ActionLine(x), `add priority 0, value "." -`) {
+		t.Errorf("ActionLine = %q", ActionLine(x))
+	}
+	csv := string(ActionsCSV([]Action{x}))
+	if !strings.Contains(csv, "mx_priority,mx_value") || !strings.Contains(csv, ",0 .,0,.,") {
+		t.Errorf("csv lacks the split columns:\n%s", csv)
+	}
+	if !strings.Contains(csv, ",@,add,") {
+		t.Errorf("the host should read @ with no apostrophe:\n%s", csv)
 	}
 }
