@@ -78,7 +78,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 	logf("domains: %d exact change(s), %d to review, on %d domain(s) (list %s)",
 		af.Exact, af.Review, af.Domains, af.Hash)
 
-	issues, err := c.Search(ctx, domainsJQL(cfg.JiraProjectKey), 5)
+	issues, err := c.Search(ctx, domainsJQL(cfg.DomainsProject()), 5)
 	if err != nil {
 		ref("error", nil, "Jira could not be searched for the open ticket")
 		return die("searching for an open lock-down ticket: %s", safelog.Line(err.Error()))
@@ -133,7 +133,7 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 		return exitOK
 	}
-	if err := jira.CheckAllowed(cfg.JiraProjectKey, cfg.JiraAllowCreate); err != nil {
+	if err := jira.CheckAllowed(cfg.DomainsProject(), cfg.JiraAllowCreate); err != nil {
 		logf("WRITE GATE CLOSED - lock-down ticket not %s: %s", plan, safelog.Line(err.Error()))
 		ref("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
 		return exitOK
@@ -146,8 +146,8 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 	switch plan {
 	case domainsCreate:
 		res, err := c.CreateIssue(ctx, jira.IssueRequest{
-			ProjectKey:  cfg.JiraProjectKey,
-			IssueType:   cfg.JiraIssueType,
+			ProjectKey:  cfg.DomainsProject(),
+			IssueType:   cfg.DomainsIssueType(),
 			Summary:     domainsSummary(af, now),
 			Description: domainsBody(af, now),
 			Labels:      []string{"cti-agent", domainsLabel},

@@ -130,6 +130,21 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			"no ticket was re-checked this run", safelog.Line(err.Error()))
 		return refs
 	}
+	// The domains lock-down ticket may live in another project (INF). It is
+	// listed for the digest like any fleet ticket, and only that: the loop
+	// below leaves it alone.
+	if dp := cfg.DomainsProject(); !strings.EqualFold(dp, cfg.JiraProjectKey) {
+		more, err := c.Search(ctx, followUpJQL(dp), followUpMax)
+		if err != nil {
+			logf("WARNING: follow-up: searching %s for the domains lock-down ticket "+
+				"failed: %s - it is not listed in the digest this run", dp, safelog.Line(err.Error()))
+		}
+		for _, is := range more {
+			if hasLabel(is.Fields.Labels, domainsLabel) {
+				issues = append(issues, is)
+			}
+		}
+	}
 	if len(issues) >= followUpMax {
 		logf("WARNING: follow-up: %d or more fleet tickets matched; only the first "+
 			"%d (oldest first) are re-checked this run", followUpMax, followUpMax)
