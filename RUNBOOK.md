@@ -1555,6 +1555,23 @@ and says once when nothing is left. A dry run only previews the ticket; with
 never stops the report. Read DNS CHANGES FOR IT in a `--dry-run` before the
 first Tuesday run: every unmarked domain gets a null MX in it.
 
+**Filing the lock-down ticket in another project (INF).** By default it goes to
+`JIRA_PROJECT_KEY`. To send it elsewhere set, in `fleet.env`:
+
+```bash
+JIRA_DOMAINS_PROJECT_KEY=INF
+JIRA_DOMAINS_ISSUE_TYPE=<the type name exactly as INF spells it>
+JIRA_ALLOW_CREATE=CR,INF
+```
+
+CVE and AppSec tickets are unaffected. The lane finds its ticket by the labels
+`cti-agent` and `cti-domains-lockdown` in that project, and keeps what it last
+said as an issue property on it. A ticket someone created by hand has neither,
+so the next run files a new one: to have the lane adopt an existing ticket
+(INF-590 replaced CR-24907), add both labels to it in Jira first, and close the
+old ticket yourself. The service account needs Browse, Create, Comment and
+Attach in the new project; `cti-jira --check` looks only at `JIRA_PROJECT_KEY`.
+
 ### 4. Public DNS, and outbound port 53
 
 The lane asks public resolvers (1.1.1.1, 8.8.8.8) rather than this host's DNS.
