@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS",
 		"JIRA_BASE_URL", "JIRA_CLOUD_ID", "JIRA_EMAIL", "JIRA_API_TOKEN",
 		"JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_ALLOW_CREATE",
-		"JIRA_DOMAINS_PROJECT_KEY", "JIRA_DOMAINS_ISSUE_TYPE",
+		"JIRA_DOMAINS_PROJECT_KEY", "JIRA_DOMAINS_ISSUE_TYPE", "DIGEST_SKIP_SUBJECTS",
 	} {
 		_ = os.Unsetenv(k)
 	}
@@ -400,5 +400,45 @@ func TestJiraCloudIDIsRead(t *testing.T) {
 	}
 	if cfg.JiraCloudID != "11111111-2222-3333-4444-555555555555" {
 		t.Errorf("JiraCloudID = %q", cfg.JiraCloudID)
+	}
+}
+
+// Qualys's weekly knowledge-base mail names 5,292 CVEs that say nothing about
+// our estate; reading them ran the daily out of its hour (2026-11-02).
+func TestTheKnowledgeBaseMailIsSkippedByDefault(t *testing.T) {
+	cfg := Config{DigestSkipSubjects: strings.Join(DefaultDigestSkipSubjects, ",")}
+	for _, subj := range []string{
+		"Latest Vulnerabilities Added to the Knowledge Base",
+		"Qualys: LATEST VULNERABILITIES ADDED to their Knowledge Base - week 44",
+		"Fwd: New QIDs added to the Knowledge Base",
+	} {
+		if _, skip := cfg.SkipsSubject(subj); !skip {
+			t.Errorf("%q should be skipped", subj)
+		}
+	}
+	for _, subj := range []string{
+		"CISA adds three vulnerabilities to the KEV catalog",
+		"Microsoft Patch Tuesday, November 2026",
+		"",
+	} {
+		if p, skip := cfg.SkipsSubject(subj); skip {
+			t.Errorf("%q must not be skipped (matched %q)", subj, p)
+		}
+	}
+}
+
+func TestDigestSkipSubjectsIsConfigurable(t *testing.T) {
+	t.Setenv("DIGEST_SKIP_SUBJECTS", " Scan Results , weekly report ,, ")
+	got := skipSubjects()
+	if len(got) != 2 || got[0] != "scan results" || got[1] != "weekly report" {
+		t.Errorf("got %q, want the two trimmed, lowercased patterns", got)
+	}
+	t.Setenv("DIGEST_SKIP_SUBJECTS", "")
+	if got := skipSubjects(); len(got) != 0 {
+		t.Errorf("set but empty must skip nothing, got %q", got)
+	}
+	_ = os.Unsetenv("DIGEST_SKIP_SUBJECTS")
+	if got := skipSubjects(); len(got) != len(DefaultDigestSkipSubjects) {
+		t.Errorf("unset must give the default, got %q", got)
 	}
 }
