@@ -245,7 +245,8 @@ func domainsBody(af domains.ActionsFile, now time.Time) string {
 	b.WriteString("*Exact changes* can be applied as written. *To review* needs a decision " +
 		"first - usually who really sends mail as the domain. The attached CSV has the same " +
 		"list. The check runs weekly and comments here when the list changes.\n\n")
-	b.WriteString("*Before setting a null MX* (MX {{0 .}}), confirm no mailbox, alias or " +
+	b.WriteString("*Before setting a null MX* (priority {{0}}, value {{.}} - a single dot and nothing " +
+		"else; the CSV has the two in separate columns), confirm no mailbox, alias or " +
 		"forwarder uses the domain: it makes every sender's mail to it fail at once.\n\n")
 
 	section := func(title string, exact bool) {
@@ -279,15 +280,24 @@ func wikiAction(x domains.Action) string {
 		return fmt.Sprintf("%s: *delete* - %s", rec, wikiEscape(x.Why))
 	case x.Set != "" && x.Replace != "":
 		return fmt.Sprintf("%s: replace {{%s}} with {{%s}} - %s", rec,
-			wikiEscape(x.Replace), wikiEscape(x.Set), wikiEscape(x.Why))
+			wikiEscape(x.Replace), wikiEscape(setPlain(x)), wikiEscape(x.Why))
 	case x.Set != "":
-		return fmt.Sprintf("%s: add {{%s}} - %s", rec, wikiEscape(x.Set), wikiEscape(x.Why))
+		return fmt.Sprintf("%s: add {{%s}} - %s", rec, wikiEscape(setPlain(x)), wikiEscape(x.Why))
 	}
 	cur := ""
 	if x.Replace != "" {
 		cur = fmt.Sprintf(" (now {{%s}})", wikiEscape(x.Replace))
 	}
 	return fmt.Sprintf("%s%s: %s", rec, cur, wikiEscape(x.Why))
+}
+
+// setPlain is what to publish without the quotes SetWords adds, so a TXT or
+// CNAME value is shown exactly as written and an MX as its two form boxes.
+func setPlain(x domains.Action) string {
+	if w := domains.SetWords(x); x.Type == "MX" && w != fmt.Sprintf("%q", x.Set) {
+		return w
+	}
+	return x.Set
 }
 
 // wikiEscape keeps a value from being read as wiki markup: braces end a

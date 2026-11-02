@@ -59,7 +59,7 @@ func TestTheTicketBodySeparatesExactFromReview(t *testing.T) {
 	for _, want := range []string{
 		"h3. Exact changes (1)", "h3. To review (1)",
 		"*a.example* (4/5. no mail)",
-		"MX {{@}}: replace {{mx1.example.test}} with {{0 .}}",
+		`MX {{@}}: replace {{mx1.example.test}} with {{priority 0, value "."}}`,
 		"Before setting a null MX",
 	} {
 		if !strings.Contains(body, want) {
