@@ -311,6 +311,11 @@ The mailbox read. Required, no default. Section 1.
 .B GRAPH_FOLDER
 Folder within it, by display name. Default:\~\fBinbox\fR. Section 1.
 .TP
+.B DIGEST_SKIP_SUBJECTS
+Optional. Comma\-separated, case\-insensitive subject substrings; no CVEs are
+read from a matching message, and its subject is logged. Unset skips Qualys's
+weekly "Latest Vulnerabilities Added to the Knowledge Base"; empty skips nothing.
+.TP
 .B GRAPH_LOOKBACK_HOURS
 The ingest window, a positive integer number of hours.
 Default:\~\fB24\fR. Section 1.
