@@ -39,6 +39,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **AppSec: a Qualys notice from the wrong sender is reported, not lost.** A
+  scan-results notice whose sender is not a Qualys address was silently
+  dropped. One from the mailbox's own address was dropped earlier still, at
+  the self-sent skip. Seen on 2026-11-02: a scanner account whose notification
+  sender is `cybersecurity@`. It is still not parsed or archived (the sender
+  check is what keeps a forged notice out), but the run now logs a warning
+  that names the sender and says what to fix in Qualys. **Upgrade:** nothing.
+  If the warning appears, change that Qualys user's notification sender.
+
+- **AppSec: more of the notification is read.** The application-status link's
+  web app id (kept as `NoticeAppID`: it tells two runs of one application
+  apart without the scan list, and the scan list's id still wins, with a
+  warning if the two disagree), hosts scanned and active, launch type and
+  account, option profile, duration, the links-crawled delta, the comparison
+  scan's reference, the first-scan marker, and the sensitive-content and
+  information-gathered counts. In the weekly: a scan where no host answered is
+  a SCANNER FAULT (`[UNREACHABLE]`) rather than a clean row, and an OPEN NOW
+  row is annotated when the scan is a first scan with no baseline, was run by
+  hand, or found sensitive content. Run titles ending "Biweekly Run #N" now
+  lose the suffix like Weekly/Monthly ones. **Upgrade:** nothing.
+
 - **The daily ignores Qualys's weekly Knowledge Base mail.** "Latest
   Vulnerabilities Added to the Knowledge Base" lists thousands of CVEs (5,292 on
   2026-11-02); the digest tried a live Qualys lookup for each at about 3.5 s,
