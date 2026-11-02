@@ -10,19 +10,24 @@ import (
 )
 
 type Config struct {
-	TenantID          string
-	ClientID          string
-	ClientSecret      string
-	GraphMailbox      string
-	GraphFolder       string
-	GraphLookback     time.Duration
-	LookupProvider    string
-	QualysBaseURL     string
-	QualysUsername    string
-	QualysPassword    string
-	QualysKBCachePath string
-	QualysKBMaxAge    time.Duration
-	ReportPath        string
+	TenantID     string
+	ClientID     string
+	ClientSecret string
+	GraphMailbox string
+	GraphFolder  string
+	// DigestSkipSubjects are comma-separated case-insensitive substrings of a
+	// subject (a string, not a slice, so Config stays comparable). The
+	// digest reads no CVEs from a message whose subject contains one, and says
+	// so in the log. See DefaultDigestSkipSubjects.
+	DigestSkipSubjects string
+	GraphLookback      time.Duration
+	LookupProvider     string
+	QualysBaseURL      string
+	QualysUsername     string
+	QualysPassword     string
+	QualysKBCachePath  string
+	QualysKBMaxAge     time.Duration
+	ReportPath         string
 
 	// MailboxLookback is how far back the CLEANUP lane looks, and it is
 	// deliberately NOT GraphLookback.
@@ -73,6 +78,45 @@ type Config struct {
 	// ends in a done status.
 	JiraAllowClose      string
 	JiraCloseTransition string
+}
+
+// DefaultDigestSkipSubjects is what the digest ignores when
+// DIGEST_SKIP_SUBJECTS is unset: Qualys's weekly "Latest Vulnerabilities Added
+// to the Knowledge Base". That email lists everything Qualys can newly detect -
+// 5,292 CVEs on 2026-11-02 - which is a catalogue, not news about our estate,
+// and each CVE costs a live scanner lookup (about 3.5 s), so the daily ran out
+// of its hour and sent nothing.
+var DefaultDigestSkipSubjects = []string{
+	"latest vulnerabilities added",
+	"added to the knowledge base",
+}
+
+// skipSubjects reads DIGEST_SKIP_SUBJECTS: comma-separated substrings. Unset
+// means the default; set but empty means skip nothing.
+func skipSubjects() []string {
+	raw, ok := os.LookupEnv("DIGEST_SKIP_SUBJECTS")
+	if !ok {
+		return append([]string(nil), DefaultDigestSkipSubjects...)
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SkipsSubject reports whether the digest should read no CVEs from a message
+// with this subject, and which pattern matched.
+func (c Config) SkipsSubject(subject string) (string, bool) {
+	s := strings.ToLower(subject)
+	for _, p := range strings.Split(c.DigestSkipSubjects, ",") {
+		if p != "" && strings.Contains(s, strings.ToLower(p)) {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // DomainsProject is where the domains lane files its lock-down ticket.
@@ -232,18 +276,19 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		// deployment, and an unconfigured install read that mailbox instead
 		// of refusing to start. Same rule as the mailer: never guess an
 		// address, fail and say which variable is missing.
-		GraphMailbox:      os.Getenv("GRAPH_MAILBOX"),
-		GraphFolder:       getenvDefault("GRAPH_FOLDER", "inbox"),
-		GraphLookback:     time.Duration(lookbackHours) * time.Hour,
-		LookupProvider:    getenvDefault("LOOKUP_PROVIDER", "qualys"),
-		QualysBaseURL:     os.Getenv("QUALYS_BASE_URL"),
-		QualysUsername:    os.Getenv("QUALYS_USERNAME"),
-		QualysPassword:    os.Getenv("QUALYS_PASSWORD"),
-		QualysKBCachePath: getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
-		QualysKBMaxAge:    time.Duration(kbMaxAgeHours) * time.Hour,
-		ReportPath:        getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
-		MailboxLookback:   time.Duration(mailboxLookbackHours) * time.Hour,
-		MailboxMinAge:     time.Duration(mailboxMinAgeHours) * time.Hour,
+		GraphMailbox:       os.Getenv("GRAPH_MAILBOX"),
+		GraphFolder:        getenvDefault("GRAPH_FOLDER", "inbox"),
+		DigestSkipSubjects: strings.Join(skipSubjects(), ","),
+		GraphLookback:      time.Duration(lookbackHours) * time.Hour,
+		LookupProvider:     getenvDefault("LOOKUP_PROVIDER", "qualys"),
+		QualysBaseURL:      os.Getenv("QUALYS_BASE_URL"),
+		QualysUsername:     os.Getenv("QUALYS_USERNAME"),
+		QualysPassword:     os.Getenv("QUALYS_PASSWORD"),
+		QualysKBCachePath:  getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
+		QualysKBMaxAge:     time.Duration(kbMaxAgeHours) * time.Hour,
+		ReportPath:         getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
+		MailboxLookback:    time.Duration(mailboxLookbackHours) * time.Hour,
+		MailboxMinAge:      time.Duration(mailboxMinAgeHours) * time.Hour,
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),

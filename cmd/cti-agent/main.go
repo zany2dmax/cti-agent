@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
@@ -83,6 +84,7 @@ func main() {
 	selfSent := 0
 	subjects := make([]report.ScannedEmail, 0, len(messages))
 	seen := make([]mailbox.Processed, 0, len(messages))
+	var skippedSubjects []string
 	for _, msg := range messages {
 		// Never read our own report back in.
 		//
@@ -102,6 +104,17 @@ func main() {
 		// the cleanup lane may archive.
 		if msg.SelfSent {
 			selfSent++
+			continue
+		}
+
+		// A catalogue mail - Qualys's weekly "Latest Vulnerabilities Added to
+		// the Knowledge Base" - names thousands of CVEs that say nothing about
+		// our estate, and each one costs a live scanner lookup. On 2026-11-02
+		// that was 5,292 lookups at 3.5 s against a one-hour limit, and the
+		// daily sent nothing. Left out of the ledger too, so the cleanup lane
+		// does not move it: other lanes may want that mail.
+		if _, skip := cfg.SkipsSubject(msg.Subject); skip {
+			skippedSubjects = append(skippedSubjects, safelog.Line(msg.Subject))
 			continue
 		}
 
@@ -134,6 +147,10 @@ func main() {
 	// four-day blind spot starts: if this number is ever larger than the
 	// number of reports the fleet sent in the window, something legitimate is
 	// being dropped and nobody would otherwise find out.
+	if len(skippedSubjects) > 0 {
+		log.Printf("skipped %d message(s) whose subject matches DIGEST_SKIP_SUBJECTS "+
+			"(no CVEs read from them): %s", len(skippedSubjects), strings.Join(skippedSubjects, " | "))
+	}
 	if selfSent > 0 {
 		log.Printf("skipped %d message(s) this fleet sent itself - "+
 			"the digest is delivered to the mailbox it reads, and reading it "+

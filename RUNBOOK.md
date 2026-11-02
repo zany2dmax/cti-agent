@@ -168,6 +168,7 @@ included), so a run by hand gets the same settings systemd gives it.
 | `GRAPH_MAILBOX` | Mailbox to read, e.g. `threatintel@example.com`. **Required, no default** |
 | `GRAPH_FOLDER` | Folder to read, default `inbox` |
 | `GRAPH_LOOKBACK_HOURS` | How far back to read messages, default 24 |
+| `DIGEST_SKIP_SUBJECTS` | Optional. Comma-separated, case-insensitive subject substrings the daily reads no CVEs from. Unset = Qualys's weekly "Latest Vulnerabilities Added to the Knowledge Base" (thousands of CVEs that describe the scanner, not our estate; it stalled the 2026-11-02 daily). Empty = skip nothing. Skipped mail is logged by subject and left in the mailbox |
 
 There is deliberately no default mailbox. A hardcoded fallback once shipped one
 organisation's internal distribution list as everyone else's default, and an

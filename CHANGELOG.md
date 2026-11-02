@@ -39,6 +39,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The daily ignores Qualys's weekly Knowledge Base mail.** "Latest
+  Vulnerabilities Added to the Knowledge Base" lists thousands of CVEs (5,292 on
+  2026-11-02); the digest tried a live Qualys lookup for each at about 3.5 s,
+  hit the one-hour limit and sent nothing. New `DIGEST_SKIP_SUBJECTS`
+  (case-insensitive substrings; unset = that mail; empty = skip nothing). Skipped
+  mail is named in the log and stays in the mailbox. Matching is on the subject
+  only, so confirm the real subject contains "latest vulnerabilities added" or
+  "added to the knowledge base". **Upgrade:** nothing; set the variable only if
+  other bulk mail needs the same treatment.
+
 - **The domains lock-down ticket can live in another Jira project.** New
   optional `JIRA_DOMAINS_PROJECT_KEY` and `JIRA_DOMAINS_ISSUE_TYPE` send only
   the weekly domains ticket (INF, for IT); unset, it follows `JIRA_PROJECT_KEY`
