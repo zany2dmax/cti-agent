@@ -326,7 +326,8 @@ func (f ActionsFile) JSON() []byte {
 func ActionsCSV(a []Action) []byte {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"domain", "chart_row", "type", "host", "action", "set_to", "current", "why"})
+	_ = w.Write([]string{"domain", "chart_row", "type", "host", "action", "set_to",
+		"mx_priority", "mx_value", "current", "why"})
 	for _, x := range a {
 		act := "review"
 		switch {
@@ -337,8 +338,21 @@ func ActionsCSV(a []Action) []byte {
 		case x.Set != "":
 			act = "add"
 		}
-		row := []string{x.Domain, x.Profile, x.Type, x.Host, act, x.Set, x.Replace, x.Why}
+		// The registrar's MX form has separate Priority and Value boxes, so
+		// "0 ." is split for the person typing it. Typing "0" in both is what
+		// GoDaddy refused as "Invalid data provided for record data".
+		prio, target := "", ""
+		if x.Type == "MX" && x.Set != "" {
+			prio, target, _ = mxParts(x.Set)
+		}
+		row := []string{x.Domain, x.Profile, x.Type, x.Host, act, x.Set, prio, target, x.Replace, x.Why}
 		for i := range row {
+			// A lone "@" (the zone apex) is not a formula, and guarding it
+			// showed IT a literal '@ to type. Anything longer that starts with
+			// @ keeps the guard: "@SUM(...)" is the case it exists for.
+			if i == 3 && row[i] == "@" {
+				continue
+			}
 			row[i] = cell(row[i])
 		}
 		_ = w.Write(row)
@@ -347,15 +361,38 @@ func ActionsCSV(a []Action) []byte {
 	return buf.Bytes()
 }
 
+// mxParts splits an MX value ("0 .", "10 mail.example.com") into its priority
+// and target. ok is false for anything else.
+func mxParts(set string) (prio, target string, ok bool) {
+	f := strings.Fields(set)
+	if len(f) != 2 || f[0] == "" || strings.Trim(f[0], "0123456789") != "" {
+		return "", "", false
+	}
+	return f[0], f[1], true
+}
+
+// SetWords says what to publish in the words of the registrar's form, quoted
+// where it is one value. An MX value is two boxes there, so "0 ." reads as
+// priority 0, value "." - not as one string to paste, which is how a null MX
+// got typed as 0 and 0.
+func SetWords(x Action) string {
+	if x.Type == "MX" {
+		if p, t, ok := mxParts(x.Set); ok {
+			return fmt.Sprintf("priority %s, value %q", p, t)
+		}
+	}
+	return fmt.Sprintf("%q", x.Set)
+}
+
 // ActionLine is one action in words, for the report and the ticket.
 func ActionLine(x Action) string {
 	switch {
 	case x.Delete:
 		return fmt.Sprintf("delete %s %s - %s", x.Type, x.Host, x.Why)
 	case x.Set != "" && x.Replace != "":
-		return fmt.Sprintf("%s %s: replace %q with %q - %s", x.Type, x.Host, x.Replace, x.Set, x.Why)
+		return fmt.Sprintf("%s %s: replace %q with %s - %s", x.Type, x.Host, x.Replace, SetWords(x), x.Why)
 	case x.Set != "":
-		return fmt.Sprintf("%s %s: add %q - %s", x.Type, x.Host, x.Set, x.Why)
+		return fmt.Sprintf("%s %s: add %s - %s", x.Type, x.Host, SetWords(x), x.Why)
 	}
 	return fmt.Sprintf("%s %s: REVIEW - %s", x.Type, x.Host, x.Why)
 }
