@@ -94,8 +94,11 @@ is real, not before. Finished work moves out of this file into
   sends; count inbound mail spoofing our domains and failing DMARC as the
   evidence for `p=reject`. Aggregates only, never per-message data. Then
   `domains.txt` needs only `saas` / `legacy` / `unknown`. Costs: a WebSocket
-  client (the module has no dependencies) and confirming the stream's
-  back-fill window
+  client (the module has no dependencies). The vendor guide (PoD Log API,
+  Rev I) answers the back-fill question: archive reads reach 30 days back in
+  one-hour steps, one session per token, no polling; the setup, behaviour and
+  field list are in RUNBOOK 11g section 7. Waiting on the admin's token and
+  cluster ID
 - Certificate expiry lane (build it behind a `certs.Source` interface from
   the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
   expire, from Qualys Certificate View (CertView; the subscription has it and
