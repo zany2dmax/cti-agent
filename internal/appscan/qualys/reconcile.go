@@ -26,6 +26,11 @@ type Reconciliation struct {
 	// Skipped counts scans deliberately left out: discovery scans, which test
 	// nothing, and scans still running.
 	Skipped int
+	// IDMismatch are scan references whose notification named a different
+	// application id from the one the scan list gives. The API's id is the
+	// one kept; a mismatch means a forged notice or a template change, and
+	// either is worth a warning.
+	IDMismatch []string
 }
 
 // Reconcile joins notification results to the API scan list on the scan
@@ -94,6 +99,9 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time, port
 		}
 		rec.Matched++
 		notified[r.Reference] = true
+		if r.NoticeAppID != "" && s.WebAppID != "" && r.NoticeAppID != s.WebAppID {
+			rec.IDMismatch = append(rec.IDMismatch, r.Reference)
+		}
 		r = applyScan(r, s)
 		r.PortalURL = ScanReportURL(portal, s.ID)
 		if r.AppID != "" {

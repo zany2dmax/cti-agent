@@ -349,6 +349,16 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 	seen := map[string]bool{}
 
 	for _, m := range msgs {
+		// Before the self-sent skip, which a lookalike from the mailbox's own
+		// address would otherwise fall into silently - SelfSent is also set,
+		// unsigned, for anything From the mailbox. A correctly signed message
+		// really is ours and is not checked.
+		if !m.SelfVerified {
+			if why := lookalike(m); why != "" {
+				problems = append(problems, why)
+				continue
+			}
+		}
 		// Our own mail is never input. The weekly report is not delivered to
 		// this mailbox, but the daily digest is, and a lane that reads its own
 		// output is a bug this fleet has already had once.
@@ -400,6 +410,24 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 	// reconciliation, when each result can be keyed on the scanner's own
 	// application id rather than a name derived from the scan title.
 	return scans, seenMsgs, problems
+}
+
+// lookalike explains a message that has a provider's notice subject but not
+// its sender, or returns "". Not parsed and not claimed, so it stays in the
+// inbox; the scan list, when there is one, still reports the scan itself.
+func lookalike(m graph.Message) string {
+	for _, p := range providers {
+		d, ok := p.(appscan.LookalikeDetector)
+		if !ok || !d.Lookalike(m.From, m.Subject) {
+			continue
+		}
+		return fmt.Sprintf("%s: has the %s notice subject but came from %s, so it "+
+			"was not read. If the scan is real, the scanner account that launched "+
+			"it probably has its notification sender set to this address - fix "+
+			"that in the scanner; this lane will not trust the sender",
+			shortSubject(m.Subject), p.Name(), safelog.Line(m.From))
+	}
+	return ""
 }
 
 // writeSeen writes the notices a report covered, 0600: subject lines from a
@@ -463,11 +491,13 @@ func newestPerApp(scans []appscan.ScanResult) []appscan.ScanResult {
 	var out []appscan.ScanResult
 	seen := map[string]bool{}
 	for _, s := range scans {
-		key := "id:" + s.AppID
-		if s.AppID == "" {
+		// AppKey falls back to the notification's id, which is enough to tell
+		// two runs of one application apart even with no scan list.
+		key := "id:" + s.AppKey()
+		if s.AppKey() == "" {
 			key = "name:" + strings.ToLower(strings.Join(strings.Fields(s.App), " "))
 		}
-		if s.AppID == "" && strings.TrimSpace(s.App) == "" {
+		if s.AppKey() == "" && strings.TrimSpace(s.App) == "" {
 			key = ""
 		}
 		if key == "" || seen[key] {
@@ -513,6 +543,11 @@ func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult,
 		// The reference is a scanner identifier, not text from the mail body.
 		logf("warn   : notification for %s has no match in the WAS scan list - "+
 			"its counts are kept; it was probably launched before the list window",
+			safelog.Line(ref))
+	}
+	for _, ref := range rec.IDMismatch {
+		logf("warn   : notification for %s names a different application id from "+
+			"the WAS scan list - the scan list's is used; check the notice is genuine",
 			safelog.Line(ref))
 	}
 	return out
