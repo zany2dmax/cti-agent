@@ -55,9 +55,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   an empty window, or events that do not cover the window) no lock-down action is produced, the actions file
   carries `held`, `cti-jira` files, comments on and resolves nothing (ref
   action `held`), and the report has a Medium "(mail gateway)" finding saying
-  why. **Upgrade:** pull, reinstall. The feature is off until
-  `DOMAINS_MAIL_GATEWAY=pod` and `POD_CLUSTER_ID` / `POD_API_TOKEN` are set in
-  fleet.env; rehearse with `run-domains --dry-run`. Do not run
+  why. **Upgrade:** pull, reinstall. The feature is OFF until you add these
+  lines to `/etc/cti-agent/fleet.env` (the `POD_*` pair is the same one
+  `cti-podprobe` uses; nothing changes without the first line):
+
+  ```
+  DOMAINS_MAIL_GATEWAY=pod
+  DOMAINS_GATEWAY_DAYS=7
+  POD_CLUSTER_ID=<cluster id>
+  POD_API_TOKEN=<token>
+  ```
+
+  Then run `sudo cti-agent run-domains --to-dev` and look for the
+  `[domains] gateway:` lines; a run without them did not use the gateway.
+  The read takes roughly 15 to 20 minutes for 7 days. Do not run
   `cti-podprobe` while the weekly runs (one session per token).
 
 - **`cti-podprobe` and `internal/podlog`: a read-only probe of the Proofpoint
