@@ -396,7 +396,7 @@ func renderText(f failure) string {
 			"exactly like a quiet day, so treat the silence as unexplained."
 	}
 	// A hold's or escalation's reason is already the opening paragraph.
-	if f.Reason != "" && !(f.isHold() || f.isEscalation()) {
+	if f.Reason != "" && !f.isHold() && !f.isEscalation() {
 		reason = "Reason: " + f.Reason + "\n\n"
 	}
 
@@ -498,7 +498,7 @@ func renderHTML(f failure) string {
 			"have checked."
 	}
 	e := html.EscapeString
-	if f.Reason != "" && !(f.isHold() || f.isEscalation()) {
+	if f.Reason != "" && !f.isHold() && !f.isEscalation() {
 		reasonRow = `<tr><td><b>reason</b></td><td>` + e(f.Reason) + `</td></tr>`
 	}
 	return fmt.Sprintf(`<!DOCTYPE html>
