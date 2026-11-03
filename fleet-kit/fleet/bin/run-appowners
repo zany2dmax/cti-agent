@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# run-appowners - daily: each application's scanner report to its owners.
+#
+# For every Qualys WAS scan that finished since the last run, fetches the
+# scanner's own report of the application's open findings, removes the scan
+# account's session cookies and login headers from it, and mails it to the
+# owner and watchers on that application's line in app-owners.txt. Many of
+# them are outside the company and not in Jira, which is why this is email
+# and not a ticket.
+#
+# WHO RECEIVES IT IS DECIDED IN cti-mailer, NOT HERE
+#
+#   cti-mailer --lane owner reads app-owners.txt itself and sends only to the
+#   owner and watchers on the application's line, and only at a domain listed
+#   in OWNER_ALLOW_DOMAINS. Nothing this runner passes can add a recipient.
+#   With OWNER_ALLOW_DOMAINS unset the lane is off: this runner says so and
+#   exits.
+#
+# WHAT IS HELD BACK
+#
+#   A scan that did not finish, whose login failed or that reached no host,
+#   and an application with no owner on file. Each is recorded once, and the
+#   operator is told through cti-alert; the owners get nothing for that scan.
+#
+# USAGE
+#   run-appowners              fetch, redact and send
+#   run-appowners --dry-run    plan and check every recipient; fetch and send nothing
+#   run-appowners --to-dev     every email to FLEET_DEV_EMAIL only, [DEV TEST]
+#                              subject, reports attached; nothing recorded
+set -euo pipefail
+
+# Sourced here, as every runner does: the `sudo cti-agent` wrapper passes only
+# the layout variables, and the unit owns those (see run-appscan).
+FLEET_HOME="${FLEET_HOME:-$HOME}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+export FLEET_HOME FLEET_CODE
+STATE="$FLEET_HOME/state"
+
+fail() { echo "[run-appowners] error: $*" >&2; exit 1; }
+log()  { echo "[run-appowners] $*" >&2; }
+
+DRY=""
+TODEV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run" ;;
+    --to-dev)   TODEV=1 ;;
+    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+  esac
+  shift
+done
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
+fi
+
+# Off until armed. A test send is allowed first, which is when you want to see
+# the emails.
+if [ -z "$TODEV" ] && [ -z "${OWNER_ALLOW_DOMAINS:-}" ]; then
+  log "OWNER_ALLOW_DOMAINS is not set in $FLEET_ENV - the owners lane is off. Nothing to do."
+  exit 0
+fi
+
+APPSCAN="$FLEET_CODE/bin/cti-appscan"
+APPREPORT="$FLEET_CODE/bin/cti-appreport"
+MAILER="$FLEET_CODE/bin/cti-mailer"
+ALERT="$FLEET_CODE/bin/cti-alert"
+for b in "$APPSCAN" "$APPREPORT" "$MAILER"; do
+  [ -x "$b" ] || fail "$(basename "$b") not found at $b - rerun the installer"
+done
+
+mkdir -p "$STATE"
+chmod 0700 "$STATE" 2>/dev/null || true
+
+STAMP="$(date -u +%Y-%m-%dT%H%M)"
+# One entry per application: the last scan sent or held. Kept across runs.
+LOG="$STATE/appowners-sent.json"
+PLAN="$STATE/appowners-plan-$STAMP.json"
+# The fetched reports and covering emails. Deleted on every way out: even
+# redacted, a report is a list of our unfixed weaknesses.
+WORK="$STATE/appowners-$STAMP"
+SENT="$WORK/sent.tsv"
+trap 'rm -rf "$PLAN" "$WORK"' EXIT
+find "$STATE" -maxdepth 1 -name 'appowners-20*' -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+
+# 48 hours, not 24: a run that fails or is late does not lose a day's scans.
+# The log keeps a scan from being sent twice.
+"$APPSCAN" --since 48h --deliveries-out "$PLAN" --delivered-log "$LOG" \
+  || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
+
+# A dry run creates nothing in the scanner, so it fetches no report.
+FETCH=()
+[ -n "$DRY" ] && FETCH=(--no-fetch)
+"$APPREPORT" --deliveries "$PLAN" --out-dir "$WORK" ${FETCH[@]+"${FETCH[@]}"} \
+  || fail "cti-appreport could not prepare the emails"
+: > "$SENT"; chmod 0600 "$SENT"
+
+sent=0; failed=0; refused=""
+while IFS=$'\t' read -r key ref appid dir att; do
+  [ -n "$key" ] || continue
+  subject="$(head -n 1 "$dir/subject.txt")"
+  appname="$(head -n 1 "$dir/app.txt")"
+  ATTACH=()
+  [ -n "$att" ] && ATTACH=(--attach "$att")
+  if [ -n "$TODEV" ]; then
+    AUDIENCE=(--to-dev)
+  else
+    AUDIENCE=(--lane owner --app-id "$appid" --app-name "$appname")
+  fi
+  # shellcheck disable=SC2086
+  if out="$("$MAILER" ${AUDIENCE[@]+"${AUDIENCE[@]}"} --html "$dir/mail.html" --subject "$subject" \
+             ${ATTACH[@]+"${ATTACH[@]}"} $DRY)"; then
+    sent=$((sent + 1))
+    printf '%s\t%s\tsent\n' "$key" "$ref" >> "$SENT"
+    case "$out" in
+      *'"refused":["'*) refused="${refused:+$refused, }$appname" ;;
+    esac
+  else
+    failed=$((failed + 1))
+    log "WARNING: $appname: not sent - see the mailer's line above; tried again on the next run"
+  fi
+done < "$WORK/send.tsv"
+
+if [ -n "$DRY" ]; then
+  log "dry run - $sent email(s) would go out, $failed refused; nothing fetched, sent or recorded"
+elif [ -n "$TODEV" ]; then
+  log "test send - $sent email(s) to FLEET_DEV_EMAIL only; nothing recorded, so the real run still sends"
+else
+  log "$sent report(s) sent, $failed not sent"
+  # Recorded only after a real send, so a scan is never marked done that
+  # nobody received. Held scans are recorded too, so each is reported once.
+  cat "$WORK/held.tsv" >> "$SENT"
+  if [ -s "$SENT" ]; then
+    "$APPSCAN" --commit-delivered "$SENT" --delivered-log "$LOG" \
+      || log "warn: could not record what was sent; the next run may send those reports again"
+  fi
+fi
+
+# ── the operator's half ──────────────────────────────────────────────────────
+# Held scans and refused watchers are the operator's to fix, not the owners'.
+# Never fatal, and HOLD rather than FAILED: the lane did its job.
+if [ -s "$WORK/held.txt" ] || [ -n "$refused" ]; then
+  n=$(wc -l < "$WORK/held.txt" | tr -d ' ')
+  reason=""
+  if [ "$n" -gt 0 ]; then
+    reason="$n application report(s) held back from their owners: $(awk '{printf "%s%s", sep, $0; sep="; "} END {print ""}' "$WORK/held.txt")."
+  fi
+  if [ -n "$refused" ]; then
+    reason="$reason Some watchers were not sent the report because their domain is not in OWNER_ALLOW_DOMAINS: $refused (the journal names the addresses)."
+  fi
+  log "operator: $reason"
+  if [ -n "$DRY" ]; then
+    log "dry run - would alert the operator"
+  elif [ -x "$ALERT" ]; then
+    "$ALERT" --unit cti-agent-appowners.service --kind HOLD ${TODEV:+--to-dev} --reason "$reason" \
+      || log "warn: cti-alert failed - the holds are in this run's journal"
+  else
+    log "warn: cti-alert not found at $ALERT - not escalated"
+  fi
+fi
+log "done"

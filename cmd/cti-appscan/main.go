@@ -6,6 +6,9 @@
 //	cti-appscan --subject-only                # for the runner's subject line
 //	cti-appscan --out r.html --seen-out seen.json   # and list the notices read
 //	cti-appscan --commit-seen seen.json        # after the send: let cleanup archive them
+//	cti-appscan --since 48h --deliveries-out d.json --delivered-log sent.json
+//	                                          # the owners lane: which reports to mail
+//	cti-appscan --commit-delivered sent.tsv --delivered-log sent.json
 //
 // # IT DOES NOT SEND
 //
@@ -87,8 +90,19 @@ func run() int {
 	stampTickets := flag.String("stamp-tickets", "",
 		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports already "+
 			"written, using the --tickets-out file, then exit")
+	deliveriesOut := flag.String("deliveries-out", "",
+		"write which applications' scanner reports to mail to their owners (and which are "+
+			"held, and why) here, for cti-appreport --deliveries; scans already in "+
+			"--delivered-log are left out")
+	deliveredLog := flag.String("delivered-log", "",
+		"the owners lane's record of the last scan sent or held per application")
+	commitDelivered := flag.String("commit-delivered", "",
+		"record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit")
 	flag.Parse()
 
+	if *commitDelivered != "" {
+		return doCommitDelivered(*commitDelivered, *deliveredLog)
+	}
 	if *commitSeen != "" {
 		return doCommitSeen(*commitSeen)
 	}
@@ -138,10 +152,18 @@ func run() int {
 	// rate-limited or unlicensed costs identity, the email-less scans and the
 	// per-finding detail - and not the report.
 	windowStart := time.Now().Add(-*since)
+	// The owners lane needs the scans and nothing else: the report it mails
+	// carries the detail, so the per-finding calls would be API budget spent
+	// on nothing.
+	deliverOnly := *deliveriesOut != "" && *out == "" && *textOut == "" && *ticketsOut == "" &&
+		*subjectOut == "" && !*subjectOnly
 	if !*noDetail {
 		if api := wasAPI(cfg); api != nil {
 			scans = reconcile(ctx, api, scans, windowStart, qualys.PortalOrigin(cfg.QualysBaseURL))
 			scans = newestPerApp(scans)
+			if deliverOnly {
+				return writeDeliveries(*deliveriesOut, *deliveredLog, scans)
+			}
 			attachDetail(ctx, api, scans, windowStart)
 			if *ticketsOut != "" {
 				attachOpen(ctx, api, scans)
@@ -152,6 +174,11 @@ func run() int {
 		}
 	} else {
 		scans = newestPerApp(scans)
+	}
+	if *deliveriesOut != "" {
+		if rc := writeDeliveries(*deliveriesOut, *deliveredLog, scans); rc != exitOK || deliverOnly {
+			return rc
+		}
 	}
 
 	// The only hosts a link may be clickable for. Registered here rather than
@@ -332,6 +359,56 @@ func writeAuthFailures(path string, scans []appscan.ScanResult) error {
 			safelog.Line(s.App), safelog.Line(s.Auth.Record), safelog.Line(status))
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+// writeDeliveries writes the owners lane's plan.
+func writeDeliveries(path, logPath string, scans []appscan.ScanResult) int {
+	if logPath == "" {
+		return die("--deliveries-out needs --delivered-log: without it every run would mail every report again")
+	}
+	done, err := appscan.LoadDeliveredLog(logPath)
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
+	for _, p := range oprobs {
+		logf("owners : %s", safelog.Line(p))
+	}
+	f := appscan.BuildDeliveries(scans, owners, done, time.Now())
+	send := 0
+	for _, d := range f.Deliveries {
+		if d.Hold == "" {
+			send++
+			continue
+		}
+		logf("hold   : %s: %s", safelog.Line(d.App), safelog.Line(d.Hold))
+	}
+	if err := os.WriteFile(path, f.JSON(), 0o600); err != nil {
+		return die("writing %s: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	logf("owners : %d report(s) to send, %d held, of %d new scan(s)", send, len(f.Deliveries)-send, len(f.Deliveries))
+	return exitOK
+}
+
+func doCommitDelivered(path, logPath string) int {
+	if logPath == "" {
+		return die("--commit-delivered needs --delivered-log")
+	}
+	// #nosec G304 -- the runner's own file
+	fh, err := os.Open(path)
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	defer func() { _ = fh.Close() }()
+	n, bad, err := appscan.CommitDelivered(logPath, fh, time.Now())
+	for _, b := range bad {
+		logf("warn   : %s: %s", safelog.Line(path), safelog.Line(b))
+	}
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	logf("owners : %d application(s) recorded in %s", n, safelog.Line(logPath))
+	return exitOK
 }
 
 // providers is every scanner this lane understands.

@@ -1,0 +1,126 @@
+.TH RUN-APPOWNERS 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.SH NAME
+run-appowners \- daily: mail each application's scanner report to its owners
+.SH SYNOPSIS
+.B run\-appowners
+.RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
+.PP
+.B sudo cti\-agent run\-appowners
+.RB [ \-\-dry\-run ]
+.RB [ \-\-to\-dev ]
+.SH DESCRIPTION
+.B run-appowners
+sends each application's Qualys WAS report of open findings, with the scan
+account's session removed, to the owner and watchers on that application's
+line in
+.IR app\-owners.txt ,
+the morning after the scan finishes. Many of them are outside the company and
+not in Jira, which is why this is email and not a ticket.
+.PP
+It is run by
+.B cti\-agent\-appowners.service
+from
+.B cti\-agent\-appowners.timer
+daily at 07:15
+.RB ( Persistent=true ).
+With
+.B OWNER_ALLOW_DOMAINS
+unset it logs that the lane is off and exits 0, except on
+.BR \-\-to\-dev .
+.PP
+The steps, in order:
+.TP
+.B 1. Plan
+.B cti\-appscan \-\-since 48h \-\-deliveries\-out \-\-delivered\-log
+lists the scans finished since the last run and not yet sent or held. Fatal
+on a non-zero exit.
+.TP
+.B 2. Prepare
+.B cti\-appreport \-\-deliveries \-\-out\-dir
+fetches, redacts and writes each email
+.RB ( \-\-no\-fetch
+on a dry run). Fatal on a non-zero exit.
+.TP
+.B 3. Send
+One
+.B cti\-mailer \-\-lane owner \-\-app\-id \-\-app\-name
+per application, with the report attached. The mailer, not this runner,
+decides the recipients (see
+.BR cti\-mailer (1)).
+A refused send is logged and tried again on the next run.
+.TP
+.B 4. Record
+On a real run only,
+.B cti\-appscan \-\-commit\-delivered
+records each sent scan, and each held one, in
+.IR $FLEET_HOME/state/appowners\-sent.json ,
+so each is dealt with once.
+.TP
+.B 5. Operator
+Held scans and watchers refused for their domain go to
+.BR cti\-alert (1)
+as one HOLD. Never fatal.
+.PP
+The working directory is deleted on every way out.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Plan and check every recipient through
+.BR "cti\-mailer \-\-dry\-run" .
+Fetches no report (a report is created in the scanner), sends, records and
+alerts nothing.
+.TP
+.B \-\-to\-dev
+Every email, with its report, to
+.B FLEET_DEV_EMAIL
+only, subject prefixed [DEV TEST]; the operator alert goes there too. Records
+nothing, so the real run still sends. Works before
+.B OWNER_ALLOW_DOMAINS
+is set.
+.SH ENVIRONMENT
+.TP
+.B OWNER_ALLOW_DOMAINS
+Domains an owner or watcher may be at, comma-separated and exact. Unset: the
+lane is off.
+.TP
+.B APPSCAN_OWNERS_FILE
+The owners file; default
+.IR /etc/cti\-agent/app\-owners.txt .
+.TP
+.B FLEET_DEV_EMAIL
+Where
+.B \-\-to\-dev
+sends.
+.SH FILES
+.TP
+.I $FLEET_HOME/state/appowners\-sent.json
+Last scan sent or held per application.
+.TP
+.I $FLEET_HOME/state/appowners\-<stamp>/
+This run's reports and emails, 0700, deleted when the run ends.
+.SH EXIT STATUS
+.TP
+.B 0
+Done, including when the lane is off, nothing was new, or some sends were
+refused (each is logged and retried).
+.TP
+.B 1
+A missing binary, an unknown argument,
+.B \-\-to\-dev
+without
+.BR FLEET_DEV_EMAIL ,
+or the plan or preparation step failed.
+.SH EXAMPLES
+.nf
+sudo cti\-agent run\-appowners \-\-dry\-run
+sudo cti\-agent run\-appowners \-\-to\-dev
+journalctl \-u cti\-agent\-appowners \-n 50 \-\-no\-pager
+sudo systemctl enable \-\-now cti\-agent\-appowners.timer
+.fi
+.SH SEE ALSO
+.BR run\-appscan (1),
+.BR cti\-appscan (1),
+.BR cti\-appreport (1),
+.BR cti\-mailer (1),
+.BR cti\-alert (1)

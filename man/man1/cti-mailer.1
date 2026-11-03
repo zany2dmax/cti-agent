@@ -455,6 +455,33 @@ and
 .B DOM_ALLOW_TO
 are listed, and references in them are not expanded.
 Default:\~\fBfalse\fR.
+.TP
+.BI \-\-app\-id " id"
+With
+.BR "\-\-lane owner" :
+the scanner's web app id whose line in
+.I app\-owners.txt
+names the recipients: the owner on To and the watchers on Cc, each only at a
+domain listed in
+.BR OWNER_ALLOW_DOMAINS .
+A watcher at another domain is dropped and listed in the result's
+.BR refused ;
+an owner at another domain, an unset
+.BR OWNER_ALLOW_DOMAINS ,
+or an application with no line refuses the send.
+.B \-\-to
+and
+.B \-\-cc
+are refused with this lane, and
+.B \-\-approve
+does not widen it.
+.TP
+.BI \-\-app\-name " name"
+With
+.BR "\-\-lane owner" :
+the application's name, for an
+.I app\-owners.txt
+line keyed by name rather than id.
 .SH ENVIRONMENT
 Read from the process environment, after
 .I fleet.env

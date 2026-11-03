@@ -795,7 +795,7 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-appowners|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
