@@ -2463,6 +2463,32 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertIs(settings["enableAllProjectMcpServers"], False)
         self.assertTrue({"Edit", "Write", "NotebookEdit"} <= set(settings["permissions"]["deny"]))
 
+    def test_the_installer_quarantines_everything_the_audit_refuses(self):
+        """run-checkin --audit refuses a beat over any steering file in the
+        account's reach; install-fedora.sh is meant to move those aside first.
+        The two lists drifted: the audit added auto-memory
+        (~/.claude/projects/*/memory) and workflows, the installer did not, so
+        an upgraded box failed its own install with a refusal it said the
+        installer would fix."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        rc = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        audit = rc[rc.index("steering_problems() {"):]
+        audit = audit[:audit.index("done")]
+        quarantine = inst[inst.index('for p in "$STATE_DIR/CLAUDE.md"'):]
+        quarantine = quarantine[:quarantine.index("; do")]
+        missing = []
+        # HOME and the config dir are the state dir on the Fedora layout;
+        # AGENT_DIR is root-owned code and is not the service account's.
+        for var, base in (("$CLAUDE_CFG", "$STATE_DIR/.claude"), ("$HOME", "$STATE_DIR")):
+            for m in re.finditer(r'"' + re.escape(var) + r'"?(/[^"\s]*)"?', audit):
+                tail = m.group(1)
+                want = base + tail
+                variants = {f'"{want}"', f'"{base}{tail.split("/*")[0]}"' + tail[len(tail.split("/*")[0]):]}
+                if not any(v in quarantine for v in variants):
+                    missing.append(f"{var}{tail} -> {want}")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
     def test_the_generic_installer_stays_retired(self):
         """install.sh left the fleet's code owned by the service account.
 
