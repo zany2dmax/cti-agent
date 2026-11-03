@@ -1104,8 +1104,9 @@ from those real subjects, and `TestEveryInputCombinationIsPinnedDown`
 enumerates all ten reachable input combinations so a future edit to the rule
 order fails a test instead of losing mail.
 
-Detection is **headers or a subject prefix** — `Auto-Submitted: auto-replied`,
-Exchange's `X-Auto-Response-Suppress`, or (since 1.3.2) a subject that *starts*
+Detection is **headers or a subject prefix** — `Auto-Submitted: auto-replied` or
+`auto-notified` (never `auto-generated`, whatever `X-Auto-Response-Suppress`
+says), or (since 1.3.2) a subject that *starts*
 `Automatic reply:`, `Out of Office:`, `Autoreply:` and the like. Until 1.3.2 it was
 headers only, and replies from systems that omit them stayed in the inbox for
 good. The prefix is matched at the start only (`Re: Automatic reply:` is a

@@ -114,7 +114,10 @@ tasks:
     #
     #     GOSEC_GOTOOLCHAIN=go1.26.9 task ship
     #
-    # Safe because gosec reads source and writes nothing. The binaries ship
+    # Safe because gosec reads source and writes nothing, and because the
+    # task first checks that the override selects exactly the packages and
+    # files your current Go does (go list under both); it refuses if not, so
+    # a build constraint cannot hide code from gosec. The binaries ship
     # builds are still compiled by your current Go, so the stdlib fixes that
     # govulncheck asks for are kept. Drop it once gosec supports the new Go.
     # Never set by default: a stale pin would quietly mean gosec checks the code
@@ -127,7 +130,39 @@ tasks:
           exit 1
         fi
         if [ -n "${GOSEC_GOTOOLCHAIN:-}" ]; then
+          # The override changes which Go selects the files gosec reads, and
+          # the build and tests above ran under the current one. A build
+          # constraint the new Go honours and the old one does not (a newer
+          # go1.NN tag, say) would put code in the binary that gosec never
+          # saw, and gosec would still say "Issues: 0". So prove both
+          # toolchains select the same packages and files before trusting it.
+          # lb: Task expands a literal double brace as its own template, so
+          # the go list template is assembled from a single one.
+          lb='{'
+          # LOADERR: go list -e exits 0 on a package it could not load and
+          # keeps the file list, so a load failure must be printed to be seen.
+          view="$lb{.ImportPath}}:$lb{join .GoFiles \",\"}}:$lb{join .CgoFiles \",\"}}:$lb{join .IgnoredGoFiles \",\"}}$lb{if or .Error .DepsErrors}}:LOADERR$lb{end}}"
+          views="$(mktemp -d -t gosec-view.XXXXXX)"
+          go list -e -f "$view" ./... > "$views/now" || exit 1
+          GOTOOLCHAIN="$GOSEC_GOTOOLCHAIN" go list -e -f "$view" ./... > "$views/old" || {
+            echo "gosec: cannot list packages with GOTOOLCHAIN=$GOSEC_GOTOOLCHAIN" >&2; exit 1; }
+          if grep -h LOADERR "$views/now" "$views/old" >&2; then
+            echo "gosec: REFUSING - a package does not load under one of the toolchains;" >&2
+            echo "  gosec cannot be trusted to have read it." >&2
+            rm -rf "$views"
+            exit 1
+          fi
+          if ! cmp -s "$views/now" "$views/old"; then
+            echo "gosec: REFUSING - $GOSEC_GOTOOLCHAIN selects different files than $(go env GOVERSION):" >&2
+            diff "$views/old" "$views/now" >&2 || true
+            rm -rf "$views"
+            echo "  gosec would pass code it never read. Drop the override, or" >&2
+            echo "  remove the build constraint the two toolchains disagree on." >&2
+            exit 1
+          fi
+          rm -rf "$views"
           echo "  note: gosec loading packages with GOTOOLCHAIN=$GOSEC_GOTOOLCHAIN" >&2
+          echo "        (same packages and files as $(go env GOVERSION) - checked)" >&2
           export GOTOOLCHAIN="$GOSEC_GOTOOLCHAIN"
         fi
         set -o pipefail   # without it, rc below is tee's status and always 0

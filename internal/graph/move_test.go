@@ -42,6 +42,14 @@ func TestIsAutoReplyTrustsOnlyTheSendersDeclaration(t *testing.T) {
 		{"suppress plus an auto declaration", Message{
 			AutoSubmitted: "auto-replied", AutoResponseSuppress: "All"}, true,
 			"the Exchange out-of-office shape"},
+		// The PrimeSec finding: suppress=All used to make any value containing
+		// "auto" count, auto-generated included.
+		{"suppress plus auto-generated is NOT an auto-reply", Message{
+			AutoSubmitted: "auto-generated", AutoResponseSuppress: "All"}, false,
+			"platform notification mail sets both; it is an advisory, not an OOF"},
+		{"suppress plus a value merely containing auto", Message{
+			AutoSubmitted: "x-autoresponder-whatever", AutoResponseSuppress: "All"}, false,
+			"only the RFC 3834 reply values count"},
 
 		// Subject text must never matter here. It is trivially forgeable and
 		// easy to hit by accident, and this function gates a deletion.
