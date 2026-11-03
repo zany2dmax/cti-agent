@@ -522,7 +522,8 @@ The heartbeat runs `claude -p` unattended, with `--permission-mode default`,
 `--disallowedTools "Edit,Write,NotebookEdit"` and an explicit `--allowedTools`
 list: named fleet commands by absolute path, `fleet-journal` (a wrapper, not
 `journalctl`; see below), `fleet-timers` (a wrapper, not `systemctl`; see
-below), and nothing else. It keeps
+below), and nothing else. Every Bash call also passes a PreToolUse hook,
+`checkin-bash-guard` (below). It keeps
 Claude Code's read-only file tools, limited to `Read` grants on `reports/`,
 `logs/` and `archive/` under `$FLEET_HOME`.
 
@@ -555,11 +556,12 @@ directory holding only `CLAUDE.md` and `.claude/skills/<name>/SKILL.md`, and
 runs with `--setting-sources project` (nothing from `~/.claude`),
 `--strict-mcp-config` with no server given, and
 `--settings /opt/cti-agent/checkin-settings.json`, a root-owned `0644` file
-that turns hooks off, disables bypass-permissions mode and denies `Edit`,
-`Write`, `NotebookEdit`, `WebFetch` and `WebSearch`. The integrity check
-covers every entry of `$FLEET_CODE/bin`, the settings file and the
-orchestrator directory, and the beat refuses to start if `CLAUDE.md`, the
-`checkin` skill or the settings file is missing.
+that leaves hooks on with exactly one configured (the Bash guard, below),
+disables bypass-permissions mode and denies `Edit`, `Write`, `NotebookEdit`,
+`WebFetch` and `WebSearch`. The integrity check covers every entry of
+`$FLEET_CODE/bin`, the settings file and the orchestrator directory, and the
+beat refuses to start if `CLAUDE.md`, the `checkin` skill, the settings file or
+the guard is missing.
 
 **A steering audit refuses the beat if something has been planted.** A beat
 steered once must not be able to leave a file behind that steers every later
@@ -600,6 +602,56 @@ read by `systemctl` as an option, so it now refuses any unit that does not
 match `^cti-agent-[A-Za-z0-9@._-]+$` (exit 2) and calls `/usr/bin/systemctl`
 and `/usr/bin/journalctl` by absolute path, with the unit after `--`.
 
+**Shell syntax is refused on every beat command.** A prefix grant such as
+`fleet-timers:*` names the command, not the shell around it. If it ever matched
+`fleet-timers > state/budget.json`, every grant would be an arbitrary file write
+as the service account, and `cmd $(other)` would run something never granted.
+Whether Claude Code's own matcher refuses each of those is its business; the
+fleet no longer depends on it. `checkin-bash-guard` (`python3 -I`) is a
+PreToolUse hook on Bash in the root-owned settings file, and exits 2 on any
+command containing `<`, `>`, `|`, `;`, `&`, a backtick, a newline or CR, and,
+outside single quotes, `$` (any expansion), `*`, `?`, `[` or `~`, or starting
+with a `NAME=value` prefix; it also exits 2 on any input it cannot read: it
+fails closed. `$` is refused even as plain `$NAME`, because the beat's
+environment carries the `fleet.env` secrets, so `$CLIENT_SECRET` could reach the
+board or a `cti-alert` mail. Single-quoted text is literal, so `'cti-agent-*'`
+is fine; the beat types absolute paths, never `$FLEET_CODE`. A hook whose
+command is missing fails open, and so does a guard whose python is missing, so
+`run-checkin` refuses to start on Linux if the guard file is missing, if the
+settings do not parse to `disableAllHooks: false` with a Bash PreToolUse command
+hook at `$FLEET_CODE/bin/checkin-bash-guard`, or if piping a redirect payload
+through the guard does not exit 2. A blocked call appears in the beat's log as a
+`checkin-bash-guard:` line.
+
+**The beat cannot empty the board or forge a line.** The grant was
+`fleet-board:*`, which includes `prune`; `prune .` moves every line to the
+archive, the ERROR lines `cti-alert` and the runners leave for the operator
+among them. The grant is now `fleet-board say`, `read`, `tail`, `resolve` and
+`expire`. Not `prune` (a free regex), and not `post`: `post` names its own
+sender, so a beat could sign a line as `@operator` (an answer the next beat acts
+on) or `@systemd`. `say <to> <kind> <body>` posts with the sender fixed as
+`@you`. The beat still keeps the board tidy each beat: `resolve <id>` archives
+the `id=<id>` line and its `re:<id>` lines (whole words, so q17 does not take
+q170), and `expire <days>` (2-365) archives older lines but keeps ERROR lines 7
+days whatever is passed, and keeps lines with no timestamp. Free-pattern `prune`
+is the operator's. `fleet-board` also validates its arguments (exit 2, nothing
+written): the handles must be `@name` from `[A-Za-z0-9._-]` (at most 32) and the
+kind upper-case letters and digits (at most 16), and `read` requires an `@name`
+handle. Before, a newline in a handle wrote a second, forged board line, such as
+an `ERROR` from `@systemd` or an answer from `@operator`, which every reader
+trusts. Control characters are stripped from post bodies.
+
+**The beat cannot record its own budget.** The grant was `cti-budget:*`; a beat
+that could `record` its results could talk the quota brake out of engaging, and
+`check` is `run-checkin`'s own gate. The grant is now `cti-budget status`.
+
+**`cti-kev --enriched` opens only an enrich output.** The beat is granted
+`cti-kev` with any arguments, and `--enriched PATH` opened any file the service
+account could read, `fleet.env` included, where a parse error could quote the
+start of the file back into the beat's context. It now accepts only a regular
+file named `enriched-*.json`; symlinks are resolved first, and when `FLEET_HOME`
+is set the file must sit directly in `$FLEET_HOME/state`.
+
 **Named per subcommand, not per binary.** The list used to grant `fleet-db:*`
 and `cti-patchtuesday:*`. The first included `fleet-db sent`, which records a
 digest as delivered so `run-digest` skips the real one, and `fleet-db finding`,
@@ -628,7 +680,7 @@ version, and a malformed flag would stop every beat.
 **The list is a command-line flag in `run-checkin`, not a settings file.**
 A permissions file the agent's account owns is a permissions file the agent
 can edit; the settings file the beat does load is root-owned and only
-narrows (hooks off, deny rules). `run-checkin` is root-owned `0755` under `$CODE_DIR`
+narrows (one guard hook, deny rules). `run-checkin` is root-owned `0755` under `$CODE_DIR`
 and the service account cannot modify it, which makes it the one place the list
 cannot be widened by the thing it constrains. The startup integrity check
 described above is what keeps that true: a box where it stops being true does

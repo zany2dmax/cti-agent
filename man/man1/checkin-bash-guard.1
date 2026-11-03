@@ -1,0 +1,129 @@
+.TH CHECKIN-BASH-GUARD 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.SH NAME
+checkin-bash-guard \- refuse shell syntax on the orchestrator heartbeat's Bash calls
+.SH SYNOPSIS
+.B checkin\-bash\-guard
+.PP
+Not run by hand: Claude Code starts it as a
+.B PreToolUse
+hook and writes one JSON event to its standard input.
+.SH DESCRIPTION
+.B checkin\-bash\-guard
+is a Claude Code hook, configured for the tool
+.B Bash
+in the root-owned
+.I $FLEET_CODE/checkin\-settings.json
+and installed root-owned in
+.IR $FLEET_CODE/bin ,
+where
+.BR run\-checkin (1)
+checks it with the rest of the code. It is a Python 3 script run with
+.BR "python3 \-I" ,
+so nothing in the working directory, the environment or the service account's
+site-packages can load code into it.
+.PP
+The heartbeat's tool grant is a list of prefix rules such as
+.BR "$FLEET_CODE/bin/fleet\-timers:*" .
+A rule names the command, not the shell around it. Had one ever matched
+.B fleet\-timers > state/budget.json
+every grant would be an arbitrary file write as the service account, and
+.B cmd $(other)
+would run something that was never granted. Whether Claude Code's own matcher
+refuses each of those is its business; this hook makes the answer not depend
+on it. A beat's command is therefore one granted command with plain arguments.
+.PP
+The hook blocks any
+.B Bash
+command that contains one of these characters anywhere, quoted or not:
+.PP
+.EX
+<  >  |  ;  &  ` (backtick)  newline  carriage return
+.EE
+.PP
+Outside single quotes it also blocks the characters bash expands:
+.PP
+.EX
+$  *  ?  [  ~
+.EE
+.PP
+.B $
+is blocked in every form, plain
+.B $NAME
+included, because the beat's environment carries the
+.I fleet.env
+secrets: a
+.B $CLIENT_SECRET
+could otherwise reach the board or a
+.BR cti\-alert
+mail. A command that starts with a
+.IB NAME = value
+prefix is blocked too, since that changes what a granted command reads.
+Single-quoted text is literal to bash and is not checked for the second set, so a
+pattern such as
+.B 'cti\-agent\-*'
+stays usable. The beat types absolute paths and never
+.BR $FLEET_CODE .
+Other tools pass untouched. Blocking is exit status 2 with the reason on
+standard error, which Claude Code returns to the model so that it can reword
+the call.
+.PP
+The hook fails closed. Input that is not a JSON object, a
+.B Bash
+event with no command string, or any error in the hook itself also exits 2. A
+guard that fails open is not a guard.
+.SH OPTIONS
+None. The hook takes no arguments and reads no environment variables; its
+only input is the JSON event on standard input.
+.SH EXIT STATUS
+.TP
+.B 0
+The call is allowed: another tool, or a
+.B Bash
+command with none of the forbidden characters and no
+.B NAME=
+prefix.
+.TP
+.B 2
+The call is blocked. Standard error carries one line beginning
+.BR checkin\-bash\-guard: .
+.SH FILES
+.TP
+.I /opt/cti\-agent/bin/checkin\-bash\-guard
+The hook.
+.TP
+.I /opt/cti\-agent/checkin\-settings.json
+Names the hook as the only one configured
+.RB ( disableAllHooks
+is false). A hook whose command does not exist fails open (Claude Code treats
+a non-2 exit as a warning), so
+.B run\-checkin
+refuses to start (exit 1,
+.BR "REFUSING to start" )
+if the guard file is missing, if this file does not parse to
+.B disableAllHooks
+false with a Bash PreToolUse command hook at
+.IR $FLEET_CODE/bin/checkin\-bash\-guard ,
+or if piping a redirect payload through the guard does not exit 2 (a missing
+python would otherwise fail open).
+.SH EXAMPLES
+A blocked call, as the orchestrator would see it in the beat's log:
+.PP
+.EX
+checkin\-bash\-guard: shell syntax is not allowed on a beat (>). Run one
+granted command with plain arguments; reword text that needs these characters.
+.EE
+.PP
+Try the guard by hand:
+.PP
+.EX
+echo '{"tool_name":"Bash","tool_input":{"command":"ls | sh"}}' \e
+  | /opt/cti\-agent/bin/checkin\-bash\-guard; echo $?
+.EE
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR fleet\-board (1),
+.BR fleet\-journal (1),
+.BR fleet\-timers (1),
+.BR cti\-agent (1)
+.PP
+fleet\-kit/fleet/CLAUDE.md; SECURITY.md, "What the orchestrator may run".

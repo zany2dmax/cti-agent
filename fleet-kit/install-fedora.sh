@@ -378,8 +378,10 @@ for s in checkin cti-digest scout-sweep patch-tuesday; do
   info "/$s"
 done
 
-# The beat's --settings file: hooks off, no project MCP servers, edit and web
-# tools denied. Root-owned beside the code; run-checkin refuses without it.
+# The beat's --settings file: one hook (bin/checkin-bash-guard, which refuses
+# shell syntax on every Bash call), no project MCP servers, edit and web
+# tools denied. The hook path is /opt/cti-agent, so CODE_DIR must be too.
+# Root-owned beside the code; run-checkin refuses without it.
 run install -m 0644 -o root -g root "$SRC/fleet/checkin-settings.json" \
     "$CODE_DIR/checkin-settings.json"
 info "checkin-settings.json -> $CODE_DIR"
