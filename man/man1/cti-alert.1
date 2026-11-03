@@ -38,7 +38,13 @@ to
 .B FLEET_OPERATOR_EMAIL
 (or
 .B DIGEST_TO
-when that is empty). It quotes systemd's
+when that is empty). It opens with a
+.B WHAT THIS MEANS
+paragraph in plain words: what the unit does, how it ended, a known cause when
+the last error line matches one (an expired secret, a missing permission, a
+timeout), and that line quoted. A HOLD or ESCALATION opens with its
+.B \-\-reason
+instead. Below that it quotes systemd's
 .BR Result ,
 .B ExecMainStatus
 and

@@ -374,11 +374,15 @@ func renderText(f failure) string {
 		consequence = "NO THREAT-INTEL EMAIL WILL ARRIVE. An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained."
 	}
-	if f.Reason != "" {
+	// A hold's or escalation's reason is already the opening paragraph.
+	if f.Reason != "" && !(f.isHold() || f.isEscalation()) {
 		reason = "Reason: " + f.Reason + "\n\n"
 	}
 
 	return fmt.Sprintf(`%s %s on %s at %s
+
+WHAT THIS MEANS
+%s
 
 %ssystemd result: %s
 exit status:    %s
@@ -395,7 +399,7 @@ Next steps on the box:
   journalctl -u %s -n 100 --no-pager
   sudo cti-agent cti-budget status         # ceilings, cooldown, beats used
   sudo ausearch -m avc -ts recent          # SELinux denials`,
-		f.Unit, verb, f.Host, f.When, reason, f.Result, f.ExitCode, f.NRestarts,
+		f.Unit, verb, f.Host, f.When, explain(f), reason, f.Result, f.ExitCode, f.NRestarts,
 		consequence, journalLines, f.Journal, f.Unit, f.Unit)
 }
 
@@ -473,7 +477,7 @@ func renderHTML(f failure) string {
 			"have checked."
 	}
 	e := html.EscapeString
-	if f.Reason != "" {
+	if f.Reason != "" && !(f.isHold() || f.isEscalation()) {
 		reasonRow = `<tr><td><b>reason</b></td><td>` + e(f.Reason) + `</td></tr>`
 	}
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -488,6 +492,9 @@ func renderHTML(f failure) string {
   <tr><td style="padding:16px 18px;font:400 14px/1.55 -apple-system,Segoe UI,
                  Helvetica,Arial,sans-serif;color:#1a202c">
     <p style="margin:0 0 12px 0"><code>%s</code> %s on <b>%s</b> at %s.</p>
+    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
+                color:#4a5568;margin:0 0 4px 0">WHAT THIS MEANS</div>
+    <p style="margin:0 0 14px 0;font-size:15px">%s</p>
     <table cellpadding="4" cellspacing="0"
            style="font:400 13px -apple-system,Segoe UI,Arial,sans-serif;color:#2d3748">
       %s
@@ -516,7 +523,7 @@ sudo ausearch -m avc -ts recent</pre>
   </td></tr>
 </table></td></tr></table></body></html>`,
 		accent, banner,
-		e(f.Unit), verb, e(f.Host), e(f.When),
+		e(f.Unit), verb, e(f.Host), e(f.When), e(explain(f)),
 		reasonRow, e(f.Result), e(f.ExitCode), e(f.NRestarts),
 		tint, accent, consequence,
 		journalLines, e(f.Journal), e(f.Unit), e(f.Unit))
