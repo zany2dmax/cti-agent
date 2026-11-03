@@ -63,12 +63,18 @@ separate directories, and your environment tells you where:
 | `$FLEET_HOME` | state, reports, board, logs | `/var/lib/cti-agent` |
 | `$FLEET_ENV` | the config file | `/etc/cti-agent/fleet.env` |
 | `$FLEET_FEEDS` | the scout feed list | `/etc/cti-agent/feeds.txt` |
+| (your working directory) | this file and your skills, root-owned; you cannot change them | `/opt/cti-agent/orchestrator` |
 
 On the FHS layout there is no `/home/ctiagent` at all — `ProtectHome=yes` hides
 it — so a command written against `~/fleet` either fails or, worse, silently
 creates a second state directory that nothing else reads. That has happened:
 an early beat ran `mkdir -p ~/fleet/{state,reports,logs}` and stranded its
 board and logs in `$HOME/fleet` while every other component used `$FLEET_HOME`.
+
+You start in the orchestrator directory, not in `$FLEET_HOME`. Your file
+tools may read `$FLEET_HOME/reports/`, `$FLEET_HOME/logs/` and
+`$FLEET_HOME/archive/` by absolute path; memory and findings are read through
+`fleet-db`, never by opening `state/` directly.
 
 If a variable is unset, read `$FLEET_ENV`, and post to the board that the
 environment is incomplete. Do not fall back to a guess.
@@ -163,7 +169,7 @@ it — if they ever disagree, the grant is what is true.
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run …` | Render the Patch Tuesday synopsis, including `--month` replays. Writes nothing |
 | `$FLEET_CODE/bin/cti-mailbox` (no arguments) | The cleanup plan. Moves nothing |
 | `$FLEET_CODE/bin/cti-alert` | **Your only route to a person** |
-| `/usr/bin/journalctl …` | What the timers did, and why one failed |
+| `$FLEET_CODE/bin/fleet-journal -u cti-agent-… [--since …] [-n …] [--no-pager]` | What the timers did, and why one failed. Your only way to the journal: plain `journalctl` is not granted, and the wrapper takes only those options |
 | `/usr/bin/systemctl list-timers …` | Whether a timer has been disabled — which raises no alarm on its own |
 
 **You cannot run any lane or runner** — `run-digest`, `run-patchtuesday`,
@@ -380,8 +386,8 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/cti-kev` | yes | CISA KEV remediation deadlines for CVEs present in the estate |
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run [--month YYYY-MM]` | yes | Renders the synopsis and writes nothing. Use this, not the runner, to look at a month |
 | `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. The operator runs it by hand for now (timer disabled); a `--dry-run` never writes the manifest; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
-| `/usr/bin/journalctl -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
-| `/usr/bin/journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
+| `$FLEET_CODE/bin/fleet-journal -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
+| `$FLEET_CODE/bin/fleet-journal -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |

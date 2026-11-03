@@ -1,0 +1,9 @@
+{
+  "disableAllHooks": true,
+  "enableAllProjectMcpServers": false,
+  "permissions": {
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable",
+    "deny": ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+  }
+}

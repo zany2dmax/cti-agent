@@ -1,0 +1,152 @@
+.TH FLEET-JOURNAL 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.SH NAME
+fleet-journal \- read the fleet's own journal units, and nothing else journalctl can do
+.SH SYNOPSIS
+.B fleet\-journal
+.BR \-u " " \fIcti\-agent\-UNIT\fR
+.RB [ \-u
+.IR cti\-agent\-UNIT ...]
+.RB [ \-\-since
+.IR WHEN ]
+.RB [ \-n
+.IR N ]
+.RB [ \-\-no\-pager ]
+.br
+.B fleet\-journal \-h
+.PP
+.B sudo cti\-agent fleet\-journal
+.I options
+.SH DESCRIPTION
+.B fleet\-journal
+is the orchestrator heartbeat's only way into the journal: it shows what the
+fleet's timers did and why one failed. It is a restricted front end to
+.BR journalctl (1)
+and is installed root-owned in
+.IR $FLEET_CODE/bin ,
+where
+.BR run\-checkin (1)
+checks it with the rest of the code.
+.PP
+The heartbeat used to be granted
+.B journalctl
+with any arguments.
+.B journalctl
+is not read-only:
+.B \-\-cursor\-file=PATH
+writes the last cursor to
+.I PATH
+as the calling account. A beat steered by a hostile advisory could aim that at
+.I state/budget.json
+(resetting the quota that keeps the fleet from crowding out its owner) or
+.IR state/memory.db ,
+and every later beat would run on the damage;
+.BR \-\-file ,
+.BR \-\-directory ,
+.B \-\-merge
+and others widen what it can read. The wrapper accepts only the options below,
+admits only the fleet's own units, and passes each value to
+.B journalctl
+as
+.BI \-\-option= VALUE
+so that nothing it is given can be read as a further option. It always adds
+.BR \-\-no\-pager .
+.PP
+Anything else is refused before
+.B journalctl
+runs: a usage line goes to standard error and the exit status is 2. The
+operator, who has a shell, uses
+.B journalctl
+directly.
+.SH OPTIONS
+At least one
+.B \-u
+is required.
+.TP
+.BR \-u ", " \-\-unit " \fIUNIT\fR"
+Show this unit. Repeatable. The name must begin with
+.B cti\-agent\-
+and contain only letters, digits and
+.BR @ ,
+.BR . ,
+.BR _ ,
+.B \-
+and
+.BR * ;
+globs are allowed, so
+.B \-u 'cti\-agent\-*'
+reads every lane. Any other unit is refused.
+.TP
+.BI \-\-since " WHEN"
+Only entries since
+.IR WHEN ,
+in a form
+.B journalctl
+accepts:
+.BR today ,
+.BR yesterday ,
+.BR \-3h ,
+.BR "2026\-11\-03 06:00:00" .
+Letters, digits, spaces and
+.B : . + \-
+only, at most 40 characters.
+.TP
+.BR \-n ", " \-\-lines " \fIN\fR"
+Only the last
+.I N
+entries. Digits only, at most six.
+.TP
+.B \-\-no\-pager
+Accepted and ignored: output is never paged.
+.TP
+.BR \-h ", " \-\-help
+Print the usage line to standard error and exit 2.
+.SH EXIT STATUS
+.TP
+.B 0
+.B journalctl
+ran and succeeded (it replaces the wrapper, so its status is the
+wrapper's).
+.TP
+.B 2
+Refused: an option not listed above, a missing value, a unit outside
+.BR cti\-agent\-* ,
+a malformed
+.B \-\-since
+or
+.BR \-n ,
+no
+.B \-u
+at all, or
+.BR \-h .
+.TP
+.I other
+.BR journalctl 's
+own exit status.
+.SH EXAMPLES
+What the digest lane did today:
+.PP
+.EX
+sudo cti\-agent fleet\-journal \-u cti\-agent\-digest.service \-\-since today
+.EE
+.PP
+Every lane, last two hours:
+.PP
+.EX
+sudo cti\-agent fleet\-journal \-u 'cti\-agent\-*' \-\-since \-2h \-n 200
+.EE
+.PP
+A refused request, as the orchestrator would see it:
+.PP
+.EX
+$ fleet\-journal \-u cti\-agent\-digest \-\-cursor\-file=/tmp/x
+fleet\-journal: '\-\-cursor\-file=/tmp/x' is not accepted (only \-u, \-\-since, \-n and \-\-no\-pager)
+$ echo $?
+2
+.EE
+.SH SEE ALSO
+.BR journalctl (1),
+.BR run\-checkin (1),
+.BR fleet\-board (1),
+.BR cti\-agent (1)
+.PP
+fleet\-kit/fleet/CLAUDE.md; SECURITY.md, "What the orchestrator may run".

@@ -15,6 +15,15 @@
 # paths - see find_claude.
 set -euo pipefail
 
+# --audit: run the integrity and steering-file checks below, report, and exit
+# without starting a beat. install-fedora.sh runs it as the service account.
+AUDIT_ONLY=0
+case "${1:-}" in
+  --audit) AUDIT_ONLY=1 ;;
+  "") ;;
+  *) echo "usage: run-checkin [--audit]" >&2; exit 2 ;;
+esac
+
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 # See run-digest: config may live outside FLEET_HOME on FHS layouts.
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
@@ -69,6 +78,11 @@ mtime() {
 code_owned_by_root() {
   local p owner mode
   for p in "$@"; do
+    # A dangling symlink is a path someone can make real later; refuse it.
+    if [ -L "$p" ] && [ ! -e "$p" ]; then
+      echo "run-checkin: REFUSING to start: $p is a dangling symlink." >&2
+      return 1
+    fi
     [ -e "$p" ] || continue
     # -L: judge what a symlink points at - that is what gets executed.
     owner="$(stat -L -c %u "$p" 2>/dev/null || echo unknown)"
@@ -83,16 +97,141 @@ code_owned_by_root() {
   done
 }
 
+# ── what steers the beat: root-owned too ───────────────────────────────────
+# Code is not the only thing a beat runs on. Claude Code also loads CLAUDE.md,
+# the skills under .claude/skills, .claude/settings*.json (allow rules and
+# hooks, which are shell commands), .mcp.json and ~/.claude.json from its
+# working directory and HOME. The beat used to start in $FLEET_HOME, the
+# service account's own HOME and state dir, where the old installer put
+# CLAUDE.md and the skills owned by that account. Making the FILES root-owned
+# would not have been enough there: an account that owns a directory can
+# rename anything in it and put its own copy in place.
+#
+# So on Linux the beat starts in $FLEET_CODE/orchestrator, a root-owned
+# directory that holds only CLAUDE.md and .claude/skills. It loads project
+# settings only (--setting-sources project, so nothing from ~/.claude), takes
+# hooks-off and deny rules from a root-owned --settings file, and loads no MCP
+# server at all (--strict-mcp-config with none given). The steering audit below
+# refuses a beat when a file the service account could have planted is there.
+#
+# macOS keeps the developer layout: the beat starts in $FLEET_HOME and the
+# settings file is used when present.
+if [ "$FLEET_OS" = "macos" ]; then
+  AGENT_DIR="$FLEET_HOME"
+else
+  AGENT_DIR="$FLEET_CODE/orchestrator"
+fi
+CHECKIN_SETTINGS="$FLEET_CODE/checkin-settings.json"
+CLAUDE_CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 if [ "$FLEET_OS" != "macos" ]; then
   SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  # Every entry in bin/, not a hand-kept list: the beat is granted several of
+  # them and the timers run the rest.
   code_owned_by_root "$SELF" "$(dirname "$SELF")" \
-    "$FLEET_CODE" "$FLEET_CODE/bin" \
-    "$FLEET_CODE/bin/fleet-board" "$FLEET_CODE/bin/fleet-db" \
-    "$FLEET_CODE/bin/cti-budget" "$FLEET_CODE/bin/cti-kev" \
-    "$FLEET_CODE/bin/cti-patchtuesday" "$FLEET_CODE/bin/cti-mailbox" \
-    "$FLEET_CODE/bin/cti-alert" || exit 1
+    "$FLEET_CODE" "$FLEET_CODE/bin" "$FLEET_CODE"/bin/* \
+    "$CHECKIN_SETTINGS" \
+    "$AGENT_DIR" "$AGENT_DIR/CLAUDE.md" "$AGENT_DIR/.claude" \
+    "$AGENT_DIR/.claude/skills" "$AGENT_DIR"/.claude/skills/* \
+    "$AGENT_DIR"/.claude/skills/*/* || exit 1
+  # Missing is a refusal too: a box upgraded without re-running the installer
+  # has no orchestrator dir, and a beat there would run with no instructions.
+  for p in "$AGENT_DIR/CLAUDE.md" "$AGENT_DIR/.claude/skills/checkin/SKILL.md" \
+           "$CHECKIN_SETTINGS"; do
+    if [ ! -f "$p" ]; then
+      echo "run-checkin: REFUSING to start: $p is missing." >&2
+      echo "  Re-run install-fedora.sh; it installs the orchestrator's" >&2
+      echo "  instructions root-owned in $AGENT_DIR." >&2
+      exit 1
+    fi
+  done
 else
   echo "[run-checkin] code integrity check skipped on macOS (developer checkout)"
+fi
+
+# Files Claude Code would load from the working directory or the account's
+# HOME and config dir, none of which this fleet ships. In the root-owned
+# orchestrator dir only root could have put one there; in HOME the account
+# itself could, which is the case this exists for - a beat steered once must
+# not be able to leave something behind that steers every beat after it.
+#
+# Settings files in the config dir are not loaded (--setting-sources project),
+# so one is refused only when it carries something that would matter if a
+# later Claude Code loaded it anyway: hooks, permissions, MCP servers, env,
+# helper commands, plugins. ~/.claude.json is Claude Code's own state file and
+# exists after the first run; it is refused only when it names MCP servers or
+# allow rules.
+steering_problems() {
+  local p
+  for p in \
+    "$AGENT_DIR/.claude/settings.json" "$AGENT_DIR/.claude/settings.local.json" \
+    "$AGENT_DIR/.mcp.json" "$AGENT_DIR/CLAUDE.local.md" \
+    "$AGENT_DIR/.claude/commands" "$AGENT_DIR/.claude/agents" \
+    "$AGENT_DIR/.claude/hooks" "$AGENT_DIR/.claude/rules" \
+    "$AGENT_DIR/.claude/output-styles" "$AGENT_DIR/.claude/workflows" \
+    "$CLAUDE_CFG/workflows" "$CLAUDE_CFG"/projects/*/memory \
+    "$CLAUDE_CFG/CLAUDE.md" "$CLAUDE_CFG/skills" "$CLAUDE_CFG/commands" \
+    "$CLAUDE_CFG/agents" "$CLAUDE_CFG/hooks" "$CLAUDE_CFG/rules" \
+    "$CLAUDE_CFG/output-styles" \
+    "$HOME/CLAUDE.md" "$HOME/CLAUDE.local.md" "$HOME/.mcp.json" \
+    "$CLAUDE_CFG/settings.local.json"; do
+    if [ -e "$p" ] || [ -L "$p" ]; then
+      echo "$p: present, and nothing in this fleet installs it"
+    fi
+  done
+  # -I: isolated mode, so nothing in the cwd or the environment picks the
+  # modules this imports.
+  python3 -I - "$CLAUDE_CFG/settings.json" "$HOME/.claude.json" \
+      "$CLAUDE_CFG/.claude.json" <<'PY'
+import json, os, sys
+RISKY = ("hooks", "permissions", "mcpServers", "enabledMcpjsonServers",
+         "enableAllProjectMcpServers", "env", "apiKeyHelper", "awsAuthRefresh",
+         "awsCredentialExport", "otelHeadersHelper", "statusLine",
+         "enabledPlugins", "extraKnownMarketplaces", "allowedTools")
+seen = set()
+for path in sys.argv[1:]:
+    real = os.path.realpath(path)
+    if real in seen or not os.path.lexists(path):
+        continue
+    seen.add(real)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"{path}: cannot be read as JSON ({e.__class__.__name__})")
+        continue
+    if not isinstance(data, dict):
+        print(f"{path}: not a JSON object")
+        continue
+    scopes = [("", data)]
+    projects = data.get("projects")
+    if isinstance(projects, dict):
+        scopes += [(f"projects[{k}].", v) for k, v in projects.items() if isinstance(v, dict)]
+    for where, d in scopes:
+        for key in RISKY:
+            if d.get(key) not in (None, False, [], {}, ""):
+                print(f"{path}: {where}{key} is set")
+PY
+}
+
+STEERING="$(steering_problems 2>&1)" || STEERING="${STEERING:-steering audit failed to run}"
+if [ "$FLEET_OS" != "macos" ] && [ -n "$STEERING" ]; then
+  echo "run-checkin: REFUSING to start: files that could steer the beat:" >&2
+  echo "$STEERING" | sed 's/^/  /' >&2
+  echo "  None of these is installed by this fleet. Read each one, then move it" >&2
+  echo "  out of the service account's reach (install-fedora.sh does this into" >&2
+  echo "  /etc/cti-agent/quarantine) or delete the key named." >&2
+  "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
+    "heartbeat refused: unexpected Claude Code settings/instructions in the service account's reach; see journalctl -u cti-agent-checkin" 2>/dev/null || true
+  exit 1
+elif [ -n "$STEERING" ]; then
+  echo "[run-checkin] steering audit (not enforced on macOS):" >&2
+  echo "$STEERING" | sed 's/^/  /' >&2
+fi
+
+if [ "$AUDIT_ONLY" = 1 ]; then
+  echo "[run-checkin] audit passed: code and orchestrator files are root-owned, no unexpected steering files"
+  exit 0
 fi
 
 find_claude() {
@@ -261,8 +400,8 @@ if [ -x "$BUDGET" ]; then
   fi
 fi
 
-echo "[run-checkin $(date '+%F %H:%M:%S')] using $CLAUDE"
-cd "$FLEET_HOME"
+echo "[run-checkin $(date '+%F %H:%M:%S')] using $CLAUDE in $AGENT_DIR"
+cd "$AGENT_DIR"
 
 # Deliberately NOT exec - exec replaces this shell and discards the EXIT trap,
 # which would leave .checkin.lock behind after every beat and block the next
@@ -317,10 +456,6 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 #                             scheduled decision, not a beat-time one.
 #   anything outside this list - including a plain shell.
 #
-# journalctl is read-only in practice here: its destructive flags
-# (--vacuum-*, --rotate) act on the system journal and need privileges this
-# unprivileged service account does not have.
-#
 # PER SUBCOMMAND, NOT PER BINARY. `fleet-db:*` granted `fleet-db sent`, which
 # records a digest as delivered - run-digest then skips that day's real send -
 # and `fleet-db finding`, which rewrites the findings the digest is built
@@ -357,7 +492,17 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(/usr/bin/systemctl list-timers:*)"
 # message to an address the operator already configured, from the fleet's own
 # mailbox - not a send to an attacker's address.
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-alert:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(/usr/bin/journalctl:*)"
+# The journal through fleet-journal, not journalctl itself: journalctl
+# --cursor-file=PATH writes to PATH as this account, so a grant of
+# journalctl:* could overwrite state/budget.json (resetting the quota) or
+# memory.db. The wrapper accepts -u cti-agent-*, --since, -n and --no-pager.
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/fleet-journal:*)"
+# The beat no longer starts in $FLEET_HOME, so the state it reads with its
+# file tools is named. Read rules cover Glob and Grep too. Not state/ (memory
+# goes through fleet-db) and not the account's credentials.
+for d in reports logs archive; do
+  ALLOWED_TOOLS="$ALLOWED_TOOLS,Read(/$FLEET_HOME/$d/**)"
+done
 
 DISALLOWED_TOOLS="Edit,Write,NotebookEdit"
 
@@ -370,7 +515,14 @@ echo "[run-checkin $(date '+%F %H:%M:%S')] disallowed tools: $DISALLOWED_TOOLS"
 # exit-4 HOLD path below was unreachable, and running out of credit failed the
 # unit and mailed FAILED - the outage the HOLD path exists to prevent.
 set +e
+# Auto-memory is a CLAUDE.md the model writes for itself, under the account's
+# config dir, and loaded on the next session: persistence by design. Off.
+export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+SETTINGS_ARGS=()
+[ -f "$CHECKIN_SETTINGS" ] && SETTINGS_ARGS=(--settings "$CHECKIN_SETTINGS")
 "$CLAUDE" -p "/checkin" --permission-mode default \
+  --setting-sources project ${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"} \
+  --strict-mcp-config \
   --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS" \
   < /dev/null 2>&1 | tee "$beat_log"
 rc="${PIPESTATUS[0]}"
