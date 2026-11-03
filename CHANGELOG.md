@@ -39,6 +39,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Operator alerts open with what the problem is.** `cti-alert` emails now
+  start with a "WHAT THIS MEANS" paragraph, above systemd's verdict and the
+  journal: what the unit does, how it ended, a plain cause when the last error
+  matches a known one (expired secret, missing permission, timeout, full disk,
+  missing setting), and that error line quoted. A hold or an orchestrator
+  escalation leads with its own reason.
 - **`scripts/healthcheck.sh`** - one read-only command that says whether the
   fleet is up: failed units, every timer enabled with a next run, code
   root-owned (the rule the heartbeat now enforces), `/etc/cti-agent` modes,
