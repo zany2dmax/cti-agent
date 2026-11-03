@@ -118,3 +118,70 @@ func TestBoardLineMatchesTheKind(t *testing.T) {
 		}
 	}
 }
+
+func TestTheAlertOpensWithAPlainSentenceAboutTheProblem(t *testing.T) {
+	f := failure{
+		Kind: "FAILED", Unit: "cti-agent-digest.service", Host: "host-a",
+		Result: "exit-code", ExitCode: "1", NRestarts: "0", IsDigest: true,
+		Journal: "Nov 03 06:00:01 host-a cti-agent-digest[1]: starting\n" +
+			"Nov 03 06:00:09 host-a cti-agent-digest[1]: graph: HTTP 403 Forbidden for mailbox\n" +
+			"Nov 03 06:00:09 host-a systemd[1]: cti-agent-digest.service: Failed with result 'exit-code'.\n",
+	}
+	got := explain(f)
+	for _, want := range []string{
+		"The daily threat-intel digest", "exited with an error (status 1)",
+		"lacks a permission", `HTTP 403 Forbidden for mailbox`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("explanation lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Failed with result") {
+		t.Error("systemd's own bookkeeping line was quoted as the cause")
+	}
+	if strings.Contains(got, "Nov 03 06:00:09") {
+		t.Error("the journal's date/host prefix was left on the quoted line")
+	}
+
+	// It sits between the headline and the journal, in both parts.
+	for name, body := range map[string]string{"html": renderHTML(f), "text": renderText(f)} {
+		i := strings.Index(body, "WHAT THIS MEANS")
+		j := strings.Index(body, "JOURNAL LINES")
+		if name == "text" {
+			j = strings.Index(body, "journal lines:")
+		}
+		if i < 0 || j < 0 || i > j {
+			t.Errorf("%s: WHAT THIS MEANS (%d) must come before the journal (%d)", name, i, j)
+		}
+	}
+}
+
+func TestAHoldAndAnEscalationLeadWithTheirOwnMessage(t *testing.T) {
+	h := failure{Kind: "HOLD", Unit: "cti-agent-scout.service", Reason: "beat budget used"}
+	if got := explain(h); !strings.Contains(got, "stopped itself on purpose: beat budget used") {
+		t.Errorf("hold: %s", got)
+	}
+	if got := explain(escalation()); !strings.HasPrefix(got, "The orchestrator needs you") ||
+		!strings.Contains(got, "3 KEV-listed CVEs") {
+		t.Errorf("escalation: %s", got)
+	}
+}
+
+func TestTheExplanationSaysSoWhenTheJournalCannotBeRead(t *testing.T) {
+	f := failure{Kind: "FAILED", Unit: "cti-agent-mailbox.service", Result: "timeout",
+		ExitCode: "1", Journal: "(journal unavailable: exit status 1)"}
+	got := explain(f)
+	if !strings.Contains(got, "ran past its time limit") || !strings.Contains(got, "could not be read") {
+		t.Errorf("got: %s", got)
+	}
+}
+
+func TestTheHTMLExplanationIsEscaped(t *testing.T) {
+	// The quoted line comes from a journal that can carry somebody else's
+	// subject line.
+	f := failure{Kind: "FAILED", Unit: "u.service", Result: "exit-code", ExitCode: "1",
+		Journal: "Nov 03 06:00:09 h t[1]: error: <script>alert(1)</script>"}
+	if strings.Contains(renderHTML(f), "<script>alert(1)") {
+		t.Error("journal text reached the HTML unescaped")
+	}
+}
