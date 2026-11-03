@@ -68,7 +68,9 @@ and
 (those that exist; in practice every entry of
 .IR $FLEET_CODE/bin ,
 including
-.BR fleet\-journal ),
+.B fleet\-journal
+and
+.BR fleet\-timers ),
 the settings file
 .IR $FLEET_CODE/checkin\-settings.json ,
 and the orchestrator directory with its
@@ -364,8 +366,23 @@ and
 Exactly that, with no arguments: the dry run. Not
 .BR \-\-for\-real .
 .TP
+.B bin/fleet\-timers
+Only
+.BR \-\-all
+and patterns within
+.BR cti\-agent\-* ,
+which it passes to
 .B systemctl list\-timers
-Any further arguments; the prefix cannot become stop or disable.
+after
+.BR \-\- .
+This replaces a grant of
+.B systemctl list\-timers
+itself, whose global options include
+.BR \-\-host ,
+which runs the query over ssh on any machine, and
+.BR \-\-machine .
+See
+.BR fleet\-timers (1).
 .TP
 .B bin/cti\-alert
 Any arguments. The only mail the orchestrator can cause: there is no
@@ -582,6 +599,7 @@ systemctl list\-timers cti\-agent\-checkin.timer
 .BR fleet\-board (1),
 .BR fleet\-db (1),
 .BR fleet\-journal (1),
+.BR fleet\-timers (1),
 .BR cti\-kev (1),
 .BR cti\-patchtuesday (1),
 .BR cti\-mailbox (1),

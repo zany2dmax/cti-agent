@@ -1,0 +1,55 @@
+#!/bin/bash
+# fleet-timers - list the fleet's own timers, and nothing else systemctl does.
+#
+#   fleet-timers [--all] [cti-agent-PATTERN ...]
+#
+# The heartbeat checks that no timer has been disabled, the failure that
+# raises no alarm on its own. It used to be granted
+# `/usr/bin/systemctl list-timers:*`, a prefix that cannot become stop or
+# disable but still accepts every global option after it: --host=user@box
+# runs the query over ssh to any machine, as the service account, and
+# --machine reaches containers. A beat steered by a hostile advisory could
+# use that to make outbound ssh connections from the fleet's box.
+#
+# So the grant is this wrapper, root-owned in $FLEET_CODE/bin like the rest
+# of the code run-checkin checks. It accepts only --all and patterns inside
+# the fleet's own units (cti-agent-*), passes the patterns after `--` so none
+# can be read as an option, and exits 2 on anything else before systemctl
+# runs. No pattern means cti-agent-*.
+set -euo pipefail
+# Absolute interpreter above and C collation here: bash found through PATH
+# could be one the service account planted, and a UTF-8 locale lets the
+# [A-Za-z] ranges below admit characters outside ASCII.
+export LC_ALL=C
+
+SYSTEMCTL=/usr/bin/systemctl
+
+usage() {
+  echo "usage: fleet-timers [--all] [cti-agent-PATTERN ...]" >&2
+  exit 2
+}
+refuse() {
+  echo "fleet-timers: $*" >&2
+  usage
+}
+
+all=""
+patterns=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --all|-a) all="--all"; shift ;;
+    -h|--help) usage ;;
+    -*) refuse "'$1' is not accepted (only --all)" ;;
+    cti-agent-*)
+      case "$1" in
+        *[!A-Za-z0-9@._*-]*) refuse "pattern '$1' has characters a unit name does not" ;;
+      esac
+      patterns+=("$1"); shift ;;
+    *) refuse "pattern '$1' is not one of the fleet's (cti-agent-*)" ;;
+  esac
+done
+[ "${#patterns[@]}" -gt 0 ] || patterns=("cti-agent-*")
+
+args=(list-timers --no-pager)
+[ -n "$all" ] && args+=("$all")
+exec "$SYSTEMCTL" "${args[@]}" -- "${patterns[@]}"

@@ -129,6 +129,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     (`state/budget.json` resets the quota). The grant is now
     `$FLEET_CODE/bin/fleet-journal`, a root-owned wrapper that accepts only
     `-u cti-agent-*`, `--since`, `-n` and `--no-pager` (new man page).
+  - **systemctl list-timers and cti-alert (H2, hardening review).** The
+    grant `Bash(/usr/bin/systemctl list-timers:*)` accepted `--host=user@box`
+    and `--machine`, which run the query over ssh or into containers, so a
+    steered beat could make outbound ssh connections from the box. The grant
+    is now `$FLEET_CODE/bin/fleet-timers`, a root-owned wrapper that accepts
+    only `--all` and `cti-agent-*` patterns, passes them after `--`, defaults
+    to `cti-agent-*` and exits 2 on anything else (new man page). `cti-alert`
+    had the same hole through `--unit=--host=...`: it now refuses (exit 2) any
+    unit not matching `^cti-agent-[A-Za-z0-9@._-]+$` and calls
+    `/usr/bin/systemctl show ... -- UNIT` and `/usr/bin/journalctl
+    --unit=UNIT` by absolute path.
+
+    **Upgrade:** pull and re-run `install-fedora.sh`. It installs
+    `fleet-timers` and rebuilds `cti-alert` (the binary is built on the box,
+    so the fix is not in place until the installer has run). `run-checkin
+    --audit` should pass, and the next beat's allowed tools show
+    `fleet-timers`.
   - **cti-patchtuesday.** `--dry-run` (granted with any arguments) now
     refuses `--url-msrc` (except `none`), `--url-bleeping`, `--url-qualys`
     and `--drop-dir`, so a beat cannot make the box fetch an arbitrary URL or
