@@ -12,6 +12,10 @@
 # Appends are serialized with an mkdir lock, which is atomic on POSIX
 # filesystems. Two lanes writing at the same instant will never interleave.
 set -euo pipefail
+# C collation: under a UTF-8 locale bash may read [A-Z] as a collation range
+# that includes lower case, so the kind and handle checks below would pass
+# "info" or worse. The fleet's units run with no LANG; a shell often has one.
+export LC_ALL=C
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 BOARD="$FLEET_HOME/board.md"
