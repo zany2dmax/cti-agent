@@ -31,6 +31,16 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 
 ## 2. The one-minute health check
 
+All of this, plus code ownership, config modes, disk, clock and the last
+heartbeat, in one read-only run (exit 1 on any FAIL; `--deep` also checks the
+Graph, Jira and GitHub logins):
+
+```bash
+sudo ~/cti-agent/scripts/healthcheck.sh
+```
+
+Or by hand:
+
 ```bash
 systemctl list-timers 'cti-agent-*'          # every lane, last and next run
 systemctl --failed 'cti-agent-*'             # anything in a failed state
