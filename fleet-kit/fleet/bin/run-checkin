@@ -11,7 +11,8 @@
 #
 # Set CLAUDE_BIN in fleet.env to pin one explicitly. Otherwise this searches
 # the usual locations and fails loudly rather than letting the timer silently
-# do nothing every 30 minutes.
+# do nothing every 30 minutes. On Linux it searches only the root-owned system
+# paths - see find_claude.
 set -euo pipefail
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
@@ -49,6 +50,51 @@ mtime() {
   fi
 }
 
+# ── code integrity: fail closed ─────────────────────────────────────────────
+# The allowlist below is only as trustworthy as the files it names and the
+# script that builds it. If the service account can write any of them, a beat
+# that reads a hostile advisory or mail could change what the NEXT beat runs -
+# and every later timer run would execute that change with the fleet's
+# credentials. install-fedora.sh puts the code in /opt/cti-agent, root-owned
+# 0755; the retired generic installer left it all owned by the service account.
+#
+# So refuse to start unless each path is owned by root and writable by nobody
+# else - us included. Exit 1 rather than posting to the board: fleet-board is
+# one of the files being checked, so it is the one thing not to run when the
+# check fails. The unit's OnFailure= alert tells the operator instead.
+#
+# Skipped on macOS only, where this is a developer's own checkout, owned by
+# design; it says so on every beat rather than skipping silently. Any other
+# platform is checked, and refuses if its stat(1) cannot answer.
+code_owned_by_root() {
+  local p owner mode
+  for p in "$@"; do
+    [ -e "$p" ] || continue
+    # -L: judge what a symlink points at - that is what gets executed.
+    owner="$(stat -L -c %u "$p" 2>/dev/null || echo unknown)"
+    mode="$(stat -L -c %a "$p" 2>/dev/null || echo 7777)"
+    if [ "$owner" != 0 ] || [ $(( 8#$mode & 8#022 )) -ne 0 ] || [ -w "$p" ]; then
+      echo "run-checkin: REFUSING to start: $p is writable by the service" >&2
+      echo "  account or not root-owned (owner uid $owner, mode $mode)." >&2
+      echo "  The fleet's code must be root-owned and read-only to the service;" >&2
+      echo "  reinstall with install-fedora.sh, which puts it in /opt/cti-agent." >&2
+      return 1
+    fi
+  done
+}
+
+if [ "$FLEET_OS" != "macos" ]; then
+  SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  code_owned_by_root "$SELF" "$(dirname "$SELF")" \
+    "$FLEET_CODE" "$FLEET_CODE/bin" \
+    "$FLEET_CODE/bin/fleet-board" "$FLEET_CODE/bin/fleet-db" \
+    "$FLEET_CODE/bin/cti-budget" "$FLEET_CODE/bin/cti-kev" \
+    "$FLEET_CODE/bin/cti-patchtuesday" "$FLEET_CODE/bin/cti-mailbox" \
+    "$FLEET_CODE/bin/cti-alert" || exit 1
+else
+  echo "[run-checkin] code integrity check skipped on macOS (developer checkout)"
+fi
+
 find_claude() {
   if [ -n "${CLAUDE_BIN:-}" ]; then
     [ -x "$CLAUDE_BIN" ] && { echo "$CLAUDE_BIN"; return 0; }
@@ -56,6 +102,17 @@ find_claude() {
     return 1
   fi
   local c
+  # On Linux, only the system locations. ~/.local/bin is the service
+  # account's own HOME, so a claude found there - or anywhere on a PATH that
+  # reaches it - is a binary the account can replace, and it runs every beat
+  # with the fleet's credentials. It was also searched FIRST, so a planted
+  # copy won even on a box with the dnf package installed.
+  if [ "$FLEET_OS" = "linux" ]; then
+    for c in /usr/bin/claude /usr/local/bin/claude; do
+      [ -x "$c" ] && { echo "$c"; return 0; }
+    done
+    return 1
+  fi
   for c in "$HOME/.local/bin/claude" /usr/bin/claude /usr/local/bin/claude \
            /opt/homebrew/bin/claude /snap/bin/claude; do
     [ -x "$c" ] && { echo "$c"; return 0; }
@@ -67,12 +124,17 @@ find_claude() {
 
 CLAUDE="$(find_claude)" || {
   echo "run-checkin: cannot find the claude binary." >&2
-  echo "  Install it (curl -fsSL https://claude.ai/install.sh | bash) or set" >&2
-  echo "  CLAUDE_BIN=/full/path/to/claude in $FLEET_HOME/fleet.env" >&2
+  echo "  On Linux install it system-wide (sudo dnf install claude-code), so it" >&2
+  echo "  is root-owned; a copy in the service account's HOME is not used." >&2
+  echo "  Or set CLAUDE_BIN=/full/path/to/claude in $FLEET_ENV." >&2
   "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
     "heartbeat cannot start: claude binary not found; set CLAUDE_BIN in fleet.env" 2>/dev/null || true
   exit 1
 }
+# The binary that runs the beat is code too. Same rule, same refusal.
+if [ "$FLEET_OS" = "linux" ]; then
+  code_owned_by_root "$CLAUDE" || exit 1
+fi
 
 # A stored login does not live in the same place on both platforms, and
 # checking the wrong one is worse than not checking at all. On Linux the token
@@ -218,19 +280,26 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 
 # WHAT THE ORCHESTRATOR MAY RUN, AND WHY IT IS A FLAG NOT A SETTINGS FILE.
 #
-# --permission-mode acceptEdits auto-approves FILE EDITS ONLY. Every Bash call
-# still asks for approval, and with -p and stdin closed there is nobody to ask,
-# so every command is denied. That is the whole "sandbox block" the heartbeat
-# reported for ten days: it could edit board.md by hand but could not run
-# fleet-board, fleet-db, cti-budget or journalctl. Not SELinux, not sudo - a
-# missing allowlist.
+# With -p and stdin closed there is nobody to approve anything, so every tool
+# call not granted here is denied. That was the "sandbox block" the heartbeat
+# reported for ten days: it could not run fleet-board, fleet-db, cti-budget or
+# journalctl. Not SELinux, not sudo - a missing allowlist.
+#
+# NO FILE EDITS. The beat used to run with --permission-mode acceptEdits,
+# which auto-approves Edit and Write. Nothing in /checkin writes a file - its
+# memory, tasks and board posts all go through the commands below - so the
+# grant bought nothing, while a beat steered by a hostile advisory could use it
+# to rewrite its own instructions or, on a layout where the service owns the
+# code, the runners themselves. The beat keeps the read-only file tools it
+# needs to look at reports/ and logs/, and Edit, Write and NotebookEdit are
+# disallowed outright so a later default change in Claude Code cannot
+# quietly give them back.
 #
 # The list lives HERE, on the command line, rather than in a settings.json
-# under the agent's own HOME. The reason is acceptEdits itself: the agent can
-# write files, so a permissions file inside its home directory is a
-# permissions file it can edit. run-checkin is root-owned 0755 in $CODE_DIR
-# and the service account cannot modify it, which makes this the one place the
-# list cannot be widened by the thing it constrains.
+# under the agent's own HOME, which is a directory the agent's account owns.
+# run-checkin is root-owned 0755 in $FLEET_CODE (checked above, fail closed),
+# which makes this the one place the list cannot be widened by the thing it
+# constrains.
 #
 # Absolute paths, so a binary of the same name earlier in PATH does not
 # inherit the grant.
@@ -279,7 +348,7 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox)"
 # failure that raises no alarm at all, and the one ARCHITECTURE.md says the
 # orchestrator exists to catch. A prefix that starts with list-timers cannot
 # become stop or disable.
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(systemctl list-timers:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(/usr/bin/systemctl list-timers:*)"
 # cti-alert is the escalation channel, and the ONLY mail capability granted.
 # It is narrow by construction rather than by trust: it has no --to flag, so
 # the recipient is FLEET_OPERATOR_EMAIL from the environment and the agent
@@ -288,9 +357,12 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(systemctl list-timers:*)"
 # message to an address the operator already configured, from the fleet's own
 # mailbox - not a send to an attacker's address.
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-alert:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(journalctl:*)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash(/usr/bin/journalctl:*)"
+
+DISALLOWED_TOOLS="Edit,Write,NotebookEdit"
 
 echo "[run-checkin $(date '+%F %H:%M:%S')] allowed tools: $ALLOWED_TOOLS"
+echo "[run-checkin $(date '+%F %H:%M:%S')] disallowed tools: $DISALLOWED_TOOLS"
 
 # errexit OFF around the beat. Under `set -euo pipefail` a non-zero claude exit
 # failed the pipeline and ended the script on this line, so rc was never read:
@@ -298,8 +370,9 @@ echo "[run-checkin $(date '+%F %H:%M:%S')] allowed tools: $ALLOWED_TOOLS"
 # exit-4 HOLD path below was unreachable, and running out of credit failed the
 # unit and mailed FAILED - the outage the HOLD path exists to prevent.
 set +e
-"$CLAUDE" -p "/checkin" --permission-mode acceptEdits \
-  --allowedTools "$ALLOWED_TOOLS" < /dev/null 2>&1 | tee "$beat_log"
+"$CLAUDE" -p "/checkin" --permission-mode default \
+  --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS" \
+  < /dev/null 2>&1 | tee "$beat_log"
 rc="${PIPESTATUS[0]}"
 set -e
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"

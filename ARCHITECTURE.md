@@ -415,10 +415,9 @@ fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
 fleet-kit/fleet/agents/        the triage agent definition
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
-fleet-kit/fleet/systemd/       service + timer pairs, generic layout
-fleet-kit/fleet/systemd-fedora/ same, FHS layout for Fedora/RHEL
-fleet-kit/install.sh           generic installer, everything under one directory
-fleet-kit/install-fedora.sh    FHS installer: /opt, /etc, /var/lib
+fleet-kit/fleet/systemd-fedora/ service + timer pairs, FHS layout for Fedora/RHEL
+fleet-kit/install-fedora.sh    the installer: code in /opt (root-owned), config
+                               in /etc, state in /var/lib
 fleet-kit/tests/               lane tests (stdlib unittest, no network)
 scripts/                       history scrub, exposure remediation notes,
                                cheatsheet-pdf.py (task cheatsheet:pdf)

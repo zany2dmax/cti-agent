@@ -32,8 +32,8 @@ from html import unescape
 
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 DB = os.path.join(FLEET_HOME, "state", "memory.db")
-# The feed list is configuration, not code. On the FHS layout it lives in
-# /etc/cti-agent/feeds.txt; on the simple layout, next to the lanes.
+# The feed list is configuration, not code: install-fedora.sh puts it in
+# /etc/cti-agent/feeds.txt and sets FLEET_FEEDS. The fallback is for dev runs.
 DEFAULT_FEEDS = (os.environ.get("FLEET_FEEDS")
                  or os.path.join(FLEET_HOME, "lanes", "feeds.txt"))
 
