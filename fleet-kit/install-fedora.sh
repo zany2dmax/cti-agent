@@ -649,7 +649,7 @@ ok "daemon-reload"
 # FAIL from PATHFAIL and would overwrite anything set here. Setting FAIL early
 # looked correct and silently did nothing.
 TZFAIL=0
-FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"
+FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"; MAILBOX_AT="07:00:00"
 if [ -r "$CONF_DIR/fleet.env" ]; then
   # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
   # version did to a real install. An absent key must read as empty here: every
@@ -658,6 +658,7 @@ if [ -r "$CONF_DIR/fleet.env" ]; then
   PATCHTUE_AT="$(cfgval FLEET_PATCHTUESDAY_TIME)"; PATCHTUE_AT="${PATCHTUE_AT:-07:30:00}"
   DIGEST_AT="$(cfgval FLEET_DIGEST_TIME)";         DIGEST_AT="${DIGEST_AT:-06:00:00}"
   WEEKLY_AT="$(cfgval FLEET_WEEKLY_TIME)";         WEEKLY_AT="${WEEKLY_AT:-07:00:00}"
+  MAILBOX_AT="$(cfgval FLEET_MAILBOX_TIME)";       MAILBOX_AT="${MAILBOX_AT:-07:00:00}"
 fi
 
 if [ -n "$FLEET_TZ" ]; then
@@ -670,6 +671,7 @@ if [ -n "$FLEET_TZ" ]; then
     # The bare OnCalendar= is required: it is a LIST, so without clearing it
     # first the drop-in ADDS a schedule and the digest sends twice.
     for pair in "cti-agent-digest.timer:*-*-* $DIGEST_AT" \
+                "cti-agent-mailbox.timer:*-*-* $MAILBOX_AT" \
                 "cti-agent-weekly.timer:Mon *-*-* $WEEKLY_AT" \
                 "cti-agent-patchtuesday.timer:Wed *-*-09..15 $PATCHTUE_AT"; do
       unit="${pair%%:*}"; cal="${pair#*:}"

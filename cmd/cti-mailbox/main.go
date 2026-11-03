@@ -180,15 +180,16 @@ func run() int {
 		})
 	}
 	plan := mailbox.PlanWith(candidates, mailbox.Merge(now, l.Index(), owned...),
-		mailbox.Options{Now: now, MinAge: cfg.MailboxMinAge, HoldArchive: hold,
+		mailbox.Options{Now: now, MinAge: cfg.MailboxMinAge, SelfMinAge: cfg.MailboxSelfMinAge,
+			HoldArchive:  hold,
 			SubjectGrace: cfg.GraphLookback})
 	counts := mailbox.Summarise(plan)
 
 	// State the window and the grace. "Why was that not archived?" should be
 	// answerable from the output rather than from fleet.env, and the answer
 	// is almost always one of these two numbers.
-	fmt.Printf("  window %s, archive grace %s\n",
-		window, cfg.MailboxMinAge)
+	fmt.Printf("  window %s, archive grace %s, own-report grace %s\n",
+		window, cfg.MailboxMinAge, cfg.MailboxSelfMinAge)
 	fmt.Printf("%s: %d message(s) in the window; %d CTI email(s) processed today\n",
 		cfg.GraphMailbox, len(candidates), todayCount)
 	// The leave count is split, because its two halves mean opposite things:

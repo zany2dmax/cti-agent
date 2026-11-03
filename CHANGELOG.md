@@ -37,6 +37,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Fixed
+
+- **Mailbox cleanup ran before the digest.** `install-fedora.sh` moved the
+  digest, weekly and Patch Tuesday timers onto `FLEET_TIMEZONE` but not the
+  mailbox timer, so on a UTC server cleanup fired at 07:00 UTC (02:00 Eastern),
+  four hours before the 06:00 Eastern digest. It found no CTI mail processed
+  "today" and archived nothing, every day, while still deleting auto-replies.
+  The mailbox timer is now pinned too, at `FLEET_MAILBOX_TIME` (default
+  07:00:00). Re-run the installer to apply it.
+
+- **The digest and weeklies were never archived.** `mailer.py` sent them
+  without the signed `X-CTI-Agent-Sent` header the Go lanes add, so cleanup,
+  which only archives our own reports on a verified signature, left every one
+  in the inbox. `mailer.py` now signs them (the same HMAC as
+  `internal/graph/selfsign.go`, pinned by a golden-value test). Reports sent
+  before this change stay unsigned and have to be filed by hand.
+
 ### Added
 
 - **AppSec: each application's report goes to its owners by email, daily.**
