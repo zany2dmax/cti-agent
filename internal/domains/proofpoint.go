@@ -244,6 +244,12 @@ func RouteOf(r Result, tenant string) Route {
 		targets = append(targets, spfTargets(rec)...)
 	}
 	targets = append(targets, r.Mail.SPFIncludes...)
+	// Some SPF records list the Proofpoint on Demand addresses instead of its
+	// include, to stay under SPF's 10-lookup limit. That authorises PoD just
+	// as well (PROOFPOINT_POD_IPS names the addresses).
+	if spfPoDByAddress(r.Mail.SPF.Values) {
+		rt.SPFPoD = true
+	}
 	allSeen := map[string]bool{}
 	for _, t := range targets {
 		if p, ok := providerOf(t); ok {

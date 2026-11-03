@@ -924,6 +924,8 @@ play.
 | `DOMAINS_MAIL_GATEWAY` | `pod` turns on the domains lane's Proofpoint on Demand log read (needs `POD_CLUSTER_ID` and `POD_API_TOKEN`): a domain with outbound mail is never asked to be locked down. A failed read holds the lock-down tickets for the run. Off when unset |
 | `DOMAINS_GATEWAY_DAYS` | whole days of the gateway log to read, 1 to 28. Default 7 |
 | `PROOFPOINT_POD_TENANT` | Proofpoint on Demand tenant id (the `00xxxxxx` in `mx0a-00xxxxxx.pphosted.com`). Empty: learned from the inventory's MX records; the gateway section is off when no domain is on PoD |
+| `PROOFPOINT_POD_IPS` | Proofpoint on Demand addresses (or CIDR ranges) that some SPF records list directly to stay under the 10-lookup limit; an SPF listing one counts as authorising PoD. Empty: none |
+| `DOMAINS_SPF_VENDORS` | `suffix=description,...` naming who an SPF include is for, added to or overriding the built-in list shown in the weekly's SPF section |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_DEV_EMAIL` | development only: your own address, for `--to-dev` on `cti-mailer`, `cti-alert` and the four mailing runners, which sends a report **only** there (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
 | `FLEET_OPERATOR` | the operator's name, used in the orchestrator's prompt so it addresses a person |
