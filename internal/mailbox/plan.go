@@ -164,7 +164,13 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 	out := make([]Decision, 0, len(candidates))
 	for _, c := range candidates {
 		rec, ok := processed[c.ID]
-		headerAuto := c.AutoReply || (ok && rec.AutoReply)
+		// The live headers only. A processed record's AutoReply is a verdict
+		// some earlier binary reached; one written before IsAutoReply stopped
+		// counting auto-generated mail would still delete a vendor notice
+		// ahead of every ownership and age check. cti-mailbox reads the
+		// headers on every run, so the candidate always has the current
+		// answer.
+		headerAuto := c.AutoReply
 		subjectAuto := AutoReplySubject(c.Subject)
 		owner := ""
 		switch {

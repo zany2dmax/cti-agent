@@ -62,6 +62,67 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   - Attack vector 10786586 (High) - generic installer leaves unattended
     fleet code and tool policy service-account-writable. Fixed by the
     heartbeat entry below.
+  - Attack vector 10786439 (High) - advisory text steers the orchestrator
+    into overwriting CLAUDE.md, the board and the findings database under
+    FLEET_HOME. Fixed by the heartbeat entries below: no file-edit tools, a
+    root-owned working directory and instructions, the Bash guard, and
+    bounded board and database grants.
+  - Attack vector 10786503 (High) - subject-line prompt injection makes the
+    heartbeat write fleet.env, which every timer-driven wrapper then
+    executes as bash (generic install layout). Fixed by the same entries:
+    the beat cannot edit files, the generic layout is retired, and
+    `fleet.env` is `root:ctiagent` `0640` on the only supported layout.
+  - Attack vector 10786525 (High) - wrapper `$1` path traversal to arbitrary
+    execution and fleet.env disclosure as ctiagent. Fixed by the
+    `cti-agent` wrapper entry below.
+  - Attack vector 10786546 (High) - forged automatic-reply headers trigger
+    unowned mailbox deletion. Fixed by the auto-reply entry below.
+  - Attack vector 10786576 (High) - caller-selected Go toolchain can exclude
+    code from `gosec` scanning. Fixed by the `GOSEC_GOTOOLCHAIN` entry below.
+
+- **`sudo cti-agent` runs fleet commands by name only.** The wrapper joined
+  its first argument onto `/opt/cti-agent/bin/` as given, so
+  `sudo cti-agent ../../../../usr/bin/env` ran `env` as the service account
+  with `fleet.env` loaded, printing every secret, and `../../bin/bash` was a
+  shell as an account meant to have none. It now refuses (exit 2, before
+  `sudo -u`) anything that is not letters, digits, dots and dashes, or not a
+  regular, non-symlink file in `bin/` (or `lanes/` for the `.py` lanes).
+  Only reachable by someone with sudo rights to the wrapper, so the operator
+  already; still worth closing for a narrower sudoers rule.
+
+  **Upgrade:** re-run `install-fedora.sh`, which rewrites
+  `/usr/local/bin/cti-agent`.
+
+- **Auto-generated mail is no longer taken for an out-of-office reply.**
+  `IsAutoReply` also accepted any `Auto-Submitted` value merely containing
+  "auto" when `X-Auto-Response-Suppress: All` was present - which takes in
+  `auto-generated`, the value RFC 3834 uses for system notifications and the
+  code's own comment said must never be deleted. A vendor or platform
+  notification carrying both headers went to Deleted Items ahead of every
+  ownership, hold and age check. Only the RFC reply values (`auto-replied`,
+  `auto-notified`) count now; out-of-office mail that declares only
+  `auto-generated` is still caught by its subject, and that path archives
+  instead of deleting when the digest took a CVE from the message. A sender
+  who forges `Auto-Submitted: auto-replied` on their own message can still
+  have it moved to Deleted Items (recoverable); they cannot do that to anyone
+  else's mail. The cleanup now decides on the live headers only, not on the
+  auto-reply verdict stored in a processed record, so records the old binary
+  wrote cannot delete a notice the new rule keeps.
+
+  **Upgrade:** none beyond the usual reinstall (rebuilds `cti-mailbox`,
+  `cti-agent`, `cti-appscan`).
+
+- **`GOSEC_GOTOOLCHAIN` cannot hide code from gosec.** With the override set,
+  `task gosec` now lists packages and files (`GoFiles`, `CgoFiles`,
+  `IgnoredGoFiles`) under both the current Go and the override, and refuses,
+  printing the difference, unless they match. A file behind a build
+  constraint only the newer Go honours would otherwise be built, tested and
+  shipped but never read by gosec, which would still report `Issues: 0`. A
+  package that fails to load under either toolchain (`go list -e` exits 0 and
+  still lists its files) is refused too.
+
+  **Upgrade:** nothing; `GOSEC_GOTOOLCHAIN=go1.26.9 task ship` now prints
+  "same packages and files ... - checked" before gosec runs.
 
 - **The heartbeat can no longer edit files, and refuses to run code it could
   edit.** A PrimeSec scan found two things that were unsafe together. The beat

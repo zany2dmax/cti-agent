@@ -455,7 +455,7 @@ the first production dry run proposed filing away a message whose entire
 subject was `suspicious`.
 
 Auto-reply detection is **headers, or a subject prefix** (since 1.3.2) —
-`Auto-Submitted: auto-replied`, `X-Auto-Response-Suppress`, or a subject that
+`Auto-Submitted: auto-replied` or `auto-notified`, or a subject that
 *starts* `Automatic reply:`, `Out of Office:`, `Autoreply:` and similar. Anyone can
 title a message that way, so a subject-only match the digest took a CVE from
 is archived instead of deleted; Deleted Items is recoverable either way.
