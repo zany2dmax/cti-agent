@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.5 — 2026-11-03
 
 ### Added
 
@@ -66,6 +66,184 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
   **Upgrade:** nothing to install; run it from your clone with
   `sudo ~/cti-agent/scripts/healthcheck.sh`.
+
+
+- **AppSec: each application's report goes to its owners by email, daily.**
+  New runner `run-appowners` and `cti-agent-appowners.timer` (07:15). For each
+  scan finished since the last run it fetches the scanner's report of open
+  findings (`cti-appreport --deliveries`), redacts the scan account's session
+  from it, and mails it with a covering note through the new
+  `cti-mailer --lane owner`, which takes its recipients only from the
+  application's `app-owners.txt` line (owner To, watchers Cc) and only at a
+  domain in `OWNER_ALLOW_DOMAINS`. Scans that did not finish, failed their login
+  or reached no host, and applications with no owner, are held and reported to
+  the operator once. Each scan is sent once (`state/appowners-sent.json`).
+  New flags: `cti-appscan --deliveries-out/--delivered-log/--commit-delivered`,
+  `cti-appreport --deliveries/--no-fetch`, `cti-mailer --app-id/--app-name`.
+  **Upgrade:** pull, reinstall. Off until you set `OWNER_ALLOW_DOMAINS`; run
+  `run-appowners --to-dev` and read a report before enabling the timer
+  (RUNBOOK 11f).
+
+- **Mailbox cleanup keeps the fleet's own reports for a week.** They used to be
+  archived the day they arrived. `MAILBOX_SELF_MIN_AGE_HOURS` (default 168, 0
+  for the old behaviour) holds them in the inbox that long, then archives them;
+  the dry run states the grace beside the other two numbers.
+- **Domains: the mail gateway's log decides who may be locked down.** With
+  `DOMAINS_MAIL_GATEWAY=pod` the weekly domains lane reads the Proofpoint on
+  Demand log for the last `DOMAINS_GATEWAY_DAYS` days (1 to 28, default 7),
+  aggregates only, through the new `domains.MailGateway` interface (`podgw` is
+  the first implementation). A domain the inventory says sends nothing that
+  has outbound mail gets a High finding and is not asked to be locked down;
+  sending domains with none get an Info; a "sends nothing" domain that only has
+  inbound mail passing DMARC as it is also left alone (a service is authorised
+  to send as it); outbound domains missing from the inventory get a Medium
+  (first 10); inbound mail using our domains is counted, with
+  DMARC passed and not passed, as the evidence for `p=reject`. If the read
+  fails or is incomplete (token in use, network, byte cap, idle, a connection
+  dropped without a close frame, undecodable messages, sender-domain overflow,
+  an empty window, or events that do not cover the window) no lock-down action is produced, the actions file
+  carries `held`, `cti-jira` files, comments on and resolves nothing (ref
+  action `held`), and the report has a Medium "(mail gateway)" finding saying
+  why. **Upgrade:** pull, reinstall. The feature is OFF until you add these
+  lines to `/etc/cti-agent/fleet.env` (the `POD_*` pair is the same one
+  `cti-podprobe` uses; nothing changes without the first line):
+
+  ```
+  DOMAINS_MAIL_GATEWAY=pod
+  DOMAINS_GATEWAY_DAYS=7
+  POD_CLUSTER_ID=<cluster id>
+  POD_API_TOKEN=<token>
+  ```
+
+  Then run `sudo cti-agent run-domains --to-dev` and look for the
+  `[domains] gateway:` lines; a run without them did not use the gateway.
+  The read takes roughly 15 to 20 minutes for 7 days. Do not run
+  `cti-podprobe` while the weekly runs (one session per token).
+
+- **`cti-podprobe` and `internal/podlog`: a read-only probe of the Proofpoint
+  on Demand Log API.** One archived window is read over a standard-library
+  WebSocket client and printed as aggregate counts only: events per
+  direction, route names, DMARC and SPF results, outbound header-From domains
+  and DKIM data, and inbound mail using our domains. It shows what the stream
+  holds before the domains lane's mail-gateway half is built. No message,
+  address or token is printed or stored; the token is read from the
+  environment, never a flag. New settings `POD_CLUSTER_ID` and `POD_API_TOKEN`
+  (commented in fleet.env.example). **Upgrade:** pull, reinstall. Nothing
+  runs it on a timer. To use it, add the two settings (the token must be the
+  fleet's own: one session per token) and see RUNBOOK 11g part 7.
+
+- **AppSec: a Qualys notice from the wrong sender is reported, not lost.** A
+  scan-results notice whose sender is not a Qualys address was silently
+  dropped. One from the mailbox's own address was dropped earlier still, at
+  the self-sent skip. Seen on 2026-11-02: a scanner account whose notification
+  sender is `cybersecurity@`. It is still not parsed or archived (the sender
+  check is what keeps a forged notice out), but the run now logs a warning
+  that names the sender and says what to fix in Qualys. **Upgrade:** nothing.
+  If the warning appears, change that Qualys user's notification sender.
+
+- **AppSec: more of the notification is read.** The application-status link's
+  web app id (kept as `NoticeAppID`: it tells two runs of one application
+  apart without the scan list, and the scan list's id still wins, with a
+  warning if the two disagree), hosts scanned and active, launch type and
+  account, option profile, duration, the links-crawled delta, the comparison
+  scan's reference, the first-scan marker, and the sensitive-content and
+  information-gathered counts. In the weekly: a scan where no host answered is
+  a SCANNER FAULT (`[UNREACHABLE]`) rather than a clean row, and an OPEN NOW
+  row is annotated when the scan is a first scan with no baseline, was run by
+  hand, or found sensitive content. Run titles ending "Biweekly Run #N" now
+  lose the suffix like Weekly/Monthly ones. **Upgrade:** nothing.
+
+- **The daily ignores Qualys's weekly Knowledge Base mail.** "Latest
+  Vulnerabilities Added to the Knowledge Base" lists thousands of CVEs (5,292 on
+  2026-11-02); the digest tried a live Qualys lookup for each at about 3.5 s,
+  hit the one-hour limit and sent nothing. New `DIGEST_SKIP_SUBJECTS`
+  (case-insensitive substrings; unset = that mail; empty = skip nothing). Skipped
+  mail is named in the log and stays in the mailbox. Matching is on the subject
+  only, so confirm the real subject contains "latest vulnerabilities added" or
+  "added to the knowledge base". **Upgrade:** nothing; set the variable only if
+  other bulk mail needs the same treatment.
+
+- **The domains lock-down ticket can live in another Jira project.** New
+  optional `JIRA_DOMAINS_PROJECT_KEY` and `JIRA_DOMAINS_ISSUE_TYPE` send only
+  the weekly domains ticket (INF, for IT); unset, it follows `JIRA_PROJECT_KEY`
+  and nothing changes. The write gate checks that project, and the digest's
+  FLEET TICKETS still lists the ticket from there. A hand-made ticket is
+  adopted only if it carries the labels `cti-agent` and `cti-domains-lockdown`.
+  **Upgrade:** nothing unless you want INF; see the RUNBOOK ("Filing the
+  lock-down ticket in another project").
+
+- **The daily names Sev5s held for approval.** A Sev5 that is neither on KEV nor
+  CVSS 9.0+ is still not filed by the scheduled run (the rule is unchanged), but
+  the digest now has a "HELD FOR APPROVAL" section with each CVE, its host count
+  and the `cti-jira --from-enriched <file> --for-real --approve` command. Before,
+  the only trace was a journal line (CVE-2026-111497, 2026-10-27). `cti-jira`
+  records them as `held` in the `-tickets.json` map; `brief.py` renders them.
+  **Upgrade:** pull and reinstall; nothing to configure.
+
+- **AppSec closes the ticket of a deleted web app.** When a Qualys WAS web app
+  is deleted, the weekly `cti-jira --appscan-tickets` closes its open ticket
+  with a comment. Guards: only when `cti-appscan` fetched the complete web-app
+  list that run (`scannerApps` in the `--tickets-out` file); only open tickets
+  labelled `cti-appscan` and `cti-appscan-<numeric id>` that carry the fleet's
+  state property (name-keyed apps never); the list must agree with that run's
+  scans and the tickets file be under 24 hours old; at most 3 per run and never
+  most of the open queue, more would-be closures close none and warn (it looks
+  like lost scanner visibility); a full search page (100) skips. Gated by
+  the new `JIRA_ALLOW_CLOSE` (project keys, empty = never, independent of
+  `JIRA_ALLOW_CREATE`) and `--for-real`. The transition is chosen by its
+  destination status category (Done); `JIRA_CLOSE_TRANSITION` picks among
+  several; one needing another required field is refused. Needs the Jira
+  permission "Transition issues" (`--check` lists it when the gate is set).
+  `--appscan-close-test KEY` rehearses on a `--appscan-test` ticket only. Closing
+  is reversible; a returning app gets a new ticket linked to the closed one.
+  The domains lane is unchanged.
+
+- `cti-jira --appscan-comment-probe KEY` (with `--appscan-tickets` and
+  `--appscan-test`): posts the weekly comment for one application onto an
+  `--appscan-test` ticket and, if the gateway refuses it (the firewall's HTTP 403
+  page seen on 2026-10-30), bisects it by line to name the refused text. Preview
+  unless `--for-real`; refuses any ticket that is not a test ticket; at most 80
+  comments.
+
+### Changed
+
+- **AppSec: no Jira tickets unless `WAS_TICKETS=1`.** The help desk does not
+  want AppSec tickets in CR, and many owners are not in Jira. `run-appscan`
+  no longer files or comments on application tickets by default.
+  **Upgrade:** nothing, unless you want tickets kept: then add `WAS_TICKETS=1`.
+  Close the existing AppSec tickets in CR by hand.
+
+- **One footer for every lane.** The daily and weekly briefs, Patch Tuesday and
+  domains emails now end with "Generated by the `<FLEET_ORG>`" instead of
+  "Generated by the `<FLEET_ORG>` CTI agent fleet", so setting
+  `FLEET_ORG="CR Agent Fleet"` gives the same name in every header and footer.
+  `FLEET_ATTRIBUTION` still overrides it.
+- **Cheat sheet: retiring a website.** Section 11 says to delete the Qualys web
+  app; the Friday run closes its ticket.
+
+**Upgrade:** pull, reinstall. Nothing is required for closing: it stays off
+until you grant the service account "Transition issues" in the project, run
+`cti-jira --check`, and set `JIRA_ALLOW_CLOSE=<project key>` in fleet.env;
+rehearse with `--appscan-close-test` first. To get "CR Agent Fleet" on the first line of the
+briefs, set `FLEET_ORG="CR Agent Fleet"` in `/etc/cti-agent/fleet.env`. Note that
+it also renames the AppSec, domains and Patch Tuesday headers.
+
+### Fixed
+
+- **Mailbox cleanup ran before the digest.** `install-fedora.sh` moved the
+  digest, weekly and Patch Tuesday timers onto `FLEET_TIMEZONE` but not the
+  mailbox timer, so on a UTC server cleanup fired at 07:00 UTC (02:00 Eastern),
+  four hours before the 06:00 Eastern digest. It found no CTI mail processed
+  "today" and archived nothing, every day, while still deleting auto-replies.
+  The mailbox timer is now pinned too, at `FLEET_MAILBOX_TIME` (default
+  07:00:00). Re-run the installer to apply it.
+
+- **The digest and weeklies were never archived.** `mailer.py` sent them
+  without the signed `X-CTI-Agent-Sent` header the Go lanes add, so cleanup,
+  which only archives our own reports on a verified signature, left every one
+  in the inbox. `mailer.py` now signs them (the same HMAC as
+  `internal/graph/selfsign.go`, pinned by a golden-value test). Reports sent
+  before this change stay unsigned and have to be filed by hand.
 
 ### Security
 
@@ -287,185 +465,6 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `journalctl -u cti-agent-checkin.service -n 30 --no-pager` should show
   `using /usr/bin/claude in /opt/cti-agent/orchestrator` and `fleet-journal`
   in the allowed tools.
-
-### Fixed
-
-- **Mailbox cleanup ran before the digest.** `install-fedora.sh` moved the
-  digest, weekly and Patch Tuesday timers onto `FLEET_TIMEZONE` but not the
-  mailbox timer, so on a UTC server cleanup fired at 07:00 UTC (02:00 Eastern),
-  four hours before the 06:00 Eastern digest. It found no CTI mail processed
-  "today" and archived nothing, every day, while still deleting auto-replies.
-  The mailbox timer is now pinned too, at `FLEET_MAILBOX_TIME` (default
-  07:00:00). Re-run the installer to apply it.
-
-- **The digest and weeklies were never archived.** `mailer.py` sent them
-  without the signed `X-CTI-Agent-Sent` header the Go lanes add, so cleanup,
-  which only archives our own reports on a verified signature, left every one
-  in the inbox. `mailer.py` now signs them (the same HMAC as
-  `internal/graph/selfsign.go`, pinned by a golden-value test). Reports sent
-  before this change stay unsigned and have to be filed by hand.
-
-### Added
-
-- **AppSec: each application's report goes to its owners by email, daily.**
-  New runner `run-appowners` and `cti-agent-appowners.timer` (07:15). For each
-  scan finished since the last run it fetches the scanner's report of open
-  findings (`cti-appreport --deliveries`), redacts the scan account's session
-  from it, and mails it with a covering note through the new
-  `cti-mailer --lane owner`, which takes its recipients only from the
-  application's `app-owners.txt` line (owner To, watchers Cc) and only at a
-  domain in `OWNER_ALLOW_DOMAINS`. Scans that did not finish, failed their login
-  or reached no host, and applications with no owner, are held and reported to
-  the operator once. Each scan is sent once (`state/appowners-sent.json`).
-  New flags: `cti-appscan --deliveries-out/--delivered-log/--commit-delivered`,
-  `cti-appreport --deliveries/--no-fetch`, `cti-mailer --app-id/--app-name`.
-  **Upgrade:** pull, reinstall. Off until you set `OWNER_ALLOW_DOMAINS`; run
-  `run-appowners --to-dev` and read a report before enabling the timer
-  (RUNBOOK 11f).
-
-- **Mailbox cleanup keeps the fleet's own reports for a week.** They used to be
-  archived the day they arrived. `MAILBOX_SELF_MIN_AGE_HOURS` (default 168, 0
-  for the old behaviour) holds them in the inbox that long, then archives them;
-  the dry run states the grace beside the other two numbers.
-- **Domains: the mail gateway's log decides who may be locked down.** With
-  `DOMAINS_MAIL_GATEWAY=pod` the weekly domains lane reads the Proofpoint on
-  Demand log for the last `DOMAINS_GATEWAY_DAYS` days (1 to 28, default 7),
-  aggregates only, through the new `domains.MailGateway` interface (`podgw` is
-  the first implementation). A domain the inventory says sends nothing that
-  has outbound mail gets a High finding and is not asked to be locked down;
-  sending domains with none get an Info; a "sends nothing" domain that only has
-  inbound mail passing DMARC as it is also left alone (a service is authorised
-  to send as it); outbound domains missing from the inventory get a Medium
-  (first 10); inbound mail using our domains is counted, with
-  DMARC passed and not passed, as the evidence for `p=reject`. If the read
-  fails or is incomplete (token in use, network, byte cap, idle, a connection
-  dropped without a close frame, undecodable messages, sender-domain overflow,
-  an empty window, or events that do not cover the window) no lock-down action is produced, the actions file
-  carries `held`, `cti-jira` files, comments on and resolves nothing (ref
-  action `held`), and the report has a Medium "(mail gateway)" finding saying
-  why. **Upgrade:** pull, reinstall. The feature is OFF until you add these
-  lines to `/etc/cti-agent/fleet.env` (the `POD_*` pair is the same one
-  `cti-podprobe` uses; nothing changes without the first line):
-
-  ```
-  DOMAINS_MAIL_GATEWAY=pod
-  DOMAINS_GATEWAY_DAYS=7
-  POD_CLUSTER_ID=<cluster id>
-  POD_API_TOKEN=<token>
-  ```
-
-  Then run `sudo cti-agent run-domains --to-dev` and look for the
-  `[domains] gateway:` lines; a run without them did not use the gateway.
-  The read takes roughly 15 to 20 minutes for 7 days. Do not run
-  `cti-podprobe` while the weekly runs (one session per token).
-
-- **`cti-podprobe` and `internal/podlog`: a read-only probe of the Proofpoint
-  on Demand Log API.** One archived window is read over a standard-library
-  WebSocket client and printed as aggregate counts only: events per
-  direction, route names, DMARC and SPF results, outbound header-From domains
-  and DKIM data, and inbound mail using our domains. It shows what the stream
-  holds before the domains lane's mail-gateway half is built. No message,
-  address or token is printed or stored; the token is read from the
-  environment, never a flag. New settings `POD_CLUSTER_ID` and `POD_API_TOKEN`
-  (commented in fleet.env.example). **Upgrade:** pull, reinstall. Nothing
-  runs it on a timer. To use it, add the two settings (the token must be the
-  fleet's own: one session per token) and see RUNBOOK 11g part 7.
-
-- **AppSec: a Qualys notice from the wrong sender is reported, not lost.** A
-  scan-results notice whose sender is not a Qualys address was silently
-  dropped. One from the mailbox's own address was dropped earlier still, at
-  the self-sent skip. Seen on 2026-11-02: a scanner account whose notification
-  sender is `cybersecurity@`. It is still not parsed or archived (the sender
-  check is what keeps a forged notice out), but the run now logs a warning
-  that names the sender and says what to fix in Qualys. **Upgrade:** nothing.
-  If the warning appears, change that Qualys user's notification sender.
-
-- **AppSec: more of the notification is read.** The application-status link's
-  web app id (kept as `NoticeAppID`: it tells two runs of one application
-  apart without the scan list, and the scan list's id still wins, with a
-  warning if the two disagree), hosts scanned and active, launch type and
-  account, option profile, duration, the links-crawled delta, the comparison
-  scan's reference, the first-scan marker, and the sensitive-content and
-  information-gathered counts. In the weekly: a scan where no host answered is
-  a SCANNER FAULT (`[UNREACHABLE]`) rather than a clean row, and an OPEN NOW
-  row is annotated when the scan is a first scan with no baseline, was run by
-  hand, or found sensitive content. Run titles ending "Biweekly Run #N" now
-  lose the suffix like Weekly/Monthly ones. **Upgrade:** nothing.
-
-- **The daily ignores Qualys's weekly Knowledge Base mail.** "Latest
-  Vulnerabilities Added to the Knowledge Base" lists thousands of CVEs (5,292 on
-  2026-11-02); the digest tried a live Qualys lookup for each at about 3.5 s,
-  hit the one-hour limit and sent nothing. New `DIGEST_SKIP_SUBJECTS`
-  (case-insensitive substrings; unset = that mail; empty = skip nothing). Skipped
-  mail is named in the log and stays in the mailbox. Matching is on the subject
-  only, so confirm the real subject contains "latest vulnerabilities added" or
-  "added to the knowledge base". **Upgrade:** nothing; set the variable only if
-  other bulk mail needs the same treatment.
-
-- **The domains lock-down ticket can live in another Jira project.** New
-  optional `JIRA_DOMAINS_PROJECT_KEY` and `JIRA_DOMAINS_ISSUE_TYPE` send only
-  the weekly domains ticket (INF, for IT); unset, it follows `JIRA_PROJECT_KEY`
-  and nothing changes. The write gate checks that project, and the digest's
-  FLEET TICKETS still lists the ticket from there. A hand-made ticket is
-  adopted only if it carries the labels `cti-agent` and `cti-domains-lockdown`.
-  **Upgrade:** nothing unless you want INF; see the RUNBOOK ("Filing the
-  lock-down ticket in another project").
-
-- **The daily names Sev5s held for approval.** A Sev5 that is neither on KEV nor
-  CVSS 9.0+ is still not filed by the scheduled run (the rule is unchanged), but
-  the digest now has a "HELD FOR APPROVAL" section with each CVE, its host count
-  and the `cti-jira --from-enriched <file> --for-real --approve` command. Before,
-  the only trace was a journal line (CVE-2026-111497, 2026-10-27). `cti-jira`
-  records them as `held` in the `-tickets.json` map; `brief.py` renders them.
-  **Upgrade:** pull and reinstall; nothing to configure.
-
-- **AppSec closes the ticket of a deleted web app.** When a Qualys WAS web app
-  is deleted, the weekly `cti-jira --appscan-tickets` closes its open ticket
-  with a comment. Guards: only when `cti-appscan` fetched the complete web-app
-  list that run (`scannerApps` in the `--tickets-out` file); only open tickets
-  labelled `cti-appscan` and `cti-appscan-<numeric id>` that carry the fleet's
-  state property (name-keyed apps never); the list must agree with that run's
-  scans and the tickets file be under 24 hours old; at most 3 per run and never
-  most of the open queue, more would-be closures close none and warn (it looks
-  like lost scanner visibility); a full search page (100) skips. Gated by
-  the new `JIRA_ALLOW_CLOSE` (project keys, empty = never, independent of
-  `JIRA_ALLOW_CREATE`) and `--for-real`. The transition is chosen by its
-  destination status category (Done); `JIRA_CLOSE_TRANSITION` picks among
-  several; one needing another required field is refused. Needs the Jira
-  permission "Transition issues" (`--check` lists it when the gate is set).
-  `--appscan-close-test KEY` rehearses on a `--appscan-test` ticket only. Closing
-  is reversible; a returning app gets a new ticket linked to the closed one.
-  The domains lane is unchanged.
-
-- `cti-jira --appscan-comment-probe KEY` (with `--appscan-tickets` and
-  `--appscan-test`): posts the weekly comment for one application onto an
-  `--appscan-test` ticket and, if the gateway refuses it (the firewall's HTTP 403
-  page seen on 2026-10-30), bisects it by line to name the refused text. Preview
-  unless `--for-real`; refuses any ticket that is not a test ticket; at most 80
-  comments.
-
-### Changed
-
-- **AppSec: no Jira tickets unless `WAS_TICKETS=1`.** The help desk does not
-  want AppSec tickets in CR, and many owners are not in Jira. `run-appscan`
-  no longer files or comments on application tickets by default.
-  **Upgrade:** nothing, unless you want tickets kept: then add `WAS_TICKETS=1`.
-  Close the existing AppSec tickets in CR by hand.
-
-- **One footer for every lane.** The daily and weekly briefs, Patch Tuesday and
-  domains emails now end with "Generated by the `<FLEET_ORG>`" instead of
-  "Generated by the `<FLEET_ORG>` CTI agent fleet", so setting
-  `FLEET_ORG="CR Agent Fleet"` gives the same name in every header and footer.
-  `FLEET_ATTRIBUTION` still overrides it.
-- **Cheat sheet: retiring a website.** Section 11 says to delete the Qualys web
-  app; the Friday run closes its ticket.
-
-**Upgrade:** pull, reinstall. Nothing is required for closing: it stays off
-until you grant the service account "Transition issues" in the project, run
-`cti-jira --check`, and set `JIRA_ALLOW_CLOSE=<project key>` in fleet.env;
-rehearse with `--appscan-close-test` first. To get "CR Agent Fleet" on the first line of the
-briefs, set `FLEET_ORG="CR Agent Fleet"` in `/etc/cti-agent/fleet.env`. Note that
-it also renames the AppSec, domains and Patch Tuesday headers.
 
 ---
 
