@@ -1,12 +1,21 @@
-.TH FLEET-BOARD 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH FLEET-BOARD 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
 .SH NAME
 fleet-board \- the fleet's append-only message board: post, read, prune and tail board.md
 .SH SYNOPSIS
 .B fleet\-board post
 .I from to kind body...
 .br
+.B fleet\-board say
+.I to kind body...
+.br
 .B fleet\-board read
 .RI [ handle ]
+.br
+.B fleet\-board resolve
+.I id
+.br
+.B fleet\-board expire
+.I days
 .br
 .B fleet\-board prune
 .I pattern
@@ -36,8 +45,17 @@ posts
 .B INFO
 when a digest is sent and
 .B ERROR
-when a run fails), the orchestrator heartbeat reads it every beat and is the
-only party that prunes it, and the operator answers on it by posting as
+when a run fails), the orchestrator heartbeat reads it every beat (its tool grant is
+.BR say ,
+.BR read ,
+.BR tail ,
+.B resolve
+and
+.BR expire ;
+not
+.B post
+or
+.BR prune ), and the operator answers on it by posting as
 .BR @operator .
 Handles in use are
 .B @you
@@ -53,7 +71,9 @@ Handles in use are
 .B @domains
 and
 .BR @all ;
-they are a convention, not checked.
+they are a convention: any well-formed
+.B @name
+is accepted.
 .PP
 Writes
 .RB ( post ,
@@ -86,10 +106,24 @@ Append one line: the local time to the minute, then
 and
 .I kind
 each padded to 8 characters, then the body. The remaining arguments are
-joined into the body; newlines in it become spaces and runs of spaces
-collapse to one, because a message is always one line.
+joined into the body; line breaks (newline and carriage return) in it become
+spaces and runs of spaces collapse to one, because a message is always one
+line.
+.I from
+and
+.I to
+must be
+.B @
+followed by letters, digits,
+.BR . ,
+.B _
+or
+.BR \- ,
+at most 32 characters;
 .I kind
-is free text; the fleet uses
+must be upper-case letters and digits, at most 16. Anything else is refused
+with exit status 2 and nothing is written: a newline in a handle used to write
+a second, forged line that every reader trusts. The fleet uses the kinds
 .BR Q ,
 .BR A ,
 .BR INFO ,
@@ -111,6 +145,46 @@ Default:\~\fB@you\fR. Prints
 .BI "(nothing for " handle )
 when nothing matches.
 .TP
+.BI say " to kind body..."
+The same as
+.B post
+with the sender fixed as
+.BR @you .
+This is the orchestrator heartbeat's way to post: it is granted
+.B say
+and not
+.BR post ,
+so it can never sign a line as
+.B @operator
+(an answer the next beat would act on) or
+.BR @systemd .
+.TP
+.BI resolve " id"
+Archive the line carrying
+.BI id= id
+and every line carrying
+.BI re: id\fR,
+matched as whole words, not as a pattern: resolving
+.B q17
+leaves
+.B re:q170
+alone. The id is letters, digits,
+.BR . ,
+.B _
+and
+.BR \- ,
+starting with a letter or digit. Prints the number of lines archived.
+.TP
+.BI expire " days"
+Archive every line whose timestamp is more than
+.I days
+old, 2 to 365.
+.B ERROR
+lines are kept for 7 days whatever
+.I days
+is, so an alert cannot be aged out before the operator has had a chance to see
+it. Lines without a timestamp are kept. Prints the number of lines archived.
+.TP
 .BI prune " pattern"
 Move every line matching the extended regular expression
 .I pattern
@@ -119,7 +193,16 @@ to the end of
 and remove it from the board. Prints
 .BI "pruned lines matching: " pattern\fR.
 The board is rewritten through a temporary file, so afterwards it has mode
-0600 and is owned by whoever ran the prune. The orchestrator's job only.
+0600 and is owned by whoever ran the prune. The orchestrator's heartbeat is not granted
+.BR prune ,
+since
+.B prune .
+would empty the board, ERROR lines included; it prunes with
+.B resolve
+and
+.B expire
+instead. The operator runs
+.BR prune .
 .TP
 .BR tail " [\fIn\fR]"
 The last
@@ -174,7 +257,18 @@ without a pattern; or the lock could not be taken within
 seconds.
 .TP
 .B 2
-Unknown command; a usage line is printed.
+Unknown command; a usage line is printed. Also
+.B post
+with a
+.I from
+or
+.I to
+that is not an
+.B @name
+or a
+.I kind
+that is not upper-case letters and digits, or any of them over its length
+limit.
 .SH EXAMPLES
 The latest traffic, and what is waiting for the orchestrator:
 .PP

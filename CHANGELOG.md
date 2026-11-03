@@ -113,8 +113,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     directory the account owns. They now live in `/opt/cti-agent/orchestrator`
     (`root:root`, `0644`/`0755`) and the beat starts there, with
     `--setting-sources project`, a root-owned
-    `--settings /opt/cti-agent/checkin-settings.json` (hooks off, no project
-    MCP servers, edit and web tools denied) and `--strict-mcp-config`. File
+    `--settings /opt/cti-agent/checkin-settings.json` (one guard hook, see below; no
+    project MCP servers, edit and web tools denied) and `--strict-mcp-config`. File
     tools may read `reports/`, `logs/` and `archive/` under `$FLEET_HOME`.
   - **Steering audit.** `run-checkin` refuses to beat (exit 1, board ERROR)
     when Claude Code files nobody installs are in the account's reach:
@@ -146,6 +146,51 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     so the fix is not in place until the installer has run). `run-checkin
     --audit` should pass, and the next beat's allowed tools show
     `fleet-timers`.
+  - **Beat commands cannot carry shell syntax, and four grants are
+    narrower (internal review).**
+    - A new PreToolUse hook on Bash, `$FLEET_CODE/bin/checkin-bash-guard`
+      (`python3 -I`, named in `checkin-settings.json`, which now has
+      `disableAllHooks: false` and this one hook), blocks (exit 2) any beat
+      command containing `<` `>` `|` `;` `&`, a backtick, a newline or CR
+      anywhere, and, outside single quotes, `$` (any expansion, plain `$NAME`
+      included: the beat's environment carries `fleet.env`, so
+      `$CLIENT_SECRET` could reach the board or a `cti-alert` mail), `*`, `?`,
+      `[` and `~`. A leading `NAME=value` is blocked too. Single-quoted text
+      is literal, so `'cti-agent-*'` still works; the beat types absolute
+      paths, never `$FLEET_CODE`. It fails closed on unreadable input. A prefix
+      grant can therefore never become a redirect-to-file write, run a
+      substituted command or leak a secret.
+    - On Linux `run-checkin` refuses to start if the guard is missing, if the
+      settings do not parse to `disableAllHooks: false` with a Bash
+      PreToolUse command hook at `$FLEET_CODE/bin/checkin-bash-guard`, or if
+      piping a redirect payload through the guard does not exit 2. A hook
+      whose command is missing, or a guard whose python is missing, would
+      otherwise fail open.
+    - The `fleet-board` grant is `say`, `read`, `tail`, `resolve` and
+      `expire`. Not `post` (it names its own sender, so a beat could sign as
+      `@operator` or `@systemd`) and not `prune` (a regex; `prune .` empties
+      the board, ERROR lines included). The beat still tidies the board each
+      beat: `resolve <id>` archives the `id=<id>` line and its `re:<id>` lines
+      (whole words, so q17 does not take q170) and `expire <days>` (2-365)
+      archives older lines, keeping ERROR lines 7 days whatever is passed and
+      lines with no timestamp. `say <to> <kind> <body>` posts as `@you`.
+      `read` now requires an `@name` handle. `fleet-board post` exits 2 on a
+      handle that is not `@name` from `[A-Za-z0-9._-]` (32 at most) or a kind
+      that is not upper-case letters and digits (16 at most); a newline in a
+      handle used to forge a second board line. Control characters are
+      stripped from post bodies.
+    - The `cti-budget` grant is `status` only; `record` and `check` are
+      `run-checkin`'s.
+    - `cti-kev --enriched PATH` accepts only a regular file named
+      `enriched-*.json`, symlinks resolved, and with `FLEET_HOME` set only one
+      directly in `$FLEET_HOME/state`. It used to open any file the account
+      could read.
+
+    **Upgrade:** re-run `install-fedora.sh`, which installs the guard and
+    rebuilds `cti-kev`. After the first beat, `journalctl -u
+    cti-agent-checkin.service -n 40 --no-pager` should show no `REFUSING to
+    start`. Free-pattern `fleet-board prune` is now the operator's alone. A `checkin-bash-guard:` line in a beat log means the guard blocked
+    a command; that is expected, not a fault.
   - **cti-patchtuesday.** `--dry-run` (granted with any arguments) now
     refuses `--url-msrc` (except `none`), `--url-bleeping`, `--url-qualys`
     and `--drop-dir`, so a beat cannot make the box fetch an arbitrary URL or

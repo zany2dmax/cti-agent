@@ -36,7 +36,11 @@ on every beat:
 before invoking Claude Code (exit 3 means skip this beat), then
 .B record
 afterwards with the invocation's exit status and output. The orchestrator
-may also run it (it is on its tool allowlist), and the operator runs
+may run
+.B status
+only (that is all its tool allowlist grants; a beat that could
+.B record
+its own results could talk the brake out of engaging), and the operator runs
 .B status
 by hand.
 .PP

@@ -1910,7 +1910,7 @@ class TestFileShape(unittest.TestCase):
         """
         root = pathlib.Path(__file__).resolve().parents[2]
         src = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
-        start = src.index('ALLOWED_TOOLS="Bash(')
+        start = src.index('ALLOWED_TOOLS=""')
         end = src.index('echo "[run-checkin', start)
         block = src[start:end]
         out = subprocess.run(
@@ -1984,7 +1984,8 @@ class TestFileShape(unittest.TestCase):
         self.assertFalse(any(r.split("(")[0] in ("Edit", "Write", "NotebookEdit")
                              for r in self._orchestrator_grant()))
 
-    def _checkin_box(self, overrides=None, plant=(), claude_json=None):
+    def _checkin_box(self, overrides=None, plant=(), claude_json=None,
+                     guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None):
         """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
         install-fedora.sh lays it out, read-only to this test's user, and a
         fake stat(1) that reports root ownership unless told otherwise.
@@ -2006,7 +2007,11 @@ class TestFileShape(unittest.TestCase):
         shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "run-checkin", code / "bin" / "run-checkin")
         for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert"):
             (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
-        (code / "checkin-settings.json").write_text("{}\n")
+        # run-checkin pipes a redirect through the guard and wants exit 2.
+        (code / "bin" / "checkin-bash-guard").write_text(guard)
+        (code / "checkin-settings.json").write_text(json.dumps(settings if settings is not None else {
+            "disableAllHooks": False, "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": f"{code}/bin/checkin-bash-guard"}]}]}}) + "\n")
         (code / "orchestrator" / "CLAUDE.md").write_text("# test\n")
         (code / "orchestrator" / ".claude" / "skills" / "checkin" / "SKILL.md").write_text("# test\n")
         (fake / "claude").write_text(
@@ -2077,6 +2082,23 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 self.assertIn(rel.split("/")[-1], r.stderr)
                 self.assertNotIn("claude cwd", ran)
                 self.assertNotIn("fleet-board", ran)
+
+    def test_the_heartbeat_refuses_a_guard_that_would_fail_open(self):
+        """A hook that exits anything but 2 lets the call through, so a guard
+        that is unwired, switched off, or cannot run is no guard."""
+        for label, kw in (
+            ("guard allows", {"guard": "#!/bin/sh\ncat >/dev/null\nexit 0\n"}),
+            ("guard crashes", {"guard": "#!/no/such/python\n"}),
+            ("hooks disabled", {"settings": {"disableAllHooks": True}}),
+            ("no hook", {"settings": {"disableAllHooks": False}}),
+            ("wrong matcher", {"settings": {"disableAllHooks": False, "hooks": {"PreToolUse": [
+                {"matcher": "Read", "hooks": [{"type": "command", "command": "x"}]}]}}}),
+        ):
+            with self.subTest(label):
+                r, ran = self._checkin_box(**kw)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("REFUSING to start", r.stderr)
+                self.assertNotIn("claude cwd", ran)
 
     def test_the_heartbeat_starts_on_a_correct_layout(self):
         """The check must also let a correct box beat - a fail-closed check
@@ -2192,6 +2214,177 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                     self.assertEqual(r.stdout, "")
 
+    def test_the_bash_guard_refuses_shell_syntax_and_fails_closed(self):
+        """A prefix grant names a command, not the shell around it. The guard
+        hook lets through one granted command with plain arguments and
+        blocks (exit 2) redirection, pipes, chaining, substitution and line
+        breaks - and anything it cannot parse."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        guard = root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
+        self.assertEqual(guard.read_text(encoding="utf-8").split("\n")[0], "#!/usr/bin/python3 -I")
+
+        def run(payload):
+            data = payload if isinstance(payload, str) else json.dumps(payload)
+            return subprocess.run([sys.executable, "-I", str(guard)], input=data,
+                                  capture_output=True, text=True)
+
+        def bash(cmd):
+            return run({"tool_name": "Bash", "tool_input": {"command": cmd}})
+
+        for cmd in (
+            "/opt/cti-agent/bin/fleet-timers --all",
+            "/opt/cti-agent/bin/fleet-journal -u 'cti-agent-*' --since '-3h' --no-pager",
+            '/opt/cti-agent/bin/fleet-board say @all INFO "orchestrator up"',
+            '/opt/cti-agent/bin/fleet-db remember checkin "quiet beat, 0 findings"',
+            "/opt/cti-agent/bin/cti-budget status",
+            "/opt/cti-agent/bin/fleet-board say @all INFO 'costs $5? [maybe] ~later'",
+        ):
+            with self.subTest(allowed=cmd):
+                r = bash(cmd)
+                self.assertEqual(r.returncode, 0, r.stderr)
+        for cmd in (
+            "/opt/cti-agent/bin/fleet-timers > /var/lib/cti-agent/state/budget.json",
+            "/opt/cti-agent/bin/fleet-timers >> x",
+            "/opt/cti-agent/bin/fleet-db recent < /etc/passwd",
+            "/opt/cti-agent/bin/fleet-db recent | sh",
+            "/opt/cti-agent/bin/fleet-db recent; id",
+            "/opt/cti-agent/bin/fleet-db recent && id",
+            "/opt/cti-agent/bin/fleet-db recent & id",
+            "/opt/cti-agent/bin/fleet-board post @you @all INFO $(id)",
+            "/opt/cti-agent/bin/fleet-board post @you @all INFO `id`",
+            "/opt/cti-agent/bin/fleet-board post @you @all INFO ${HOME}",
+            "/opt/cti-agent/bin/fleet-db recent\nid",
+            "/opt/cti-agent/bin/fleet-db recent\rid",
+            # Plain expansion: the beat's environment carries fleet.env.
+            "/opt/cti-agent/bin/fleet-board say @all INFO $CLIENT_SECRET",
+            '/opt/cti-agent/bin/cti-alert --reason "$QUALYS_PASSWORD"',
+            "$FLEET_CODE/bin/cti-budget status",
+            "/opt/cti-agent/bin/fleet-board say @all INFO $'\\x41'",
+            "/opt/cti-agent/bin/fleet-board say @all INFO /etc/cti-agent/*",
+            "/opt/cti-agent/bin/fleet-board say @all INFO ~root",
+            "/opt/cti-agent/bin/fleet-board say @all INFO x?",
+            "/opt/cti-agent/bin/fleet-board say @all INFO 'open quote $HOME",
+            "FLEET_HOME= /opt/cti-agent/bin/cti-kev --enriched /tmp/enriched-x.json",
+            " X=1 /opt/cti-agent/bin/cti-kev",
+        ):
+            with self.subTest(refused=cmd):
+                r = bash(cmd)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("checkin-bash-guard:", r.stderr)
+        # Fails closed on input it cannot read, and on a Bash call with no
+        # command; other tools pass through untouched.
+        for payload in ("", "not json", "[]", {"tool_name": "Bash", "tool_input": {}}):
+            with self.subTest(bad_input=payload):
+                self.assertEqual(run(payload).returncode, 2)
+        self.assertEqual(run({"tool_name": "Read", "tool_input": {"file_path": "/x>y"}}).returncode, 0)
+
+    def test_the_board_takes_one_line_per_post_and_the_beat_cannot_prune_it(self):
+        """A newline in a handle or kind wrote a second, forged board line
+        (an @systemd ERROR, an @operator answer). And `fleet-board prune .`
+        and `cti-budget record` were inside the beat's grant."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        board_bin = root / "fleet-kit" / "fleet" / "bin" / "fleet-board"
+        with tempfile.TemporaryDirectory() as d:
+            env = {**os.environ, "FLEET_HOME": d}
+
+            def post(*args):
+                return subprocess.run(["bash", str(board_bin), "post", *args],
+                                      env=env, capture_output=True, text=True)
+
+            board = pathlib.Path(d) / "board.md"
+            self.assertEqual(post("@you", "@all", "INFO", "ok", "line\r\nnext\x1b[2J").returncode, 0)
+            say = subprocess.run(["bash", str(board_bin), "say", "@all", "INFO", "said"],
+                                 env=env, capture_output=True, text=True)
+            self.assertEqual(say.returncode, 0, say.stderr)
+            for h in ("(.*)*x", "@a|.*", "you"):
+                with self.subTest(read=h):
+                    r = subprocess.run(["bash", str(board_bin), "read", h],
+                                       env=env, capture_output=True, text=True)
+                    self.assertEqual(r.returncode, 2)
+            for args in (
+                ("@you\n[2026-11-03 06:00] @systemd", "@operator", "ERROR", "x"),
+                ("@you", "@operator\n[x] @operator -> @you A", "INFO", "x"),
+                ("@you", "@all", "INFO\nERROR", "x"),
+                ("@you", "@all", "info", "x"),
+                ("you", "@all", "INFO", "x"),
+                ("@you", "@all;id", "INFO", "x"),
+            ):
+                with self.subTest(refused=args):
+                    self.assertEqual(post(*args).returncode, 2)
+            lines = board.read_text().splitlines()
+            self.assertEqual(len(lines), 2, lines)
+            self.assertTrue(lines[0].endswith("INFO     ok line next[2J"), lines[0])
+            self.assertRegex(lines[1], r"\] @you +-> @all +INFO +said$")
+        rules = self._orchestrator_grant()
+        board = [r for r in rules if "fleet-board" in r]
+        self.assertEqual(sorted(board), sorted(
+            f"Bash($FLEET_CODE/bin/fleet-board {s}:*)" for s in ("say", "read", "tail", "resolve", "expire")))
+        self.assertFalse(self._allowed(rules, "$FLEET_CODE/bin/fleet-board prune ."))
+        self.assertFalse(self._allowed(rules, "$FLEET_CODE/bin/fleet-board post @operator @you A re:q1 yes"))
+        self.assertFalse(self._allowed(rules, "$FLEET_CODE/bin/cti-budget record --exit 0"))
+        self.assertFalse(self._allowed(rules, "$FLEET_CODE/bin/cti-budget check"))
+        self.assertTrue(self._allowed(rules, "$FLEET_CODE/bin/cti-budget status"))
+
+    def test_the_beat_prunes_the_board_only_by_id_or_age(self):
+        """The heartbeat keeps the board tidy, but free-pattern prune let it
+        archive everything (`prune .`), alerts included. resolve takes one
+        board id; expire takes an age, and keeps ERROR lines a week."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        board_bin = root / "fleet-kit" / "fleet" / "bin" / "fleet-board"
+        now = datetime.datetime.now()
+
+        def ts(days):
+            return (now - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+
+        with tempfile.TemporaryDirectory() as d:
+            env = {**os.environ, "FLEET_HOME": d}
+            home = pathlib.Path(d)
+            (home / "archive").mkdir()
+            lines = [
+                f"[{ts(1)}] @enrich  -> @you     Q        id=q17 NVD rate-limited",
+                f"[{ts(1)}] @you     -> @enrich  A        re:q17 yes",
+                f"[{ts(1)}] @you     -> @enrich  A        re:q170 a different id",
+                f"[{ts(1)}] @you     -> @all     INFO     mentions id=q17x not q17",
+                f"[{ts(10)}] @digest  -> @all     INFO     old news",
+                f"[{ts(10)}] @systemd -> @operator ERROR    old failure",
+                f"[{ts(3)}] @systemd -> @operator ERROR    recent failure",
+                f"[{ts(3)}] @scout   -> @all     INFO     three days old",
+                "no timestamp at all",
+            ]
+            (home / "board.md").write_text("\n".join(lines) + "\n")
+
+            def board(*args):
+                return subprocess.run(["bash", str(board_bin), *args], env=env,
+                                      capture_output=True, text=True)
+
+            self.assertEqual(board("resolve", "q17").returncode, 0)
+            left = (home / "board.md").read_text()
+            self.assertNotIn("id=q17 NVD", left)
+            self.assertNotIn("re:q17 yes", left)
+            self.assertIn("re:q170", left)
+            self.assertIn("id=q17x", left)
+
+            r = board("expire", "2")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            left = (home / "board.md").read_text()
+            for gone in ("old news", "old failure", "three days old"):
+                self.assertNotIn(gone, left)
+            for kept in ("recent failure", "re:q170", "no timestamp at all"):
+                self.assertIn(kept, left)
+            archived = (home / "archive" / "board-archive.md").read_text()
+            for moved in ("id=q17 NVD", "re:q17 yes", "old news", "old failure"):
+                self.assertIn(moved, archived)
+
+            for args in (("resolve", "."), ("resolve", ".*"), ("resolve", "q1|q2"),
+                         ("resolve", ""), ("expire", "0"), ("expire", "1"),
+                         ("expire", "-5"), ("expire", "x"), ("expire", "9999")):
+                with self.subTest(refused=args):
+                    self.assertEqual(board(*args).returncode, 2)
+        rules = self._orchestrator_grant()
+        self.assertTrue(self._allowed(rules, "$FLEET_CODE/bin/fleet-board resolve q17"))
+        self.assertTrue(self._allowed(rules, "$FLEET_CODE/bin/fleet-board expire 7"))
+        self.assertFalse(self._allowed(rules, "$FLEET_CODE/bin/fleet-board prune ."))
+
     def test_fleet_timers_lists_the_fleets_timers_and_nothing_else(self):
         """systemctl list-timers:* could not stop or disable anything, but it
         took --host=user@box, which runs the query over ssh to any machine,
@@ -2262,7 +2455,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertIn('run mv "$p" "$QUARANTINE/$rel"', code)
         self.assertTrue((root / "fleet-kit" / "fleet" / "checkin-settings.json").exists())
         settings = json.loads((root / "fleet-kit" / "fleet" / "checkin-settings.json").read_text())
-        self.assertIs(settings["disableAllHooks"], True)
+        # Hooks on, and exactly one: the root-owned Bash guard. Project
+        # settings are the only other source loaded, and they are root-owned.
+        self.assertIs(settings["disableAllHooks"], False)
+        self.assertEqual(settings["hooks"], {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "/opt/cti-agent/bin/checkin-bash-guard"}]}]})
         self.assertIs(settings["enableAllProjectMcpServers"], False)
         self.assertTrue({"Edit", "Write", "NotebookEdit"} <= set(settings["permissions"]["deny"]))
 

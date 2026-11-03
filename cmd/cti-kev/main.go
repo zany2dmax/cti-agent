@@ -41,6 +41,14 @@ func main() {
 	flag.Parse()
 
 	path := *enriched
+	if path != "" {
+		p, err := confineEnriched(path, os.Getenv("FLEET_HOME"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cti-kev: %v\n", err)
+			os.Exit(1)
+		}
+		path = p
+	}
 	if path == "" {
 		p, err := newestEnriched()
 		if err != nil {
@@ -110,6 +118,51 @@ func cves(rows []kev.Dated) []string {
 		out = append(out, d.CVE)
 	}
 	return out
+}
+
+// confineEnriched admits only an enrich output: a regular file named
+// enriched-*.json, and with FLEET_HOME set, one directly in $FLEET_HOME/state.
+//
+// The orchestrator heartbeat is granted cti-kev with any arguments, and
+// --enriched used to open whatever path it was given with the service
+// account's rights - fleet.env included - where a parse error could quote the
+// start of the file back into the beat's context. Symlinks are resolved first
+// so a link named enriched-x.json cannot point anywhere else. Without
+// FLEET_HOME (a checkout's `task kev`) only the name rule applies.
+func confineEnriched(path, home string) (string, error) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("--enriched %s: %w", path, err)
+	}
+	real, err = filepath.Abs(real)
+	if err != nil {
+		return "", fmt.Errorf("--enriched %s: %w", path, err)
+	}
+	base := filepath.Base(real)
+	if !strings.HasPrefix(base, "enriched-") || !strings.HasSuffix(base, ".json") {
+		return "", fmt.Errorf("--enriched must name an enriched-*.json file, not %s", path)
+	}
+	fi, err := os.Stat(real)
+	if err != nil {
+		return "", fmt.Errorf("--enriched %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("--enriched %s is not a regular file", path)
+	}
+	if home == "" {
+		return real, nil
+	}
+	state, err := filepath.EvalSymlinks(filepath.Join(home, "state"))
+	if err != nil {
+		return "", fmt.Errorf("--enriched: cannot resolve $FLEET_HOME/state: %w", err)
+	}
+	if state, err = filepath.Abs(state); err != nil {
+		return "", fmt.Errorf("--enriched: %w", err)
+	}
+	if filepath.Dir(real) != state {
+		return "", fmt.Errorf("--enriched must be in %s, not %s", state, path)
+	}
+	return real, nil
 }
 
 // newestEnriched picks the most recent enriched-*.json by filename rather than

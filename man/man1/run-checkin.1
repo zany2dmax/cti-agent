@@ -70,7 +70,9 @@ and
 including
 .B fleet\-journal
 and
-.BR fleet\-timers ),
+.BR fleet\-timers ,
+and the hook
+.BR checkin\-bash\-guard ),
 the settings file
 .IR $FLEET_CODE/checkin\-settings.json ,
 and the orchestrator directory with its
@@ -101,8 +103,16 @@ account, does not. The runner also refuses (exit 1) when
 the
 .I checkin
 .I SKILL.md
-or the settings file is missing, which is what a box upgraded without
-re-running the installer looks like. On macOS the check is skipped with a log
+the settings file or the hook
+.I $FLEET_CODE/bin/checkin\-bash\-guard
+is missing, or when the settings do not parse to
+.B disableAllHooks
+false with a Bash PreToolUse command hook at that path, or when piping a
+redirect payload through the guard does not exit 2
+(Claude Code treats a hook whose command is missing as a warning and runs the
+command anyway, so a hook that is not there fails open, and so does a guard
+whose python is missing). A missing file is what
+a box upgraded without re-running the installer looks like. On macOS the check is skipped with a log
 line, since that is a developer's own checkout.
 .TP
 .B 0a. Steering audit
@@ -239,10 +249,15 @@ stdin is closed, so nothing can be approved interactively.
 .B \-\-setting\-sources project
 loads no settings from the user's config directory, and
 .B \-\-strict\-mcp\-config
-with none given loads no MCP server. The root-owned settings file turns hooks
-off
-.RB ( disableAllHooks ),
-stops project MCP servers being enabled, disables bypass-permissions mode and
+with none given loads no MCP server. The root-owned settings file leaves hooks on
+.RB ( disableAllHooks
+false) and configures exactly one, a
+.B PreToolUse
+hook on
+.B Bash
+that runs
+.BR checkin\-bash\-guard (1);
+it also stops project MCP servers being enabled, disables bypass-permissions mode and
 denies
 .BR Edit ,
 .BR Write ,
@@ -313,9 +328,46 @@ not in a settings file the agent could edit, from absolute paths under
 (shown here as
 .IR bin/ ).
 Each entry is a prefix: the command as written, then any further arguments.
+Every Bash call must also pass
+.BR checkin\-bash\-guard (1),
+which refuses redirection, pipes, chaining, line breaks, any
+.B $
+expansion outside single quotes, globs,
+.B ~
+and a leading
+.BR NAME=value ,
+so a prefix below can never be stretched into a file write, a second command or
+a leaked secret. The beat types absolute paths, never
+.BR $FLEET_CODE .
 .TP
 .B bin/fleet\-board
-Any arguments.
+Only the subcommands
+.BR say ,
+.BR read ,
+.BR tail ,
+.B resolve
+and
+.BR expire .
+Not
+.BR post ,
+which names its own sender, so a beat could sign a line as
+.B @operator
+or
+.BR @systemd ;
+.B say
+always posts as
+.BR @you .
+Not
+.BR prune ,
+because
+.B prune .
+moves every line off the board, including the ERROR lines the operator has
+not seen. The beat tidies the board with
+.B resolve
+and
+.BR expire ,
+which keeps ERROR lines 7 days. See
+.BR fleet\-board (1).
 .TP
 .B bin/fleet\-db
 Only the subcommands
@@ -339,13 +391,26 @@ or
 .BR init .
 .TP
 .B bin/cti\-budget
-Any arguments, including
-.B record
-and
+Only
 .BR status .
+Not
+.B record
+or
+.BR check ,
+which are this runner's: a beat that could record its own results could talk
+the brake out of engaging.
 .TP
 .B bin/cti\-kev
-Any arguments.
+Any arguments, but
+.B \-\-enriched
+accepts only a regular file named
+.IR enriched\-*.json ,
+and under
+.B FLEET_HOME
+only one directly in
+.IR state/ .
+See
+.BR cti\-kev (1).
 .TP
 .B bin/cti\-patchtuesday \-\-dry\-run
 Only with
@@ -514,6 +579,10 @@ The settings file passed with
 installed root-owned
 .BR 0644 .
 .TP
+.I /opt/cti\-agent/bin/checkin\-bash\-guard
+The Bash hook the settings file names; see
+.BR checkin\-bash\-guard (1).
+.TP
 .I /opt/cti\-agent/.orchestrator\-CLAUDE.md.sha256
 The installer's record of the
 .I CLAUDE.md
@@ -552,7 +621,8 @@ credit (exit 4). The last two post to the board and may alert, but are not
 unit failures.
 .TP
 .B 1
-The code integrity check failed (step 0), files are missing, or the steering
+The code integrity check failed (step 0), files are missing (including the
+guard, a settings file that does not name it, or a guard that lets a redirect through), or the steering
 audit found files that could steer the beat (step 0a), so nothing was started
 (also the result of a failed
 .BR \-\-audit );
@@ -600,6 +670,7 @@ systemctl list\-timers cti\-agent\-checkin.timer
 .BR fleet\-db (1),
 .BR fleet\-journal (1),
 .BR fleet\-timers (1),
+.BR checkin\-bash\-guard (1),
 .BR cti\-kev (1),
 .BR cti\-patchtuesday (1),
 .BR cti\-mailbox (1),

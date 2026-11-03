@@ -1,9 +1,28 @@
 {
-  "disableAllHooks": true,
+  "disableAllHooks": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/opt/cti-agent/bin/checkin-bash-guard"
+          }
+        ]
+      }
+    ]
+  },
   "enableAllProjectMcpServers": false,
   "permissions": {
     "defaultMode": "default",
     "disableBypassPermissionsMode": "disable",
-    "deny": ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+    "deny": [
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch"
+    ]
   }
 }
