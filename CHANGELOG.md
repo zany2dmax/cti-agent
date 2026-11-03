@@ -39,6 +39,18 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **`cti-podprobe` and `internal/podlog`: a read-only probe of the Proofpoint
+  on Demand Log API.** One archived window is read over a standard-library
+  WebSocket client and printed as aggregate counts only: events per
+  direction, route names, DMARC and SPF results, outbound header-From domains
+  and DKIM data, and inbound mail using our domains. It shows what the stream
+  holds before the domains lane's mail-gateway half is built. No message,
+  address or token is printed or stored; the token is read from the
+  environment, never a flag. New settings `POD_CLUSTER_ID` and `POD_API_TOKEN`
+  (commented in fleet.env.example). **Upgrade:** pull, reinstall. Nothing
+  runs it on a timer. To use it, add the two settings (the token must be the
+  fleet's own: one session per token) and see RUNBOOK 11g part 7.
+
 - **AppSec: a Qualys notice from the wrong sender is reported, not lost.** A
   scan-results notice whose sender is not a Qualys address was silently
   dropped. One from the mailbox's own address was dropped earlier still, at

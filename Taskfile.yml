@@ -460,6 +460,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-alert ./cmd/cti-alert
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-budget ./cmd/cti-budget
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-kev ./cmd/cti-kev
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-podprobe ./cmd/cti-podprobe
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-patchtuesday ./cmd/cti-patchtuesday
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailbox ./cmd/cti-mailbox
       # cti-mailer and cti-jira were missing from this list while being built

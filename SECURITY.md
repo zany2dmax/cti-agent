@@ -589,6 +589,14 @@ errored before calling it is recorded but not charged, so a failing lane
 cannot ration the fleet into a hold and present a code fault as a budget
 decision. `cti-budget status` prints both counts for that reason.
 
+`cti-podprobe` reads one archived window of the Proofpoint on Demand Log API
+and nothing else: no writes to the service, no mail, no tickets. The token
+comes only from the environment or `fleet.env`, never a flag (shell history,
+process list). It never logs or stores a message, address or subject; it keeps
+aggregates only, with every key capped in length and in count, and a byte cap
+on the read. The service allows one session per token, so the fleet's token
+is its own.
+
 Model usage is rationed by `cti-budget` — window and daily ceilings with
 exponential backoff — so an agent loop cannot consume a shared subscription.
 
