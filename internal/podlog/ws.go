@@ -65,6 +65,11 @@ const (
 // ErrStop returned from the Stream callback ends the stream cleanly.
 var ErrStop = errors.New("podlog: stop")
 
+// ErrDropped means the connection ended without a WebSocket close frame: the
+// network or the service cut it, so the data read may be only part of what was
+// asked for. A clean end of stream is io.EOF, from the service's close frame.
+var ErrDropped = errors.New("podlog: connection dropped without a close frame")
+
 // ErrIdle means no frame arrived within the idle timeout.
 var ErrIdle = errors.New("podlog: idle timeout")
 
@@ -272,7 +277,7 @@ func (c *Client) readLoop(conn net.Conn, br *bufio.Reader, fn func([]byte) error
 			case errors.As(err, &ne) && ne.Timeout():
 				return ErrIdle
 			case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-				return io.EOF
+				return ErrDropped
 			}
 			return err
 		}

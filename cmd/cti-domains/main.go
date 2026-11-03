@@ -32,6 +32,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/domains"
 	"github.com/zany2dmax/cti-agent/internal/domains/godaddy"
+	"github.com/zany2dmax/cti-agent/internal/domains/podgw"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
@@ -59,6 +60,11 @@ var (
 	webProber  domains.WebProber
 	smtpProber domains.SMTPProber
 )
+
+// gatewayFor is a seam so the entry point can be tested without Proofpoint.
+var gatewayFor = func(cluster, token string) domains.MailGateway {
+	return &podgw.Gateway{Cluster: cluster, Token: token}
+}
 
 func defaultState() string {
 	home := os.Getenv("FLEET_HOME")
@@ -130,6 +136,28 @@ func run() int {
 	defer cancel()
 
 	opt := domains.Options{Now: time.Now(), ExpectRUA: strings.TrimSpace(os.Getenv("DOMAINS_DMARC_RUA"))}
+	// THE MAIL GATEWAY. Off unless DOMAINS_MAIL_GATEWAY=pod. It reads in the
+	// background while the probes run, and the lane waits for it before it
+	// evaluates. See internal/domains/gateway.go for what a missing read does.
+	gwStatus := &domains.GatewayStatus{}
+	var gwDone chan struct{}
+	gwDays := 0
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DOMAINS_MAIL_GATEWAY"))) {
+	case "", "off":
+	case "pod":
+		days := 7
+		if v := strings.TrimSpace(os.Getenv("DOMAINS_GATEWAY_DAYS")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 28 {
+				return die("DOMAINS_GATEWAY_DAYS=%q is not a number of days from 1 to 28", safelog.Line(v))
+			}
+			days = n
+		}
+		gwStatus.Enabled = true
+		gwDays = days
+	default:
+		return die("DOMAINS_MAIL_GATEWAY=%q is not pod or off", safelog.Line(os.Getenv("DOMAINS_MAIL_GATEWAY")))
+	}
 	var cmp *domains.Comparison
 	var regs []domains.Registration
 	orgOf := map[string]domains.Registration{}
@@ -211,6 +239,32 @@ func run() int {
 		}
 		sp = domains.NetSMTPProber(port, *timeout, netRes)
 	}
+	// Started only after every setting is validated, so a configuration error
+	// above never opens the (one-session) token for nothing.
+	if gwStatus.Enabled {
+		gwDone = make(chan struct{})
+		since, to := domains.GatewayWindow(opt.Now, gwDays)
+		go func() {
+			defer close(gwDone)
+			cluster := strings.TrimSpace(os.Getenv("POD_CLUSTER_ID"))
+			token := strings.TrimSpace(os.Getenv("POD_API_TOKEN"))
+			if cluster == "" || token == "" {
+				gwStatus.Err = "POD_CLUSTER_ID and POD_API_TOKEN are not both set in fleet.env"
+				return
+			}
+			// Its own deadline, not the lane's 30 minutes: a week of mail is
+			// 15-20 minutes of reading and the unit allows an hour.
+			gctx, gcancel := context.WithTimeout(context.Background(), 45*time.Minute)
+			defer gcancel()
+			ev, err := gatewayFor(cluster, token).Evidence(gctx, since, to)
+			if err != nil {
+				gwStatus.Err = safelog.Line(err.Error())
+				return
+			}
+			gwStatus.Evidence = &ev
+		}()
+		logf("gateway: Proofpoint on Demand log, last %d day(s), reading in the background", gwDays)
+	}
 	p := domains.Prober{Resolver: res, Web: web, Selectors: selectors,
 		Concurrency: *concurrency, PerDomain: 6 * *timeout, SMTP: sp}
 	results := p.Run(ctx, entries, orgOf)
@@ -230,7 +284,17 @@ func run() int {
 		logf("pod    : PoD tenants %v and none is a strict majority - the gateway "+
 			"check is OFF this run; set PROOFPOINT_POD_TENANT", tenants)
 	}
+	if gwDone != nil {
+		<-gwDone
+		if gwStatus.Held() {
+			logf("gateway: NO USABLE EVIDENCE (%s) - lock-down changes held, Jira left alone", gwStatus.HeldWhy())
+		} else {
+			logf("gateway: %d events read, %d outbound header-From domain(s)",
+				gwStatus.Evidence.Events, len(gwStatus.Evidence.Outbound))
+		}
+	}
 	findings := domains.Evaluate(results, cmp, opt)
+	findings = append(findings, domains.EvalGateway(results, gwStatus)...)
 
 	prev, err := domains.LoadState(*statePath)
 	if err != nil {
@@ -243,7 +307,7 @@ func run() int {
 	findings = append(findings, domains.EvalProofpoint(results, cur, opt.Now)...)
 	domains.SortFindings(findings)
 
-	actions := domains.Actions(results, opt.ExpectRUA)
+	actions, skipped := domains.ActionsWithSkipped(results, opt.ExpectRUA, gwStatus)
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
 		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
 		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions,
@@ -253,6 +317,13 @@ func run() int {
 	}
 	block := rep.Render()
 	af := domains.NewActionsFile(opt.Now, actions)
+	if gwStatus.Held() {
+		af.Held, af.HeldWhy = true, gwStatus.HeldWhy()
+	}
+	af.Skipped = skipped
+	if len(skipped) > 0 {
+		logf("gateway: %d lock-down domain(s) left out because the gateway shows they send", len(skipped))
+	}
 	logf("actions: %d exact DNS change(s), %d to review, on %d domain(s)", af.Exact, af.Review, af.Domains)
 
 	for _, w := range []struct{ path, body string }{

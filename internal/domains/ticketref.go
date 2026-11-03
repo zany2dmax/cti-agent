@@ -65,6 +65,11 @@ func TicketLine(r *TicketRef) (line, url string) {
 		return fmt.Sprintf("Jira (dry run): would add this week's changed list to %s%s.", key, st), url
 	case "would-resolve":
 		return fmt.Sprintf("Jira (dry run): would tell %s%s nothing is left to change.", key, st), url
+	case "held":
+		if key != "" {
+			return fmt.Sprintf("Jira: %s%s was left alone this run - the mail gateway evidence was unavailable.", key, st), url
+		}
+		return "Jira: no lock-down ticket was filed this run - the mail gateway evidence was unavailable.", ""
 	case "gate-closed", "error":
 		if note == "" {
 			note = "see the run-domains journal"

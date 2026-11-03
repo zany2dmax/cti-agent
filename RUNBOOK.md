@@ -1621,10 +1621,10 @@ should go (the mail gateway may provide an address). Until it is set the check
 is only that every sending domain has *some* `rua=`; once set, every sending
 domain's `rua=` must include it.
 
-### 7. The PoD Log API (read-only probe built; the lane is not)
+### 7. The PoD Log API (probe and the opt-in lane half)
 
-A read-only probe, `cti-podprobe`, now exists. The domains lane's use of the
-API is still not built. The mail-side evidence for that lane will come from Proofpoint's *PoD
+A read-only probe, `cti-podprobe`, and the lane's use of the API both exist;
+the lane half is off until you turn it on (below). The mail-side evidence comes from Proofpoint's *PoD
 Log API*. The vendor guide is **"Proofpoint on Demand (PoD) Log API", Revision
 I, August 2023** (Proofpoint Customer Success Center; the guide is
 proprietary, so it is not in this repository: keep your copy beside the
@@ -1683,6 +1683,58 @@ The lane keeps **aggregates only**: per domain and week, the outbound senders
 (header-From domain, DKIM selector, count) and the inbound messages that claim
 the domain but fail DMARC (count, top sending IPs). No subjects, recipients or
 per-message records are written to disk or sent in any report.
+
+**Turning on the lane half**
+
+Off by default. With `POD_CLUSTER_ID` and `POD_API_TOKEN` already in
+`fleet.env`, add:
+
+```bash
+DOMAINS_MAIL_GATEWAY=pod      # off (or unset) is the default
+DOMAINS_GATEWAY_DAYS=7        # whole days to read, 1 to 28, default 7
+```
+
+then rehearse with `sudo cti-agent run-domains --dry-run`. The weekly reads
+the archive for the last N whole days (the window ends at the last full hour
+more than an hour ago) in the background while the DNS and web probes run, and
+keeps counts only. What changes in the report, when the evidence is usable:
+
+- A domain the inventory says sends nothing (`receive`, `legacy`, or no mail)
+  that has outbound mail in the window gets a **High** finding and **no
+  lock-down action**: IT is not asked to publish `-all` and `p=reject` for a
+  domain that sends. Find the sender, then correct the inventory (`send`) or
+  stop the mail. The same applies to such a domain that only has inbound mail
+  *passing DMARC* as it: some service is authorised to send as the domain
+  (High, "find the service"). While any domain is left out this way, an open
+  lock-down ticket is not told it is finished (`skipped` in the actions file).
+- A sending domain with no outbound mail in the window gets an **Info**. A
+  domain that sends only through some other path (not this gateway) shows as
+  "no outbound seen"; that line is expected for it.
+- An outbound header-From domain that is not in the inventory gets a
+  **Medium** (the first 10 alphabetically; the rest are counted, since
+  forwarded mail keeps other people's From domains). Gateway bounces and
+  unparsable names are counted in the summary line, not attributed.
+- Inbound mail using our domains in the From address gets an **Info** with the
+  passed and not-passed DMARC counts: the evidence for `p=reject`. It is a
+  finding line, not a ticket action.
+
+**The hold rule.** If the gateway is configured but the read failed or was
+incomplete (token in use, HTTP 409; network error; the byte cap; the stream
+went idle; **the connection dropped without a close frame**; messages that
+could not be decoded; more distinct sender domains than the aggregate can
+name; an empty window; or events that do not cover the start and end of the
+window to within 3 hours), the run
+cannot prove a "sends nothing" domain sends nothing. So it produces **no
+lock-down actions**, the actions file carries `held: true`, and `cti-jira`
+files, comments on and resolves nothing that run (the ticket reference action
+is `held`). Without that, an empty action list on an open lock-down ticket
+would be read as "nothing is left to change" and the ticket resolved. The
+report still goes out, with a **Medium** "(mail gateway)" finding saying why;
+the next good run catches up.
+
+**One session per token.** Do not run `cti-podprobe` (or anything else on the
+token) while the weekly runs: the second connection gets HTTP 409 and the
+weekly holds its tickets for the week.
 
 **Running the probe**
 

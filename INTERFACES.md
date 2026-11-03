@@ -177,6 +177,30 @@ tests supply a map. It is here so the DNS checks can be tested without a
 network. It is also where you would point the lane at a specific resolver, but
 it is not meant for swapping a vendor.
 
+### 1.6 `domains.MailGateway`
+
+```go
+type MailGateway interface {
+    Name() string
+    Evidence(ctx context.Context, since, to time.Time) (GatewayEvidence, error)
+}
+```
+
+Reads aggregate evidence of who really sends mail: outbound header-From domain
+counts and inbound DMARC pass/not-passed counts, never a message or address.
+`Complete` is false when the read ended early; the lane then treats the
+evidence as missing and holds its lock-down tickets (`internal/domains/gateway.go`).
+
+- First implementation: `internal/domains/podgw` (Proofpoint on Demand, over
+  `internal/podlog`). `cmd/cti-domains` builds it through `var gatewayFor =
+  func(cluster, token string) domains.MailGateway`, selected by
+  `DOMAINS_MAIL_GATEWAY=pod` (off by default).
+- Gaps: the setting names only `pod` and reads `POD_*` directly, so a second
+  gateway needs a selector and its own credentials; the PoD adapter reads
+  header-From and direction only (no DKIM selector, since outbound events do
+  not carry one); not verified live on the box yet.
+- A new implementation must be read-only and aggregate-only.
+
 ---
 
 ## 2. Where the abstraction is incomplete today
@@ -208,7 +232,8 @@ add. This is already on the [backlog](BACKLOG.md).
 ### 2.3 Domains has two single-vendor pieces with no interface
 
 - `internal/domains/proofpoint.go` recognises Proofpoint on Demand by MX and
-  SPF host names. It is logic, not an interface.
+  SPF host names. It is logic, not an interface. (The gateway's log evidence
+  is behind [`MailGateway`](#16-domainsmailgateway).)
 - The registrar has no selection setting (see [1.4](#14-domainsregistrar)).
 
 ### 2.4 Microsoft 365 Graph and Jira are used as concrete types
@@ -234,7 +259,7 @@ relative. **Do not build these speculatively**: see the rule in
 | 3.5 | Notification channel | board plus Graph mail | `alert.Notifier` | Medium | Low |
 | 3.6 | Ownership source | `app-owners.txt` | `appscan.OwnerSource` | Medium | Low |
 | 3.7 | Advisory and exploit feeds | CISA KEV in Python; Patch Tuesday sources in Go | `AdvisorySource` | Medium | Medium |
-| 3.8 | Mail-gateway evidence | Proofpoint on Demand, hard-coded | `domains.MailGateway` | Low until the PoD item ships | Medium |
+| 3.8 | Mail-gateway evidence | Proofpoint on Demand, hard-coded | `domains.MailGateway` (built, see 1.6) | Done for PoD; a second gateway is the open part | Medium |
 | 3.9 | Exposure / attack-path source | Defender for Cloud emails | `exposure.Provider` | Low until built | Medium |
 | 3.10 | Certificate inventory | not built | `certs.Source` | Decide at build time | Low |
 
@@ -318,11 +343,8 @@ decision.
 
 ### 3.8 Mail-gateway evidence
 
-The domains lane's Proofpoint handling is hard-coded. The [backlog](BACKLOG.md) item
-for the Proofpoint on Demand Log API would be the first real implementation
-of a `MailGateway` ("does this domain send mail, and from where"). Define the
-interface when that item is built, with PoD as implementation one, so the
-shape follows a real API rather than a guess.
+Built: see [1.6](#16-domainsmailgateway). Proofpoint on Demand is
+implementation one. A second gateway adds an implementation and a selector.
 
 ### 3.9 Exposure / attack-path source
 

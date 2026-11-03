@@ -946,6 +946,8 @@ play.
 | `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
 | `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
+| `DOMAINS_MAIL_GATEWAY` | `pod` turns on the domains lane's Proofpoint on Demand log read (needs `POD_CLUSTER_ID` and `POD_API_TOKEN`): a domain with outbound mail is never asked to be locked down. A failed read holds the lock-down tickets for the run. Off when unset |
+| `DOMAINS_GATEWAY_DAYS` | whole days of the gateway log to read, 1 to 28. Default 7 |
 | `PROOFPOINT_POD_TENANT` | Proofpoint on Demand tenant id (the `00xxxxxx` in `mx0a-00xxxxxx.pphosted.com`). Empty: learned from the inventory's MX records; the gateway section is off when no domain is on PoD |
 | `FLEET_OPERATOR_EMAIL` | a person, not the DL. Escalations and failure alerts. `cti-alert` refuses to run without it |
 | `FLEET_DEV_EMAIL` | development only: your own address, for `--to-dev` on `cti-mailer`, `cti-alert` and the four mailing runners, which sends a report **only** there (never CC'd, subject `[DEV TEST] ...`). Nothing scheduled uses it |
