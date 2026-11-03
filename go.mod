@@ -1,3 +1,3 @@
 module github.com/zany2dmax/cti-agent
 
-go 1.23
+go 1.26
