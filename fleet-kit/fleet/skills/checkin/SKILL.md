@@ -58,7 +58,8 @@ If this is the first beat ever, do the bootstrap from CLAUDE.md first.
 - Pick up the operator's answers from the board - `@operator` lines carrying
   `re:<id>`. You cannot read mail, so tell them in the escalation how to
   answer: `sudo cti-agent fleet-board post @operator @you A "re:<id> ..."`.
-- Prune resolved and stale lines into `$FLEET_HOME/archive/board-archive.md`.
+- Prune the board: `fleet-board resolve <id>` for each answered question,
+  then `fleet-board expire 7` for stale lines (ERROR lines stay a week).
 - Ack any mailbox row you have actioned: `fleet-db ack <id>`.
 
 Lines from `@systemd` are `cti-alert` reporting a unit that failed. Read them,

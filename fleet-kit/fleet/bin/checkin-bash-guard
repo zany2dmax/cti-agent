@@ -1,0 +1,82 @@
+#!/usr/bin/python3 -I
+"""checkin-bash-guard - refuse shell syntax on a heartbeat's Bash calls.
+
+Claude Code runs this before every Bash call the heartbeat makes (a
+PreToolUse hook in $FLEET_CODE/checkin-settings.json). The beat's grant is a
+list of prefix rules such as `$FLEET_CODE/bin/fleet-timers:*`. Those name
+the command, not the shell around it: if a prefix rule ever matched
+`fleet-timers > state/budget.json`, every grant would be an arbitrary file
+write as the service account, and `cmd $(other)` would run something that
+was never granted. Whether Claude Code's matcher already refuses each of
+those is its business; this makes the answer not depend on it.
+
+So a beat's command may be one granted command with plain arguments:
+no redirection, pipes, chaining, background jobs, line breaks, and no
+expansion of any kind outside single quotes - not $(...), not ${...}, and
+not plain $NAME either. The beat's process carries fleet.env, so
+`fleet-board say @all INFO $CLIENT_SECRET` would put a credential on the
+board, and `cti-alert --reason $QUALYS_PASSWORD` would mail one. Globs and
+~ are refused for the same reason (they list paths Read is not granted),
+and so is a leading NAME=value, which changes what a granted command reads.
+Single-quoted text is literal to bash, so patterns such as 'cti-agent-*'
+stay usable there. The grants are absolute paths, so nothing legitimate
+needs a variable. Exit 2 blocks the call and the message goes
+back to the model. ANY failure here - unreadable input, a crash - also exits
+2: a guard that fails open is not a guard.
+
+-I: isolated mode (implies -s and -E), so nothing in the cwd, the
+environment or the account's user site-packages can load code into this.
+"""
+import json
+import re
+import sys
+
+
+# Anywhere in the command, quoted or not.
+FORBIDDEN_ANYWHERE = set("<>|;&`\n\r")
+# Outside single quotes, where bash expands them.
+FORBIDDEN_UNQUOTED = set("$*?[~")
+ASSIGNMENT = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def unquoted(cmd):
+    """The command with single-quoted spans removed - what bash expands.
+
+    An unbalanced quote leaves the rest in, so it is judged, not skipped."""
+    return re.sub(r"'[^']*'", "''", cmd)
+
+
+def verdict(event):
+    """Return None to allow, or the reason to refuse."""
+    if not isinstance(event, dict):
+        return "hook input is not a JSON object"
+    if event.get("tool_name") != "Bash":
+        return None
+    cmd = (event.get("tool_input") or {}).get("command")
+    if not isinstance(cmd, str):
+        return "Bash call has no command string"
+    bad = sorted(FORBIDDEN_ANYWHERE.intersection(cmd))
+    bad += sorted(FORBIDDEN_UNQUOTED.intersection(unquoted(cmd)))
+    if ASSIGNMENT.match(cmd):
+        bad.append("NAME=value prefix")
+    if bad:
+        shown = " ".join(repr(c)[1:-1] for c in bad)
+        return (f"shell syntax is not allowed on a beat ({shown}). Run one "
+                "granted command with plain arguments; reword text that "
+                "needs these characters.")
+    return None
+
+
+def main():
+    try:
+        reason = verdict(json.load(sys.stdin))
+    except Exception as e:  # noqa: BLE001 - fail closed on anything
+        reason = f"could not read the hook input ({e.__class__.__name__})"
+    if reason is None:
+        return 0
+    print(f"checkin-bash-guard: {reason}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

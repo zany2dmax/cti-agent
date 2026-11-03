@@ -257,7 +257,11 @@ every one of them sends or moves mail, and timers (or the operator) own them. It
 person is `cti-alert`, which has no recipient argument. It reads the journal
 only through `fleet-journal`, which takes `cti-agent-*` units and no option that
 writes, and lists timers only through `fleet-timers`, which takes `--all` and
-`cti-agent-*` patterns and no option that reaches another host. It starts in a root-owned directory (`/opt/cti-agent/orchestrator`) that
+`cti-agent-*` patterns and no option that reaches another host. A Bash hook, `checkin-bash-guard`, refuses
+any beat command with redirection, pipes, chaining, expansion (`$`, globs, `~`) or a
+`NAME=` prefix, so a granted prefix cannot become a file write or leak a secret; the board
+grant is `say`, `read`, `tail`, `resolve` and `expire` (no `post`, which names its own
+sender, and no `prune`) and the budget grant is `status` only. It starts in a root-owned directory (`/opt/cti-agent/orchestrator`) that
 holds its instructions, under a root-owned settings file, and `run-checkin`
 refuses a beat if the service account's reach holds any Claude Code file that
 could steer it. A test checks that
@@ -418,7 +422,7 @@ fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
                                run-appscan, run-domains, run-mailbox-cleanup,
                                fleet-board, fleet-db, fleet-journal,
-                               fleet-timers
+                               fleet-timers, checkin-bash-guard
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
                                (installed to /opt/cti-agent/orchestrator)
 fleet-kit/fleet/checkin-settings.json  root-owned settings for the beat

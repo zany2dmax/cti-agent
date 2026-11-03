@@ -2,8 +2,11 @@
 # fleet-board — lock-safe append-only message board for the CTI fleet.
 #
 #   fleet-board post <from> <to> <kind> <body...>   append one line
+#   fleet-board say <to> <kind> <body...>           append one line from @you
 #   fleet-board read [handle]                       lines for @you/@all (default @you)
-#   fleet-board prune <pattern>                     move matching lines to archive (orchestrator only)
+#   fleet-board resolve <id>                        archive a question (id=<id>) and its answers (re:<id>)
+#   fleet-board expire <days>                       archive lines older than <days> (min 2)
+#   fleet-board prune <pattern>                     archive lines matching a regex (operator only)
 #   fleet-board tail [n]                            last n lines
 #
 # Appends are serialized with an mkdir lock, which is atomic on POSIX
@@ -38,6 +41,33 @@ mtime() {
   fi
 }
 
+# days_ago N -> "YYYY-MM-DD HH:MM" N days back, the board's timestamp format,
+# so lines compare as strings.
+days_ago() {
+  if [ "$FLEET_OS" = "macos" ]; then
+    date -v-"$1"d '+%Y-%m-%d %H:%M'
+  else
+    date -d "$1 days ago" '+%Y-%m-%d %H:%M'
+  fi
+}
+
+# archive_where AWK-CONDITION [awk -v assignments...]: under the lock, move
+# every board line for which the condition holds to the archive. Fixed
+# conditions only - the caller's values arrive as awk variables, never as
+# program text or a regex.
+archive_where() {
+  local cond="$1"; shift
+  acquire
+  local tmp moved
+  tmp=$(mktemp)
+  moved=$(mktemp)
+  awk "$@" -v out="$tmp" -v arc="$moved" "{ if ($cond) print > arc; else print > out }" "$BOARD"
+  cat "$moved" >> "$ARCHIVE"
+  echo "archived $(wc -l < "$moved" | tr -d ' ') line(s)"
+  rm -f "$moved"
+  mv "$tmp" "$BOARD"
+}
+
 acquire() {
   local waited=0
   until mkdir "$LOCK" 2>/dev/null; do
@@ -59,21 +89,71 @@ acquire() {
 
 cmd="${1:-read}"; shift || true
 
+# `say` is the orchestrator's post: the same line, with the sender fixed as
+# @you. The heartbeat is granted say, not post, so it can neither sign a line
+# as @operator (an answer the next beat would act on) nor as @systemd (a
+# failure report), however it is steered.
+if [ "$cmd" = say ]; then
+  cmd=post
+  set -- @you "$@"
+fi
+
 case "$cmd" in
   post)
     from="${1:?from handle required}"; to="${2:?to handle required}"
     kind="${3:?kind required (Q|A|INFO|P1|APPROVE|ERROR)}"; shift 3
+    # The handles and kind are fixed-shape. They used to go to the board
+    # as given, so a newline in one wrote a second, forged line - "from
+    # @systemd ... ERROR" or an @operator answer - that every reader trusts.
+    case "$from$to" in *[!@A-Za-z0-9._-]*)
+      echo "fleet-board: handles are @name ([A-Za-z0-9._-])" >&2; exit 2 ;; esac
+    case "$from" in @?*) ;; *) echo "fleet-board: from must be @name" >&2; exit 2 ;; esac
+    case "$to" in @?*) ;; *) echo "fleet-board: to must be @name" >&2; exit 2 ;; esac
+    case "$kind" in ''|*[!A-Z0-9]*)
+      echo "fleet-board: kind is upper-case letters and digits" >&2; exit 2 ;; esac
+    [ "${#from}" -le 32 ] && [ "${#to}" -le 32 ] && [ "${#kind}" -le 16 ] \
+      || { echo "fleet-board: handle or kind too long" >&2; exit 2; }
     body="$*"
     [ -n "$body" ] || { echo "fleet-board: empty body" >&2; exit 1; }
-    # Collapse newlines — the board is one line per message, always.
-    body=$(printf '%s' "$body" | tr '\n' ' ' | sed 's/  */ /g')
+    # Collapse line breaks — the board is one line per message, always — and
+    # drop the other control characters, so an escape sequence cannot redraw
+    # the terminal of whoever tails the board.
+    body=$(printf '%s' "$body" | tr '\r\n\t' '   ' | LC_ALL=C tr -d '\000-\037\177' | sed 's/  */ /g')
     acquire
     printf '[%s] %-8s -> %-8s %-8s %s\n' \
       "$(date '+%Y-%m-%d %H:%M')" "$from" "$to" "$kind" "$body" >> "$BOARD"
     ;;
   read)
     handle="${1:-@you}"
+    # The handle goes into grep -E; a pattern there could stall the beat.
+    case "$handle" in @?*) ;; *) echo "fleet-board: read takes an @name handle" >&2; exit 2 ;; esac
+    case "$handle" in *[!@A-Za-z0-9._-]*)
+      echo "fleet-board: handles are @name ([A-Za-z0-9._-])" >&2; exit 2 ;; esac
     grep -E -- "-> +(${handle}|@all) " "$BOARD" 2>/dev/null || echo "(nothing for ${handle})"
+    ;;
+  resolve)
+    # The heartbeat's pruning: one question and its answers, by board id.
+    # Unlike prune it cannot match more than that id's own lines.
+    id="${1:-}"
+    case "$id" in [A-Za-z0-9]*) ;; *)
+      echo "fleet-board: resolve takes a board id, such as q17" >&2; exit 2 ;; esac
+    case "$id" in *[!A-Za-z0-9._-]*)
+      echo "fleet-board: ids are [A-Za-z0-9._-]" >&2; exit 2 ;; esac
+    [ "${#id}" -le 32 ] || { echo "fleet-board: id too long" >&2; exit 2; }
+    archive_where 'index($0 " ", " id=" id " ") || index($0 " ", " re:" id " ")' -v id="$id"
+    ;;
+  expire)
+    # The heartbeat's other pruning: lines past their age. ERROR lines stay
+    # a week whatever is asked, so an alert cannot be aged out before the
+    # operator has had a chance to see it.
+    days="${1:-}"
+    case "$days" in ''|*[!0-9]*) echo "fleet-board: days is a number" >&2; exit 2 ;; esac
+    [ "${#days}" -le 3 ] && [ "$days" -ge 2 ] && [ "$days" -le 365 ] \
+      || { echo "fleet-board: days must be 2 to 365" >&2; exit 2; }
+    cutoff="$(days_ago "$days")"; week="$(days_ago 7)"
+    # $1 "[YYYY-MM-DD", $2 "HH:MM]", $6 the kind. Lines without a timestamp stay.
+    archive_where 'substr($0,1,1) == "[" && (ts = substr($1,2) " " substr($2,1,5)) < cutoff && !($6 == "ERROR" && ts >= week)' \
+      -v cutoff="$cutoff" -v week="$week"
     ;;
   prune)
     pattern="${1:?pattern required}"
@@ -85,5 +165,5 @@ case "$cmd" in
     echo "pruned lines matching: $pattern"
     ;;
   tail) tail -n "${1:-20}" "$BOARD" ;;
-  *) echo "usage: fleet-board {post|read|prune|tail}" >&2; exit 2 ;;
+  *) echo "usage: fleet-board {post|say|read|resolve|expire|prune|tail}" >&2; exit 2 ;;
 esac

@@ -137,7 +137,7 @@ if [ "$FLEET_OS" != "macos" ]; then
   # Missing is a refusal too: a box upgraded without re-running the installer
   # has no orchestrator dir, and a beat there would run with no instructions.
   for p in "$AGENT_DIR/CLAUDE.md" "$AGENT_DIR/.claude/skills/checkin/SKILL.md" \
-           "$CHECKIN_SETTINGS"; do
+           "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard"; do
     if [ ! -f "$p" ]; then
       echo "run-checkin: REFUSING to start: $p is missing." >&2
       echo "  Re-run install-fedora.sh; it installs the orchestrator's" >&2
@@ -145,6 +145,35 @@ if [ "$FLEET_OS" != "macos" ]; then
       exit 1
     fi
   done
+  # The guard is a hook, and a hook whose command does not exist fails OPEN
+  # (Claude Code treats a non-2 exit as a warning). So the settings must name
+  # the guard at this box's own code path, which the check above has just
+  # found present and root-owned.
+  # Parsed, not grepped: hooks on, and a Bash PreToolUse hook that runs it.
+  if ! /usr/bin/python3 -I - "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1], encoding="utf-8"))
+ok = s.get("disableAllHooks") is False and any(
+    m.get("matcher") == "Bash" and any(h.get("type") == "command" and h.get("command") == sys.argv[2]
+                                       for h in m.get("hooks", []))
+    for m in s.get("hooks", {}).get("PreToolUse", []))
+sys.exit(0 if ok else 1)
+PY
+  then
+    echo "run-checkin: REFUSING to start: $CHECKIN_SETTINGS does not run" >&2
+    echo "  $FLEET_CODE/bin/checkin-bash-guard as its Bash PreToolUse hook." >&2
+    exit 1
+  fi
+  # And the guard must actually refuse. A missing interpreter or a broken
+  # script exits non-2, which Claude Code treats as "allow".
+  guard_rc=0
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"x > y"}}' \
+    | "$FLEET_CODE/bin/checkin-bash-guard" >/dev/null 2>&1 || guard_rc=$?
+  if [ "$guard_rc" -ne 2 ]; then
+    echo "run-checkin: REFUSING to start: checkin-bash-guard let a redirect" >&2
+    echo "  through (exit $guard_rc, want 2). Is /usr/bin/python3 installed?" >&2
+    exit 1
+  fi
 else
   echo "[run-checkin] code integrity check skipped on macOS (developer checkout)"
 fi
@@ -465,7 +494,17 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 # control. Each line below is a prefix match, so it names exactly the
 # subcommands CLAUDE.md and the /checkin skill tell the agent to use, and
 # tests/test_lanes.py checks the two stay in step.
-ALLOWED_TOOLS="Bash($FLEET_CODE/bin/fleet-board:*)"
+# fleet-board: say, read, tail, and the two bounded ways to prune - resolve
+# (one question and its answers, by id) and expire (lines older than N days,
+# ERROR lines kept a week). NOT prune itself, which takes a regex: `prune .`
+# empties the board, including the ERROR lines cti-alert and the runners
+# leave for the operator. That one is the operator's. NOT post either:
+# post names its own sender, so a beat could sign a line as @operator (an
+# answer the next beat acts on) or @systemd. `say` posts as @you, always.
+ALLOWED_TOOLS=""
+for sub in say read tail resolve expire; do
+  ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}Bash($FLEET_CODE/bin/fleet-board $sub:*)"
+done
 # fleet-db: reads, plus the memory, task and board-mail writes the agent is
 # told to make every beat. NOT sent (fakes a delivered digest), finding
 # (rewrites what the digest reports), note (silences the stale-finding nudge
@@ -473,7 +512,10 @@ ALLOWED_TOOLS="Bash($FLEET_CODE/bin/fleet-board:*)"
 for sub in recent findings was-sent rollup remember task mail ack vacuum; do
   ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/fleet-db $sub:*)"
 done
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget:*)"
+# cti-budget: status only. `record` writes beat outcomes into budget.json,
+# and `check` is run-checkin's own gate - a beat that could record its own
+# results could talk the brake out of engaging.
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget status:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
 # Rendering only. cti-patchtuesday refuses --mark-sent with --dry-run, so no
 # invocation that starts with --dry-run can change state.

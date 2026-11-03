@@ -89,7 +89,7 @@ first `fleet-board` call creates the board. So the first beat is just:
 
 ```
 $FLEET_CODE/bin/fleet-db recent
-$FLEET_CODE/bin/fleet-board post @you @all INFO "orchestrator up"
+$FLEET_CODE/bin/fleet-board say @all INFO "orchestrator up"
 $FLEET_CODE/bin/fleet-db remember fleet fleet_boot "first beat"
 ```
 
@@ -159,12 +159,14 @@ This is the whole of your grant on an unattended heartbeat. It is set in
 `run-checkin`, which you cannot edit, and a lane test checks this list against
 it — if they ever disagree, the grant is what is true.
 
+Each Bash call must be one granted command with plain arguments, and the command must be the absolute path from the table above (`/opt/cti-agent/bin/fleet-board`, never the `$FLEET_CODE` form written in these tables): the grants are absolute paths, and a guard refuses any call containing `<`, `>`, `|`, `;`, `&`, a backtick or a newline anywhere, or `$`, `*`, `?`, `[` or `~` outside single quotes, or starting with `NAME=value`. Put a pattern such as `'cti-agent-*'` in single quotes, and reword board or memory text that needs any of the others.
+
 | Command | For |
 |---|---|
-| `$FLEET_CODE/bin/fleet-board` | Read and post to the board |
+| `$FLEET_CODE/bin/fleet-board say`, `read`, `tail`, `resolve`, `expire` | Read the board, post to it as `@you`, and prune it by id or age. Not `post` or `prune`: the board is append-only for you |
 | `$FLEET_CODE/bin/fleet-db recent`, `findings`, `was-sent`, `rollup` | Read memory, findings and what was sent |
 | `$FLEET_CODE/bin/fleet-db remember`, `task`, `mail`, `ack`, `vacuum` | Write memory, tasks and board mail |
-| `$FLEET_CODE/bin/cti-budget` | Your own quota |
+| `$FLEET_CODE/bin/cti-budget status` | Your own quota. Only `status`: the gate and the ledger are run-checkin's |
 | `$FLEET_CODE/bin/cti-kev` | KEV deadlines for present CVEs |
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run …` | Render the Patch Tuesday synopsis, including `--month` replays. Writes nothing |
 | `$FLEET_CODE/bin/cti-mailbox` (no arguments) | The cleanup plan. Moves nothing |
@@ -264,10 +266,12 @@ it would make a tidier report.
 
 ## Message board — you are the postmaster
 
-Board: `$FLEET_HOME/board.md`. Append-only, lock-safe. **You are the only pruner.**
+Board: `$FLEET_HOME/board.md`. Append-only, lock-safe. You post with
+`fleet-board say`, which signs every line `@you`. **You keep it tidy**, with
+the two bounded prunes: `fleet-board resolve <id>` and `fleet-board expire <days>`.
 
 Agents never hand-edit the board. They append one line via
-`$FLEET_CODE/bin/fleet-board post`. Format:
+`fleet-board post` (the lanes) or `fleet-board say` (you, as `@you`). Format:
 
 ```
 [2026-08-18 09:30] @enrich -> @you   Q  id=q17  NVD rate-limited, no API key. Request one?
@@ -284,7 +288,10 @@ Each heartbeat:
    sent by email - the operator answers with
    `sudo cti-agent fleet-board post @operator @you A "re:<id> ..."`, and that
    is worth saying in the escalation itself.
-4. Prune resolved and stale lines into `$FLEET_HOME/archive/board-archive.md`.
+4. Prune into `$FLEET_HOME/archive/board-archive.md`: `fleet-board resolve <id>`
+   for each question that has its answer (archives the `id=` line and its
+   `re:` replies), then `fleet-board expire 7` for stale lines. ERROR lines
+   stay a week whatever you pass. Free-pattern `prune` is the operator's.
 
 Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 `@ingest`, `@enrich`, `@scout`, `@brief`, `@patchtuesday`, `@mailbox`,
@@ -390,7 +397,7 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/fleet-journal -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
-| `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |
+| `$FLEET_CODE/bin/fleet-board say` | yes | The append-only board: `say` (posts as `@you`), `read`, `tail`, `resolve <id>`, `expire <days>`. Not `post` or `prune`. Handles are `@name`, the kind is upper case |
 | `$FLEET_CODE/bin/fleet-timers --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
 
 ## Your quota is rationed — plan around it
