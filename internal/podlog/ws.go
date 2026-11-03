@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -329,25 +330,30 @@ func readFrame(br *bufio.Reader, limit int) (fin bool, op byte, payload []byte, 
 	if h[1]&0x80 != 0 {
 		return false, 0, nil, errors.New("podlog: the server sent a masked frame")
 	}
-	n := uint64(h[1] & 0x7F)
+	n := int(h[1] & 0x7F)
 	switch n {
 	case 126:
 		var b [2]byte
 		if _, err = io.ReadFull(br, b[:]); err != nil {
 			return false, 0, nil, err
 		}
-		n = uint64(binary.BigEndian.Uint16(b[:]))
+		n = int(binary.BigEndian.Uint16(b[:]))
 	case 127:
 		var b [8]byte
 		if _, err = io.ReadFull(br, b[:]); err != nil {
 			return false, 0, nil, err
 		}
-		n = binary.BigEndian.Uint64(b[:])
+		v := binary.BigEndian.Uint64(b[:])
+		if v > math.MaxInt32 {
+			return false, 0, nil, errors.New("podlog: frame larger than the limit")
+		}
+		// #nosec G115 -- bounded by the MaxInt32 check above.
+		n = int(v)
 	}
 	if op >= 0x8 && (n > 125 || !fin) {
 		return false, 0, nil, errors.New("podlog: malformed control frame")
 	}
-	if n > uint64(limit) {
+	if n > limit {
 		return false, 0, nil, errors.New("podlog: frame larger than the limit")
 	}
 	payload = make([]byte, n)
@@ -370,6 +376,7 @@ func writeFrame(w io.Writer, op byte, payload []byte) error {
 		_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	}
 	out := make([]byte, 0, 6+len(payload))
+	// #nosec G115 -- payload is capped at 125 above.
 	out = append(out, 0x80|op, 0x80|byte(len(payload)))
 	out = append(out, mask[:]...)
 	for i, b := range payload {
