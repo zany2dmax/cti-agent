@@ -107,6 +107,8 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 	logf("domains: %s", why)
 	if plan == domainsNothing {
 		switch {
+		case af.Held:
+			ref("held", open, "")
 		case open == nil:
 			ref("none", nil, "")
 		case prev.Resolved && len(af.Actions) == 0:
@@ -216,6 +218,11 @@ const (
 func planDomains(open *jira.Issue, prev domainsState, af domains.ActionsFile) (domainsPlan, string) {
 	empty := len(af.Actions) == 0
 	switch {
+	case af.Held:
+		return domainsNothing, "held: the mail gateway evidence was unavailable this run, so nothing is filed, changed or resolved"
+	case empty && len(af.Skipped) > 0:
+		return domainsNothing, fmt.Sprintf("the list is empty only because %d domain(s) were left out as the "+
+			"mail gateway shows they send; not telling the ticket it is finished", len(af.Skipped))
 	case open == nil && empty:
 		return domainsNothing, "no changes needed and no lock-down ticket open"
 	case open == nil:

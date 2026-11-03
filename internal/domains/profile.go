@@ -111,8 +111,36 @@ func (a Action) Exact() bool { return a.Set != "" || a.Delete }
 // Actions lists the changes every domain needs to match its profile.
 // Lookups that failed produce nothing: an unknown is never a change request.
 func Actions(results []Result, rua string) []Action {
+	return ActionsWith(results, rua, nil)
+}
+
+// ActionsWith is Actions with the mail gateway's evidence applied (gateway.go):
+// with a gateway configured, a lock-down is never asked of a domain that has
+// outbound mail in the window, and is not asked of any domain while the
+// evidence is missing. A nil or disabled gateway changes nothing.
+func ActionsWith(results []Result, rua string, gw *GatewayStatus) []Action {
+	out, _ := ActionsWithSkipped(results, rua, gw)
+	return out
+}
+
+// ActionsWithSkipped also returns the lock-down domains left out because the
+// gateway shows they send (outbound mail, or inbound mail passing DMARC as
+// them, which means a service is authorised to send as the domain). A held
+// gateway skips nothing by name: it produces no lock-down actions at all and
+// the actions file says Held.
+func ActionsWithSkipped(results []Result, rua string, gw *GatewayStatus) ([]Action, []string) {
 	var out []Action
+	var skipped []string
 	for _, r := range results {
+		if gw != nil && gw.Enabled && ProfileOf(r.Entry).LockedDown() {
+			if gw.Held() {
+				continue
+			}
+			if gw.Evidence.OutboundFor(r.Entry.Name) > 0 || gw.Evidence.InboundFor(r.Entry.Name).Pass > 0 {
+				skipped = append(skipped, r.Entry.Name)
+				continue
+			}
+		}
 		out = append(out, actionsFor(r, rua)...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -121,7 +149,7 @@ func Actions(results []Result, rua string) []Action {
 		}
 		return out[i].Host < out[j].Host
 	})
-	return out
+	return out, skipped
 }
 
 const lockedSPF = "v=spf1 -all"
@@ -294,6 +322,15 @@ type ActionsFile struct {
 	Exact     int      `json:"exact"`   // copy-paste records
 	Review    int      `json:"review"`  // items that need a decision
 	Actions   []Action `json:"actions"`
+	// Held: a mail gateway is configured but gave no usable evidence this run
+	// (gateway.go), so cti-jira must not file, comment or resolve anything.
+	// An empty list on an open ticket would otherwise read as "all done".
+	Held    bool   `json:"held,omitempty"`
+	HeldWhy string `json:"heldWhy,omitempty"`
+	// Skipped: lock-down domains left out because the gateway shows they send.
+	// While any exist, cti-jira does not tell an open ticket "nothing is left"
+	// on the strength of an empty list: the list is empty because of them.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // NewActionsFile summarises a run's actions.

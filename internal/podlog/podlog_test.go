@@ -346,3 +346,11 @@ func TestMaskedServerFrameIsRejected(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestDroppedConnectionIsNotACleanClose(t *testing.T) {
+	s := newStub(t, 101, [][]byte{frame(true, 0x1, []byte(`{"a":1}`))}) // no close frame
+	got, err := collect(t, s.client(), good)
+	if !errors.Is(err, ErrDropped) || len(got) != 1 {
+		t.Fatalf("err=%v messages=%d", err, len(got))
+	}
+}

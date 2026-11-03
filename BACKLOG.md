@@ -84,22 +84,14 @@ is real, not before. Finished work moves out of this file into
   services. Resolve every name and report only live hosts missing from
   `domains.txt`, dangling CNAMEs (takeover risk, High) and names new since
   last week; historical names that no longer resolve are dropped
-- Domains lane, the Proofpoint on Demand Log API half (define a
-  `domains.MailGateway` interface here, with PoD as its first implementation,
-  see [INTERFACES.md](INTERFACES.md)) (the DNS half - not yet
-  on the gateway, other-tenant MX, leftovers - shipped in 1.3.2). Confirm a
-  domain really sends from outbound mail in PoD's log stream (read-only
-  cluster token, WebSocket) with that header From and the DKIM selector it
-  signed with, so a lock-down ticket is never raised for a domain that
-  sends; count inbound mail spoofing our domains and failing DMARC as the
-  evidence for `p=reject`. Aggregates only, never per-message data. Then
-  `domains.txt` needs only `saas` / `legacy` / `unknown`. Costs: a WebSocket
-  client (the module has no dependencies). The vendor guide (PoD Log API,
-  Rev I) answers the back-fill question: archive reads reach 30 days back in
-  one-hour steps, one session per token, no polling; the setup, behaviour and
-  field list are in RUNBOOK 11g section 7. The read-only probe
-  `cti-podprobe` (with `internal/podlog`, the WebSocket client) is built; the
-  lane itself is not, and waits on what the probe shows for this tenant
+- Domains lane, the Proofpoint on Demand Log API half: **built** behind
+  `DOMAINS_MAIL_GATEWAY=pod` (off by default; `domains.MailGateway` with
+  `podgw` as the first implementation, see [INTERFACES.md](INTERFACES.md) and
+  RUNBOOK 11g part 7). A domain with outbound mail is never asked to be locked
+  down, and a failed read holds the tickets. Left: live verification on the
+  box (token, window size and read time against a real week); the `p=reject`
+  evidence is a finding line in the report, not a ticket action; and then
+  `domains.txt` could need only `saas` / `legacy` / `unknown`.
 - Certificate expiry lane (build it behind a `certs.Source` interface from
   the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
   expire, from Qualys Certificate View (CertView; the subscription has it and
