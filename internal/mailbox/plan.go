@@ -66,7 +66,8 @@ type Decision struct {
 //
 // THE RULES, IN THIS ORDER, AND THE ORDER MATTERS
 //
-//  0. Sent by this fleet -> archive. Our own reports are never processed (the
+//  0. Sent by this fleet -> archive, once Options.SelfMinAge old (a week by
+//     default under cti-mailbox). Our own reports are never processed (the
 //     digest skips them), so no later rule could ever move them.
 //  1. An automatic reply -> Deleted Items, read or not. Declared by its own
 //     headers, or - since 1.3.2 - by a subject that starts the way an
@@ -116,6 +117,10 @@ type Options struct {
 	// it is this old, so the outcome does not depend on when the lane runs.
 	// It applies to archiving only; auto-replies go on sight.
 	MinAge time.Duration
+	// SelfMinAge is the same grace for the fleet's own reports (SelfSent):
+	// the team keeps a week of digests where they can see them, then they go
+	// to Archive. Zero archives them on sight.
+	SelfMinAge time.Duration
 	// SubjectGrace holds a SUBJECT-only auto-reply match that no lane has
 	// read yet until it is this old (cti-mailbox passes GRAPH_LOOKBACK). The
 	// CVE exception below can only protect a message the digest has read; a
@@ -169,6 +174,12 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 			owner = "digest"
 		}
 		switch {
+		case c.SelfSent && o.SelfMinAge > 0 && c.Received.After(now.Add(-o.SelfMinAge)):
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: fmt.Sprintf("sent by this fleet, only %s old - our own "+
+					"reports stay in the inbox until %s so the team can still "+
+					"read them there", now.Sub(c.Received).Round(time.Minute),
+					o.SelfMinAge), Known: true})
 		case c.SelfSent:
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: "sent by this fleet - our own report delivered back to " +

@@ -114,5 +114,9 @@ is real, not before. Finished work moves out of this file into
   reports, ticket files, previews and KB cache that build up in `state/`.
   Problems and growth trends reported through the existing alert path or the
   check-in. Noted only, not designed
+- Supplier request mail: the shared inbox also collects supplier requests, and
+  nothing tidies them. Probably its own lane (they are not CTI mail and need a
+  different owner and rules than cti-mailbox). Not designed: what the requests
+  are, who answers them, and what "done" means for one
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane

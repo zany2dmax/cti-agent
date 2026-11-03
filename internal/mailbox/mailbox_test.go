@@ -842,3 +842,28 @@ func TestAZeroGraceKeepsTheOldBehaviour(t *testing.T) {
 		t.Errorf("minAge=0 should archive immediately: %v", got[0].Action)
 	}
 }
+
+func TestOurOwnReportsWaitTheirWeekThenArchive(t *testing.T) {
+	now := time.Date(2026, 11, 3, 7, 0, 0, 0, time.UTC)
+	week := 7 * 24 * time.Hour
+	plan := PlanWith([]Candidate{
+		{ID: "new", Subject: "CTI Nov 02", SelfSent: true, Received: now.Add(-6 * 24 * time.Hour)},
+		{ID: "old", Subject: "CTI Oct 20", SelfSent: true, Received: now.Add(-8 * 24 * time.Hour)},
+		{ID: "edge", Subject: "CTI Oct 27", SelfSent: true, Received: now.Add(-week)},
+	}, map[string]Processed{}, Options{Now: now, SelfMinAge: week})
+	got := map[string]Action{}
+	for _, d := range plan {
+		got[d.ID] = d.Action
+	}
+	if got["new"] != ActionLeave || got["old"] != ActionArchive || got["edge"] != ActionArchive {
+		t.Fatalf("actions = %v, want new=leave, old=archive, edge=archive", got)
+	}
+	for _, d := range plan {
+		if d.ID == "new" && (!d.Known || !strings.Contains(d.Reason, "sent by this fleet")) {
+			t.Errorf("held report = %+v: must be Known (not a backlog) and say why", d)
+		}
+	}
+	if c := Summarise(plan); c.Unread != 0 {
+		t.Errorf("Unread = %d: a held report of ours is not an unread message", c.Unread)
+	}
+}
