@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -38,6 +39,24 @@ import (
 )
 
 const journalLines = "40"
+
+// Absolute paths, so a same-named binary earlier on PATH - the service
+// account's own ~/.local/bin, say - is never what runs.
+const (
+	systemctlBin  = "/usr/bin/systemctl"
+	journalctlBin = "/usr/bin/journalctl"
+)
+
+// fleetUnit is the only shape of unit this alerter reports on: the fleet's
+// own, as systemd names them in OnFailure=cti-agent-alert@%n.service.
+//
+// The unit reaches systemctl and journalctl as an argument, and the
+// orchestrator heartbeat may call cti-alert with any --unit it likes. A
+// value such as "--host=user@box" was read by systemctl as an option and ran
+// the query over ssh to any machine. A name that must start "cti-agent-"
+// cannot start with "-", and the character set keeps out "=", spaces and
+// shell or path syntax.
+var fleetUnit = regexp.MustCompile(`^cti-agent-[A-Za-z0-9@._-]+$`)
 
 func main() {
 	unit := flag.String("unit", "", "the systemd unit that failed (required)")
@@ -63,6 +82,10 @@ func main() {
 	if name == "" {
 		fmt.Fprintln(os.Stderr, "cti-alert: no unit given; pass --unit or one argument")
 		os.Exit(2) // a usage error is worth failing on; a send error is not
+	}
+	if !fleetUnit.MatchString(name) {
+		fmt.Fprintf(os.Stderr, "cti-alert: %q is not one of the fleet's units (cti-agent-NAME)\n", name)
+		os.Exit(2)
 	}
 
 	loadEnvFile()
@@ -183,7 +206,7 @@ func gather(unit string) failure {
 // systemctlShow reads one property. A missing systemctl or unknown property is
 // not worth failing over - the alert is still worth sending without it.
 func systemctlShow(unit, prop string) string {
-	out, err := run(3*time.Second, "systemctl", "show", "-p", prop, "--value", unit)
+	out, err := run(3*time.Second, systemctlBin, "show", "-p", prop, "--value", "--", unit)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return "unknown"
 	}
@@ -191,7 +214,7 @@ func systemctlShow(unit, prop string) string {
 }
 
 func journal(unit string) string {
-	out, err := run(10*time.Second, "journalctl", "-u", unit, "-n", journalLines, "--no-pager")
+	out, err := run(10*time.Second, journalctlBin, "--unit="+unit, "-n", journalLines, "--no-pager")
 	if err != nil || strings.TrimSpace(out) == "" {
 		// The alert unit runs with SupplementaryGroups=systemd-journal; a hand
 		// run through `sudo cti-agent` does not, and journalctl exits 1. Say
@@ -207,11 +230,9 @@ func run(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	// #nosec G204 -- name is a compile-time constant at both call sites
-	// ("systemctl" and "journalctl"); nothing computes it. Arguments go
-	// through argv, not a shell, so a unit name containing shell
-	// metacharacters is passed as one opaque argument rather than
-	// interpreted. The unit name itself is a systemd specifier supplied by
-	// the unit that invoked this alerter.
+	// (systemctlBin and journalctlBin); nothing computes it. Arguments go
+	// through argv, not a shell, and the unit name has already matched
+	// fleetUnit in main, so it can be neither an option nor shell syntax.
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }

@@ -170,7 +170,7 @@ it — if they ever disagree, the grant is what is true.
 | `$FLEET_CODE/bin/cti-mailbox` (no arguments) | The cleanup plan. Moves nothing |
 | `$FLEET_CODE/bin/cti-alert` | **Your only route to a person** |
 | `$FLEET_CODE/bin/fleet-journal -u cti-agent-… [--since …] [-n …] [--no-pager]` | What the timers did, and why one failed. Your only way to the journal: plain `journalctl` is not granted, and the wrapper takes only those options |
-| `/usr/bin/systemctl list-timers …` | Whether a timer has been disabled — which raises no alarm on its own |
+| `$FLEET_CODE/bin/fleet-timers [--all]` | Whether a timer has been disabled — which raises no alarm on its own |
 
 **You cannot run any lane or runner** — `run-digest`, `run-patchtuesday`,
 `run-appscan`, `run-domains`, `cti-domains`, `run-mailbox-cleanup`, `cti-agent`, `enrich.py`, `scout.py`,
@@ -391,7 +391,7 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |
-| `/usr/bin/systemctl list-timers 'cti-agent-*' --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
+| `$FLEET_CODE/bin/fleet-timers --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
 
 ## Your quota is rationed — plan around it
 

@@ -521,7 +521,8 @@ list changes) - are timer-owned and not on the orchestrator's grant.
 The heartbeat runs `claude -p` unattended, with `--permission-mode default`,
 `--disallowedTools "Edit,Write,NotebookEdit"` and an explicit `--allowedTools`
 list: named fleet commands by absolute path, `fleet-journal` (a wrapper, not
-`journalctl`; see below), `systemctl list-timers`, and nothing else. It keeps
+`journalctl`; see below), `fleet-timers` (a wrapper, not `systemctl`; see
+below), and nothing else. It keeps
 Claude Code's read-only file tools, limited to `Read` grants on `reports/`,
 `logs/` and `archive/` under `$FLEET_HOME`.
 
@@ -586,6 +587,18 @@ quota that stops the fleet crowding out its owner) or `memory.db`; `--file`,
 `$FLEET_CODE/bin/fleet-journal:*`, a root-owned wrapper that accepts only
 `-u|--unit cti-agent-*`, `--since`, `-n|--lines` and `--no-pager`, passes each
 as `--opt=VALUE`, and exits 2 on anything else.
+
+**Timers go through `fleet-timers`, not `systemctl`.** The grant
+`systemctl list-timers:*` could not become `stop` or `disable`, but it accepted
+every global option after the prefix: `--host=user@box` runs the query over ssh
+to any machine as the service account, and `--machine` reaches containers (H2
+in the hardening review). The grant is now `$FLEET_CODE/bin/fleet-timers:*`, a
+root-owned wrapper that accepts only `--all` and `cti-agent-*` patterns, passes
+the patterns after `--`, defaults to `cti-agent-*`, and exits 2 on anything
+else. `cti-alert` closed the same hole from its side: `--unit=--host=...` was
+read by `systemctl` as an option, so it now refuses any unit that does not
+match `^cti-agent-[A-Za-z0-9@._-]+$` (exit 2) and calls `/usr/bin/systemctl`
+and `/usr/bin/journalctl` by absolute path, with the unit after `--`.
 
 **Named per subcommand, not per binary.** The list used to grant `fleet-db:*`
 and `cti-patchtuesday:*`. The first included `fleet-db sent`, which records a

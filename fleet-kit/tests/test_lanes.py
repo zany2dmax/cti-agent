@@ -2098,6 +2098,10 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertIn("--strict-mcp-config", args)
         grant = args[args.index("--allowedTools") + 1]
         self.assertIn("/code/bin/fleet-journal:*)", grant)
+        # systemctl list-timers took --host=user@box (ssh to anywhere); the
+        # beat reaches timers only through fleet-timers.
+        self.assertNotIn("systemctl", grant)
+        self.assertIn("/code/bin/fleet-timers:*)", grant)
         self.assertNotIn("journalctl", grant)
 
     def test_the_heartbeat_refuses_steering_files_the_account_could_plant(self):
@@ -2182,6 +2186,59 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 ["-u", "cti-agent-x", "-n", "10", "_PID=1"],
                 ["--no-pager"],
                 [],
+            ):
+                with self.subTest(refused=args):
+                    r = run(*args)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertEqual(r.stdout, "")
+
+    def test_fleet_timers_lists_the_fleets_timers_and_nothing_else(self):
+        """systemctl list-timers:* could not stop or disable anything, but it
+        took --host=user@box, which runs the query over ssh to any machine,
+        and --machine. The wrapper passes --all and cti-agent-* patterns,
+        after --, and nothing else."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        src = (root / "fleet-kit" / "fleet" / "bin" / "fleet-timers").read_text(encoding="utf-8")
+        self.assertIn("\nSYSTEMCTL=/usr/bin/systemctl\n", src)
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            fake = d / "systemctl"
+            fake.write_text('#!/bin/sh\nfor a; do echo "$a"; done\n')
+            fake.chmod(0o755)
+            w = d / "fleet-timers"
+            w.write_text(src.replace("\nSYSTEMCTL=/usr/bin/systemctl\n", f"\nSYSTEMCTL={fake}\n"))
+
+            def run(*args):
+                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True)
+
+            for args, want in (
+                ([], ["list-timers", "--no-pager", "--", "cti-agent-*"]),
+                (["--all"], ["list-timers", "--no-pager", "--all", "--", "cti-agent-*"]),
+                (["cti-agent-domains.timer"],
+                 ["list-timers", "--no-pager", "--", "cti-agent-domains.timer"]),
+                (["--all", "cti-agent-*"], ["list-timers", "--no-pager", "--all", "--", "cti-agent-*"]),
+                (["-a"], ["list-timers", "--no-pager", "--all", "--", "cti-agent-*"]),
+            ):
+                with self.subTest(args=args):
+                    r = run(*args)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual(r.stdout.splitlines(), want)
+            for args in (
+                ["--host=user@example.com"],
+                ["-H", "user@example.com"],
+                ["--all", "--host", "user@example.com"],
+                ["--machine=x"],
+                ["-M", "x"],
+                ["--user"],
+                ["--output=json"],
+                ["sshd.timer"],
+                ["cti-agent-x;id"],
+                ["cti-agent-x", "--host=y"],
+                ["cti-agent-$(id)"],
+                ["cti-agent-[a-z]*"],
+                ["cti-agent-?"],
+                ["cti-agent-x\n--host=y"],
+                ["cti-agent-x=y"],
             ):
                 with self.subTest(refused=args):
                     r = run(*args)

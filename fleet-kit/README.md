@@ -1875,6 +1875,7 @@ fleet-kit/
     │   ├── fleet-board            lock-safe append-only board (post/read/prune/tail)
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
     │   ├── fleet-journal          the beat's restricted journal reader (cti-agent-* units only)
+    │   ├── fleet-timers           the beat's restricted timer lister (--all and cti-agent-* only)
     │   ├── run-digest             deterministic ingest→enrich→brief→send
     │   └── run-checkin            resolves the claude binary, audits, fires one beat
     ├── checkin-settings.json      root-owned --settings for the beat (hooks off, deny rules)

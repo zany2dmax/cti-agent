@@ -145,7 +145,23 @@ or a space.
 The unit to report on, for example
 .BR cti\-agent\-digest.service .
 Required; when omitted, the first argument after the options is used
-instead. With neither, nothing is sent and the exit status is 2.
+instead. With neither, nothing is sent and the exit status is 2. The name must
+begin with
+.B cti\-agent\-
+and continue with letters, digits and
+.BR @ ,
+.BR . ,
+.B _
+or
+.BR \- ;
+anything else is refused with exit status 2 before
+.BR systemctl (1)
+or
+.BR journalctl (1)
+runs, so a value such as
+.B \-\-host=user@box
+can never be read as an option. Both are called by absolute path
+.RB ( /usr/bin ).
 Default:\~empty.
 .TP
 .BI \-\-kind " KIND"
@@ -259,7 +275,9 @@ status, so the alert unit is never itself marked failed and
 still names the unit that really broke.
 .TP
 .B 2
-No unit was given, or an option was not recognised.
+No unit was given, the unit is not a fleet unit
+.RB ( cti\-agent\-NAME ),
+or an option was not recognised.
 .B \-\-help
 prints the usage and exits 0.
 .SH EXAMPLES

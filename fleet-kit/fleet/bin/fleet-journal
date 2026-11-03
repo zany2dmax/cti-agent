@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # fleet-journal - read the fleet's own journal, and nothing else journalctl does.
 #
 #   fleet-journal -u UNIT [-u UNIT ...] [--since WHEN] [-n N] [--no-pager]
@@ -18,6 +18,10 @@
 # value is passed to journalctl in --opt=VALUE form, so nothing it is given
 # can be read as another option. Anything else exits 2 before journalctl runs.
 set -euo pipefail
+# Absolute interpreter above and C collation here: bash found through PATH
+# could be one the service account planted, and a UTF-8 locale lets the
+# [A-Za-z] ranges below admit characters outside ASCII.
+export LC_ALL=C
 
 JOURNALCTL=/usr/bin/journalctl
 
