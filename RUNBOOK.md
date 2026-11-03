@@ -1707,14 +1707,27 @@ the token, the probe gets HTTP 409, and while it runs nothing else may use it.
   the header From, so that rule alone does not mean "outbound".
 - Our own phishing-simulation mail carries KnowBe4 routes and must be excluded
   from spoof counts.
-- `dkimv` is DKIM verification, so it may be absent on outbound mail. Outbound
-  evidence is then the header-From domain and the sender IP.
-- An hour read was cut off at a 20 MB cap with very few events, so event size
-  and volume are unconfirmed until the probe has run with the larger cap.
+- `dkimv` is DKIM verification, and it is **absent on outbound mail** (a full
+  business hour: 1,015 outbound events, none with it). The stream cannot say
+  which DKIM selector our outbound mail was signed with, so that stays a DNS
+  check (`DOMAINS_DKIM_SELECTORS`). Outbound evidence from the stream is the
+  header-From domain and the sender IP.
+- A full business hour (a Monday, 10:00 local) was about 5,300 events and 73 MB
+  (about 14 KB each, the largest 450 KB): roughly 70% inbound, 19% outbound,
+  1% internal. Plan on several GB for a week read, so the weekly lane must ask
+  for compression (permessage-deflate, see the guide's request examples) or
+  read incrementally; measure `time` on the box before choosing.
+- Inbound mail that uses our domains in the header From is mostly *our own
+  cloud senders passing DMARC*. Counting it as spoofing would be wrong; the
+  signal is the part that does not pass (fail, quarantine, reject), and the
+  probe lists sender IPs for those only.
+- The outbound header-From domains of one hour already name every domain that
+  sends through the gateway, plus a few bounce/NDR identities from the gateway
+  itself (a `127.0.0.1` sender, the gateway's own host name) that the lane must
+  not mistake for domains of ours.
 
-The guide warns that archive data can contain control characters, and the
-remaining field paths above are from the guide, not yet confirmed against this
-tenant.
+The field paths in the table above are confirmed against this tenant for
+direction, header From, sender IP, route names, DMARC and SPF results.
 
 ---
 
