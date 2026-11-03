@@ -7,6 +7,7 @@
 //	cti-appreport --app-id 1234 --out-dir /tmp/r            # one report: create, poll, download, delete
 //	cti-appreport --probe-findings 1234 > probe.xml         # verbose finding fields, redacted
 //	cti-appreport --tickets T.json --only-ref P.json --out-dir D   # the weekly run
+//	cti-appreport --deliveries D.json --out-dir R                  # the owners lane, daily
 //
 // # ONE INTERFACE, ANY SCANNER
 //
@@ -111,11 +112,23 @@ func run() int {
 		"print the web application id, name and findings of every application in the newest "+
 			"$FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; "+
 			"reads the file only - no scanner calls, no credentials")
+	deliveries := flag.String("deliveries", "",
+		"the owners lane: fetch the report for every application in this cti-appscan "+
+			"--deliveries-out file that is not held, redact it, and write each covering "+
+			"email beside it in --out-dir with send.tsv and held.tsv for the runner")
+	noFetch := flag.Bool("no-fetch", false,
+		"with --deliveries: write the covering emails without fetching any report (a dry run)")
 	flag.Parse()
 
 	fleetenv.Load()
 	if *listIDs {
 		return doListIDs(*tickets)
+	}
+	if *deliveries != "" && *noFetch {
+		if *outDir == "" {
+			return die("--deliveries needs --out-dir")
+		}
+		return doDeliveries(context.Background(), nil, *deliveries, *outDir, *maxReports, *keep, *timeout)
 	}
 	// The scanner's settings only: no mailbox, no Jira.
 	cfg, err := config.LoadVulnLookup()
@@ -207,6 +220,12 @@ func run() int {
 		fmt.Printf("%s: %d bytes in %s/%s (scanner report id %s%s)\n", name, r.Bytes, *outDir, r.File,
 			r.RemoteID, map[bool]string{true: ", left in the scanner", false: ", deleted from the scanner"}[r.Kept])
 		return exitOK
+
+	case *deliveries != "":
+		if *outDir == "" {
+			return die("--deliveries needs --out-dir")
+		}
+		return doDeliveries(ctx, fetcher, *deliveries, *outDir, *maxReports, *keep, *timeout)
 
 	case *tickets != "":
 		if *outDir == "" {
@@ -429,4 +448,136 @@ func listIDs(tf appscan.TicketsFile, path string) string {
 	fmt.Fprintf(&b, "\n%d of %d application(s) would get a report. Try one with:\n"+
 		"  sudo cti-agent cti-appreport --app-id <APP ID> --dump-request\n", ready, len(ts))
 	return b.String()
+}
+
+// doDeliveries prepares the owners lane's mail. For each application to send:
+// the scanner's report, redacted, and the covering email, in a directory of
+// its own; one send.tsv row per application ready to go, and held.tsv for
+// the ones the runner should record as dealt with without sending. A report
+// that could not be fetched or redacted gets no row in either, so tomorrow's
+// run tries it again. f nil means a dry run: no report is fetched.
+func doDeliveries(ctx context.Context, f appscan.ReportFetcher, path, dir string,
+	max int, keep bool, timeout time.Duration) int {
+
+	// #nosec G304 G703 -- the runner's own --deliveries-out file
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	var df appscan.DeliveriesFile
+	if err := json.Unmarshal(b, &df); err != nil {
+		return die("%s is not a cti-appscan deliveries file: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	var targets []target
+	for _, d := range df.Deliveries {
+		if d.Hold == "" && d.AppID != "" {
+			targets = append(targets, target{key: d.Key, id: d.AppID, name: d.App})
+		}
+	}
+	m := appscan.ReportsManifest{Reports: map[string]appscan.Report{}, Failed: map[string]string{}}
+	if f != nil && len(targets) > 0 {
+		logf("plan   : %d report(s) to fetch for their owners", len(targets))
+		m, _ = fetchAll(ctx, f, dir, targets, max, keep, timeout)
+	} else if err := os.MkdirAll(dir, 0o700); err != nil { // #nosec G301 G703 -- owner-only
+		return die("%s", safelog.Line(err.Error()))
+	}
+
+	var send, held, heldText strings.Builder
+	for _, d := range df.Deliveries {
+		name := safelog.Line(d.App)
+		if d.Hold != "" {
+			if !d.Retry {
+				fmt.Fprintf(&held, "%s\t%s\theld: %s\n", d.Key, tsvField(d.ScanRef), tsvField(d.Hold))
+			}
+			fmt.Fprintf(&heldText, "%s: %s\n", name, safelog.Line(d.Hold))
+			continue
+		}
+		attached, why := "", "this was a dry run"
+		var body []byte
+		if f != nil {
+			r, ok, err := appscan.LoadReport(dir, d.Key, d.AppID)
+			if err != nil || !ok {
+				why := m.Failed[d.Key]
+				if err != nil {
+					why = err.Error()
+				}
+				logf("warn   : %s: no report, not sent today - %s", name, safelog.Line(why))
+				continue
+			}
+			rname, rbody, err := appscan.RedactReport(r.Body)
+			// The original carries the scan account's session; only the
+			// redacted copy stays.
+			_ = os.Remove(filepath.Join(dir, r.File)) // #nosec G703 -- a name LoadReport checked
+			if err != nil {
+				logf("warn   : %s: report not mailed - %s", name, safelog.Line(err.Error()))
+				continue
+			}
+			if len(rbody) > appscan.MaxMailAttachment {
+				why = fmt.Sprintf("it is %.1f MB, over the %d MB email limit", float64(len(rbody))/1e6,
+					appscan.MaxMailAttachment/1_000_000)
+				logf("warn   : %s: report too large to attach (%d bytes); the email says so", name, len(rbody))
+			} else {
+				attached, body = reportFileName(d, rname), rbody
+			}
+		}
+		sub := filepath.Join(dir, d.Label())
+		if err := os.MkdirAll(sub, 0o700); err != nil { // #nosec G301 G703 -- owner-only, our own name
+			logf("warn   : %s: %s", name, safelog.Line(err.Error()))
+			continue
+		}
+		mail := appscan.RenderOwnerMail(d, attached, why)
+		werr := appscan.WriteOwnerFile(sub, "mail.html", []byte(mail.HTML))
+		if werr == nil {
+			werr = appscan.WriteOwnerFile(sub, "subject.txt", []byte(safelog.Line(mail.Subject)+"\n"))
+		}
+		if werr == nil {
+			werr = appscan.WriteOwnerFile(sub, "app.txt", []byte(safelog.Line(d.App)+"\n"))
+		}
+		if werr == nil && attached != "" {
+			werr = appscan.WriteOwnerFile(sub, attached, body)
+		}
+		if werr != nil {
+			logf("warn   : %s: %s", name, safelog.Line(werr.Error()))
+			continue
+		}
+		att := ""
+		if attached != "" {
+			att = filepath.Join(sub, attached)
+		}
+		// key, ref, web app id, the application's directory, the attachment
+		fmt.Fprintf(&send, "%s\t%s\t%s\t%s\t%s\n", d.Key, tsvField(d.ScanRef), tsvField(d.AppID), sub, att)
+	}
+	for _, w := range []struct{ name, body string }{
+		{"send.tsv", send.String()}, {"held.tsv", held.String()}, {"held.txt", heldText.String()},
+	} {
+		if err := appscan.WriteOwnerFile(dir, w.name, []byte(w.body)); err != nil {
+			return die("writing %s: %s", w.name, safelog.Line(err.Error()))
+		}
+	}
+	logf("owners : %d email(s) ready, %d held", strings.Count(send.String(), "\n"),
+		strings.Count(heldText.String(), "\n"))
+	return exitOK
+}
+
+// tsvField keeps a value on one TSV field.
+func tsvField(s string) string {
+	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+}
+
+var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
+
+// reportFileName is what the recipient sees: the application and the date.
+func reportFileName(d appscan.Delivery, redacted string) string {
+	slug := strings.Trim(slugRE.ReplaceAllString(strings.ToLower(d.App), "-"), "-")
+	if len(slug) > 48 {
+		slug = strings.Trim(slug[:48], "-")
+	}
+	if slug == "" {
+		slug = "web-app"
+	}
+	ext := filepath.Ext(redacted)
+	if ext != ".zip" {
+		ext = ".html"
+	}
+	return slug + "-scan-report-" + d.Finished.Local().Format("2006-01-02") + ext
 }

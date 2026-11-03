@@ -10,6 +10,8 @@
 //	cti-mailer --html d.html --cc a@example.com,b@example.com
 //	cti-mailer --html d.html --dry-run                       # render + validate only
 //	cti-mailer --check                                       # verify token + roles
+//	cti-mailer --lane owner --app-id 123 --app-name "App" --html m.html --attach r.html
+//	                                                         # one app's report to its owners
 //
 // # WHY THIS IS GO NOW
 //
@@ -37,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailer"
@@ -87,6 +90,10 @@ func run() int {
 		"send as a named lane (e.g. was): uses <LANE>_TO and <LANE>_ALLOW_TO, "+
 			"and refuses if either is unset rather than falling back to the digest "+
 			"audience")
+	appID := flag.String("app-id", "",
+		"with --lane owner: the scanner's web app id whose app-owners.txt line names the recipients")
+	appName := flag.String("app-name", "",
+		"with --lane owner: the application's name, for an app-owners.txt line keyed by name")
 	cc := flag.String("cc", "",
 		"comma-separated; defaults to DIGEST_CC. Subject to the same "+
 			"VM_ALLOW_TO gate as --to")
@@ -159,11 +166,39 @@ func run() int {
 	}
 	var err error
 
-	var recipients, copies []string
+	var recipients, copies, refused []string
 	if *toDev && *lane != "" {
 		return die("--to-dev cannot be combined with --lane: a test send goes to FLEET_DEV_EMAIL only")
 	}
-	if *lane != "" {
+	if strings.EqualFold(strings.TrimSpace(*lane), "owner") {
+		// One application's report to the people on its app-owners.txt line,
+		// many of them outside the company. Recipients come from that file
+		// and OWNER_ALLOW_DOMAINS only - see internal/mailer/owner.go.
+		if *to != "" || *cc != "" {
+			return die("--lane owner takes no --to or --cc: the recipients are the application's " +
+				"owner and watchers in app-owners.txt, and nothing else")
+		}
+		if strings.TrimSpace(*appID) == "" && strings.TrimSpace(*appName) == "" {
+			return die("--lane owner needs --app-id (or --app-name) to find the application's line in app-owners.txt")
+		}
+		owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
+		for _, p := range oprobs {
+			logf("owners : %s", safelog.Line(p))
+		}
+		w, ok := owners.For(strings.TrimSpace(*appID), *appName)
+		if !ok {
+			return die("no line for this application in %s, so there is nobody to send its report to",
+				safelog.Line(appscan.OwnersPath()))
+		}
+		recipients, copies, refused, err = mailer.OwnerAudience(w.Email, w.Watchers, os.Getenv(mailer.OwnerAllowVar))
+		if err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+		for _, r := range refused {
+			logf("REFUSED: %s (app-owners.txt line %d) is not at a domain in %s - not sent to them",
+				safelog.Line(r), w.Line, mailer.OwnerAllowVar)
+		}
+	} else if *lane != "" {
 		// A lane send uses its OWN recipient list and its OWN allowlist, and
 		// refuses if either is unset.
 		//
@@ -260,6 +295,9 @@ func run() int {
 
 	logf("from   : %s", safelog.Line(mailbox))
 	logf("to     : %s", safelog.Line(strings.Join(recipients, ", ")))
+	if len(copies) > 0 {
+		logf("cc     : %s", safelog.Line(strings.Join(copies, ", ")))
+	}
 	logf("subject: %s", safelog.Line(subj))
 	logf("size   : %d bytes html, %d attachment(s)", len(body), len(attachments))
 
@@ -267,7 +305,7 @@ func run() int {
 		logf("DRY RUN - nothing sent")
 		out := map[string]any{
 			"dry_run": true, "subject": subj,
-			"to": recipients, "cc": orEmpty(copies),
+			"to": recipients, "cc": orEmpty(copies), "refused": orEmpty(refused),
 			"mode": "message",
 		}
 		if *htmlPath != "" {
@@ -317,7 +355,7 @@ func run() int {
 	logf("sent - HTTP %d, request-id %s", res.Status, safelog.Line(reqID))
 	emit(map[string]any{
 		"sent": true, "status": res.Status, "request_id": reqID,
-		"subject": subj, "to": recipients, "cc": orEmpty(copies),
+		"subject": subj, "to": recipients, "cc": orEmpty(copies), "refused": orEmpty(refused),
 		"ts": time.Now().UTC().Format(time.RFC3339),
 	})
 	return exitOK
@@ -366,8 +404,13 @@ func loadAttachments(paths []string) ([]graph.Attachment, []string) {
 			continue
 		}
 		ct := "text/plain"
-		if strings.HasSuffix(p, ".md") {
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".md":
 			ct = "text/markdown"
+		case ".html", ".htm":
+			ct = "text/html"
+		case ".zip":
+			ct = "application/zip"
 		}
 		out = append(out, graph.Attachment{
 			Name: filepath.Base(p), ContentType: ct, Bytes: b,
@@ -397,6 +440,7 @@ var optional = [][2]string{
 	{"WAS_ALLOW_TO", "--lane was allowlist; NO fallback - unset means it will not send"},
 	{"DOM_TO", "--lane dom recipients; the weekly domains check, security team only"},
 	{"DOM_ALLOW_TO", "--lane dom allowlist; NO fallback - unset means it will not send"},
+	{"OWNER_ALLOW_DOMAINS", "--lane owner: domains an app owner or watcher may be at; unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},
 }

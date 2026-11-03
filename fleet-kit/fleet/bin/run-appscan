@@ -17,7 +17,8 @@
 #   fall back to the digest audience.
 #
 # USAGE
-#   run-appscan              render, file/update one Jira ticket per application, send
+#   run-appscan              render, send (and, with WAS_TICKETS=1, file/update one
+#                            Jira ticket per application)
 #   run-appscan --dry-run    render, print the subject, send nothing
 #   run-appscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
 #                            subject, auth-failure alert to you too
@@ -138,8 +139,19 @@ rm -f "$AUTHFAIL"
 # and could disagree with the report if a scan landed in between.
 SUBJFILE="$STATE/appscan-subject-$STAMP.txt"
 rm -f "$SUBJFILE"
+# APPLICATION TICKETS ARE OFF UNLESS WAS_TICKETS=1.
+#
+# Many application owners and watchers are outside the company and not in
+# Jira, and the help desk does not want AppSec work in its project. Each
+# application's report now reaches its owners by email (run-appowners), so
+# tickets are opt-in. Off, cti-appscan is not asked for ticket input either,
+# which saves the per-application open-findings calls.
+TICKETARGS=()
+if [ "${WAS_TICKETS:-0}" = 1 ]; then
+  TICKETARGS=(--tickets-out "$TICKETS" --ticket-slot)
+fi
 "$APPSCAN" --out "$HTML" --text-out "$TXT" --auth-fail-out "$AUTHFAIL" --seen-out "$SEEN" \
-  --tickets-out "$TICKETS" --ticket-slot --subject-out "$SUBJFILE" \
+  ${TICKETARGS[@]+"${TICKETARGS[@]}"} --subject-out "$SUBJFILE" \
   || fail "cti-appscan exited non-zero (check outbound 443 to Graph and Qualys)"
 
 [ -s "$SUBJFILE" ] || fail "cti-appscan wrote no subject line"
@@ -151,7 +163,7 @@ log "subject: $SUBJECT"
 # The application tickets, BEFORE the send, so the email names each one.
 # Never fatal: Jira trouble becomes a "not updated" line, and the email goes.
 # A dry run or a test send only previews - nothing is written to Jira.
-if [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
+if [ "${WAS_TICKETS:-0}" = 1 ] && [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
   if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
     # The would-be ticket text names URLs and parameters on our own
     # applications: a 0600 file, not the journal.
@@ -205,7 +217,11 @@ if [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
          sed -i.bak 's/<!--CTI_APPSCAN_TICKETS-->//g' "$HTML" "$TXT" 2>/dev/null || true
          rm -f "$HTML.bak" "$TXT.bak"; }
 else
-  [ -x "$JIRA" ] || log "cti-jira not installed - no application tickets"
+  if [ "${WAS_TICKETS:-0}" != 1 ]; then
+    log "tickets: off (WAS_TICKETS is not 1) - reports reach owners by email through run-appowners"
+  elif [ ! -x "$JIRA" ]; then
+    log "cti-jira not installed - no application tickets"
+  fi
   sed -i.bak 's/<!--CTI_APPSCAN_TICKETS-->//g' "$HTML" "$TXT" 2>/dev/null || true
   rm -f "$HTML.bak" "$TXT.bak"
 fi

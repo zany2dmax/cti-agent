@@ -262,6 +262,33 @@ file named alongside it; then exit. A missing or unreadable
 .I FILE
 says each status is unavailable. Links are only https Jira browse links.
 Default:\~empty.
+.TP
+.BI \-\-deliveries\-out " file"
+The owners lane
+.RB ( run\-appowners (1)):
+write which applications' scanner reports to mail to their owners, and which
+are held and why (a scan that did not finish, failed its login or reached no
+host; no owner in
+.IR app\-owners.txt ;
+no web app id), for
+.BR "cti\-appreport \-\-deliveries" .
+Scans already in
+.B \-\-delivered\-log
+are left out. Given alone, the per-finding detail calls are skipped.
+.TP
+.BI \-\-delivered\-log " file"
+The owners lane's record of the last scan sent or held per application.
+Required with
+.B \-\-deliveries\-out
+and
+.BR \-\-commit\-delivered .
+.TP
+.BI \-\-commit\-delivered " file"
+Record the file's
+.I key<TAB>ref<TAB>status
+lines in
+.BR \-\-delivered\-log ,
+replacing it atomically, then exit. The runner calls it only after a real send.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from
