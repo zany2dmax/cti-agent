@@ -1,0 +1,14 @@
+[Unit]
+Description=Application scan reports to their owners, daily 07:15
+
+[Timer]
+# Daily, so a report reaches its owners the morning after the scan. Before the
+# Friday 07:30 weekly report, and spread from it, since both spend the shared
+# Qualys API budget.
+OnCalendar=*-*-* 07:15:00
+AccuracySec=1min
+Persistent=true
+Unit=cti-agent-appowners.service
+
+[Install]
+WantedBy=timers.target

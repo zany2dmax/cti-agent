@@ -217,6 +217,7 @@ regression test.
 | `NVD_API_KEY` | Free NVD key. Without it enrichment is 10x slower |
 | `FLEET_USER_AGENT` | User-Agent sent to NVD, EPSS, CISA and advisory feeds |
 | `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. **This file is mailbox cleanup's entire authority to move anything** — no entry, no move |
+| `MAILBOX_SELF_MIN_AGE_HOURS` | How long the fleet's own reports stay in the inbox before cleanup archives them. Default 168 (a week); 0 archives on sight; must be less than `MAILBOX_LOOKBACK_HOURS` |
 | `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record, default 25 |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Only for the orchestrator heartbeat |
 | `FLEET_BUDGET_*` | Quota ceilings for the heartbeat. See [fleet-kit/README.md → Quota ceilings](fleet-kit/README.md#8-quota-ceilings) |
@@ -389,6 +390,7 @@ one is enabled.
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
+| 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | `app-owners.txt` reviewed, `OWNER_ALLOW_DOMAINS` set, one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
 
 ```bash
 systemctl list-timers 'cti-agent-*' --all
@@ -429,7 +431,7 @@ nobody watching. Treat the rollout accordingly.
 
 | Message | Action |
 |---|---|
-| The fleet's own report, delivered back to the mailbox, with a correctly **signed** `X-CTI-Agent-Sent` header | **Archive** (a copy is in Sent Items) |
+| The fleet's own report, delivered back to the mailbox, with a correctly **signed** `X-CTI-Agent-Sent` header | **Archive**, once a week old (`MAILBOX_SELF_MIN_AGE_HOURS`, default 168; a copy is in Sent Items) |
 | An automatic reply - by its headers, or a subject starting `Automatic reply:`, `Out of Office:` and the like - read by a lane or not | **Deleted Items** (recoverable) |
 | The digest read it and took a CVE from it | **Archive**, after the grace |
 | A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
@@ -1093,7 +1095,68 @@ A dry run leaves the rendered report at
 the timer: it names which applications have open Urgent findings, so it is a
 map of where to look, and it is handled like the VM reports for that reason.
 
+### Reports to application owners, by email
+
+`cti-agent-appowners.timer`, daily 07:15, runner `run-appowners`. For every
+scan that finished since the last run, it fetches the scanner's own report of
+the application's open findings, removes the scan account's session from it,
+and mails it to the owner (To) and watchers (Cc) on the application's line in
+`app-owners.txt`. Many owners and watchers are outside the company and not in
+Jira, which is why this is email and not a ticket.
+
+```bash
+sudo cti-agent run-appowners --dry-run   # plan, check every recipient; fetch and send nothing
+sudo cti-agent run-appowners --to-dev    # every email and report to FLEET_DEV_EMAIL only
+sudo cti-agent run-appowners             # fetch, redact, send, record
+```
+
+**Who receives it.** `cti-mailer --lane owner` reads `app-owners.txt` itself
+and sends only to that application's owner and watchers, and only to
+addresses at a domain in `OWNER_ALLOW_DOMAINS` (exact domains, comma-separated;
+a subdomain is a different domain). A watcher at another domain is dropped and
+the operator is alerted; an owner at another domain stops that application's
+send. It takes no `--to` or `--cc`, and `--approve` does not widen it. With
+`OWNER_ALLOW_DOMAINS` unset the runner logs that the lane is off and exits 0.
+Replies go to `GRAPH_MAILBOX`.
+
+**What is held back.** A scan that did not finish, whose login failed, or that
+reached no host, and an application with no line in `app-owners.txt`. The
+owners get nothing for that scan; the operator gets one `cti-alert` HOLD
+listing them, once per scan. A scan with no web app id (the WAS API was down)
+is tried again the next day.
+
+**What is sent.** A short covering email (open findings by severity, what this
+scan found, authenticated or not, and a do-not-forward note) with the report
+attached as HTML, or as a zip when Qualys's report has images or other files.
+Every text file in the report goes through the same redaction as the probe
+output (`Cookie`, `Set-Cookie`, `Authorization` and similar headers, token
+fields in JSON, session and token parameters in URLs); a file type it cannot
+check is left out. A report over 3 MB after redaction is not attached and the
+email says so - send that one by hand. The unredacted zip is deleted as soon as
+it is redacted, and the whole working directory when the run ends.
+
+**Each scan is sent once.** `$FLEET_HOME/state/appowners-sent.json` holds the
+last scan sent or held per application, written only after a real send. The
+runner looks back 48 hours, so a late or failed run loses nothing. A test send
+and a dry run record nothing, so the real run still sends.
+
+**Before enabling the timer**, read the redacted report from one `--to-dev`
+run end to end - search it for `Cookie`, `Authorization`, `sid=` and
+`token=`. The redaction was written against Qualys's API output, not a real
+HTML report, so check that the evidence sections came through redacted before
+any outside address gets one.
+
+```bash
+sudo systemctl enable --now cti-agent-appowners.timer
+```
+
 ### One Jira ticket per application
+
+**Off unless `WAS_TICKETS=1`** in `fleet.env`. The help desk does not want
+AppSec tickets in CR and many owners are not in Jira, so the reports now go by
+email (above). With it off, `run-appscan` asks for no ticket input and calls
+no `cti-jira`; the weekly email has no JIRA TICKETS section. What follows
+applies when it is on.
 
 Before the weekly email goes, `cti-jira --appscan-tickets` keeps ONE open
 ticket per application (label `cti-appscan-<web app id>`), and the email's

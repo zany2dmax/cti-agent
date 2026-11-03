@@ -2484,6 +2484,12 @@ for a in "$@"; do
     json)     echo "{}" > "$a" ;;
     authfail) printf 'App One\trecord\tFAILED\n' > "$a" ;;
     ref)      echo '{"action":"commented","key":"SEC-50"}' > "$a" ;;
+    outdir)   # cti-appreport --deliveries: one email ready, one held
+              mkdir -p "$a/app"; echo "Web application scan results: App One" > "$a/app/subject.txt"
+              echo "App One" > "$a/app/app.txt"; echo "<p>x</p>" > "$a/app/mail.html"
+              printf 'id:1\tref1\t1\t%s\t\n' "$a/app" > "$a/send.tsv"
+              printf 'id:2\tref2\theld: the scan did not finish\n' > "$a/held.tsv"
+              printf 'App Two: the scan did not finish\n' > "$a/held.txt" ;;
   esac
   next=""
   case "$a" in
@@ -2492,6 +2498,7 @@ for a in "$@"; do
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
     --ref-out) next=ref ;;
+    --out-dir) next=outdir ;;
   esac
 done
 case "$me $*" in
@@ -2519,7 +2526,7 @@ class RunnersToDev(unittest.TestCase):
     """--to-dev on a runner: real pipeline, mail to FLEET_DEV_EMAIL only, and
     none of the side effects a real send has."""
 
-    BIN = ("cti-mailer", "cti-alert", "cti-jira", "cti-domains", "cti-appscan",
+    BIN = ("cti-mailer", "cti-alert", "cti-jira", "cti-domains", "cti-appscan", "cti-appreport",
            "cti-patchtuesday", "fleet-db", "fleet-board")
 
     def setUp(self):
@@ -2557,8 +2564,8 @@ class RunnersToDev(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_lane(self, runner, *args, dev="dev@example.com"):
-        self.envfile.write_text(f"FLEET_DEV_EMAIL={dev}\n" if dev else "")
+    def run_lane(self, runner, *args, dev="dev@example.com", env=""):
+        self.envfile.write_text((f"FLEET_DEV_EMAIL={dev}\n" if dev else "") + env)
         r = subprocess.run(["bash", str(KIT / "fleet" / "bin" / runner), *args],
                            env=self.base, capture_output=True, text=True, timeout=60)
         return r, self.log.read_text().splitlines()
@@ -2649,11 +2656,17 @@ class RunnersToDev(unittest.TestCase):
                 self.assertEqual("--for-real" in calls[jira], real,
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
 
+    def test_appscan_files_no_tickets_unless_asked(self):
+        r, calls = self.run_lane("run-appscan")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([c for c in calls if c.startswith("cti-jira ")], [], calls)
+        self.assertNotIn("--tickets-out", calls[0])
+
     def test_appscan_files_its_application_tickets_before_the_send(self):
         for args, real in (([], True), (["--to-dev"], False), (["--dry-run"], False)):
             with self.subTest(args=args):
                 self.log.write_text("")
-                r, calls = self.run_lane("run-appscan", *args)
+                r, calls = self.run_lane("run-appscan", *args, env="WAS_TICKETS=1\n")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
                 jira = idx(lambda c: c.startswith("cti-jira ") and "--appscan-tickets" in c)
@@ -2665,8 +2678,42 @@ class RunnersToDev(unittest.TestCase):
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
                 self.assertIn("--ticket-slot", calls[idx(lambda c: c.startswith("cti-appscan --out"))])
 
+    def test_appowners_is_off_until_armed(self):
+        r, calls = self.run_lane("run-appowners")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(calls, [], "the owners lane did work with OWNER_ALLOW_DOMAINS unset")
+
+    def test_appowners_sends_through_the_owner_lane_then_records(self):
+        r, calls = self.run_lane("run-appowners", env="OWNER_ALLOW_DOMAINS=example.com\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
+        send = idx(lambda c: c.startswith("cti-mailer "))
+        self.assertIn("--lane owner --app-id 1 --app-name App One", calls[send])
+        self.assertNotIn("--to ", calls[send])
+        commit = idx(lambda c: "--commit-delivered" in c)
+        self.assertLess(send, commit, "recorded as sent before the send")
+        self.assertNotIn("--no-fetch", calls[idx(lambda c: c.startswith("cti-appreport "))])
+        alerts = [c for c in calls if c.startswith("cti-alert ")]
+        self.assertEqual(len(alerts), 1, calls)
+        self.assertIn("App Two", alerts[0])
+
+    def test_appowners_test_send_records_nothing(self):
+        calls = self.assertTestSend("run-appowners")
+        self.assertEqual([c for c in calls if "--commit-delivered" in c], [], calls)
+
+    def test_appowners_dry_run_fetches_and_records_nothing(self):
+        r, calls = self.run_lane("run-appowners", "--dry-run", env="OWNER_ALLOW_DOMAINS=example.com\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        report = [c for c in calls if c.startswith("cti-appreport ")]
+        self.assertIn("--no-fetch", report[0])
+        sends = [c for c in calls if c.startswith("cti-mailer ")]
+        self.assertTrue(sends and all("--dry-run" in c for c in sends), calls)
+        for c in calls:
+            self.assertNotIn("--commit-delivered", c)
+            self.assertFalse(c.startswith("cti-alert "), c)
+
     def test_no_dev_address_is_refused_before_any_work(self):
-        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):
+        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan", "run-appowners"):
             with self.subTest(runner=runner):
                 self.log.write_text("")
                 r, calls = self.run_lane(runner, "--to-dev", dev="")
@@ -2675,7 +2722,7 @@ class RunnersToDev(unittest.TestCase):
                                  "a test send with no FLEET_DEV_EMAIL reached the mailer")
 
     def test_with_dry_run_nothing_is_mailed(self):
-        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan"):
+        for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan", "run-appowners"):
             with self.subTest(runner=runner):
                 self.log.write_text("")
                 r, calls = self.run_lane(runner, "--to-dev", "--dry-run")

@@ -190,6 +190,37 @@ values are redacted from the output, which is still evidence from the
 organisation's own application: redirect it to a 0600 file and keep it off
 tickets.
 Default:\~empty.
+.TP
+.BI \-\-deliveries " file"
+The owners lane
+.RB ( run\-appowners (1)):
+for every application in this
+.B "cti\-appscan \-\-deliveries\-out"
+file that is not held, fetch its report, pass every text file in it through
+the same redaction as
+.B \-\-probe\-findings
+(a file type it cannot check is left out), delete the unredacted zip, and
+write the covering email
+.RI ( mail.html ,
+.IR subject.txt ,
+.IR app.txt )
+and the attachment into a directory per application under
+.BR \-\-out\-dir .
+Also writes
+.I send.tsv
+(one row per email ready),
+.I held.tsv
+(holds to record as dealt with) and
+.I held.txt
+(for the operator's alert). A report over 3\~MB after redaction is not
+attached and the email says so. A report that could not be fetched or
+redacted gets no row, so the next run tries again.
+.TP
+.B \-\-no\-fetch
+With
+.BR \-\-deliveries :
+write the covering emails without fetching any report, and without
+credentials. For a dry run.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from
