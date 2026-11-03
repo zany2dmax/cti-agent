@@ -64,8 +64,10 @@ The message carries an
 header with a valid signature (an HMAC keyed from the app registration's
 client secret, which only this fleet holds). The sender address alone is not
 enough, and neither is an unsigned header. Mail signed before a client secret
-rotation no longer verifies and is left for the operator. Not subject to the
-archive grace.
+rotation no longer verifies and is left for the operator. Archived once it has
+been in the mailbox for
+.BR MAILBOX_SELF_MIN_AGE_HOURS ;
+until then it is left, with the reason stated.
 .TP
 .B 1. An automatic reply: Deleted Items, read or not
 Declared by its headers
@@ -224,6 +226,14 @@ refuses to start otherwise.
 .B 0
 disables the grace and archives on sight.
 Default:\~\fB48\fR.
+.TP
+.B MAILBOX_SELF_MIN_AGE_HOURS
+How long the fleet's own reports stay in the inbox before they are archived.
+Must be less than
+.BR MAILBOX_LOOKBACK_HOURS .
+.B 0
+archives them on sight.
+Default:\~\fB168\fR (a week).
 .TP
 .BR GRAPH_LOOKBACK_HOURS ", " QUALYS_KB_MAX_AGE_HOURS
 Not used by this command, but validated by the shared loader: each must be a

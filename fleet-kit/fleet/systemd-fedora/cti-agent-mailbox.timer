@@ -8,7 +8,8 @@ Description=CTI mailbox cleanup, once a day after the digest
 # ran late or not at all makes this a no-op rather than a mistake.
 #
 # No timezone here: OnCalendar uses the SYSTEM timezone, and the installer
-# writes a drop-in setting it from FLEET_TIMEZONE. The first digest fired at
+# writes a drop-in setting it from FLEET_TIMEZONE and FLEET_MAILBOX_TIME (until
+# 1.4.x it did not, so on a UTC box this ran at 02:00 Eastern, before the digest). The first digest fired at
 # 2am because that was not understood.
 OnCalendar=*-*-* 07:00:00
 AccuracySec=5min

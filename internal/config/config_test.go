@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 		"QUALYS_BASE_URL", "QUALYS_USERNAME", "QUALYS_PASSWORD",
 		"QUALYS_KB_CACHE", "QUALYS_KB_MAX_AGE_HOURS",
 		"REPORT_PATH",
-		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS",
+		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS", "MAILBOX_SELF_MIN_AGE_HOURS",
 		"JIRA_BASE_URL", "JIRA_CLOUD_ID", "JIRA_EMAIL", "JIRA_API_TOKEN",
 		"JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_ALLOW_CREATE",
 		"JIRA_DOMAINS_PROJECT_KEY", "JIRA_DOMAINS_ISSUE_TYPE", "DIGEST_SKIP_SUBJECTS",
@@ -440,5 +440,33 @@ func TestDigestSkipSubjectsIsConfigurable(t *testing.T) {
 	_ = os.Unsetenv("DIGEST_SKIP_SUBJECTS")
 	if got := skipSubjects(); len(got) != len(DefaultDigestSkipSubjects) {
 		t.Errorf("unset must give the default, got %q", got)
+	}
+}
+
+func TestOwnReportGraceDefaultsToAWeekAndMustFitTheWindow(t *testing.T) {
+	t.Setenv("LOOKUP_PROVIDER", "none")
+	t.Setenv("GRAPH_LOOKBACK_HOURS", "24")
+	t.Setenv("MAILBOX_LOOKBACK_HOURS", "336")
+	t.Setenv("MAILBOX_MIN_AGE_HOURS", "48")
+	cfg, err := LoadVulnLookup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MailboxSelfMinAge != 168*time.Hour {
+		t.Errorf("default = %s, want 168h", cfg.MailboxSelfMinAge)
+	}
+	// Unset, a short window caps the default instead of refusing to start.
+	t.Setenv("MAILBOX_LOOKBACK_HOURS", "72")
+	if cfg, err := LoadVulnLookup(); err != nil || cfg.MailboxSelfMinAge != 71*time.Hour {
+		t.Errorf("short window: got %v %v, want 71h", cfg.MailboxSelfMinAge, err)
+	}
+	t.Setenv("MAILBOX_LOOKBACK_HOURS", "336")
+	t.Setenv("MAILBOX_SELF_MIN_AGE_HOURS", "336")
+	if _, err := LoadVulnLookup(); err == nil {
+		t.Error("a grace as long as the window must be refused")
+	}
+	t.Setenv("MAILBOX_SELF_MIN_AGE_HOURS", "0")
+	if cfg, err := LoadVulnLookup(); err != nil || cfg.MailboxSelfMinAge != 0 {
+		t.Errorf("0 must mean archive on sight, got %v %v", cfg.MailboxSelfMinAge, err)
 	}
 }

@@ -46,6 +46,10 @@ type Config struct {
 	// the lane happens to run and a colleague reading this morning's roundup
 	// still finds it where they left it.
 	MailboxMinAge time.Duration
+	// MailboxSelfMinAge is the same wait for the fleet's own reports that come
+	// back to the inbox: a week by default, then Archive. Zero archives them
+	// on sight.
+	MailboxSelfMinAge time.Duration
 
 	JiraBaseURL string
 	// JiraCloudID, when set, sends API calls through the Atlassian gateway
@@ -233,6 +237,25 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 	if err != nil || mailboxMinAgeHours < 0 {
 		return Config{}, fmt.Errorf("MAILBOX_MIN_AGE_HOURS must be zero or a positive integer")
 	}
+	// Left unset, the week is capped to fit inside the window, so an install
+	// that already runs a short MAILBOX_LOOKBACK_HOURS keeps starting. Set
+	// explicitly, a value that cannot fit is refused: at or past the window a
+	// report is never both old enough and still visible, so none is archived.
+	selfDefault := 168
+	if selfDefault >= mailboxLookbackHours {
+		selfDefault = mailboxLookbackHours - 1
+	}
+	mailboxSelfMinAgeHours, err := strconv.Atoi(getenvDefault("MAILBOX_SELF_MIN_AGE_HOURS", strconv.Itoa(selfDefault)))
+	if err != nil || mailboxSelfMinAgeHours < 0 {
+		return Config{}, fmt.Errorf("MAILBOX_SELF_MIN_AGE_HOURS must be zero or a positive integer")
+	}
+	if mailboxSelfMinAgeHours >= mailboxLookbackHours {
+		return Config{}, fmt.Errorf(
+			"MAILBOX_SELF_MIN_AGE_HOURS (%d) must be less than MAILBOX_LOOKBACK_HOURS (%d); "+
+				"otherwise our own reports are never both old enough to archive and "+
+				"still inside the window",
+			mailboxSelfMinAgeHours, mailboxLookbackHours)
+	}
 	// THE CLEANUP MUST NOT ARCHIVE MAIL THE DIGEST STILL NEEDS.
 	//
 	// cti-agent ingests from the INBOX over GRAPH_LOOKBACK_HOURS and rebuilds
@@ -289,6 +312,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		ReportPath:         getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
 		MailboxLookback:    time.Duration(mailboxLookbackHours) * time.Hour,
 		MailboxMinAge:      time.Duration(mailboxMinAgeHours) * time.Hour,
+		MailboxSelfMinAge:  time.Duration(mailboxSelfMinAgeHours) * time.Hour,
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),

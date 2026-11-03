@@ -619,6 +619,16 @@ class MailerGate(unittest.TestCase):
             f.write("<html><body>d</body></html>")
         self.assertEqual(self.run_mailer("--html", f.name, "--subject", "s"), 0)
 
+    def test_the_self_header_matches_the_go_signature(self):
+        # Golden value from internal/graph/selfsign.go selfMAC with the same
+        # inputs. If either side changes, cti-mailbox stops archiving our reports.
+        v = mailer.sign_self_header("s3cret", "Cyber@Example.com",
+                                    nonce="0123456789abcdef01234567")
+        self.assertEqual(
+            v, "Cyber@Example.com; n=0123456789abcdef01234567; sig="
+               "eaebc36cad57f3d0088c739280c34581fd20ca911b3ed4de4e170490c45cf4e8")
+        self.assertEqual(mailer.sign_self_header("", "a@b.c"), "a@b.c")
+
     def test_operator_escalation_needs_no_approval(self):
         self.assertEqual(
             self.run_mailer("--to-operator", "--subject", "s", "--message", "m"), 0)

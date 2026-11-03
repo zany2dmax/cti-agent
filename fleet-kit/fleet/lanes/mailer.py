@@ -43,6 +43,8 @@ mis-send waiting to happen when this is deployed somewhere else, so the fleet
 refuses to guess who should receive security findings.
 """
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -84,6 +86,27 @@ def load_env():
                     continue
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+SELF_HEADER = "X-CTI-Agent-Sent"
+
+
+def sign_self_header(secret, mailbox, nonce=None):
+    """The value cti-mailbox verifies before it archives our own report.
+
+    Same scheme as internal/graph/selfsign.go: "<mailbox>; n=<nonce>; sig=<hmac>",
+    sig = HMAC-SHA256(sha256(context + secret), lower(mailbox) + NUL + nonce).
+    Without it the Go side only recognises these reports by their sender
+    address, which is good enough to keep them out of the digest but not to
+    archive them, so every digest and weekly stayed in the inbox for good.
+    """
+    if not secret:
+        return mailbox
+    nonce = nonce or os.urandom(12).hex()
+    key = hashlib.sha256(b"cti-agent/self-header/v1\x00" + secret.encode()).digest()
+    sig = hmac.new(key, (mailbox.strip().lower() + "\x00" + nonce).encode(),
+                   hashlib.sha256).hexdigest()
+    return f"{mailbox}; n={nonce}; sig={sig}"
 
 
 def token():
@@ -470,6 +493,11 @@ def main():
         "toRecipients": [{"emailAddress": {"address": r}} for r in recipients],
         "importance": "high" if subject.startswith("[Sev5]") else "normal",
     }
+    message["internetMessageHeaders"] = [{
+        "name": SELF_HEADER,
+        "value": sign_self_header(os.environ.get("CLIENT_SECRET", ""),
+                                  args.from_mailbox),
+    }]
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": r}} for r in cc]
     for path in args.attach:
