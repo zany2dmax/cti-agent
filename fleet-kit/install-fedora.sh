@@ -541,6 +541,12 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-kev"
   ok "built $CODE_DIR/bin/cti-kev"
 
+  # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
+  # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-podprobe" ./cmd/cti-podprobe )
+  chmod 0755 "$CODE_DIR/bin/cti-podprobe"
+  ok "built $CODE_DIR/bin/cti-podprobe"
+
   # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
   # against Qualys, so it needs outbound 443 to two more hosts - checked in
   # the preflight above.
@@ -789,7 +795,7 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
@@ -841,7 +847,8 @@ FAIL=0
 [ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
-         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-patchtuesday" \
+         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" \
+         "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
