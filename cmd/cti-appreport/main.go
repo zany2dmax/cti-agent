@@ -579,5 +579,9 @@ func reportFileName(d appscan.Delivery, redacted string) string {
 	if ext != ".zip" {
 		ext = ".html"
 	}
-	return slug + "-scan-report-" + d.Finished.Local().Format("2006-01-02") + ext
+	day := time.Now()
+	if !d.Finished.IsZero() {
+		day = d.Finished
+	}
+	return slug + "-scan-report-" + day.Local().Format("2006-01-02") + ext
 }

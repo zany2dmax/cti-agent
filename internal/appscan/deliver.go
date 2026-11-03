@@ -45,7 +45,10 @@ type Delivery struct {
 	ScanTitle string    `json:"scanTitle,omitempty"`
 	ScanRef   string    `json:"scanRef"`
 	Finished  time.Time `json:"finished"`
-	AuthLabel string    `json:"auth"`
+	// LaunchOnly says Finished is the launch time: a scan known only from
+	// the scanner's list, which gives no end time. Zero when neither is known.
+	LaunchOnly bool   `json:"launchOnly,omitempty"`
+	AuthLabel  string `json:"auth"`
 	// Hold is why this is not sent; empty means send. Retry says the hold
 	// may clear by itself (the API was unreachable), so it is not recorded
 	// as done.
@@ -119,6 +122,9 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 			if _, ok := owners.For(s.AppID, s.App); !ok {
 				d.Hold = "no owner in app-owners.txt"
 			}
+		}
+		if d.Finished.IsZero() && !s.Started.IsZero() {
+			d.Finished, d.LaunchOnly = s.Started, true
 		}
 		f.Deliveries = append(f.Deliveries, d)
 	}
@@ -280,11 +286,19 @@ type OwnerMail struct {
 // attachment's file name, or "" when the report was not attached, with why
 // saying so.
 func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
-	when := d.Finished.Local().Format("Mon 2 Jan 2006")
-	subj := fmt.Sprintf("Web application scan results: %s (%s)", oneLineName(d.App), d.Finished.Local().Format("2 Jan 2006"))
+	subj := "Web application scan results: " + oneLineName(d.App)
+	finished := "finished recently"
+	if !d.Finished.IsZero() {
+		subj += " (" + d.Finished.Local().Format("2 Jan 2006") + ")"
+		verb := "finished on "
+		if d.LaunchOnly {
+			verb = "started on "
+		}
+		finished = verb + d.Finished.Local().Format("Mon 2 Jan 2006")
+	}
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html><body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2328">`)
-	fmt.Fprintf(&b, `<p>The scheduled security scan of <b>%s</b> finished on %s (%s).</p>`, e(d.App), e(when), e(d.AuthLabel))
+	fmt.Fprintf(&b, `<p>The scheduled security scan of <b>%s</b> %s (%s).</p>`, e(d.App), e(finished), e(d.AuthLabel))
 	if !d.NoNotice {
 		fmt.Fprintf(&b, `<p><b>Open findings in the application:</b> %s</p>`, e(ownerCounts(d.Active)))
 		if d.FirstScan {

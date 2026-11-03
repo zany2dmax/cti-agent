@@ -181,12 +181,15 @@ func run() int {
 		if strings.TrimSpace(*appID) == "" && strings.TrimSpace(*appName) == "" {
 			return die("--lane owner needs --app-id (or --app-name) to find the application's line in app-owners.txt")
 		}
+		// The file's problems are logged by the planning step; repeated
+		// here they would be the same lines once per application. Only a
+		// failed lookup shows them, since one of them may be the reason.
 		owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
-		for _, p := range oprobs {
-			logf("owners : %s", safelog.Line(p))
-		}
 		w, ok := owners.For(strings.TrimSpace(*appID), *appName)
 		if !ok {
+			for _, p := range oprobs {
+				logf("owners : %s", safelog.Line(p))
+			}
 			return die("no line for this application in %s, so there is nobody to send its report to",
 				safelog.Line(appscan.OwnersPath()))
 		}
