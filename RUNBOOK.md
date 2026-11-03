@@ -1686,15 +1686,24 @@ per-message records are written to disk or sent in any report.
 
 **Turning on the lane half**
 
-Off by default. With `POD_CLUSTER_ID` and `POD_API_TOKEN` already in
-`fleet.env`, add:
+**Off by default, and nothing changes until you add the first line below.**
+Without `DOMAINS_MAIL_GATEWAY=pod` the weekly never touches the Log API: the
+run prints no `gateway:` lines and the report has no gateway findings. With
+`POD_CLUSTER_ID` and `POD_API_TOKEN` already in `fleet.env` (the same pair
+`cti-podprobe` uses), add:
 
 ```bash
 DOMAINS_MAIL_GATEWAY=pod      # off (or unset) is the default
 DOMAINS_GATEWAY_DAYS=7        # whole days to read, 1 to 28, default 7
 ```
 
-then rehearse with `sudo cti-agent run-domains --dry-run`. The weekly reads
+then rehearse with `sudo cti-agent run-domains --to-dev` (a test send to
+`FLEET_DEV_EMAIL`; it reads the log, writes nothing to Jira and does not
+advance the baseline) and look for the `[domains] gateway:` lines in the output:
+`gateway: Proofpoint on Demand log, last 7 day(s), reading in the background`,
+then `gateway: N events read, ...` (or `NO USABLE EVIDENCE (reason)`). If
+neither appears, the setting is not being read. The read takes roughly 15 to 20
+minutes for 7 days, so the run is slow. The weekly reads
 the archive for the last N whole days (the window ends at the last full hour
 more than an hour ago) in the background while the DNS and web probes run, and
 keeps counts only. What changes in the report, when the evidence is usable:
