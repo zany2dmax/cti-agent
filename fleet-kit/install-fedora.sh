@@ -413,17 +413,26 @@ for p in "$STATE_DIR/CLAUDE.md" "$STATE_DIR/CLAUDE.local.md" "$STATE_DIR/.mcp.js
          "$STATE_DIR/.claude/settings.json" "$STATE_DIR/.claude/settings.local.json" \
          "$STATE_DIR/.claude/commands" "$STATE_DIR/.claude/agents" \
          "$STATE_DIR/.claude/hooks" "$STATE_DIR/.claude/rules" \
-         "$STATE_DIR/.claude/output-styles" "$LEGACY_HASH"; do
+         "$STATE_DIR/.claude/output-styles" "$STATE_DIR/.claude/workflows" \
+         "$STATE_DIR/.claude/projects"/*/memory "$LEGACY_HASH"; do
   [ -e "$p" ] || [ -L "$p" ] || continue
   # Only paths that really are in the state dir: never follow a link out.
   case "$(realpath -m "$(dirname "$p")" 2>/dev/null)" in
     "$STATE_DIR"|"$STATE_DIR/.claude") ;;
+    # realpath is canonical, so this cannot be a ../ out of projects/.
+    "$STATE_DIR/.claude/projects/"*) ;;
     *) warn "$p resolves outside $STATE_DIR - not moved; inspect it"; found_any=1; continue ;;
   esac
   found_any=1
   case "$p" in
     "$STATE_DIR/CLAUDE.md"|"$STATE_DIR/.claude/skills"|"$LEGACY_HASH")
       warn "$p - the old installer's copy; no longer loaded, moved aside" ;;
+    "$STATE_DIR/.claude/projects/"*/memory)
+      # Claude Code's auto-memory: notes a beat wrote for itself, loaded into
+      # the next session. Beats ran with it on before run-checkin turned it
+      # off, so a box upgraded from then has one. Read it: if a beat was ever
+      # steered, this is where it would have left instructions for the next.
+      warn "$p - auto-memory an earlier beat wrote; no longer used, moved aside. Read it." ;;
     *)
       warn "$p - NOT installed by this kit. Read it before deleting it:"
       info "  a file here is how a steered beat would make itself permanent." ;;
