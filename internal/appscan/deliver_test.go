@@ -33,6 +33,7 @@ func TestBuildDeliveriesHoldsWhatWouldMislead(t *testing.T) {
 		{App: "Dark", AppID: "105", Reference: "was/1.6", Complete: true, HostsScanned: 1},
 		{App: "Email Only", Reference: "was/1.7", Complete: true},
 		{App: "Sent Already", AppID: "106", Reference: "was/1.8", Complete: true},
+		{App: "From The List", AppID: "101", Reference: "was/1.9", Complete: true, NoNotification: true, Started: fin},
 	}
 	done := DeliveredLog{"id:106": {Ref: "was/1.8"}}
 	f := BuildDeliveries(scans, deliverOwners(t), done, fin)
@@ -59,6 +60,9 @@ func TestBuildDeliveriesHoldsWhatWouldMislead(t *testing.T) {
 	}
 	if !got["Email Only"].Retry || got["Cut Short"].Retry {
 		t.Error("only a hold that may clear by itself is retried")
+	}
+	if d := got["From The List"]; !d.LaunchOnly || !d.Finished.Equal(fin) {
+		t.Errorf("a scan known only from the list has no date: %+v", d)
 	}
 	if got["Good App"].AuthLabel != "authenticated scan" {
 		t.Errorf("auth label %q", got["Good App"].AuthLabel)
@@ -174,7 +178,15 @@ func TestRenderOwnerMail(t *testing.T) {
 	if !strings.HasPrefix(m.Subject, "Web application scan results: <script>Shop</script>") {
 		t.Errorf("subject %q", m.Subject)
 	}
+	m = RenderOwnerMail(Delivery{App: "Listed", NoNotice: true, LaunchOnly: true,
+		Finished: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)}, "r.html", "")
+	if !strings.Contains(m.HTML, "started on") || !strings.Contains(m.Subject, "2026") {
+		t.Errorf("launch-only date: %q\n%s", m.Subject, m.HTML)
+	}
 	m = RenderOwnerMail(Delivery{App: "Big", NoNotice: true}, "", "it is 4.1 MB, over the 3 MB email limit")
+	if strings.Contains(m.Subject, "0001") || strings.Contains(m.HTML, "0001") || !strings.Contains(m.HTML, "finished recently") {
+		t.Errorf("zero date rendered: %q\n%s", m.Subject, m.HTML)
+	}
 	if !strings.Contains(m.HTML, "not attached: it is 4.1 MB") || strings.Contains(m.HTML, "Open findings") {
 		t.Errorf("too-large mail:\n%s", m.HTML)
 	}
