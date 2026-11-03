@@ -292,8 +292,13 @@ func (a *Aggregate) addEvent(ev *event) {
 		}
 		st.Total++
 		bump(st.DMARC, dmarc)
-		if ip := key(ev.Connection.IP); ip != "(none)" {
-			bump(a.SpoofIPs, ip)
+		// Only the senders DMARC did not pass: a passing sender is one of our
+		// own cloud services (it signs or aligns as us), and listing its
+		// address beside the real offenders only buries them.
+		if dmarc != "pass" {
+			if ip := key(ev.Connection.IP); ip != "(none)" {
+				bump(a.SpoofIPs, ip)
+			}
 		}
 	}
 }
@@ -433,5 +438,5 @@ func (a *Aggregate) Report(w io.Writer, n int) {
 		}
 		p("  %7d  %s  [dmarc: %s]\n", st.Total, k, strings.Join(parts, " "))
 	}
-	section("sender IPs of those messages", a.SpoofIPs)
+	section("sender IPs of those messages that did not pass DMARC", a.SpoofIPs)
 }
