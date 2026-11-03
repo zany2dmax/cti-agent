@@ -344,6 +344,12 @@ One installer, `fleet-kit/install-fedora.sh`, with the FHS layout: code in
 `/etc/cti-agent`, state in `/var/lib/cti-agent`. There used to be a generic
 single-directory installer; it is gone because it left the code owned by the
 service account, and the heartbeat now refuses to start on a layout like that.
+The orchestrator's `CLAUDE.md` and skills live in `/opt/cti-agent/orchestrator`
+(root-owned) with `/opt/cti-agent/checkin-settings.json`; on an existing box the
+installer moves the old copies from `/var/lib/cti-agent` into
+`/etc/cti-agent/quarantine/<timestamp>/`. If a beat refuses with "files that
+could steer the beat" or "REFUSING ... is missing", re-run the installer, then
+check with `sudo cti-agent run-checkin --audit`.
 
 The installer builds all eleven binaries, installs 17 systemd units and the
 man pages, writes the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux,
@@ -1884,6 +1890,9 @@ sudo journalctl -u cti-agent-digest --since today \
 
 # The cleanup plan, and whether the archive list is only CTI mail
 sudo cti-agent cti-mailbox
+
+# Would the heartbeat start? Integrity and steering checks, no beat
+sudo cti-agent run-checkin --audit
 
 # The heartbeat's quota position, if it is skipping beats
 sudo cti-agent cti-budget status

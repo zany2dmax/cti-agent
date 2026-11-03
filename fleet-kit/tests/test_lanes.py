@@ -1984,38 +1984,230 @@ class TestFileShape(unittest.TestCase):
         self.assertFalse(any(r.split("(")[0] in ("Edit", "Write", "NotebookEdit")
                              for r in self._orchestrator_grant()))
 
+    def _checkin_box(self, overrides=None, plant=(), claude_json=None):
+        """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
+        install-fedora.sh lays it out, read-only to this test's user, and a
+        fake stat(1) that reports root ownership unless told otherwise.
+
+        overrides maps a path relative to the box to {"u": uid, "a": mode} for
+        stat to report, so a single wrong entry can be tested on its own.
+        plant lists paths relative to HOME to create before the run.
+        Returns (CompletedProcess, what the fake claude and fleet-board saw).
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        self.addCleanup(subprocess.run, ["chmod", "-R", "u+w", str(d)])
+        code, home, fake, tmp = d / "code", d / "home", d / "fakebin", d / "tmp"
+        for p in (code / "bin", code / "orchestrator" / ".claude" / "skills" / "checkin",
+                  home, fake, tmp):
+            p.mkdir(parents=True)
+        ran = d / "ran"
+        shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "run-checkin", code / "bin" / "run-checkin")
+        for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert"):
+            (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
+        (code / "checkin-settings.json").write_text("{}\n")
+        (code / "orchestrator" / "CLAUDE.md").write_text("# test\n")
+        (code / "orchestrator" / ".claude" / "skills" / "checkin" / "SKILL.md").write_text("# test\n")
+        (fake / "claude").write_text(
+            f'#!/bin/sh\n{{ echo "claude cwd=$PWD"; for a; do echo "arg $a"; done; }} >> "{ran}"\n')
+        (fake / "uname").write_text("#!/bin/sh\necho Linux\n")
+        (fake / "python3").symlink_to(sys.executable)
+        table = d / "stat.json"
+        table.write_text(json.dumps({str(d / k): v for k, v in (overrides or {}).items()}))
+        # stat -L -c FMT PATH, as run-checkin calls it. Ownership from the
+        # table (default root), mode and mtime from the real file.
+        (fake / "stat").write_text(f"""#!{sys.executable}
+import json, os, sys
+args = [a for a in sys.argv[1:] if a != "-L"]
+fmt, path = args[args.index("-c") + 1], args[-1]
+st = os.stat(path)
+o = json.load(open({str(table)!r})).get(path, {{}})
+print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
+        "%Y": int(st.st_mtime)}}[fmt])
+""")
+        for rel in plant:
+            p = home / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("{}\n" if rel.endswith(".json") else "planted\n")
+        if claude_json is not None:
+            (home / ".claude.json").write_text(json.dumps(claude_json))
+        for f in fake.iterdir():
+            if not f.is_symlink():
+                f.chmod(0o555)
+        # Read-only to us, which is what "writable by nobody else, us
+        # included" means for a non-root test. Files first, then directories.
+        for p in sorted(code.rglob("*"), key=lambda p: -len(p.parts)):
+            p.chmod(0o555 if p.is_dir() or p.parent.name == "bin" else 0o444)
+        code.chmod(0o555)
+        env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(home),
+               "FLEET_HOME": str(home), "FLEET_CODE": str(code),
+               "FLEET_ENV": str(d / "none.env"), "TMPDIR": str(tmp),
+               "CLAUDE_BIN": str(fake / "claude"),
+               "ANTHROPIC_API_KEY": "test-placeholder"}
+        r = subprocess.run(["bash", str(code / "bin" / "run-checkin")], env=env,
+                           capture_output=True, text=True)
+        return r, (ran.read_text() if ran.exists() else "")
+
     def test_the_heartbeat_refuses_to_run_code_the_service_can_write(self):
         """run-checkin fails closed when its code is not root-owned.
 
-        Runs the real script against a FLEET_CODE this test owns, pretending
-        to be Linux. It must exit 1 before it posts to the board or starts
-        claude - both of which would be running the very files that failed.
+        Each case leaves the rest of the box correct and gets one entry wrong,
+        so the refusal is about that entry - including the $FLEET_CODE/bin/*
+        commands the beat is granted, and the orchestrator files that steer
+        it. It must exit 1 before it posts to the board or starts claude -
+        both of which would be running the very files that failed.
         """
+        for rel, bad in (
+            ("code/bin/run-checkin", {"u": 1000}),
+            ("code/bin", {"a": "775"}),
+            ("code/bin/fleet-db", {"u": 1000}),
+            ("code/bin/fleet-journal", {"a": "557"}),
+            ("code/bin/cti-alert", {"a": "575"}),
+            ("code/checkin-settings.json", {"u": 1000}),
+            ("code/orchestrator", {"u": 1000}),
+            ("code/orchestrator/CLAUDE.md", {"a": "666"}),
+            ("code/orchestrator/.claude/skills/checkin/SKILL.md", {"u": 1000}),
+            ("fakebin/claude", {"u": 1000}),
+        ):
+            with self.subTest(path=rel):
+                r, ran = self._checkin_box(overrides={rel: bad})
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("REFUSING to start", r.stderr)
+                self.assertIn(rel.split("/")[-1], r.stderr)
+                self.assertNotIn("claude cwd", ran)
+                self.assertNotIn("fleet-board", ran)
+
+    def test_the_heartbeat_starts_on_a_correct_layout(self):
+        """The check must also let a correct box beat - a fail-closed check
+        that refuses everything looks exactly like one that works, until the
+        heartbeat has been silent for a day. And when it does beat, claude
+        runs in the root-owned orchestrator dir with project settings only,
+        the root-owned settings file and no MCP servers."""
+        r, ran = self._checkin_box()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        lines = ran.splitlines()
+        self.assertTrue(any(l.startswith("claude cwd=") and l.endswith("/code/orchestrator")
+                            for l in lines), ran)
+        args = [l[4:] for l in lines if l.startswith("arg ")]
+        for flag, value in (("--setting-sources", "project"),
+                            ("--permission-mode", "default"),
+                            ("--disallowedTools", "Edit,Write,NotebookEdit")):
+            self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertTrue(args[args.index("--settings") + 1].endswith("/code/checkin-settings.json"))
+        self.assertIn("--strict-mcp-config", args)
+        grant = args[args.index("--allowedTools") + 1]
+        self.assertIn("/code/bin/fleet-journal:*)", grant)
+        self.assertNotIn("journalctl", grant)
+
+    def test_the_heartbeat_refuses_steering_files_the_account_could_plant(self):
+        """A beat steered once must not leave behind something that steers
+        every beat after it. Claude Code loads skills, commands, agents,
+        CLAUDE.md and settings from the account's HOME and config dir, and
+        MCP servers from ~/.claude.json; the account can write all of them."""
+        for plant in (".claude/skills/checkin/SKILL.md", ".claude/commands/checkin.md",
+                      ".claude/agents/x.md", ".claude/CLAUDE.md", ".mcp.json",
+                      ".claude/settings.local.json"):
+            with self.subTest(plant=plant):
+                r, ran = self._checkin_box(plant=[plant])
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("files that could steer the beat", r.stderr)
+                # A directory is reported as the directory.
+                self.assertIn("/home/" + "/".join(plant.split("/")[:2]) + ":", r.stderr)
+                self.assertNotIn("claude cwd", ran)
+                self.assertIn("fleet-board post @you @operator ERROR", ran)
+        for name, cj in (
+            ("mcpServers", {"mcpServers": {"x": {"command": "/bin/sh"}}}),
+            ("project mcpServers", {"projects": {"/x": {"mcpServers": {"x": {}}}}}),
+            ("project allowedTools", {"projects": {"/x": {"allowedTools": ["Bash"]}}}),
+        ):
+            with self.subTest(claude_json=name):
+                r, ran = self._checkin_box(claude_json=cj)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn(".claude.json", r.stderr)
+                self.assertNotIn("claude cwd", ran)
+        # What Claude Code writes there itself is not a finding.
+        r, ran = self._checkin_box(claude_json={
+            "numStartups": 3, "projects": {"/x": {"allowedTools": [], "mcpServers": {}}}})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("claude cwd", ran)
+
+    def test_fleet_journal_reads_the_fleets_units_and_nothing_else(self):
+        """journalctl:* granted --cursor-file=PATH, which overwrites PATH as the
+        service account: state/budget.json (resetting the quota) or memory.db.
+        The wrapper passes -u cti-agent-*, --since, -n and --no-pager, each as
+        --opt=VALUE so a value cannot become an option, and nothing else."""
         root = pathlib.Path(__file__).resolve().parents[2]
-        script = root / "fleet-kit" / "fleet" / "bin" / "run-checkin"
+        src = (root / "fleet-kit" / "fleet" / "bin" / "fleet-journal").read_text(encoding="utf-8")
+        self.assertIn("\nJOURNALCTL=/usr/bin/journalctl\n", src)
         with tempfile.TemporaryDirectory() as d:
             d = pathlib.Path(d)
-            code = d / "code"
-            (code / "bin").mkdir(parents=True)
-            fake = d / "fakebin"
-            fake.mkdir()
-            ran = d / "ran"
-            for name in ("fleet-board", "claude"):
-                f = (code / "bin" / name) if name == "fleet-board" else (fake / name)
-                f.write_text(f'#!/bin/sh\necho {name} >> "{ran}"\n')
-                f.chmod(0o755)
-            (fake / "uname").write_text("#!/bin/sh\necho Linux\n")
-            (fake / "uname").chmod(0o755)
-            env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(d),
-                   "FLEET_HOME": str(d), "FLEET_CODE": str(code),
-                   "FLEET_ENV": str(d / "none.env"),
-                   "CLAUDE_BIN": str(fake / "claude"),
-                   "ANTHROPIC_API_KEY": "test-placeholder"}
-            r = subprocess.run(["bash", str(script)], env=env,
-                               capture_output=True, text=True)
-            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-            self.assertIn("REFUSING to start", r.stderr)
-            self.assertFalse(ran.exists(), "ran " + (ran.read_text() if ran.exists() else ""))
+            fake = d / "journalctl"
+            fake.write_text('#!/bin/sh\nfor a; do echo "$a"; done\n')
+            fake.chmod(0o755)
+            w = d / "fleet-journal"
+            w.write_text(src.replace("\nJOURNALCTL=/usr/bin/journalctl\n", f"\nJOURNALCTL={fake}\n"))
+
+            def run(*args):
+                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True)
+
+            for args, want in (
+                (["-u", "cti-agent-*", "--since", "-3h", "--no-pager"],
+                 ["--no-pager", "--unit=cti-agent-*", "--since=-3h"]),
+                (["-u", "cti-agent-appscan.service", "--since", "today", "--no-pager"],
+                 ["--no-pager", "--unit=cti-agent-appscan.service", "--since=today"]),
+                (["-u", "cti-agent-checkin.service", "-n", "100"],
+                 ["--no-pager", "--unit=cti-agent-checkin.service", "--lines=100"]),
+                (["-u", "cti-agent-alert@x.service", "--since", "2026-11-03 06:00:00"],
+                 ["--no-pager", "--unit=cti-agent-alert@x.service", "--since=2026-11-03 06:00:00"]),
+            ):
+                with self.subTest(args=args):
+                    r = run(*args)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual(r.stdout.splitlines(), want)
+            for args in (
+                ["-u", "cti-agent-x", "--cursor-file=/var/lib/cti-agent/state/budget.json"],
+                ["-u", "cti-agent-x", "--cursor-file", "/tmp/x"],
+                ["-u", "cti-agent-x", "--after-cursor=x"],
+                ["-u", "cti-agent-x", "--output-fields=MESSAGE"],
+                ["-u", "cti-agent-x", "-D", "/var/log/journal"],
+                ["-u", "cti-agent-x", "--file=/etc/shadow"],
+                ["-u", "cti-agent-x", "--vacuum-size=1"],
+                ["-u", "sshd"],
+                ["-u", "x-cti-agent-x"],
+                ["-u", "cti-agent-x;id"],
+                ["-u", "cti-agent-x", "--since", "today; id"],
+                ["-u", "cti-agent-x", "--since", "$(id)"],
+                ["-u", "cti-agent-x", "-n", "-1"],
+                ["-u", "cti-agent-x", "-n", "10", "_PID=1"],
+                ["--no-pager"],
+                [],
+            ):
+                with self.subTest(refused=args):
+                    r = run(*args)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertEqual(r.stdout, "")
+
+    def test_the_orchestrator_files_are_installed_root_owned(self):
+        """CLAUDE.md and the skills steer the beat. The installer put them in
+        the service account's state dir, owned by it; they now go to a
+        root-owned directory under the code, and the old copies - and
+        anything else Claude Code would load from there - are moved aside."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        code = "\n".join(l for l in inst.split("\n") if not l.lstrip().startswith("#"))
+        self.assertIn('AGENT_DIR="$CODE_DIR/orchestrator"', code)
+        for line in re.findall(r"^\s*run install [^\n]*(?:\\\n[^\n]*)*", code, re.M):
+            if "CLAUDE.md" in line or "skills" in line or "checkin-settings" in line:
+                self.assertIn("-o root -g root", line, line)
+                self.assertNotIn("$STATE_DIR", line, line)
+        self.assertIn('"$CODE_DIR/bin/run-checkin" --audit', code)
+        self.assertIn('run mv "$p" "$QUARANTINE/$rel"', code)
+        self.assertTrue((root / "fleet-kit" / "fleet" / "checkin-settings.json").exists())
+        settings = json.loads((root / "fleet-kit" / "fleet" / "checkin-settings.json").read_text())
+        self.assertIs(settings["disableAllHooks"], True)
+        self.assertIs(settings["enableAllProjectMcpServers"], False)
+        self.assertTrue({"Edit", "Write", "NotebookEdit"} <= set(settings["permissions"]["deny"]))
 
     def test_the_generic_installer_stays_retired(self):
         """install.sh left the fleet's code owned by the service account.

@@ -520,9 +520,10 @@ list changes) - are timer-owned and not on the orchestrator's grant.
 
 The heartbeat runs `claude -p` unattended, with `--permission-mode default`,
 `--disallowedTools "Edit,Write,NotebookEdit"` and an explicit `--allowedTools`
-list: named fleet commands by absolute path, `journalctl`,
-`systemctl list-timers`, and nothing else. It keeps Claude Code's read-only
-file tools, which it uses to look at `reports/`.
+list: named fleet commands by absolute path, `fleet-journal` (a wrapper, not
+`journalctl`; see below), `systemctl list-timers`, and nothing else. It keeps
+Claude Code's read-only file tools, limited to `Read` grants on `reports/`,
+`logs/` and `archive/` under `$FLEET_HOME`.
 
 **The beat cannot edit files, and will not run code it could edit.** A
 PrimeSec scan found that the beat ran with `acceptEdits` (which auto-approves
@@ -541,6 +542,51 @@ world-writable, and not writable by the account running it. The unit's
 `install-fedora.sh` is the only installer, and it puts the code in
 `/opt/cti-agent` as `root:root` `0755`.
 
+**The beat's instructions and settings are root-owned too.** The code is not
+the only thing a beat runs on: Claude Code also loads `CLAUDE.md`, skills,
+`.claude/settings*.json` (allow rules and hooks, which are shell commands),
+`.mcp.json` and `~/.claude.json` from its working directory and home. The beat
+used to start in `/var/lib/cti-agent`, the service account's own home, where
+the installer put `CLAUDE.md` and the skills owned by that account; an account
+that owns a directory can replace anything in it, root-owned files or not. On
+Linux the beat now starts in `/opt/cti-agent/orchestrator`, a root-owned
+directory holding only `CLAUDE.md` and `.claude/skills/<name>/SKILL.md`, and
+runs with `--setting-sources project` (nothing from `~/.claude`),
+`--strict-mcp-config` with no server given, and
+`--settings /opt/cti-agent/checkin-settings.json`, a root-owned `0644` file
+that turns hooks off, disables bypass-permissions mode and denies `Edit`,
+`Write`, `NotebookEdit`, `WebFetch` and `WebSearch`. The integrity check
+covers every entry of `$FLEET_CODE/bin`, the settings file and the
+orchestrator directory, and the beat refuses to start if `CLAUDE.md`, the
+`checkin` skill or the settings file is missing.
+
+**A steering audit refuses the beat if something has been planted.** A beat
+steered once must not be able to leave a file behind that steers every later
+one. Before each beat `run-checkin` looks for files Claude Code would load that
+this fleet never installs: in the orchestrator directory, `.claude/settings*.json`,
+`.mcp.json`, `CLAUDE.local.md` and `.claude/commands|agents|hooks|rules`; in
+the service account's home and config directory, `CLAUDE.md`, `skills`,
+`commands`, `agents`, `hooks`, `rules`, `output-styles`, `settings.local.json`,
+`~/CLAUDE.md`, `~/CLAUDE.local.md` and `~/.mcp.json`; and keys in
+`~/.claude/settings.json` or `~/.claude.json` that set hooks, permissions, MCP
+servers, env, helper commands or plugins (and, per project, `allowedTools` or
+MCP servers). Any hit exits 1 with an ERROR on the board and names the file.
+On macOS the audit is reported, not enforced. `run-checkin --audit` runs the
+integrity and steering checks without starting a beat, and the installer runs
+it as the service account. On an existing box the installer moves the old
+`/var/lib/cti-agent/CLAUDE.md`, `.claude/skills` and any planted Claude Code
+files into `/etc/cti-agent/quarantine/<timestamp>/` (root-only; nothing is
+deleted) and prints a diff hint if the old `CLAUDE.md` had operator edits.
+
+**The journal goes through `fleet-journal`, not `journalctl`.** `journalctl
+--cursor-file=PATH` writes `PATH` as the service account, so a grant of
+`journalctl:*` let a steered beat overwrite `state/budget.json` (resetting the
+quota that stops the fleet crowding out its owner) or `memory.db`; `--file`,
+`--directory` and `--merge` widen what it can read. The grant is now
+`$FLEET_CODE/bin/fleet-journal:*`, a root-owned wrapper that accepts only
+`-u|--unit cti-agent-*`, `--since`, `-n|--lines` and `--no-pager`, passes each
+as `--opt=VALUE`, and exits 2 on anything else.
+
 **Named per subcommand, not per binary.** The list used to grant `fleet-db:*`
 and `cti-patchtuesday:*`. The first included `fleet-db sent`, which records a
 digest as delivered so `run-digest` skips the real one, and `fleet-db finding`,
@@ -550,7 +596,11 @@ release's CVEs. `CLAUDE.md` forbade all three, but a prohibition that lives
 only in the prompt, on a capability the grant includes, is not a control. The
 grant is now `fleet-db` read and memory subcommands only, and `cti-patchtuesday
 --dry-run:*`, made safe by the binary itself refusing `--mark-sent` together
-with `--dry-run`. `tests/test_lanes.py` fails if a forbidden command becomes
+with `--dry-run`. It likewise refuses `--url-msrc` (other than `none`),
+`--url-bleeping`, `--url-qualys` and `--drop-dir` with `--dry-run` (exit 2),
+because the grant allows any arguments and those would let a steered beat make
+outbound GETs to any host or read any folder; the operator still uses them
+without `--dry-run`. `tests/test_lanes.py` fails if a forbidden command becomes
 grantable, or if the instructions tell the agent to run something that is not.
 
 **`fleet.env` is outside the agent's reach by instruction only.** The service
@@ -563,8 +613,9 @@ place yet because the rule syntax has not been verified on the installed
 version, and a malformed flag would stop every beat.
 
 **The list is a command-line flag in `run-checkin`, not a settings file.**
-A permissions file inside the agent's own home directory is a permissions file
-the agent's account owns. `run-checkin` is root-owned `0755` under `$CODE_DIR`
+A permissions file the agent's account owns is a permissions file the agent
+can edit; the settings file the beat does load is root-owned and only
+narrows (hooks off, deny rules). `run-checkin` is root-owned `0755` under `$CODE_DIR`
 and the service account cannot modify it, which makes it the one place the list
 cannot be widened by the thing it constrains. The startup integrity check
 described above is what keeps that true: a box where it stops being true does
@@ -595,11 +646,11 @@ Deliberately absent from the grant:
 - **`run-domains` and `cti-domains`.** Not granted. The first sends to the
   security team; the second probes every domain we own and advances last
   week's baseline, so an extra run would swallow a week's changes. The
-  orchestrator reads `journalctl -u cti-agent-domains.service`.
+  orchestrator reads `fleet-journal -u cti-agent-domains.service`.
 - **`run-appscan` and `cti-appscan`.** The first sends the AppSec report to
   another team; the second reads the mailbox and the Qualys WAS API. Neither is
   a beat-time decision. The orchestrator learns what the last run found from
-  `journalctl -u cti-agent-appscan.service`, which it is granted.
+  `fleet-journal -u cti-agent-appscan.service`, which it is granted.
 - **A general shell.** There is no `Bash(*)` entry.
 
 Until this list existed the agent had no Bash capability at all: with nobody
