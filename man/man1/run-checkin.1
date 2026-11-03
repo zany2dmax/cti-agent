@@ -42,9 +42,54 @@ on failure.
 .PP
 The steps, in order:
 .TP
+.B 0. Code integrity
+On Linux the runner refuses to start unless the code it will run cannot be
+changed by the account running it. Each of
+.IR run\-checkin ,
+its directory,
+.BR FLEET_CODE ,
+.IR $FLEET_CODE/bin ,
+and the granted binaries
+.BR fleet\-board ,
+.BR fleet\-db ,
+.BR cti\-budget ,
+.BR cti\-kev ,
+.BR cti\-patchtuesday ,
+.BR cti\-mailbox
+and
+.B cti\-alert
+(those that exist) must be owned by root, not writable by group or others, and
+not writable by the running account. Symbolic links are judged by their
+target. Otherwise the runner prints
+.B REFUSING to start
+and the offending path to standard error and exits 1.
+It posts nothing to the board, because
+.B fleet\-board
+is one of the files being checked, and it does not start Claude Code; the
+unit's
+.B OnFailure
+alert tells the operator. The reason is that the beat reads attacker-supplied
+text and its allowlist is built here: if the service account could rewrite the
+runner or a granted binary, a hostile advisory could change what every later
+run executes with the fleet's credentials.
+.B install\-fedora.sh
+installs the code root-owned
+.B 0755
+under
+.IR /opt/cti\-agent ,
+which passes. The retired generic layout, with the code owned by the service
+account, does not. On macOS the check is skipped with a log line, since that
+is a developer's own checkout.
+.TP
 .B 1. Find claude
 .B CLAUDE_BIN
-if set, which must be executable. Otherwise the first executable of
+if set, which must be executable. Otherwise, on Linux, the first executable
+of
+.I /usr/bin/claude
+and
+.IR /usr/local/bin/claude ;
+the binary found must pass the same root-owned check as the code, or the
+beat refuses to start. On macOS, the first executable of
 .IR $HOME/.local/bin/claude ,
 .IR /usr/bin/claude ,
 .IR /usr/local/bin/claude ,
@@ -105,13 +150,14 @@ is absent there is no gate.
 .TP
 .B 5. Beat
 .EX
-claude \-p /checkin \-\-permission\-mode acceptEdits \e
+claude \-p /checkin \-\-permission\-mode default \e
+       \-\-disallowedTools "Edit,Write,NotebookEdit" \e
        \-\-allowedTools "$ALLOWED_TOOLS" </dev/null
 .EE
 .IP
 stdin is closed, so nothing can be approved interactively. Output goes to
-the journal and to a temporary file. The allowlist itself is printed to the
-journal before the beat.
+the journal and to a temporary file. The allowlist and the disallowed tools
+are printed to the journal before the beat.
 .TP
 .B 6. Record
 If
@@ -143,9 +189,18 @@ Everything in
 is exported into Claude Code's environment, Graph and scanner credentials
 included.
 .SS What the orchestrator may run
-.B \-\-permission\-mode acceptEdits
-approves file edits only; every shell command needs a grant, and with no
-terminal anything not granted is denied. The grant is built in the runner,
+The beat has no file-edit tools:
+.BR Edit ,
+.B Write
+and
+.B NotebookEdit
+are disallowed, because nothing in
+.B /checkin
+writes a file (memory, tasks and board posts go through the commands below)
+and an edit grant would let a beat steered by hostile input rewrite its own
+instructions. Read-only file tools remain, for looking at reports and logs.
+Every shell command needs a grant, and with no terminal anything not granted
+is denied. The grant is built in the runner,
 not in a settings file the agent could edit, from absolute paths under
 .I $FLEET_CODE/bin
 (shown here as
@@ -324,6 +379,7 @@ credit (exit 4). The last two post to the board and may alert, but are not
 unit failures.
 .TP
 .B 1
+The code integrity check failed (step 0), so nothing was started;
 .B claude
 was not found,
 .B CLAUDE_BIN

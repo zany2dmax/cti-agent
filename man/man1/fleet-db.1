@@ -122,9 +122,9 @@ sends no mail and makes no network calls.
 Create the schema and run the migration, then print
 .BI "initialized " path\fR.
 Idempotent.
-.B install.sh
-runs it once; on the Fedora layout the schema is created by the first
-command that touches the database, since every command does the same.
+The schema is created by the first
+command that touches the database, since every command does the same, so
+running it is never required.
 .TP
 .BI remember " category topic content..."
 Store a free-text memory with the current UTC time. Prints

@@ -37,6 +37,48 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Security
+
+- **The heartbeat can no longer edit files, and refuses to run code it could
+  edit.** A PrimeSec scan found two things that were unsafe together. The beat
+  ran `claude` with `--permission-mode acceptEdits`, which auto-approves file
+  edits, and the generic `install.sh` left the fleet's runners and tool
+  policy owned by the service account. A beat steered by a hostile advisory
+  or mail could have rewritten `run-checkin` or a granted binary, and every
+  later run would have executed the change with the fleet's credentials.
+  - `run-checkin` now uses `--permission-mode default` with
+    `--disallowedTools "Edit,Write,NotebookEdit"`. Nothing in `/checkin`
+    writes a file, so nothing is lost; the beat keeps its read-only file tools
+    for `reports/` and logs.
+  - On Linux `run-checkin` fails closed: it exits 1, before posting to the
+    board or starting `claude`, unless it, its directory, `$FLEET_CODE`,
+    `$FLEET_CODE/bin` and each granted binary are root-owned, not group- or
+    world-writable, and not writable by the running account. The unit's
+    `OnFailure` alert notifies the operator. On macOS the check is skipped
+    with a log line.
+  - `fleet-kit/install.sh` and `fleet-kit/fleet/systemd/` are removed.
+    `install-fedora.sh` (code in `/opt/cti-agent`, `root:root` `0755`) is the
+    only installer. The docs and man pages no longer describe the generic
+    layout.
+  - Found by the follow-up review: on Linux the beat now uses only a
+    root-owned `claude` (`CLAUDE_BIN`, `/usr/bin/claude` or
+    `/usr/local/bin/claude`) and checks it like the rest of the code. It used
+    to look in `~/.local/bin` first, which is the service account's own HOME.
+    `journalctl` and `systemctl list-timers` are granted by absolute path
+    (`/usr/bin/...`), so a same-named binary earlier on `PATH` gets nothing.
+    `fleet-db` runs as `/usr/bin/python3 -sE`, so `PYTHON*` variables and the
+    account's user site-packages cannot load code into it.
+
+  **Upgrade:** on the Fedora box, check `command -v claude` first. If it is
+  under `/var/lib/cti-agent/.local/bin`, install the dnf package
+  (`sudo dnf install claude-code`, repo in `install-fedora.sh`) and remove the
+  per-account copy, or the heartbeat refuses to start. Then pull and
+  reinstall with `install-fedora.sh` as usual. After the first beat,
+  `journalctl -u cti-agent-checkin.service -n 30 --no-pager` should show
+  `disallowed tools: Edit,Write,NotebookEdit` and no `REFUSING to start`.
+  Anyone still on an `install.sh` layout must move to `install-fedora.sh`: the
+  heartbeat now refuses to start there.
+
 ### Fixed
 
 - **Mailbox cleanup ran before the digest.** `install-fedora.sh` moved the

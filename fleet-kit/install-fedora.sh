@@ -2,12 +2,13 @@
 #
 # install-fedora.sh - deploy the CTI fleet on Fedora / RHEL / Rocky / Alma.
 #
-# WHY A SEPARATE INSTALLER
-#   install.sh puts everything under /home/ctiagent and hardens the units with
-#   ProtectHome=read-only plus a ReadWritePaths punch-through into /home. That
-#   combination is order-dependent in systemd and is the exact shape SELinux is
-#   most likely to deny on a Fedora box running enforcing. Rather than fight it,
-#   this installer uses the FHS layout systemd and SELinux already expect:
+# WHY THIS LAYOUT
+#   The retired generic install.sh put everything under /home/ctiagent, owned
+#   by the service account - so the account could rewrite the code it runs -
+#   and hardened the units with ProtectHome=read-only plus a ReadWritePaths
+#   punch-through into /home, the exact shape SELinux is most likely to deny.
+#   This installer, now the only one, uses the FHS layout systemd and SELinux
+#   already expect:
 #
 #     /opt/cti-agent      code, root-owned, read-only to the service
 #     /etc/cti-agent      config; fleet.env is 0640 root:ctiagent
@@ -212,7 +213,6 @@ if [ -r /etc/os-release ]; then
       ok "${PRETTY_NAME:-$ID}" ;;
     *)
       warn "${PRETTY_NAME:-unknown} is not Fedora/RHEL-family"
-      info "install.sh is the Debian/Ubuntu-oriented variant"
       read -r -p "  Continue anyway? [y/N] " c
       [ "${c:-n}" = y ] || bail 1 ;;
   esac
@@ -734,11 +734,17 @@ fi
 # ─────────────────────────────────────────────────────────── Claude Code ─────
 bold "Claude Code"
 CLAUDE_BIN=""
-for c in /usr/bin/claude /usr/local/bin/claude "$STATE_DIR/.local/bin/claude"; do
+for c in /usr/bin/claude /usr/local/bin/claude; do
   [ -x "$c" ] && { CLAUDE_BIN="$c"; break; }
 done
 if [ -n "$CLAUDE_BIN" ]; then
   ok "found $CLAUDE_BIN"
+elif [ -x "$STATE_DIR/.local/bin/claude" ]; then
+  # The service account can replace a binary in its own HOME, and the
+  # heartbeat would run the replacement every beat. run-checkin refuses it.
+  warn "claude is only in $STATE_DIR/.local/bin - the heartbeat will NOT use it"
+  info "Install it system-wide from the signed dnf repo: sudo dnf install claude-code"
+  info "then remove the per-account copy: sudo rm $STATE_DIR/.local/bin/claude"
 else
   warn "not installed - the digest timers do not need it, only the heartbeat does"
   info "Install from the signed dnf repo, then authenticate as $FLEET_USER:"

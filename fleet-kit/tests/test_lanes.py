@@ -1945,7 +1945,7 @@ class TestFileShape(unittest.TestCase):
         for a person rather than for the agent.
         """
         found = []
-        start = re.compile(r'^"?(\$FLEET_CODE/|python3 |journalctl|systemctl )')
+        start = re.compile(r'^"?(\$FLEET_CODE/|python3 |(/usr/bin/)?journalctl|(/usr/bin/)?systemctl )')
         for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
             joined = re.sub(r"\\\n\s*", " ", block)
             for line in joined.split("\n"):
@@ -1962,6 +1962,70 @@ class TestFileShape(unittest.TestCase):
                 found.append(span)
         # Placeholders are arguments, not part of the command's identity.
         return [re.split(r"\s[\[<…]|\s\.\.\.", c)[0].strip() for c in found]
+
+    def test_the_heartbeat_cannot_edit_files(self):
+        """A beat reads untrusted advisories and mail; it must not write files.
+
+        It ran with --permission-mode acceptEdits, which auto-approves Edit and
+        Write, though nothing in /checkin writes a file. A security scan showed
+        the chain: a hostile message steers the beat, the beat rewrites a runner
+        it can write, and the next timer run executes it. The grant is gone and
+        the edit tools are disallowed by name.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        src = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
+        code = "\n".join(l for l in src.split("\n") if not l.lstrip().startswith("#"))
+        self.assertNotIn("acceptEdits", code)
+        self.assertNotIn("bypassPermissions", code)
+        self.assertIn('--disallowedTools "$DISALLOWED_TOOLS"', code)
+        m = re.search(r'^DISALLOWED_TOOLS="([^"]*)"', code, re.M)
+        self.assertIsNotNone(m)
+        self.assertEqual(set(m.group(1).split(",")), {"Edit", "Write", "NotebookEdit"})
+        self.assertFalse(any(r.split("(")[0] in ("Edit", "Write", "NotebookEdit")
+                             for r in self._orchestrator_grant()))
+
+    def test_the_heartbeat_refuses_to_run_code_the_service_can_write(self):
+        """run-checkin fails closed when its code is not root-owned.
+
+        Runs the real script against a FLEET_CODE this test owns, pretending
+        to be Linux. It must exit 1 before it posts to the board or starts
+        claude - both of which would be running the very files that failed.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        script = root / "fleet-kit" / "fleet" / "bin" / "run-checkin"
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            code = d / "code"
+            (code / "bin").mkdir(parents=True)
+            fake = d / "fakebin"
+            fake.mkdir()
+            ran = d / "ran"
+            for name in ("fleet-board", "claude"):
+                f = (code / "bin" / name) if name == "fleet-board" else (fake / name)
+                f.write_text(f'#!/bin/sh\necho {name} >> "{ran}"\n')
+                f.chmod(0o755)
+            (fake / "uname").write_text("#!/bin/sh\necho Linux\n")
+            (fake / "uname").chmod(0o755)
+            env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(d),
+                   "FLEET_HOME": str(d), "FLEET_CODE": str(code),
+                   "FLEET_ENV": str(d / "none.env"),
+                   "CLAUDE_BIN": str(fake / "claude"),
+                   "ANTHROPIC_API_KEY": "test-placeholder"}
+            r = subprocess.run(["bash", str(script)], env=env,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("REFUSING to start", r.stderr)
+            self.assertFalse(ran.exists(), "ran " + (ran.read_text() if ran.exists() else ""))
+
+    def test_the_generic_installer_stays_retired(self):
+        """install.sh left the fleet's code owned by the service account.
+
+        Retired for that reason; install-fedora.sh is the one installer, with
+        code root-owned in /opt/cti-agent. Its units went with it.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        self.assertFalse((root / "fleet-kit" / "install.sh").exists())
+        self.assertFalse((root / "fleet-kit" / "fleet" / "systemd").exists())
 
     def test_the_heartbeat_is_told_to_run_only_what_it_is_granted(self):
         """An instruction the grant cannot satisfy fails silently on a beat.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -sE
 """fleet-db - SQLite memory for the CTI fleet.
 
   fleet-db init                       create schema (idempotent)
