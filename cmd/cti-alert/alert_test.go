@@ -185,3 +185,25 @@ func TestTheHTMLExplanationIsEscaped(t *testing.T) {
 		t.Error("journal text reached the HTML unescaped")
 	}
 }
+
+func TestOnlyTheFleetsOwnUnitsAreAccepted(t *testing.T) {
+	for _, ok := range []string{
+		"cti-agent-digest.service", "cti-agent-checkin.service",
+		"cti-agent-alert@cti-agent-weekly.service.service",
+	} {
+		if !fleetUnit.MatchString(ok) {
+			t.Errorf("%q refused, want accepted", ok)
+		}
+	}
+	// An option systemctl would act on, a unit outside the fleet, and the
+	// syntax that could smuggle either in.
+	for _, bad := range []string{
+		"", "--host=user@example.com", "-H", "--machine=x", "sshd.service",
+		"cti-agent-", "cti-agent-x --host=y", "cti-agent-x=y", "cti-agent-x;id",
+		"cti-agent-../../etc", "cti-agent-x\n--host",
+	} {
+		if fleetUnit.MatchString(bad) {
+			t.Errorf("%q accepted, want refused", bad)
+		}
+	}
+}

@@ -1,0 +1,124 @@
+.TH FLEET-TIMERS 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.SH NAME
+fleet-timers \- list the fleet's own timers, and nothing else systemctl can do
+.SH SYNOPSIS
+.B fleet\-timers
+.RB [ \-\-all ]
+.RI [ cti\-agent\-PATTERN ...]
+.br
+.B fleet\-timers \-h
+.PP
+.B sudo cti\-agent fleet\-timers
+.I options
+.SH DESCRIPTION
+.B fleet\-timers
+is how the orchestrator heartbeat checks that no timer has been disabled, the
+failure that raises no alarm on its own. It is a restricted front end to
+.B systemctl list\-timers
+(see
+.BR systemctl (1))
+and is installed root-owned in
+.IR $FLEET_CODE/bin ,
+where
+.BR run\-checkin (1)
+checks it with the rest of the code.
+.PP
+The heartbeat used to be granted
+.B systemctl list\-timers
+with any further arguments. That prefix cannot become
+.B stop
+or
+.BR disable ,
+but it still accepts every global option of
+.BR systemctl :
+.B \-\-host=user@box
+runs the query over
+.BR ssh (1)
+on any machine, as the service account, and
+.B \-\-machine
+reaches containers. A beat steered by a hostile advisory could have used that
+to make outbound connections from the fleet's box. The wrapper accepts only
+the options below, admits only the fleet's own units, and passes the patterns
+to
+.B systemctl
+after
+.B \-\-
+so that none of them can be read as an option. It always adds
+.BR \-\-no\-pager .
+.PP
+Anything else is refused before
+.B systemctl
+runs: a usage line goes to standard error and the exit status is 2. The
+operator, who has a shell, uses
+.B systemctl list\-timers
+directly.
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-all
+Include inactive timers, so a timer that has been disabled still shows, with
+an empty LAST column if it never ran.
+.TP
+.I cti\-agent\-PATTERN
+Show timers matching this pattern. Repeatable. It must begin with
+.B cti\-agent\-
+and contain only letters, digits and
+.BR @ ,
+.BR . ,
+.BR _ ,
+.B \-
+and
+.BR * ;
+globs are allowed. With no pattern the wrapper shows
+.BR cti\-agent\-* .
+Any other pattern is refused.
+.TP
+.BR \-h ", " \-\-help
+Print the usage line to standard error and exit 2.
+.SH EXIT STATUS
+.TP
+.B 0
+.B systemctl
+ran and succeeded (it replaces the wrapper, so its status is the wrapper's).
+.TP
+.B 2
+Refused: an option not listed above (including
+.B \-\-host
+and
+.BR \-\-machine ),
+a pattern outside
+.BR cti\-agent\-* ,
+a pattern with other characters, or
+.BR \-h .
+.TP
+.I other
+.BR systemctl 's
+own exit status.
+.SH EXAMPLES
+Every active fleet timer, last and next run:
+.PP
+.EX
+sudo cti\-agent fleet\-timers
+.EE
+.PP
+Including timers that are off, for one lane:
+.PP
+.EX
+sudo cti\-agent fleet\-timers \-\-all 'cti\-agent\-domains*'
+.EE
+.PP
+A refused request, as the orchestrator would see it:
+.PP
+.EX
+$ fleet\-timers \-\-host=user@box
+fleet\-timers: '\-\-host=user@box' is not accepted (only \-\-all)
+usage: fleet\-timers [\-\-all] [cti\-agent\-PATTERN ...]
+$ echo $?
+2
+.EE
+.SH SEE ALSO
+.BR systemctl (1),
+.BR run\-checkin (1),
+.BR fleet\-journal (1),
+.BR cti\-agent (1)
+.PP
+fleet\-kit/fleet/CLAUDE.md; SECURITY.md, "What the orchestrator may run".
