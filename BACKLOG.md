@@ -97,8 +97,9 @@ is real, not before. Finished work moves out of this file into
   client (the module has no dependencies). The vendor guide (PoD Log API,
   Rev I) answers the back-fill question: archive reads reach 30 days back in
   one-hour steps, one session per token, no polling; the setup, behaviour and
-  field list are in RUNBOOK 11g section 7. Waiting on the admin's token and
-  cluster ID
+  field list are in RUNBOOK 11g section 7. The read-only probe
+  `cti-podprobe` (with `internal/podlog`, the WebSocket client) is built; the
+  lane itself is not, and waits on what the probe shows for this tenant
 - Certificate expiry lane (build it behind a `certs.Source` interface from
   the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
   expire, from Qualys Certificate View (CertView; the subscription has it and

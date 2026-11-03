@@ -1621,9 +1621,10 @@ should go (the mail gateway may provide an address). Until it is set the check
 is only that every sending domain has *some* `rua=`; once set, every sending
 domain's `rua=` must include it.
 
-### 7. The PoD Log API (planned, not built)
+### 7. The PoD Log API (read-only probe built; the lane is not)
 
-The mail-side evidence for the domains lane will come from Proofpoint's *PoD
+A read-only probe, `cti-podprobe`, now exists. The domains lane's use of the
+API is still not built. The mail-side evidence for that lane will come from Proofpoint's *PoD
 Log API*. The vendor guide is **"Proofpoint on Demand (PoD) Log API", Revision
 I, August 2023** (Proofpoint Customer Success Center; the guide is
 proprietary, so it is not in this repository: keep your copy beside the
@@ -1631,7 +1632,9 @@ fleet's other vendor documents and cite its page numbers when something here
 disagrees with it). This section records what the fleet relies on; the guide
 wins on any difference.
 
-**What to arrange with the Proofpoint admin**
+**What to arrange with the Proofpoint admin.** Only two items: the remote
+syslog licence and the token. There is no console toggle for
+`routeDirection`; it is a field in the log.
 
 1. **A token for the fleet alone.** Email Protection portal, Settings > API
    Key Management > Create New (or ask Proofpoint support). The service allows
@@ -1681,11 +1684,37 @@ The lane keeps **aggregates only**: per domain and week, the outbound senders
 the domain but fail DMARC (count, top sending IPs). No subjects, recipients or
 per-message records are written to disk or sent in any report.
 
-**Before the first real run**
+**Running the probe**
 
-Run one archive read for a single hour by hand and look at the output: the
-guide warns that archive data can contain control characters, and the field
-paths above are from the guide, not yet confirmed against this tenant.
+```bash
+sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500
+```
+
+It needs `POD_CLUSTER_ID` and `POD_API_TOKEN` in `fleet.env` (there is no
+token flag) and a window that began more than an hour ago. It prints **counts
+only**: events per direction, route names, DMARC and SPF results, outbound
+header-From domains and DKIM data, and inbound mail using our domains. It
+never prints or stores a message, address or subject. `--json` gives the same
+counts as JSON; `--max-bytes` (default 200 MB) stops a large read and says the
+counts are partial. **One session per token:** if a SIEM or a hand test holds
+the token, the probe gets HTTP 409, and while it runs nothing else may use it.
+
+**What a real read of this tenant showed**
+
+- `routeDirection` is present on events, with values `inbound` and `outbound`.
+- Outbound events carry routes such as `allow_relay`, and a tenant rule
+  `mydomains_from_hdr` that also appears on inbound mail using our domains in
+  the header From, so that rule alone does not mean "outbound".
+- Our own phishing-simulation mail carries KnowBe4 routes and must be excluded
+  from spoof counts.
+- `dkimv` is DKIM verification, so it may be absent on outbound mail. Outbound
+  evidence is then the header-From domain and the sender IP.
+- An hour read was cut off at a 20 MB cap with very few events, so event size
+  and volume are unconfirmed until the probe has run with the larger cap.
+
+The guide warns that archive data can contain control characters, and the
+remaining field paths above are from the guide, not yet confirmed against this
+tenant.
 
 ---
 

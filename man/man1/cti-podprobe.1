@@ -1,0 +1,135 @@
+.TH CTI-PODPROBE 1 "2026-11-03" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-podprobe \- read one window of the Proofpoint on Demand Log API and print aggregate counts
+.SH SYNOPSIS
+.B cti\-podprobe
+.RB [ \-\-since
+.IR TIME ]
+.RB [ \-\-to
+.IR TIME ]
+.RB [ \-\-type
+.IR TYPE ]
+.RB [ \-\-top
+.IR N ]
+.RB [ \-\-json ]
+.RB [ \-\-max\-bytes
+.IR N ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-idle
+.IR DURATION ]
+.PP
+.B sudo cti\-agent cti\-podprobe
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-podprobe
+is a read-only probe, run by hand. It opens one archive read of the
+Proofpoint on Demand (PoD) Log API, counts what the stream contains, and
+prints the counts: events per direction, route names, DMARC and SPF results,
+the header-From domains and DKIM data of outbound mail, and inbound mail that
+uses this organisation's domains.
+It exists to show what the stream holds for this tenant before the domains
+lane depends on it; the lane itself is not built.
+.PP
+It prints counts only. It never prints or stores a message, an address, a
+subject or the token, and it sends nothing. Distinct keys per table are
+capped, and key text is shortened and sanitised, so a hostile stream cannot
+grow it without bound.
+.PP
+The service allows one session per token. A second connection with the same
+token is refused with HTTP 409, so do not run the probe while another client
+uses the token.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash
+.RB ( \-json ),
+and a value may follow
+.B =
+or a space.
+.TP
+.BI \-\-since " TIME"
+Start of the window, such as
+.BR 2026\-11\-02T10:00:00\-0500 .
+RFC 3339 is also accepted. The window must start more than an hour ago:
+archive reads only.
+Default: the hour that began 3 hours ago.
+.TP
+.BI \-\-to " TIME"
+End of the window, same format. Must be after
+.BR \-\-since .
+Default: one hour after
+.BR \-\-since .
+.TP
+.BI \-\-type " TYPE"
+Stream type:
+.BR message ,
+.B maillog
+or
+.BR audit .
+Default:\~\fBmessage\fR.
+.TP
+.BI \-\-top " N"
+Rows to print per table.
+Default:\~\fB20\fR.
+.TP
+.B \-\-json
+Print the aggregate as one indented JSON object instead of text.
+Default:\~\fBfalse\fR.
+.TP
+.BI \-\-max\-bytes " N"
+Stop after reading this many bytes of messages. The counts then cover only
+part of the window, and a note says so.
+Default:\~\fB209715200\fR (200 MB).
+.TP
+.BI \-\-timeout " DURATION"
+Give up after this long.
+Default:\~\fB10m\fR.
+.TP
+.BI \-\-idle " DURATION"
+Treat the window as finished when no data arrives for this long.
+Default:\~\fB1m30s\fR.
+.SH ENVIRONMENT
+Read from the environment or
+.IR fleet.env .
+There is deliberately no flag for the token: a flag lands in shell history and
+the process list.
+.TP
+.B POD_CLUSTER_ID
+The PoD cluster ID, shown at the top right of the management interface.
+Required.
+.TP
+.B POD_API_TOKEN
+A Log API token created for the fleet alone (Email Protection portal,
+Settings, API Key Management). Required.
+.SH FILES
+.TP
+.I /etc/cti\-agent/fleet.env
+Holds both settings; 0640 root:ctiagent. The probe writes no file.
+.SH EXIT STATUS
+.TP
+.B 0
+The counts were printed, including when the read stopped at
+.B \-\-max\-bytes
+or went idle.
+.TP
+.B 1
+A setting is missing, a time is invalid or too recent, or the service refused
+or broke the read (a 409 means the token is in use elsewhere).
+Go's flag package also uses 1 here for an unknown option.
+.SH EXAMPLES
+One archived hour:
+.PP
+.EX
+sudo cti\-agent cti\-podprobe \e
+  \-\-since 2026\-11\-02T10:00:00\-0500 \-\-to 2026\-11\-02T11:00:00\-0500
+.EE
+.PP
+The default hour, as JSON, with a smaller cap:
+.PP
+.EX
+sudo cti\-agent cti\-podprobe \-\-json \-\-max\-bytes 5242880
+.EE
+.SH SEE ALSO
+.BR cti\-domains (1),
+.BR cti\-agent (1)
+.PP
+RUNBOOK.md, section 11g part 7, "The PoD Log API".

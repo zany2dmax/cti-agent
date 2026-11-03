@@ -276,6 +276,7 @@ sudo cti-agent fleet-board read @you           # lines addressed to the operator
 sudo cti-agent fleet-db recent 20              # recent memories, open tasks, counts
 sudo cti-agent fleet-db findings --priority Sev5
 sudo cti-agent cti-kev --horizon 30            # KEV deadlines due in 30 days
+sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500   # PoD Log API counts, read only
 ```
 
 ## 11. Updating the box
