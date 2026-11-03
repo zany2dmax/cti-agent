@@ -19,8 +19,8 @@ everything is the one that runs long and gets killed mid-write.
 
 ## Paths — do not assume `~/fleet`
 
-The two installers lay things out differently and your environment tells you
-which one you are on. Use these variables, never a literal path:
+The fleet is laid out under /opt, /etc and /var/lib, and your environment
+tells you where. Use these variables, never a literal path:
 
 | Variable | Contains |
 |---|---|
@@ -44,9 +44,8 @@ and say so on the board rather than guessing.
 - `$FLEET_CODE/bin/fleet-db recent` — last 20 memory rows, open tasks, unacked mailbox.
 - `$FLEET_HOME/reports/` — what exists, how fresh. Use your file tools to list
   it; there is no general shell on a beat, so `ls` is not available.
-- `journalctl -u 'cti-agent-*' --since '-3h' --no-pager` — did any timer fail
-  since the last beat? On the generic layout, read `$FLEET_HOME/logs/*.log`
-  with your file tools instead.
+- `/usr/bin/journalctl -u 'cti-agent-*' --since '-3h' --no-pager` — did any timer fail
+  since the last beat?
 - `$FLEET_CODE/bin/cti-budget status` — how much of your own quota is left. If
   you are near the window ceiling, prefer a short beat.
 
@@ -84,10 +83,10 @@ What you owe the schedule instead is **checking it happened**:
 |---|---|---|
 | Daily digest sent | `fleet-db was-sent $(date +%F) daily` | Post to the board. Look for a `cti-alert` line first — the cause is probably already there |
 | Weekly sent (Mon) | `fleet-db was-sent $(date +%F) weekly` | Same |
-| AppSec report ran (Fri, after 07:30) | `journalctl -u cti-agent-appscan.service --since today --no-pager` | No `[run-appscan] done` line: post to the board. An `AUTH FAILED on N scan(s)` line has **already** alerted the operator - track it, do not re-escalate. `0 notification(s)` is a question, not a quiet week |
-| Domains check ran (Tue, after 08:00) | `journalctl -u cti-agent-domains.service --since today --no-pager` | No `[run-domains] done` line: post to the board. `[REGISTRAR NOT CHECKED]` in the subject: note it; the second Tuesday running, escalate - the GoDaddy token has likely expired. `WARNING: lock-down ticket not filed or updated`: post it to the board - the email went, only IT's Jira ticket is behind. Its findings already reached the security team; do not re-send |
+| AppSec report ran (Fri, after 07:30) | `/usr/bin/journalctl -u cti-agent-appscan.service --since today --no-pager` | No `[run-appscan] done` line: post to the board. An `AUTH FAILED on N scan(s)` line has **already** alerted the operator - track it, do not re-escalate. `0 notification(s)` is a question, not a quiet week |
+| Domains check ran (Tue, after 08:00) | `/usr/bin/journalctl -u cti-agent-domains.service --since today --no-pager` | No `[run-domains] done` line: post to the board. `[REGISTRAR NOT CHECKED]` in the subject: note it; the second Tuesday running, escalate - the GoDaddy token has likely expired. `WARNING: lock-down ticket not filed or updated`: post it to the board - the email went, only IT's Jira ticket is behind. Its findings already reached the security team; do not re-send |
 | Patch Tuesday sent (from the Thursday after Patch Tuesday) | `fleet-db was-sent <YYYY-MM> patchtuesday` | Run by hand for now, so nothing fails loudly if it is forgotten. Not sent: remind the operator once, naming the month (CHEATSHEET.md section 7a) |
-| Timers still enabled | `systemctl list-timers 'cti-agent-*' --all` | A disabled timer is silent forever. Tell the operator - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
+| Timers still enabled | `/usr/bin/systemctl list-timers 'cti-agent-*' --all` | A disabled timer is silent forever. Tell the operator - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
 **You cannot re-run the pipeline yourself** - no runner is on your grant,

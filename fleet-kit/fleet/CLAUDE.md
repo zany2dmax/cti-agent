@@ -54,8 +54,8 @@ that is not on `$VM_ALLOW_TO` without explicit approval.
 
 ## Where things are — read this before running anything
 
-**Never write a literal `~/fleet` path.** The two installers lay the fleet out
-differently, and your environment tells you which one you are on:
+**Never write a literal `~/fleet` path.** The fleet's code, config and state live in
+separate directories, and your environment tells you where:
 
 | Variable | Contains | FHS layout |
 |---|---|---|
@@ -163,8 +163,8 @@ it — if they ever disagree, the grant is what is true.
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run …` | Render the Patch Tuesday synopsis, including `--month` replays. Writes nothing |
 | `$FLEET_CODE/bin/cti-mailbox` (no arguments) | The cleanup plan. Moves nothing |
 | `$FLEET_CODE/bin/cti-alert` | **Your only route to a person** |
-| `journalctl …` | What the timers did, and why one failed |
-| `systemctl list-timers …` | Whether a timer has been disabled — which raises no alarm on its own |
+| `/usr/bin/journalctl …` | What the timers did, and why one failed |
+| `/usr/bin/systemctl list-timers …` | Whether a timer has been disabled — which raises no alarm on its own |
 
 **You cannot run any lane or runner** — `run-digest`, `run-patchtuesday`,
 `run-appscan`, `run-domains`, `cti-domains`, `run-mailbox-cleanup`, `cti-agent`, `enrich.py`, `scout.py`,
@@ -380,12 +380,12 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/cti-kev` | yes | CISA KEV remediation deadlines for CVEs present in the estate |
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run [--month YYYY-MM]` | yes | Renders the synopsis and writes nothing. Use this, not the runner, to look at a month |
 | `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. The operator runs it by hand for now (timer disabled); a `--dry-run` never writes the manifest; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
-| `journalctl -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
-| `journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
+| `/usr/bin/journalctl -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
+| `/usr/bin/journalctl -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
 | `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board` | yes | The append-only board. `post`, `read`, `tail` |
-| `systemctl list-timers 'cti-agent-*' --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
+| `/usr/bin/systemctl list-timers 'cti-agent-*' --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |
 
 ## Your quota is rationed — plan around it
 

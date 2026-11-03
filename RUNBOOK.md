@@ -339,14 +339,13 @@ The longer version, including what runs where and why, is
 
 ## 8. Installing the fleet
 
-Two installers, two layouts:
+One installer, `fleet-kit/install-fedora.sh`, with the FHS layout: code in
+`/opt/cti-agent` (`root:root`, read-only to the service), config in
+`/etc/cti-agent`, state in `/var/lib/cti-agent`. There used to be a generic
+single-directory installer; it is gone because it left the code owned by the
+service account, and the heartbeat now refuses to start on a layout like that.
 
-| Installer | Layout | Use when |
-|---|---|---|
-| `fleet-kit/install.sh` | everything under one directory | a VM you own, simple paths |
-| `fleet-kit/install-fedora.sh` | FHS: `/opt`, `/etc`, `/var/lib` | Fedora/RHEL, SELinux, a service account |
-
-The Fedora installer builds all eleven binaries, installs 17 systemd units and the
+The installer builds all eleven binaries, installs 17 systemd units and the
 man pages, writes the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux,
 and then verifies
 the paths it just created. It refuses to install from inside the tree it

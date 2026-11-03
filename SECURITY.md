@@ -518,9 +518,28 @@ list changes) - are timer-owned and not on the orchestrator's grant.
 
 ### What the orchestrator may run
 
-The heartbeat runs `claude -p` unattended, with `--permission-mode acceptEdits`
-and an explicit `--allowedTools` list: named fleet commands by absolute path,
-`journalctl`, `systemctl list-timers`, and nothing else.
+The heartbeat runs `claude -p` unattended, with `--permission-mode default`,
+`--disallowedTools "Edit,Write,NotebookEdit"` and an explicit `--allowedTools`
+list: named fleet commands by absolute path, `journalctl`,
+`systemctl list-timers`, and nothing else. It keeps Claude Code's read-only
+file tools, which it uses to look at `reports/`.
+
+**The beat cannot edit files, and will not run code it could edit.** A
+PrimeSec scan found that the beat ran with `acceptEdits` (which auto-approves
+file edits) while the generic installer left the fleet's runners and tool
+policy owned by the service account. A beat that read a hostile advisory could
+then have rewritten `run-checkin` or a granted binary, and every later run
+would have executed the change with the fleet's credentials. Nothing in
+`/checkin` writes a file - memory, tasks and board posts all go through the
+granted commands - so the edit grant is removed, and `Edit`, `Write` and
+`NotebookEdit` are disallowed by name so a later default change in Claude Code
+cannot give them back. Separately, on Linux `run-checkin` exits 1 before it
+posts to the board or starts claude unless it, its directory, `$FLEET_CODE`,
+`$FLEET_CODE/bin` and each granted binary are root-owned, not group- or
+world-writable, and not writable by the account running it. The unit's
+`OnFailure` alert tells the operator. The generic installer is retired:
+`install-fedora.sh` is the only installer, and it puts the code in
+`/opt/cti-agent` as `root:root` `0755`.
 
 **Named per subcommand, not per binary.** The list used to grant `fleet-db:*`
 and `cti-patchtuesday:*`. The first included `fleet-db sent`, which records a
@@ -544,11 +563,12 @@ place yet because the rule syntax has not been verified on the installed
 version, and a malformed flag would stop every beat.
 
 **The list is a command-line flag in `run-checkin`, not a settings file.**
-`acceptEdits` means the agent can write files, so a permissions file inside its
-own home directory is a permissions file it can edit. `run-checkin` is
-root-owned `0755` under `$CODE_DIR` and the service account cannot modify it,
-which makes it the one place the list cannot be widened by the thing it
-constrains.
+A permissions file inside the agent's own home directory is a permissions file
+the agent's account owns. `run-checkin` is root-owned `0755` under `$CODE_DIR`
+and the service account cannot modify it, which makes it the one place the list
+cannot be widened by the thing it constrains. The startup integrity check
+described above is what keeps that true: a box where it stops being true does
+not run a beat.
 
 Deliberately absent from the grant:
 
@@ -582,9 +602,10 @@ Deliberately absent from the grant:
   `journalctl -u cti-agent-appscan.service`, which it is granted.
 - **A general shell.** There is no `Bash(*)` entry.
 
-Until this list existed the agent had no Bash capability at all: `acceptEdits`
-approves edits only, so every command was denied with nobody present to
-approve. It worked around that by editing `board.md` directly for ten days.
+Until this list existed the agent had no Bash capability at all: with nobody
+present to approve, every command was denied. It worked around that by editing
+`board.md` directly for ten days, which only worked because it could edit
+files; it cannot now.
 That was a missing allowlist, not a sandbox — but it is worth noting that the
 failure was in the safe direction.
 
