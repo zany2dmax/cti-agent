@@ -318,9 +318,21 @@ else
 fi
 run install -m 0644 -o root -g root "$SRC/README.md" "$CODE_DIR/README.md"
 
-# CLAUDE.md must sit in the orchestrator's working directory so it loads on
-# every session. That is the state dir, since WorkingDirectory points there.
+# THE ORCHESTRATOR'S INSTRUCTIONS ARE CODE, AND ARE INSTALLED LIKE CODE.
 #
+# CLAUDE.md and the skills tell the heartbeat what to do, and Claude Code loads
+# them - plus settings, hooks and MCP servers - from its working directory.
+# They used to be installed into $STATE_DIR owned by the service account, so a
+# beat steered once by a hostile advisory could rewrite the instructions every
+# later beat follows. Root-owned files in a directory the account owns would
+# not fix that (it can rename them away), so they live in a root-owned
+# directory under $CODE_DIR and the beat starts there. run-checkin refuses to
+# start if any of it is writable by the service.
+AGENT_DIR="$CODE_DIR/orchestrator"
+bold "Orchestrator instructions ($AGENT_DIR, root-owned)"
+run install -d -m 0755 -o root -g root "$AGENT_DIR" "$AGENT_DIR/.claude" \
+    "$AGENT_DIR/.claude/skills"
+
 # "Not overwriting your edits" was protecting a file nobody had edited.
 #
 # The orchestrator's standing instructions were frozen at first install, so a
@@ -330,48 +342,103 @@ run install -m 0644 -o root -g root "$SRC/README.md" "$CODE_DIR/README.md"
 # a human while holding the capability to do so.
 #
 # So: remember the hash of what we install. Unmodified since last time means
-# it is ours to update. Modified means an operator changed it, and THAT is
-# worth preserving - but loudly, with the diff named, rather than with a
-# cheerful ok that hides a stale file.
-CLAUDE_MD_HASH="$STATE_DIR/.claude/CLAUDE.md.installed-sha256"
+# it is ours to update. Modified means an operator changed it (only root can,
+# now), and THAT is worth preserving - but loudly, with the diff named.
+CLAUDE_MD_HASH="$CODE_DIR/.orchestrator-CLAUDE.md.sha256"
 claude_md_unmodified() {
   # Identical to what we ship counts as unmodified even with no hash on
-  # record. Without this, the FIRST run after this change always warns -
-  # including for an operator who just copied the shipped file across by hand,
-  # which is exactly what the warning would be telling them to do. A guard
-  # whose first act is to cry wolf is a guard people learn to scroll past.
-  cmp -s "$STATE_DIR/CLAUDE.md" "$SRC/fleet/CLAUDE.md" && return 0
+  # record, so the first run does not cry wolf.
+  cmp -s "$AGENT_DIR/CLAUDE.md" "$SRC/fleet/CLAUDE.md" && return 0
   [ -f "$CLAUDE_MD_HASH" ] || return 1
-  [ "$(sha256sum "$STATE_DIR/CLAUDE.md" | cut -d" " -f1)" = "$(cat "$CLAUDE_MD_HASH")" ]
+  [ "$(sha256sum "$AGENT_DIR/CLAUDE.md" | cut -d" " -f1)" = "$(cat "$CLAUDE_MD_HASH")" ]
 }
-
-if [ -f "$STATE_DIR/CLAUDE.md" ] && ! claude_md_unmodified; then
+if [ -f "$AGENT_DIR/CLAUDE.md" ] && ! claude_md_unmodified; then
   warn "CLAUDE.md differs from the shipped version and was NOT updated"
-  info "  yours:    $STATE_DIR/CLAUDE.md"
+  info "  yours:    $AGENT_DIR/CLAUDE.md"
   info "  shipped:  $SRC/fleet/CLAUDE.md"
-  info "  diff:     sudo diff -u $STATE_DIR/CLAUDE.md $SRC/fleet/CLAUDE.md"
+  info "  diff:     sudo diff -u $AGENT_DIR/CLAUDE.md $SRC/fleet/CLAUDE.md"
   info "  The agent follows YOUR copy. If the shipped one changed how it"
   info "  escalates or what it may run, your copy will not know."
+  run chown root:root "$AGENT_DIR/CLAUDE.md"
+  run chmod 0644 "$AGENT_DIR/CLAUDE.md"
 else
-  run install -m 0640 -o "$FLEET_USER" -g "$FLEET_GROUP" \
-      "$SRC/fleet/CLAUDE.md" "$STATE_DIR/CLAUDE.md"
-  info "CLAUDE.md -> $STATE_DIR (the orchestrator's standing instructions)"
+  run install -m 0644 -o root -g root "$SRC/fleet/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
+  info "CLAUDE.md -> $AGENT_DIR (the orchestrator's standing instructions)"
   if [ "$MODE" != dryrun ]; then
-    install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$STATE_DIR/.claude"
-    sha256sum "$STATE_DIR/CLAUDE.md" | cut -d" " -f1 > "$CLAUDE_MD_HASH"
-    chmod 0640 "$CLAUDE_MD_HASH"
+    sha256sum "$AGENT_DIR/CLAUDE.md" | cut -d" " -f1 > "$CLAUDE_MD_HASH"
+    chmod 0644 "$CLAUDE_MD_HASH"
   fi
 fi
 
 bold "Skills"
-SKILLS="$STATE_DIR/.claude/skills"
-run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$STATE_DIR/.claude" "$SKILLS"
 for s in checkin cti-digest scout-sweep patch-tuesday; do
-  run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$SKILLS/$s"
-  run install -m 0640 -o "$FLEET_USER" -g "$FLEET_GROUP" \
-      "$SRC/fleet/skills/$s/SKILL.md" "$SKILLS/$s/SKILL.md"
+  run install -d -m 0755 -o root -g root "$AGENT_DIR/.claude/skills/$s"
+  run install -m 0644 -o root -g root \
+      "$SRC/fleet/skills/$s/SKILL.md" "$AGENT_DIR/.claude/skills/$s/SKILL.md"
   info "/$s"
 done
+
+# The beat's --settings file: hooks off, no project MCP servers, edit and web
+# tools denied. Root-owned beside the code; run-checkin refuses without it.
+run install -m 0644 -o root -g root "$SRC/fleet/checkin-settings.json" \
+    "$CODE_DIR/checkin-settings.json"
+info "checkin-settings.json -> $CODE_DIR"
+
+# ── AUDIT: what the service account could have planted ──────────────────────
+#
+# Everything Claude Code would load from the account's HOME ($STATE_DIR) or
+# its config dir, which this fleet no longer installs there. On a box upgraded
+# from the old layout that includes the old CLAUDE.md and skills; anywhere,
+# it may include something a steered beat left behind. Nothing is deleted: it
+# is moved to a root-only quarantine folder and named, so the operator can
+# read it. run-checkin refuses to beat while any of it is present, and the
+# verification block below runs run-checkin --audit to prove it is gone.
+bold "Audit: Claude Code files in the service account's reach"
+QUARANTINE="$CONF_DIR/quarantine/$(date +%Y%m%d-%H%M%S)"
+LEGACY_HASH="$STATE_DIR/.claude/CLAUDE.md.installed-sha256"
+found_any=0
+# A symlinked .claude would aim the moves below at whatever it points to -
+# the root-owned orchestrator files just installed, say - so the link itself
+# goes first, and the loop then sees nothing under it.
+if [ -L "$STATE_DIR/.claude" ]; then
+  found_any=1
+  warn "$STATE_DIR/.claude is a symlink (to $(readlink "$STATE_DIR/.claude")) - moved aside"
+  run install -d -m 0700 -o root -g root "$QUARANTINE"
+  run mv "$STATE_DIR/.claude" "$QUARANTINE/dot-claude.symlink"
+fi
+for p in "$STATE_DIR/CLAUDE.md" "$STATE_DIR/CLAUDE.local.md" "$STATE_DIR/.mcp.json" \
+         "$STATE_DIR/.claude/skills" "$STATE_DIR/.claude/CLAUDE.md" \
+         "$STATE_DIR/.claude/settings.json" "$STATE_DIR/.claude/settings.local.json" \
+         "$STATE_DIR/.claude/commands" "$STATE_DIR/.claude/agents" \
+         "$STATE_DIR/.claude/hooks" "$STATE_DIR/.claude/rules" \
+         "$STATE_DIR/.claude/output-styles" "$LEGACY_HASH"; do
+  [ -e "$p" ] || [ -L "$p" ] || continue
+  # Only paths that really are in the state dir: never follow a link out.
+  case "$(realpath -m "$(dirname "$p")" 2>/dev/null)" in
+    "$STATE_DIR"|"$STATE_DIR/.claude") ;;
+    *) warn "$p resolves outside $STATE_DIR - not moved; inspect it"; found_any=1; continue ;;
+  esac
+  found_any=1
+  case "$p" in
+    "$STATE_DIR/CLAUDE.md"|"$STATE_DIR/.claude/skills"|"$LEGACY_HASH")
+      warn "$p - the old installer's copy; no longer loaded, moved aside" ;;
+    *)
+      warn "$p - NOT installed by this kit. Read it before deleting it:"
+      info "  a file here is how a steered beat would make itself permanent." ;;
+  esac
+  rel="${p#"$STATE_DIR"/}"
+  run install -d -m 0700 -o root -g root "$QUARANTINE/$(dirname "$rel")"
+  run mv "$p" "$QUARANTINE/$rel"
+done
+if [ "$found_any" = 1 ]; then
+  info "moved to $QUARANTINE (root only; a dry run moves nothing). If the old CLAUDE.md held your own"
+  info "edits, compare and apply them to $AGENT_DIR/CLAUDE.md:"
+  info "  sudo diff -u $QUARANTINE/CLAUDE.md $AGENT_DIR/CLAUDE.md"
+else
+  ok "nothing in $STATE_DIR that Claude Code would load"
+fi
+# ~/.claude.json is Claude Code's own state file, so it is not moved; what it
+# would mean to a beat is checked by run-checkin --audit below.
 
 # ───────────────────────────────────────────────────────────── config ────────
 bold "Config"
@@ -895,6 +962,19 @@ if [ "$MODE" != dryrun ]; then
     ok "$FLEET_USER can write $STATE_DIR"
   else
     bad "$FLEET_USER cannot write $STATE_DIR"; FAIL=1
+  fi
+  # The heartbeat's own fail-closed checks, run as the account they guard
+  # against: code and orchestrator files root-owned and unwritable by it, and
+  # nothing in its HOME or config dir that would steer a beat. As root, -w
+  # is always true, so this must run as $FLEET_USER.
+  if audit_out="$(sudo -u "$FLEET_USER" env HOME="$STATE_DIR" FLEET_HOME="$STATE_DIR" \
+        FLEET_CODE="$CODE_DIR" FLEET_ENV="$CONF_DIR/fleet.env" \
+        "$CODE_DIR/bin/run-checkin" --audit 2>&1)"; then
+    ok "run-checkin --audit: orchestrator files root-owned, no steering files"
+  else
+    bad "run-checkin --audit refused - the heartbeat will not start:"
+    printf '%s\n' "$audit_out" | sed 's/^/      /'
+    FAIL=1
   fi
   # And that it can read the secret but not the world.
   # Prove SYSTEMD can read the env file, not just the service account. Those

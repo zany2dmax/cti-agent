@@ -84,6 +84,15 @@ func main() {
 			"this, because a manifest is a statement about what was sent")
 	flag.Parse()
 
+	if err := refuseDryRunUndone(os.Args[1:], *dryRun); err != nil {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: %v\n", err)
+		os.Exit(2)
+	}
+	if err := refuseDryRunOverrides(flag.CommandLine); err != nil {
+		fmt.Fprintf(os.Stderr, "cti-patchtuesday: %v\n", err)
+		os.Exit(2)
+	}
+
 	// fleet.env. The runner sources it in shell before calling this, so under
 	// systemd this is a no-op; `sudo cti-agent cti-patchtuesday` does not, and
 	// the wrapper passes only the FLEET_* layout. Without this that by-hand
@@ -647,4 +656,69 @@ func sameFile(a, b string) bool {
 	aa, errA := filepath.Abs(a)
 	bb, errB := filepath.Abs(b)
 	return errA == nil && errB == nil && aa == bb
+}
+
+// dryRunOverrides are the flags that choose where the lane reads from. The
+// orchestrator is granted "--dry-run, any arguments after it", and with these
+// a beat steered by a hostile advisory could make the box GET any URL it
+// names (a request that can carry data out in its path) or read files from
+// any folder the service can see. A dry run of the real sources needs none of
+// them; an operator pointing the lane somewhere else runs it by hand without
+// --dry-run, or with --out/--text-out to a scratch file.
+var dryRunOverrides = []string{"url-msrc", "url-bleeping", "url-qualys", "drop-dir"}
+
+// refuseDryRunOverrides reports an error when --dry-run is combined with a
+// source override. --url-msrc none is allowed: it skips a fetch rather than
+// redirecting one. A flag counts as given even when its value is empty, so
+// "--drop-dir=" cannot slip past as unset.
+func refuseDryRunOverrides(fs *flag.FlagSet) error {
+	if f := fs.Lookup("dry-run"); f == nil || f.Value.String() != "true" {
+		return nil
+	}
+	var bad []string
+	fs.Visit(func(f *flag.Flag) {
+		for _, name := range dryRunOverrides {
+			if f.Name != name {
+				continue
+			}
+			if name == "url-msrc" && strings.EqualFold(f.Value.String(), "none") {
+				continue
+			}
+			bad = append(bad, "--"+name)
+		}
+	})
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	return fmt.Errorf("--dry-run with %s is refused. A dry run reads the "+
+		"standard sources only; run without --dry-run to point the lane at "+
+		"another URL or folder", strings.Join(bad, ", "))
+}
+
+// refuseDryRunUndone reports an error when --dry-run appears on the command
+// line but the parsed value is false. The flag package lets a later
+// occurrence win, so "--dry-run --dry-run=false --mark-sent" matches the
+// orchestrator's "--dry-run, any arguments after it" grant and is then a real
+// run: a manifest marked sent, --json/--out writes to any path, fetches from
+// any URL. Every guard below reads the final value, so this one reads the
+// arguments.
+func refuseDryRunUndone(args []string, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		name := strings.TrimLeft(a, "-")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		if strings.HasPrefix(a, "-") && name == "dry-run" {
+			return fmt.Errorf("%s turns off a --dry-run given earlier; refused, "+
+				"because a command that starts as a dry run must stay one", a)
+		}
+	}
+	return nil
 }

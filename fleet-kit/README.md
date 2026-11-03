@@ -77,7 +77,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
       │ SHARED STATE (survives restarts, compaction, reboots)      │
       │  ~/fleet/state/memory.db   findings, scout items, digests  │
       │  ~/fleet/board.md          append-only, lock-safe          │
-      │  ~/fleet/CLAUDE.md         standing behavior + autonomy    │
+      │  orchestrator/CLAUDE.md    standing behavior + autonomy    │
       └────────────────────────────────────────────────────────────┘
                                             │
                mailer.py / cti-mailer → Graph sendMail (allowlisted)
@@ -1874,8 +1874,10 @@ fleet-kit/
     ├── bin/
     │   ├── fleet-board            lock-safe append-only board (post/read/prune/tail)
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
+    │   ├── fleet-journal          the beat's restricted journal reader (cti-agent-* units only)
     │   ├── run-digest             deterministic ingest→enrich→brief→send
-    │   └── run-checkin            resolves the claude binary, fires one beat
+    │   └── run-checkin            resolves the claude binary, audits, fires one beat
+    ├── checkin-settings.json      root-owned --settings for the beat (hooks off, deny rules)
     ├── lanes/
     │   ├── enrich.py              NVD + EPSS + KEV → Sev5–Sev1, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
@@ -1950,12 +1952,13 @@ journalctl -u cti-agent-digest -f
 journalctl -u 'cti-agent-*' --since today
 ```
 
-Asking the fleet something directly needs the orchestrator's own directory,
-since `CLAUDE.md` and the skills are resolved relative to it:
+Asking the fleet something directly needs the orchestrator's own directory
+(root-owned; it holds `CLAUDE.md` and `.claude/skills`), since they are
+resolved relative to it:
 
 ```bash
 sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env \
-  bash -c 'cd /opt/cti-agent && claude "what Sev5s are open and unremediated?"'
+  bash -c 'cd /opt/cti-agent/orchestrator && claude "what Sev5s are open and unremediated?"'
 ```
 
 ### Troubleshooting
@@ -1980,6 +1983,8 @@ sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env 
 | A processed advisory was never archived | The cleanup window equals the interval between runs, so mail arriving just before the lane fires ages out before the next one | `MAILBOX_LOOKBACK_HOURS` must EXCEED the time between runs, and cover the weekly AppSec window; 336h is the default since 1.3.2 (72h before). The lane prints its window and grace on every run |
 | Today's advisory was archived hours after it arrived | A manual run after the digest, rather than the timer which fires before it | Expected before `MAILBOX_MIN_AGE_HOURS` existed. With the grace set (24h default) the outcome no longer depends on what time the lane runs |
 | Heartbeat reports tools "require approval" or a "sandbox block" | No `--allowedTools` list. With nobody present to approve, every command not granted is denied | Not SELinux and not sudo. Check `journalctl -u cti-agent-checkin \| grep "allowed tools"` — if that line is absent, the box is running a build from before the allowlist existed |
+| Heartbeat refuses: `files that could steer the beat` | The steering audit found a Claude Code file this fleet never installs (`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`, hooks, skills or MCP servers in the service account's home or the orchestrator directory). It posts ERROR to the board and starts nothing | Read what it names. Re-run `install-fedora.sh`, which moves them into `/etc/cti-agent/quarantine/<timestamp>/` (root-only, nothing deleted); inspect there. Confirm with `sudo cti-agent run-checkin --audit` |
+| Heartbeat fails at once with `REFUSING ... is missing` | `CLAUDE.md`, the `checkin` skill or `checkin-settings.json` is not in `/opt/cti-agent`: a box upgraded without re-running the installer | Re-run `install-fedora.sh` |
 | Heartbeat fails at once with `REFUSING to start: ... is writable by the service account` | `run-checkin` fails closed when it, `$FLEET_CODE`, `$FLEET_CODE/bin` or a binary it grants is not root-owned, or is writable by the service account. It posts nothing to the board and starts nothing; the unit's alert mails the operator | Reinstall with `install-fedora.sh`, which puts the code in `/opt/cti-agent` as `root:root` `0755`. A box still on the retired generic layout (code under `/home/ctiagent`) cannot pass; move it |
 | `Credit balance is too low`, but you configured a subscription token | A stale `ANTHROPIC_API_KEY` is also set, and claude prefers it — so the beat bills a Console balance, not your seat | `sudo grep -E '^(export )?(ANTHROPIC_API_KEY\|ANTHROPIC_AUTH_TOKEN\|CLAUDE_CODE_OAUTH_TOKEN)=' /etc/cti-agent/fleet.env \| sed 's/=.*/=<set>/'` — blank all but one. run-checkin now refuses when more than one is set, and prints `auth: <NAME>` on every beat |
 | `digest WAS SENT but the send was not recorded`, run-digest exit 3 | `fleet-db sent` failed after the mail went | **Do not rerun run-digest** - it would mail a second copy. Run the exact `sudo cti-agent fleet-db sent ...` command the log and the board line print |

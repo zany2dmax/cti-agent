@@ -37,7 +37,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **`scripts/healthcheck.sh`** - one read-only command that says whether the
+  fleet is up: failed units, every timer enabled with a next run, code
+  root-owned (the rule the heartbeat now enforces), `/etc/cti-agent` modes,
+  disk, clock sync, SELinux, Go and Python versions, journal errors since
+  boot, the last heartbeat's result, and the budget, board and memory db.
+  `--deep` adds `cti-mailer --check`, `mailer.py --check`, `cti-jira --check`
+  and a comparison with the latest published commit. Exit 1 on any FAIL.
+
+  **Upgrade:** nothing to install; run it from your clone with
+  `sudo ~/cti-agent/scripts/healthcheck.sh`.
+
 ### Security
+
+- **Fixed issues found by PrimeSec AI:**
+  - Attack vector 10786586 (High) - generic installer leaves unattended
+    fleet code and tool policy service-account-writable. Fixed by the
+    heartbeat entry below.
 
 - **The heartbeat can no longer edit files, and refuses to run code it could
   edit.** A PrimeSec scan found two things that were unsafe together. The beat
@@ -78,6 +96,57 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `disallowed tools: Edit,Write,NotebookEdit` and no `REFUSING to start`.
   Anyone still on an `install.sh` layout must move to `install-fedora.sh`: the
   heartbeat now refuses to start there.
+
+- **Nothing the heartbeat reads its instructions from is writable by its
+  account, and its last write and outbound-request paths are closed.** The
+  review after the fix above found the beat could still persist a change or
+  widen its reach without editing code:
+  - **Instructions and settings.** `CLAUDE.md` and the skills were installed
+    in `/var/lib/cti-agent`, owned by `ctiagent`, and the beat started there,
+    so Claude Code also loaded settings, hooks and MCP servers from a
+    directory the account owns. They now live in `/opt/cti-agent/orchestrator`
+    (`root:root`, `0644`/`0755`) and the beat starts there, with
+    `--setting-sources project`, a root-owned
+    `--settings /opt/cti-agent/checkin-settings.json` (hooks off, no project
+    MCP servers, edit and web tools denied) and `--strict-mcp-config`. File
+    tools may read `reports/`, `logs/` and `archive/` under `$FLEET_HOME`.
+  - **Steering audit.** `run-checkin` refuses to beat (exit 1, board ERROR)
+    when Claude Code files nobody installs are in the account's reach:
+    `~/.claude/{CLAUDE.md,skills,commands,agents,hooks,rules,...}`,
+    `~/.mcp.json`, extra settings in the orchestrator dir, or a
+    `~/.claude/settings.json` / `~/.claude.json` that sets hooks,
+    permissions, MCP servers, env or allow rules. Its integrity check now
+    covers every `$FLEET_CODE/bin/*` entry, the settings file and the
+    orchestrator files. `run-checkin --audit` runs the checks alone.
+  - **journalctl.** `Bash(/usr/bin/journalctl:*)` allowed
+    `--cursor-file=PATH`, which overwrites `PATH` as the account
+    (`state/budget.json` resets the quota). The grant is now
+    `$FLEET_CODE/bin/fleet-journal`, a root-owned wrapper that accepts only
+    `-u cti-agent-*`, `--since`, `-n` and `--no-pager` (new man page).
+  - **cti-patchtuesday.** `--dry-run` (granted with any arguments) now
+    refuses `--url-msrc` (except `none`), `--url-bleeping`, `--url-qualys`
+    and `--drop-dir`, so a beat cannot make the box fetch an arbitrary URL or
+    read an arbitrary folder, and refuses a `--dry-run` that a later
+    `--dry-run=false` turns off (the flag package lets the last one win, so
+    that matched the grant and was a real run: `--mark-sent`, `--json PATH`
+    writes, any URL). The operator's by-hand runs without `--dry-run` are
+    unchanged.
+  - Claude Code's auto-memory is off for the beat
+    (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), and the installer's quarantine
+    will not follow a symlinked `~/.claude` onto the root-owned files.
+
+  **Upgrade:** pull and re-run `install-fedora.sh`. It installs the
+  orchestrator directory and settings file, and moves the old
+  `/var/lib/cti-agent/CLAUDE.md`, `.claude/skills` and any planted Claude Code
+  files into `/etc/cti-agent/quarantine/<time>/` (nothing is deleted). If you
+  had edited the old `CLAUDE.md`, compare it with the diff command the
+  installer prints and apply your edits to
+  `/opt/cti-agent/orchestrator/CLAUDE.md`. The Verification block must show
+  `run-checkin --audit` passing; until the installer has run, the heartbeat
+  refuses to start. After the next beat,
+  `journalctl -u cti-agent-checkin.service -n 30 --no-pager` should show
+  `using /usr/bin/claude in /opt/cti-agent/orchestrator` and `fleet-journal`
+  in the allowed tools.
 
 ### Fixed
 

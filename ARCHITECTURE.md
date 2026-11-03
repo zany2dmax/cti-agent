@@ -254,7 +254,12 @@ may call a short allowlist of commands — named **per subcommand**, so it can
 write its own notes but cannot record a digest as sent, rewrite a finding, or
 mark a monthly release delivered — and nothing else. It cannot run any lane:
 every one of them sends or moves mail, and timers (or the operator) own them. Its only route to a
-person is `cti-alert`, which has no recipient argument. A test checks that
+person is `cti-alert`, which has no recipient argument. It reads the journal
+only through `fleet-journal`, which takes `cti-agent-*` units and no option that
+writes. It starts in a root-owned directory (`/opt/cti-agent/orchestrator`) that
+holds its instructions, under a root-owned settings file, and `run-checkin`
+refuses a beat if the service account's reach holds any Claude Code file that
+could steer it. A test checks that
 everything its instructions tell it to run is on that list, and that nothing
 they forbid is.
 
@@ -411,8 +416,10 @@ fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
                                run-appscan, run-domains, run-mailbox-cleanup,
-                               fleet-board, fleet-db
+                               fleet-board, fleet-db, fleet-journal
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
+                               (installed to /opt/cti-agent/orchestrator)
+fleet-kit/fleet/checkin-settings.json  root-owned settings for the beat
 fleet-kit/fleet/agents/        the triage agent definition
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
 fleet-kit/fleet/systemd-fedora/ service + timer pairs, FHS layout for Fedora/RHEL

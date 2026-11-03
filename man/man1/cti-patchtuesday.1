@@ -183,6 +183,21 @@ no
 no
 .BR \-\-json ,
 no manifest. The sources and Qualys are still queried.
+.B \-\-mark\-sent
+is refused with it, as are
+.BR \-\-url\-msrc
+(except
+.BR "\-\-url\-msrc none" ),
+.BR \-\-url\-bleeping ,
+.B \-\-url\-qualys
+and
+.BR \-\-drop\-dir :
+all exit 2 before anything is fetched. The orchestrator heartbeat may run
+.B "cti\-patchtuesday \-\-dry\-run"
+with any arguments, and those four would let a steered beat make outbound
+requests to any host or read any folder. Without
+.B \-\-dry\-run
+they work as described below, for the operator.
 Default:\~\fBfalse\fR.
 .TP
 .B \-\-no\-manifest
@@ -206,6 +221,10 @@ Read Microsoft's release document from
 instead of the API address, or skip it with
 .BR none ,
 in which case the figures come from the articles as before 1.3.
+A URL other than
+.B none
+is refused with
+.BR \-\-dry\-run .
 Default:\~\fIhttps://api.msrc.microsoft.com/cvrf/v3.0/cvrf/YYYY\-Mon\fR.
 .TP
 .BI \-\-drop\-dir " DIR"
@@ -223,18 +242,24 @@ or
 .BR .txt .
 The newest match wins. A source with no saved copy is fetched as before, and
 when that fails its line in the email says where to save it.
+Refused with
+.BR \-\-dry\-run .
 Default:\~\fI$FLEET_HOME/inbox/patchtuesday/YYYY\-MM\fR.
 .TP
 .BI \-\-url\-qualys " URL"
 Read the Qualys review from
 .I URL
 instead of the computed address, for when the blog's URL pattern changes.
+Refused with
+.BR \-\-dry\-run .
 Default:\~computed from the release date.
 .TP
 .BI \-\-url\-bleeping " URL"
 Read the BleepingComputer article from
 .I URL
 instead of discovering it.
+Refused with
+.BR \-\-dry\-run .
 Default:\~discovered.
 .TP
 .BI \-\-provider " NAME"
@@ -384,7 +409,16 @@ or rewritten.
 .B 2
 .B \-\-mark\-sent
 was given with
-.BR \-\-dry\-run ,
+.BR \-\-dry\-run ;
+.BR \-\-url\-msrc
+(other than
+.BR none ),
+.BR \-\-url\-bleeping ,
+.B \-\-url\-qualys
+or
+.B \-\-drop\-dir
+was given with
+.BR \-\-dry\-run ;
 or an unknown option or bad value (Go's flag package).
 .SH EXAMPLES
 Preview this month's synopsis without writing anything:

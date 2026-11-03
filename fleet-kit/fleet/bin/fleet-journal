@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# fleet-journal - read the fleet's own journal, and nothing else journalctl does.
+#
+#   fleet-journal -u UNIT [-u UNIT ...] [--since WHEN] [-n N] [--no-pager]
+#
+# The orchestrator heartbeat needs to see what the timers did. It used to be
+# granted /usr/bin/journalctl with any arguments, and journalctl is not
+# read-only: --cursor-file=PATH writes the last cursor to PATH, as the service
+# account. A beat steered by a hostile advisory could aim that at
+# state/budget.json (resetting the quota that keeps the fleet from crowding
+# out its owner) or state/memory.db, and every later beat would run on the
+# damage. --output-fields, --file, --directory, --merge and the rest widen
+# what it can read.
+#
+# So the grant is this wrapper, root-owned in $FLEET_CODE/bin like the rest
+# of the code run-checkin checks, and it accepts only the four options the
+# /checkin skill uses. Units must be the fleet's own (cti-agent-*). Every
+# value is passed to journalctl in --opt=VALUE form, so nothing it is given
+# can be read as another option. Anything else exits 2 before journalctl runs.
+set -euo pipefail
+
+JOURNALCTL=/usr/bin/journalctl
+
+usage() {
+  echo "usage: fleet-journal -u cti-agent-UNIT [-u ...] [--since WHEN] [-n N] [--no-pager]" >&2
+  exit 2
+}
+refuse() {
+  echo "fleet-journal: $*" >&2
+  usage
+}
+
+units=()
+since=""
+lines=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u|--unit)
+      [ $# -ge 2 ] || refuse "$1 needs a unit name"
+      # Globs allowed (the skill reads 'cti-agent-*'); the prefix keeps them
+      # inside the fleet's units.
+      case "$2" in
+        cti-agent-*) ;;
+        *) refuse "unit '$2' is not one of the fleet's (cti-agent-*)" ;;
+      esac
+      case "$2" in
+        *[!A-Za-z0-9@._*-]*) refuse "unit '$2' has characters a unit name does not" ;;
+      esac
+      units+=("$2"); shift 2 ;;
+    --since)
+      [ $# -ge 2 ] || refuse "--since needs a time"
+      # journalctl's own forms: today, yesterday, -3h, 2026-11-03 06:00:00.
+      case "$2" in
+        ''|*[!A-Za-z0-9\ :.+-]*) refuse "--since '$2' is not a time journalctl accepts" ;;
+      esac
+      [ "${#2}" -le 40 ] || refuse "--since value is too long"
+      since="$2"; shift 2 ;;
+    -n|--lines)
+      [ $# -ge 2 ] || refuse "$1 needs a number"
+      case "$2" in
+        ''|*[!0-9]*) refuse "$1 '$2' is not a number" ;;
+      esac
+      [ "${#2}" -le 6 ] || refuse "$1 '$2' is too large"
+      lines="$2"; shift 2 ;;
+    --no-pager) shift ;;
+    -h|--help) usage ;;
+    *) refuse "'$1' is not accepted (only -u, --since, -n and --no-pager)" ;;
+  esac
+done
+
+[ "${#units[@]}" -gt 0 ] || refuse "at least one -u cti-agent-UNIT is required"
+
+args=(--no-pager)
+for u in ${units[@]+"${units[@]}"}; do args+=("--unit=$u"); done
+[ -n "$since" ] && args+=("--since=$since")
+[ -n "$lines" ] && args+=("--lines=$lines")
+
+exec "$JOURNALCTL" "${args[@]}"
