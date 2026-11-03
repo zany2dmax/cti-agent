@@ -39,6 +39,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Domains: who each SPF include is for.** The weekly gains an "SPF INCLUDES -
+  WHO EACH ONE IS FOR" section and the CSV an `spf_includes_described` column:
+  each include/redirect in the domains' own SPF records once, with the vendor
+  (SMTP2GO, KnowBe4, Mailchimp, Microsoft 365, and about thirty more) and the
+  domains that carry it, unrecognised ones first. `DOMAINS_SPF_VENDORS` adds or
+  corrects entries, so the mail admin can answer "do we use this vendor?" from
+  the report.
+- **Domains: Proofpoint listed by address counts.** `PROOFPOINT_POD_IPS` names
+  the PoD addresses some SPF records list instead of the include (to stay under
+  the 10-lookup limit); an SPF that lists one is no longer reported as not
+  authorising Proofpoint.
 - **Operator alerts open with what the problem is.** `cti-alert` emails now
   start with a "WHAT THIS MEANS" paragraph, above systemd's verdict and the
   journal: what the unit does, how it ended, a plain cause when the last error

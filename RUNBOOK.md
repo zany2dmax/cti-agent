@@ -1678,6 +1678,20 @@ and what is left after a move (an old SPF include, a Google DKIM key). The
 tenant is learned from the MX records; pin it with `PROOFPOINT_POD_TENANT`
 if a week could ever have more domains off the gateway than on it.
 
+An SPF record at the 10-lookup limit may list the PoD addresses instead of the
+include. Put them in `PROOFPOINT_POD_IPS` (addresses or CIDR ranges) and such a
+record counts as authorising PoD.
+
+The weekly also has a **SPF INCLUDES - WHO EACH ONE IS FOR** section: every
+`include:` / `redirect=` in the domains' own SPF records, once, with the vendor
+behind it (SMTP2GO, KnowBe4, Mailchimp, Microsoft 365 and so on) and the
+domains that carry it, so "do we use that vendor?" is one answer and one
+removal. An include the report does not know is shown first as **NOT
+RECOGNISED**; once someone has found out who it is, add it to
+`DOMAINS_SPF_VENDORS` (`suffix=description`) and the next report says so. The
+CSV has the same per domain in `spf_includes_described`. Only a record's own
+includes are described, not what a vendor's record includes in turn.
+
 ### 6. DKIM selectors and DMARC reports
 
 DKIM keys cannot be listed, only probed by selector. If a sending domain shows

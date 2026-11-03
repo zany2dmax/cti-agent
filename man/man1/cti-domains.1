@@ -89,6 +89,17 @@ each for: live website (final host, status, page title), redirects to
 another domain, registrar-hosted, parked or for sale, DNS but no working
 page, no website, and not checked. The lead says the same in one sentence.
 .PP
+An
+.B "SPF INCLUDES - WHO EACH ONE IS FOR"
+section lists every
+.B include:
+and
+.B redirect=
+in the domains' own SPF records once, with the vendor behind it (or
+.B "NOT RECOGNISED"
+first) and the domains that carry it. The CSV repeats it per domain in
+.BR spf_includes_described .
+.PP
 When any domain's MX is on Proofpoint on Demand (or
 .B PROOFPOINT_POD_TENANT
 is set), a
@@ -368,6 +379,20 @@ these servers return.
 Our Proofpoint on Demand tenant id. Empty: the most common tenant in the
 inventory's MX records; with no domain on pphosted.com the gateway section
 is off.
+.TP
+.B PROOFPOINT_POD_IPS
+Proofpoint on Demand addresses or CIDR ranges that some SPF records list
+directly to stay under SPF's limit of 10 DNS lookups, separated by commas
+(fleet.env is sourced by the shell, so no spaces). An SPF listing one counts as authorising Proofpoint on Demand. Empty:
+none.
+.TP
+.B DOMAINS_SPF_VENDORS
+Comma-separated
+.I suffix=description
+entries naming who an SPF include is for, added to (and overriding) the built-in
+list used by the report's
+.B "SPF INCLUDES"
+section. A description may not contain a comma.
 .TP
 .B DOMAINS_DKIM_SELECTORS
 DKIM selectors to probe, comma- or space-separated. Empty: selector1,
