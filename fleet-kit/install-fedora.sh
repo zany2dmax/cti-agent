@@ -883,6 +883,23 @@ export HOME=$STATE_DIR
 cd "$STATE_DIR"
 cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-appowners|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
+# A fleet command by NAME, nothing else. \$cmd used to be joined onto bin/
+# as given, so "cti-agent ../../../usr/bin/env" ran env as the service
+# account with fleet.env loaded - every secret printed - and ../../bin/bash
+# was a shell as an account that is meant to have none. A name is letters,
+# digits, dots and dashes with no slash, and it must be a regular file this
+# installer put in bin/ (or lanes/ for the .py lanes): not a symlink.
+case "\$cmd" in
+  *[!a-z0-9.-]*|.*|'') echo "cti-agent: '\$cmd' is not a fleet command" >&2; exit 2 ;;
+esac
+case "\$cmd" in
+  *.py) target="$CODE_DIR/lanes/\$cmd" ;;
+  *)    target="$CODE_DIR/bin/\$cmd" ;;
+esac
+if [ ! -f "\$target" ] || [ -L "\$target" ]; then
+  echo "cti-agent: '\$cmd' is not a fleet command (no \$target)" >&2
+  exit 2
+fi
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
 # variables: cti-kev, the Python lanes, fleet-db and cti-budget ran on their
@@ -895,9 +912,9 @@ export FLEET_HOME="\$_h" FLEET_CODE="\$_c" FLEET_ENV="\$_e" FLEET_FEEDS="\$_f" H
 exec "\$@"'
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              /bin/bash -c "\$LOADENV" cti-agent /usr/bin/python3 "$CODE_DIR/lanes/\$cmd" "\$@" ;;
+              /bin/bash -c "\$LOADENV" cti-agent /usr/bin/python3 "\$target" "\$@" ;;
   *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
-              /bin/bash -c "\$LOADENV" cti-agent "$CODE_DIR/bin/\$cmd" "\$@" ;;
+              /bin/bash -c "\$LOADENV" cti-agent "\$target" "\$@" ;;
 esac
 WRAP
   chmod 0755 /usr/local/bin/cti-agent

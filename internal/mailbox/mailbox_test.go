@@ -388,7 +388,7 @@ func TestTheBacklogNoteOnlyFiresAtTheThreshold(t *testing.T) {
 
 func TestSummariseCountsEveryAction(t *testing.T) {
 	plan := planNoGrace([]Candidate{
-		{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"},
+		{ID: "a"}, {ID: "b", AutoReply: true}, {ID: "c"}, {ID: "d"},
 	}, map[string]Processed{
 		"a": {ID: "a", HasCVE: true},
 		"b": {ID: "b", AutoReply: true},
@@ -411,7 +411,7 @@ func TestSummariseCountsEveryAction(t *testing.T) {
 func TestEveryDecisionCarriesAReason(t *testing.T) {
 	// This lane moves other people's mail unattended. "Why is this in Deleted
 	// Items" has to be answerable from the log alone.
-	plan := planNoGrace([]Candidate{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+	plan := planNoGrace([]Candidate{{ID: "a"}, {ID: "b", AutoReply: true}, {ID: "c"}},
 		map[string]Processed{
 			"a": {ID: "a", HasCVE: true},
 			"b": {ID: "b", AutoReply: true},
@@ -537,7 +537,8 @@ func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
 		// Auto-replies first, read or not.
 		{in{hdrAuto: true}, ActionDelete, "unread, header says auto-reply"},
 		{in{subjAuto: true}, ActionDelete, "unread, subject says auto-reply"},
-		{in{record: true, recAuto: true}, ActionDelete, "recorded as an auto-reply"},
+		// A stored verdict alone no longer deletes: the live headers decide.
+		{in{record: true, recAuto: true}, ActionLeave, "recorded as an auto-reply, headers now say not"},
 		{in{record: true, cve: true, hdrAuto: true}, ActionDelete,
 			"headers outrank a quoted CVE"},
 		{in{record: true, cve: true, subjAuto: true}, ActionArchive,
@@ -865,5 +866,16 @@ func TestOurOwnReportsWaitTheirWeekThenArchive(t *testing.T) {
 	}
 	if c := Summarise(plan); c.Unread != 0 {
 		t.Errorf("Unread = %d: a held report of ours is not an unread message", c.Unread)
+	}
+}
+
+func TestAStoredAutoReplyVerdictDoesNotDeleteMailTheLiveHeadersClear(t *testing.T) {
+	// A record written by a binary that still took auto-generated mail for an
+	// out-of-office reply says AutoReply. The live headers say otherwise; the
+	// live headers win, and the message falls to the ordinary rules.
+	plan := planNoGrace([]Candidate{{ID: "vendor", Subject: "Security notification"}},
+		map[string]Processed{"vendor": {ID: "vendor", AutoReply: true}})
+	if plan[0].Action == ActionDelete {
+		t.Errorf("stale stored verdict deleted it: %s (%s)", plan[0].Action, plan[0].Reason)
 	}
 }

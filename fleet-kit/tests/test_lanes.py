@@ -2489,6 +2489,51 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                     missing.append(f"{var}{tail} -> {want}")
         self.assertEqual(missing, [], "\n" + "\n".join(missing))
 
+    def test_the_cti_agent_wrapper_runs_fleet_commands_by_name_only(self):
+        """`sudo cti-agent ../../../usr/bin/env` joined the argument onto bin/
+        and ran env as the service account with fleet.env loaded, printing
+        every secret; ../../bin/bash was a shell. The wrapper now takes a name
+        that is a regular file in bin/ (or lanes/ for .py) and nothing else."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        body = inst[inst.index("cat > /usr/local/bin/cti-agent <<WRAP\n") + len("cat > /usr/local/bin/cti-agent <<WRAP\n"):]
+        body = body[:body.index("\nWRAP\n") + 1]
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            code, state, fake = d / "code", d / "state", d / "fakebin"
+            for p in (code / "bin", code / "lanes", state, fake):
+                p.mkdir(parents=True)
+            (code / "bin" / "fleet-db").write_text("#!/bin/sh\n")
+            (code / "lanes" / "scout.py").write_text("")
+            (code / "bin" / "linked").symlink_to("/usr/bin/env")
+            (fake / "sudo").write_text('#!/bin/sh\nfor a; do echo "$a"; done\n')
+            (fake / "sudo").chmod(0o755)
+            wrapper = d / "cti-agent"
+            render = subprocess.run(
+                ["bash", "-c", f'CODE_DIR="{code}" STATE_DIR="{state}" CONF_DIR="{d}" '
+                 f'FLEET_USER=ctiagent; cat <<WRAP\n{body}WRAP\n'],
+                capture_output=True, text=True, check=True)
+            wrapper.write_text(render.stdout)
+            env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(d)}
+
+            def run(*args):
+                return subprocess.run(["bash", str(wrapper), *args], env=env,
+                                      capture_output=True, text=True)
+
+            r = run("fleet-db", "recent")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(f"{code}/bin/fleet-db", r.stdout.splitlines())
+            r = run("scout.py", "--days", "1")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(f"{code}/lanes/scout.py", r.stdout.splitlines())
+            for cmd in ("../../../../usr/bin/env", "../../../../bin/bash", "/usr/bin/env",
+                        "fleet-db/../../../x", "..", ".hidden", "Fleet-DB", "env",
+                        "linked", "nope", "x.py", "../lanes/scout.py", "fleet-db\nid"):
+                with self.subTest(refused=cmd):
+                    r = run(cmd, "-c", "id")
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertEqual(r.stdout, "", "sudo must not have been reached")
+
     def test_the_generic_installer_stays_retired(self):
         """install.sh left the fleet's code owned by the service account.
 
