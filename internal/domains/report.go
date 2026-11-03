@@ -437,6 +437,7 @@ func (r Report) text() string {
 	r.inventoryText(&b)
 	r.websitesText(&b)
 	r.proofpointText(&b)
+	r.spfVendorsText(&b)
 
 	section := func(title string, f []Finding, tagSev bool) {
 		if len(f) == 0 {
@@ -609,6 +610,7 @@ func (r Report) html() string {
 	if pf := proofpointFindings(r.Findings); len(pf) > 0 {
 		cards(proofpointTitle, "#6b46c1", "#f5f0ff", pf, true)
 	}
+	r.spfVendorsHTML(&b)
 	cards("NEEDS ACTION", "#b3001b", "#fdecee", r.high(), false)
 	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
 	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)

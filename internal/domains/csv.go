@@ -30,6 +30,7 @@ var CSVHeader = []string{
 	"tls_verified", "tls_verify_error", "tls_not_after", "tls_dns_names",
 	"dangling_cname", "mx_unresolved", "smtp_starttls", "smtp_error",
 	"dkim_bits", "dmarc_policy", "dmarc_rua", "spf_lookups",
+	"spf_includes_described",
 }
 
 // CSV renders one row per probed host: the inventory name and, for an apex,
@@ -131,6 +132,7 @@ func csvRow(r Result, w Web) []string {
 		strings.Join(w.TLS.Names, ";"),
 		boolStr(w.Dangling), strings.Join(m.MXUnresolved, ";"), boolStr(m.SMTP.StartTLS), m.SMTP.Err,
 		strings.Join(dkimBits, ";"), pol, rua, strconv.Itoa(m.SPFLookups),
+		spfDescribed(r),
 	}
 }
 
@@ -148,4 +150,19 @@ func firstNonEmptyStr(s ...string) string {
 		}
 	}
 	return ""
+}
+
+// spfDescribed is the domain's own SPF includes with who each is for, one
+// "mechanism = vendor" per entry, for filtering in a spreadsheet.
+func spfDescribed(r Result) string {
+	var out []string
+	for _, x := range SPFIncludes([]Result{r}) {
+		v := x.Vendor
+		if v == "" {
+			v = "NOT RECOGNISED"
+		}
+		out = append(out, x.Mechanism+" = "+v)
+	}
+	sort.Strings(out)
+	return strings.Join(out, "; ")
 }
