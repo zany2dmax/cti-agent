@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/domains"
 	"github.com/zany2dmax/cti-agent/internal/jira"
 )
 
@@ -110,5 +111,29 @@ func TestThePreviewAndTheRealRunAgree(t *testing.T) {
 			t.Errorf("%s: preview %q (would comment: %v), real run commented: %v",
 				tc.name, preview, said, did)
 		}
+	}
+}
+
+func TestPlanDomainsHeldTouchesNothing(t *testing.T) {
+	open := &jira.Issue{Key: "CR-1"}
+	// An empty action list on an open ticket is normally "all done"; held must
+	// override that, or an unavailable gateway would close real work.
+	for _, o := range []*jira.Issue{nil, open} {
+		plan, why := planDomains(o, domainsState{}, domains.ActionsFile{Held: true, HeldWhy: "HTTP 409"})
+		if plan != domainsNothing || !strings.Contains(why, "held") {
+			t.Errorf("open=%v: plan %q (%s)", o != nil, plan, why)
+		}
+	}
+	plan, _ := planDomains(open, domainsState{}, domains.ActionsFile{Actions: []domains.Action{}})
+	if plan != domainsDone {
+		t.Errorf("without Held an empty list still resolves: %q", plan)
+	}
+}
+
+func TestPlanDomainsEmptyBecauseOfSkippedDoesNotResolve(t *testing.T) {
+	open := &jira.Issue{Key: "CR-1"}
+	plan, why := planDomains(open, domainsState{}, domains.ActionsFile{Skipped: []string{"a.example"}})
+	if plan != domainsNothing || !strings.Contains(why, "left out") {
+		t.Errorf("plan %q (%s)", plan, why)
 	}
 }

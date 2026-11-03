@@ -258,7 +258,15 @@ so the runner does not probe every domain a second time to build it.
 .BI \-\-actions\-out " FILE"
 Write the DNS changes (see DESCRIPTION) as JSON, mode 0600: each change's
 domain, profile, record type and host, the value to set, the current value
-and why, plus counts and a hash of the list.
+and why, plus counts and a hash of the list. When
+.B DOMAINS_MAIL_GATEWAY
+is set but gave no usable evidence the file also carries
+.B held
+(true) and
+.BR heldWhy ,
+and
+.BR cti\-jira (1)
+changes no ticket.
 .B run\-domains
 passes it to
 .BR "cti\-jira \-\-domains\-actions" .
@@ -380,6 +388,34 @@ connect, the report says once that outbound port 25 appears blocked.
 .TP
 .B DOMAINS_SMTP_PORT
 Port for the SMTP probe. Default:\~\fB25\fR.
+.TP
+.B DOMAINS_MAIL_GATEWAY
+.B pod
+reads the Proofpoint on Demand log for the last
+.B DOMAINS_GATEWAY_DAYS
+days, in the background, and keeps counts only. A domain the inventory says
+sends nothing that has outbound mail is reported High and is not asked to be
+locked down; outbound domains missing from the inventory are Medium; inbound
+mail using our domains is counted as evidence for
+.BR p=reject .
+It needs
+.B POD_CLUSTER_ID
+and
+.BR POD_API_TOKEN .
+If the read fails or is incomplete, no lock-down change is produced, the
+actions file is marked
+.BR held ,
+and the report says why. Default: off.
+.TP
+.B DOMAINS_GATEWAY_DAYS
+Whole days of gateway log to read, 1 to 28. Default:\~\fB7\fR.
+.TP
+.BR POD_CLUSTER_ID ", " POD_API_TOKEN
+The Proofpoint on Demand cluster and token for
+.BR DOMAINS_MAIL_GATEWAY .
+The service allows one session per token: do not run
+.BR cti\-podprobe (1)
+while the weekly runs.
 .TP
 .BR FLEET_HOME ", " FLEET_ENV ", " FLEET_ORG
 Fleet layout, the

@@ -291,6 +291,17 @@ fails if one appears in the tree, the report and `domains-state.json` are
 written `0600`, it goes only to `DOM_TO` through its own fail-closed allowlist,
 and every fixture is a reserved example name.
 
+**The mail-gateway read is aggregates only, read-only, and a failed read holds
+tickets rather than guessing.** With `DOMAINS_MAIL_GATEWAY=pod` the domains lane
+reads the Proofpoint on Demand log for the last N days and keeps header-From
+domain counts and DMARC pass/fail counts: no address, subject, recipient or
+message is stored or printed, and the client makes no write to the service.
+The token comes from `fleet.env` only and is the fleet's own (one session per
+token). If the read fails or is incomplete the lane does not assume a "sends
+nothing" domain is silent: it produces no lock-down actions, marks the actions
+file held, and `cti-jira` files, comments and resolves nothing that run. Off
+unless the setting is made.
+
 **The GoDaddy token can read, and the client never asks for auth codes.** The
 listing endpoint will return each domain's transfer auth code on request; a
 file or log holding those for every domain we own would be the most valuable

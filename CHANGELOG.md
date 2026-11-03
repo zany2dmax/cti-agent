@@ -39,6 +39,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Domains: the mail gateway's log decides who may be locked down.** With
+  `DOMAINS_MAIL_GATEWAY=pod` the weekly domains lane reads the Proofpoint on
+  Demand log for the last `DOMAINS_GATEWAY_DAYS` days (1 to 28, default 7),
+  aggregates only, through the new `domains.MailGateway` interface (`podgw` is
+  the first implementation). A domain the inventory says sends nothing that
+  has outbound mail gets a High finding and is not asked to be locked down;
+  sending domains with none get an Info; a "sends nothing" domain that only has
+  inbound mail passing DMARC as it is also left alone (a service is authorised
+  to send as it); outbound domains missing from the inventory get a Medium
+  (first 10); inbound mail using our domains is counted, with
+  DMARC passed and not passed, as the evidence for `p=reject`. If the read
+  fails or is incomplete (token in use, network, byte cap, idle, a connection
+  dropped without a close frame, undecodable messages, sender-domain overflow,
+  an empty window, or events that do not cover the window) no lock-down action is produced, the actions file
+  carries `held`, `cti-jira` files, comments on and resolves nothing (ref
+  action `held`), and the report has a Medium "(mail gateway)" finding saying
+  why. **Upgrade:** pull, reinstall. The feature is off until
+  `DOMAINS_MAIL_GATEWAY=pod` and `POD_CLUSTER_ID` / `POD_API_TOKEN` are set in
+  fleet.env; rehearse with `run-domains --dry-run`. Do not run
+  `cti-podprobe` while the weekly runs (one session per token).
+
 - **`cti-podprobe` and `internal/podlog`: a read-only probe of the Proofpoint
   on Demand Log API.** One archived window is read over a standard-library
   WebSocket client and printed as aggregate counts only: events per

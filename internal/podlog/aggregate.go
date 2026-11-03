@@ -132,12 +132,15 @@ type Aggregate struct {
 	SPF       map[string]int `json:"spf"`
 
 	// Outbound: what our own mail looks like to the gateway.
-	OutboundFrom       map[string]int `json:"outboundFromDomains"`
-	OutboundIPs        map[string]int `json:"outboundSenderIPs"`
-	OutboundDKIM       map[string]int `json:"outboundDkim"` // "signer/selector/result"
-	OutboundEvents     int            `json:"outboundEvents"`
-	OutboundWithDKIM   int            `json:"outboundWithDkim"`
-	OutboundDKIMByFrom map[string]int `json:"outboundDkimByFromDomain"`
+	OutboundFrom   map[string]int `json:"outboundFromDomains"`
+	OutboundIPs    map[string]int `json:"outboundSenderIPs"`
+	OutboundDKIM   map[string]int `json:"outboundDkim"` // "signer/selector/result"
+	OutboundEvents int            `json:"outboundEvents"`
+	// OutboundUnattributed: outbound events with no usable header-From domain
+	// (bounces, unparsable names). They are counted, never attributed.
+	OutboundUnattributed int            `json:"outboundUnattributed"`
+	OutboundWithDKIM     int            `json:"outboundWithDkim"`
+	OutboundDKIMByFrom   map[string]int `json:"outboundDkimByFromDomain"`
 
 	// Inbound mail using our name.
 	Spoof          map[string]*SpoofStat `json:"spoof"`
@@ -259,6 +262,9 @@ func (a *Aggregate) addEvent(ev *event) {
 	case "outbound":
 		a.OutboundEvents++
 		bump(a.OutboundFrom, key(from))
+		if k := key(from); k == "(none)" || k == "(unparsed)" {
+			a.OutboundUnattributed++
+		}
 		if ip := key(ev.Connection.IP); ip != "(none)" {
 			bump(a.OutboundIPs, ip)
 		}
@@ -343,6 +349,10 @@ func fromDomain(ev *event) string {
 }
 
 var domainRE = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
+
+// Span is the earliest and latest event time seen (zero when none parsed). A
+// caller that needs to know the read covered its window compares these with it.
+func (a *Aggregate) Span() (first, last time.Time) { return a.first, a.last }
 
 func (a *Aggregate) noteTime(ts string) {
 	if ts == "" {

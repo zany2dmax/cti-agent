@@ -141,6 +141,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logf("note   : stopped at --max-bytes (%d); counts cover only part of the window", *maxBytes)
 	case err == nil, errors.Is(err, io.EOF):
 		logf("done   : the service ended the stream")
+	case errors.Is(err, podlog.ErrDropped):
+		logf("note   : the connection dropped before the service closed the stream; counts are partial")
 	case errors.Is(err, podlog.ErrIdle):
 		logf("note   : no data for %s; treating the window as finished", *idle)
 	default:

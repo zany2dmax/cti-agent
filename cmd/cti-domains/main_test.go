@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"net"
 	"os"
 	"path/filepath"
@@ -107,5 +109,114 @@ func TestDNSResolverSpec(t *testing.T) {
 		if _, _, err := dnsResolver(bad); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}
+	}
+}
+
+type fakeGateway struct {
+	ev  domains.GatewayEvidence
+	err error
+}
+
+func (fakeGateway) Name() string { return "Fake Gateway" }
+func (f fakeGateway) Evidence(_ context.Context, since, to time.Time) (domains.GatewayEvidence, error) {
+	if f.err != nil {
+		return domains.GatewayEvidence{}, f.err
+	}
+	ev := f.ev
+	ev.Since, ev.To = since, to
+	return ev, nil
+}
+
+// runGateway runs the lane with a one-domain "receive" inventory and returns
+// the report text and the raw actions file.
+func runGateway(t *testing.T, mode string, gw fakeGateway) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	inv := filepath.Join(dir, "domains.txt")
+	if err := os.WriteFile(inv, []byte("example.org receive\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GODADDY_PAT", "test-pat")
+	t.Setenv("DOMAINS_DNS_SERVERS", "")
+	t.Setenv("FLEET_ENV", filepath.Join(dir, "absent.env"))
+	t.Setenv("DOMAINS_MAIL_GATEWAY", mode)
+	t.Setenv("DOMAINS_GATEWAY_DAYS", "")
+	t.Setenv("POD_CLUSTER_ID", "cluster-example")
+	t.Setenv("POD_API_TOKEN", "token-example")
+	registrarFor = func(string) domains.Registrar {
+		return fakeRegistrar{regs: []domains.Registration{
+			{Domain: "example.org", Status: "ACTIVE", Expires: time.Now().AddDate(1, 0, 0), AutoRenew: true, Locked: true},
+		}}
+	}
+	gatewayFor = func(cluster, token string) domains.MailGateway {
+		if cluster != "cluster-example" || token != "token-example" {
+			t.Errorf("gateway built with %q / %q", cluster, token)
+		}
+		return gw
+	}
+	resolver = emptyDNS{}
+	webProber = func(context.Context, string) (domains.Fetch, domains.Fetch, domains.Cert) {
+		return domains.Fetch{}, domains.Fetch{}, domains.Cert{}
+	}
+	txt, act := filepath.Join(dir, "r.txt"), filepath.Join(dir, "a.json")
+	os.Args = []string{"cti-domains", "--inventory", inv, "--state", filepath.Join(dir, "s.json"),
+		"--text-out", txt, "--actions-out", act}
+	// run() registers flags on the global set; start each run with a fresh one.
+	flag.CommandLine = flag.NewFlagSet("cti-domains", flag.ContinueOnError)
+	if code := run(); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	r, _ := os.ReadFile(txt)
+	a, _ := os.ReadFile(act)
+	return string(r), string(a)
+}
+
+func hasAction(actions, domain string) bool {
+	return strings.Contains(actions, `"domain": "`+domain+`"`) || strings.Contains(actions, `"domain":"`+domain+`"`)
+}
+
+func TestRunGatewayOutboundBlocksLockDown(t *testing.T) {
+	// Control: with no gateway the receive domain gets lock-down actions.
+	_, base := runGateway(t, "", fakeGateway{})
+	if !hasAction(base, "example.org") {
+		t.Fatalf("control run has no action for example.org:\n%s", base)
+	}
+	if strings.Contains(base, `"held"`) {
+		t.Errorf("unconfigured gateway left a held field:\n%s", base)
+	}
+
+	rep, act := runGateway(t, "pod", fakeGateway{ev: domains.GatewayEvidence{
+		Gateway: "Fake Gateway", Complete: true, Events: 10,
+		Outbound: map[string]int{"example.org": 3},
+	}})
+	if hasAction(act, "example.org") {
+		t.Errorf("a domain with outbound mail was asked to be locked down:\n%s", act)
+	}
+	if strings.Contains(act, `"held"`) {
+		t.Errorf("usable evidence marked the actions held:\n%s", act)
+	}
+	if !strings.Contains(rep, "the inventory says this domain sends nothing") {
+		t.Errorf("report missing the High finding:\n%s", rep)
+	}
+}
+
+func TestRunGatewayFailureHoldsTickets(t *testing.T) {
+	rep, act := runGateway(t, "pod", fakeGateway{err: errors.New("token in use (HTTP 409)")})
+	if !strings.Contains(act, `"held": true`) && !strings.Contains(act, `"held":true`) {
+		t.Errorf("actions file is not held:\n%s", act)
+	}
+	if hasAction(act, "example.org") {
+		t.Errorf("lock-down action produced while held:\n%s", act)
+	}
+	if !strings.Contains(rep, "(mail gateway)") || !strings.Contains(rep, "evidence is unavailable") ||
+		!strings.Contains(rep, "token in use") {
+		t.Errorf("report does not explain the hold:\n%s", rep)
+	}
+}
+
+func TestRunGatewayIncompleteHolds(t *testing.T) {
+	_, act := runGateway(t, "pod", fakeGateway{ev: domains.GatewayEvidence{Complete: false, Reason: "byte cap reached"}})
+	if !strings.Contains(act, `"held"`) || hasAction(act, "example.org") {
+		t.Errorf("incomplete evidence did not hold:\n%s", act)
 	}
 }
