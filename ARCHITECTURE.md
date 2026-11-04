@@ -433,7 +433,7 @@ fleet-kit/install-fedora.sh    the installer: code in /opt (root-owned), config
                                in /etc, state in /var/lib
 fleet-kit/tests/               lane tests (stdlib unittest, no network)
 scripts/                       history scrub, exposure remediation notes,
-                               cheatsheet-pdf.py (task cheatsheet:pdf)
+                               cheatsheet-header.tex (task cheatsheet:pdf)
 ```
 
 ---

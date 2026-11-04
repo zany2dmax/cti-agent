@@ -38,19 +38,33 @@ tasks:
         echo "  ok  man pages clean"
 
   cheatsheet:pdf:
-    desc: Build CHEATSHEET.pdf from CHEATSHEET.md (needs reportlab)
+    desc: Build CHEATSHEET.pdf from CHEATSHEET.md (needs pandoc and pdflatex)
     # The PDF is generated, so it is gitignored: CHEATSHEET.md is the source.
+    # pandoc turns the Markdown into LaTeX and pdflatex typesets it, so there is
+    # no Python library to install. CHEATSHEET.md must stay plain ASCII:
+    # pdflatex does not take arrows or smart quotes without extra setup.
+    # Mac: brew install pandoc; brew install --cask basictex (then
+    # sudo tlmgr install fvextra etoolbox framed), or install MacTeX.
     sources:
       - CHEATSHEET.md
-      - scripts/cheatsheet-pdf.py
+      - scripts/cheatsheet-header.tex
     generates:
       - CHEATSHEET.pdf
     cmds:
       - |
-        if ! python3 -c 'import reportlab' 2>/dev/null; then
-          echo "reportlab is not installed: pip3 install --user reportlab" >&2; exit 1
+        for tool in pandoc pdflatex; do
+          command -v "$tool" >/dev/null 2>&1 || { echo "$tool is not installed (see the comment on this task in Taskfile.yml)" >&2; exit 1; }
+        done
+        kpsewhich fvextra.sty >/dev/null 2>&1 || { echo "LaTeX package fvextra is missing: sudo tlmgr install fvextra etoolbox framed" >&2; exit 1; }
+        if LC_ALL=C grep -n '[^[:print:][:space:]]' CHEATSHEET.md >/dev/null; then
+          echo "CHEATSHEET.md has non-ASCII characters; pdflatex will fail on them:" >&2
+          LC_ALL=C grep -n '[^[:print:][:space:]]' CHEATSHEET.md | head -5 >&2; exit 1
         fi
-        python3 scripts/cheatsheet-pdf.py CHEATSHEET.md CHEATSHEET.pdf
+        pandoc CHEATSHEET.md -o CHEATSHEET.pdf --pdf-engine=pdflatex \
+          -H scripts/cheatsheet-header.tex -V geometry:margin=0.7in \
+          -V fontsize=10pt -V colorlinks=true -V linkcolor=blue \
+          --highlight-style=tango
+        echo "  ok  CHEATSHEET.pdf"
 
   fmt:check:
     desc: Fail if anything is unformatted, rather than silently reformatting it
