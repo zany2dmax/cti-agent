@@ -334,50 +334,58 @@ sudo systemctl disable --now cti-agent-domains.timer
 sudo systemctl enable --now cti-agent-domains.timer
 ```
 
-### 11a. Tag a release and copy it to the company GitHub
+### 11a. Tag a release (the company GitHub copies it for you)
 
-Development stays on your personal GitHub (`origin`). The company GitHub
-(`company`) is a release copy for running tools internally: you only push to
-it, never pull from it. Run these on the Mac, in the repo.
+Development and releases live on your personal GitHub (`origin`). You never
+push to the company GitHub: a workflow in the company repo
+(`.github/workflows/sync-upstream.yml`) reads your personal repo every hour
+from 17:00 to 01:00 UTC (noon to 8pm US Eastern in winter), copies any new
+release tag (`v1.5`, `1.4.1`) to the company repo, creates a GitHub Release
+from the tag, and starts `security-scan.yml` if that file exists. The personal
+repo is public, so the workflow needs no personal login; it uses the company
+secret `SYNC_PAT`.
 
-One time:
-
-```bash
-git remote add company https://github.com/<company-org>/cti-agent.git
-git remote -v                          # origin = personal, company = company
-gh auth status                         # company account logged in, SSO authorised
-# First push only, if the company repo has a starter README commit:
-git fetch company && git ls-tree -r --name-only company/main   # starter files only?
-git push company main --force
-```
-
-Each release (after the work has run in production about a week, and you
-have decided the number):
+Each release, on the Mac (after the work has run in production about a week
+and you have decided the number):
 
 ```bash
-git status                             # clean, on main
+gh auth switch --user <personal-account>   # the account that owns origin
+git status                                 # clean, on main
 # 1. CHANGELOG: date the heading ("## 1.5.1 - YYYY-MM-DD"), commit it
-GOSEC_GOTOOLCHAIN=go1.26.9 task ship   # checks, then pushes main to origin
+GOSEC_GOTOOLCHAIN=go1.26.9 task ship       # checks, then pushes main to origin
 # 2. Tag the commit and push the tag
 git tag -a v1.5.1 -m "v1.5.1"
 git push origin v1.5.1
-# 3. Copy to the company GitHub
-git push company main --tags
-# 4. Verify both remotes hold the tag at the same commit
-git ls-remote --tags origin v1.5.1
-git ls-remote --tags company v1.5.1
+```
+
+Then wait for the next window, or run it now: company repo, Actions, "Sync
+upstream releases", Run workflow (type the tag, or leave it blank for all new
+tags). Check the result:
+
+```bash
+git ls-remote --tags origin v1.5.1         # personal
+gh release view v1.5.1 --repo <company-org>/cti-agent   # company, work account
 ```
 
 Then update the box (section 11); it records the tag in
 `/etc/cti-agent/version`.
 
-Mistakes: a wrong tag that is only local is `git tag -d v1.5.1`. One already
-pushed is `git push origin :refs/tags/v1.5.1` (and the same for `company`),
-then tag again. Never move a tag the box has installed.
+Rules:
 
-The history still holds two large old files (`cti-appreport`,
-`qualys_kb_cache.json`), so the company copy carries them until the history is
-purged.
+- **Never push `main` to the company repo, and never force-push there.** The
+  workflow file lives only in the company repo; replacing its history deletes
+  the workflow (this happened once). If it is missing, put
+  `.github/workflows/sync-upstream.yml` back from `.fleet-local/` (your copy,
+  not in git) and run it by hand once.
+- The workflow copies tags only. The company `main` branch does not move on a
+  release, so a scanner set to scan `main` there reads old code. Point it at
+  the tag, or have the workflow move `main` to each new tag.
+- A tag that is wrong and only local: `git tag -d v1.5.1`. Already pushed:
+  `git push origin :refs/tags/v1.5.1`, and delete the release and tag in the
+  company repo, then tag again. Never move a tag the box has installed.
+- Workflow secrets (company repo, Settings, Secrets and variables, Actions):
+  `SYNC_PAT` (a work-account token that can write contents and workflows) and,
+  only if the personal repo ever goes private, `UPSTREAM_READ_TOKEN`.
 
 ## 12. Mail and Microsoft Graph
 
