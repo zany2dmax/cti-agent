@@ -907,6 +907,11 @@ fmt → build → test → lint → scan → gosec → govulncheck → push
 It exists because a push once outran a red test when the two were separate
 commands.
 
+![From the laptop to production: task ship gates every push, the Fedora installer is idempotent, and a sync workflow copies each release tag to the company GitHub, where PrimeSec AI scans it.](docs/cti-agent-flow.svg)
+
+*Left to right: the gate on the dev machine, the install on the server, and the
+release path to the company repo, where the code is scanned again.*
+
 **Static analysis policy.** There is no blanket exclusion list. A finding is
 either fixed or annotated at the line with the reason it is intentional
 (`#nosec RULE -- reason`, `//nolint:linter // reason`). A suppression whose
