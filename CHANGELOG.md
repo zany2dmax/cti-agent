@@ -35,6 +35,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **`task cheatsheet:pdf` uses pandoc and pdflatex, not reportlab.** The
+  Python renderer (`scripts/cheatsheet-pdf.py`) is removed, so there is no pip
+  library to install. `scripts/cheatsheet-header.tex` wraps long lines in code
+  blocks. The task checks for pandoc, pdflatex and the `fvextra` LaTeX package,
+  and refuses non-ASCII text in `CHEATSHEET.md`, which pdflatex cannot set.
+- **Docs: a laptop-to-production diagram** (`docs/cti-agent-flow.svg`) in
+  SECURITY.md under "Build and release gates" and in the README, and
+  CHEATSHEET 11a describes the release flow (tag on the personal repo; the
+  sync workflow copies it to the company GitHub).
+
+**Upgrade:** nothing on the box. To build the cheat sheet PDF on a Mac:
+`brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
+basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and
+`task cheatsheet:pdf`.
+
 ## 1.5 — 2026-11-03
 
 ### Added

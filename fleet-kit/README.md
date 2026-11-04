@@ -253,7 +253,7 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task govulncheck` | stdlib and dependencies against the Go vulnerability database. `go.mod` has no third-party dependencies, so this is about the stdlib — and the agent parses untrusted HTML and XML off the public internet through `encoding/xml` and `net/http`, so an advisory in either is a live finding here |
 | `task ship` | fmt, build, all tests, lint, scan, gosec, govulncheck, **then** push. Task stops at the first failure, so the push cannot outrun a red gate — which it did once, when `task test` and `git push` were separate lines in the same paste |
 | `task man:lint` | Every man page in `man/man1/` renders without warnings (mandoc or groff). The drift test that every flag is documented runs with the lane tests |
-| `task cheatsheet:pdf` | Render `CHEATSHEET.md` to `CHEATSHEET.pdf` (needs `pip3 install reportlab`) |
+| `task cheatsheet:pdf` | Render `CHEATSHEET.md` to `CHEATSHEET.pdf` (needs `pandoc` and `pdflatex`) |
 | `task clean` / `task clean:all` | Build artifacts / also local state |
 
 ### Production — Fedora/RHEL layout

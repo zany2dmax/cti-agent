@@ -1,0 +1,9 @@
+% LaTeX preamble for `task cheatsheet:pdf` (pandoc -H). Wraps long lines in
+% code blocks instead of running them off the page, and tightens the layout.
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breakanywhere,commandchars=\\\{\}}
+\fvset{fontsize=\footnotesize}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\footnotesize}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
