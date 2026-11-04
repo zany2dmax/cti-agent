@@ -377,9 +377,12 @@ Rules:
   the workflow (this happened once). If it is missing, put
   `.github/workflows/sync-upstream.yml` back from `.fleet-local/` (your copy,
   not in git) and run it by hand once.
-- The workflow copies tags only. The company `main` branch does not move on a
-  release, so a scanner set to scan `main` there reads old code. Point it at
-  the tag, or have the workflow move `main` to each new tag.
+- After copying the tags, the workflow merges the newest one into the company
+  `main` (a merge, never a force push), so scanners and tools that read `main`
+  there see the release. The merge keeps the company repo's own
+  `.github/workflows/` files. If it ever fails (a conflict, or branch
+  protection blocking the `SYNC_PAT` push) the job fails visibly in the
+  Actions tab and `main` stays as it was; the tags are already copied.
 - A tag that is wrong and only local: `git tag -d v1.5.1`. Already pushed:
   `git push origin :refs/tags/v1.5.1`, and delete the release and tag in the
   company repo, then tag again. Never move a tag the box has installed.
