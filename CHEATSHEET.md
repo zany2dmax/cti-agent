@@ -334,6 +334,51 @@ sudo systemctl disable --now cti-agent-domains.timer
 sudo systemctl enable --now cti-agent-domains.timer
 ```
 
+### 11a. Tag a release and copy it to the company GitHub
+
+Development stays on your personal GitHub (`origin`). The company GitHub
+(`company`) is a release copy for running tools internally: you only push to
+it, never pull from it. Run these on the Mac, in the repo.
+
+One time:
+
+```bash
+git remote add company https://github.com/<company-org>/cti-agent.git
+git remote -v                          # origin = personal, company = company
+gh auth status                         # company account logged in, SSO authorised
+# First push only, if the company repo has a starter README commit:
+git fetch company && git ls-tree -r --name-only company/main   # starter files only?
+git push company main --force
+```
+
+Each release (after the work has run in production about a week, and you
+have decided the number):
+
+```bash
+git status                             # clean, on main
+# 1. CHANGELOG: date the heading ("## 1.5.1 - YYYY-MM-DD"), commit it
+GOSEC_GOTOOLCHAIN=go1.26.9 task ship   # checks, then pushes main to origin
+# 2. Tag the commit and push the tag
+git tag -a v1.5.1 -m "v1.5.1"
+git push origin v1.5.1
+# 3. Copy to the company GitHub
+git push company main --tags
+# 4. Verify both remotes hold the tag at the same commit
+git ls-remote --tags origin v1.5.1
+git ls-remote --tags company v1.5.1
+```
+
+Then update the box (section 11); it records the tag in
+`/etc/cti-agent/version`.
+
+Mistakes: a wrong tag that is only local is `git tag -d v1.5.1`. One already
+pushed is `git push origin :refs/tags/v1.5.1` (and the same for `company`),
+then tag again. Never move a tag the box has installed.
+
+The history still holds two large old files (`cti-appreport`,
+`qualys_kb_cache.json`), so the company copy carries them until the history is
+purged.
+
 ## 12. Mail and Microsoft Graph
 
 ```bash
