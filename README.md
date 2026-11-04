@@ -69,6 +69,13 @@ run](RUNBOOK.md#12-verifying-a-run) · [taking a host off the
 schedule](RUNBOOK.md#11e-taking-a-host-off-the-schedule) · [known
 gaps](SECURITY.md#known-gaps-and-accepted-risks)
 
+**From laptop to production.** Every push passes the `task ship` gate, the
+server installs idempotently, and each release tag is copied to the company
+GitHub for scanning (the gates are described in
+[SECURITY.md](SECURITY.md#build-and-release-gates)):
+
+![From the laptop to production: task ship gates every push, the Fedora installer is idempotent, and a sync workflow copies each release tag to the company GitHub, where PrimeSec AI scans it.](docs/cti-agent-flow.svg)
+
 ---
 
 ## What it produces
