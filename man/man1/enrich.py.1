@@ -183,7 +183,11 @@ section 6, ENRICHMENT.
 .TP
 .B FLEET_USER_AGENT
 User-Agent sent to NVD, EPSS and CISA.
-Default:\~\fB\%cti\-agent\-enrich/1.0\fR. Section 6.
+Default:\~\fB\%cti\-agent\-enrich/1.0\fR.
+.B GRAPH_MAILBOX
+is appended as the contact,
+.BR "(+mailto:" ... ) ,
+unless the value already carries a comment. Section 6.
 .TP
 .B FLEET_HOME
 State directory: the caches and

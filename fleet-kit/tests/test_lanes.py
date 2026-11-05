@@ -3363,6 +3363,35 @@ class RunnersToDev(unittest.TestCase):
                 self.assertTrue(sends and all("--dry-run" in c for c in sends), calls)
 
 
+class TestUserAgent(unittest.TestCase):
+    """The agent names a contact from GRAPH_MAILBOX, never a hardcoded one,
+    and the two lanes that fetch build it the same way as internal/useragent."""
+
+    CASES = [
+        ({}, "p/1.0"),
+        ({"GRAPH_MAILBOX": "fleet@example.com"}, "p/1.0 (+mailto:fleet@example.com)"),
+        ({"FLEET_USER_AGENT": "cti-agent-fleet/1.0", "GRAPH_MAILBOX": "fleet@example.com"},
+         "cti-agent-fleet/1.0 (+mailto:fleet@example.com)"),
+        ({"FLEET_USER_AGENT": "acme/2 (+https://acme.example)", "GRAPH_MAILBOX": "fleet@example.com"},
+         "acme/2 (+https://acme.example)"),
+        ({"GRAPH_MAILBOX": "fleet@example.com) evil ("}, "p/1.0"),
+        ({"GRAPH_MAILBOX": "fleet@example.com\r\nX-Evil: 1"}, "p/1.0"),
+        ({"FLEET_USER_AGENT": "a\r\nX-Evil: 1"}, "p/1.0"),
+    ]
+
+    def test_both_lanes(self):
+        scout = load("scout")
+        for lane in (enrich, scout):
+            for env, want in self.CASES:
+                with self.subTest(lane=lane.__name__, env=env):
+                    self.assertEqual(lane.user_agent("p/1.0", env), want)
+
+    def test_no_address_in_the_lanes(self):
+        for name in ("enrich", "scout"):
+            src = (LANES / f"{name}.py").read_text()
+            self.assertNotRegex(src, r"mailto:[A-Za-z0-9]", name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

@@ -76,9 +76,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   SECURITY.md under "Build and release gates" and in the README, and
   CHEATSHEET 11a describes the release flow (tag on the personal repo; the
   sync workflow copies it to the company GitHub).
+- **The User-Agent names a contact: the fleet's own mailbox.** Since 4 Nov
+  www.cisa.gov answers every scout fetch with 403, and the agent was a bare
+  `cti-agent-fleet/1.0` that gave CISA nobody to ask. Every fetch from a public
+  site - scout and enrich (NVD, EPSS, CISA, the feeds), Patch Tuesday
+  (Microsoft and the wrap-ups) and the domains web check - now sends
+  `<FLEET_USER_AGENT or the component's name> (+mailto:<GRAPH_MAILBOX>)`. The
+  address is read from `fleet.env` at run time, never written into the repo,
+  and a malformed one is left out rather than reshaping the header. A
+  `(...)` comment of your own in `FLEET_USER_AGENT` replaces the contact. One
+  helper in Go (`internal/useragent`) and its mirror in the two lanes, tested
+  to agree. It never impersonates a browser.
 
-**Upgrade:** nothing on the box. To build the cheat sheet PDF on a Mac:
-`brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
+**Upgrade:** nothing on the box beyond the reinstall; `GRAPH_MAILBOX` is
+already required. To ask CISA to allow the fleet, quote the
+`x-reference-error` value from a 403 response. To build the cheat sheet PDF on
+a Mac: `brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
 basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and
 `task cheatsheet:pdf`.
 

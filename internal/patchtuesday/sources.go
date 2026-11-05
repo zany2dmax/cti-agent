@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/useragent"
 )
 
 // Source is one fetched wrap-up article.
@@ -110,7 +112,9 @@ type Category struct {
 	Severities string
 }
 
-const userAgent = "cti-agent-patchtuesday/1.0 (+security team internal tooling)"
+// userAgent names this component and, through the fleet's mailbox, a contact.
+// See internal/useragent for why the address comes from fleet.env.
+func userAgent() string { return useragent.String("cti-agent-patchtuesday/1.0") }
 
 // QualysURL builds the canonical Qualys review URL. The date path is Patch
 // Tuesday itself, which is computable - verified against the May 2026
@@ -170,7 +174,7 @@ func Fetch(ctx context.Context, client *http.Client, name, url string) Source {
 	// Identify honestly. Some publishers rate-limit or block unrecognised
 	// agents, and if that happens the right response is to say so in the
 	// email, not to disguise the request.
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", userAgent())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 
 	resp, err := client.Do(req)

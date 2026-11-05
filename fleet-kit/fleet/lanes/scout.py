@@ -42,7 +42,24 @@ DEFAULT_FEEDS = (os.environ.get("FLEET_FEEDS")
 # producing a well-formed identifier for a different vulnerability.
 CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
 TAG_RE = re.compile(r"<[^>]+>")
-UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-scout/1.0")
+# The agent carries the fleet's mailbox as a contact, read from fleet.env at
+# run time so the public repo never holds the address: a publisher who sees
+# our polling can write to us instead of blocking us. Never a browser's agent.
+# Mirrors internal/useragent; test_lanes checks the lanes agree.
+_MAILBOX_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def user_agent(product, env=os.environ):
+    ua = (env.get("FLEET_USER_AGENT") or "").strip()
+    if not ua or "\r" in ua or "\n" in ua:
+        ua = product
+    contact = (env.get("GRAPH_MAILBOX") or "").strip()
+    if "(" in ua or not _MAILBOX_RE.fullmatch(contact):
+        return ua
+    return f"{ua} (+mailto:{contact})"
+
+
+UA = user_agent("cti-agent-scout/1.0")
 
 
 def log(m):
