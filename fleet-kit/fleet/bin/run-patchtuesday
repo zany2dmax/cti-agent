@@ -41,7 +41,10 @@ FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 
 # See run-digest: fleet.env must not overwrite the layout the unit injected.
 _inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
-set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+set +a
 [ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
 [ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
 export FLEET_HOME FLEET_CODE

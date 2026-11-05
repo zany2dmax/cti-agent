@@ -25,7 +25,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -49,15 +49,30 @@ def log(m):
     print(f"[scout] {m}", file=sys.stderr)
 
 
+MAX_FEED_BYTES = 10 * 1024 * 1024
+
+
 def fetch(url, timeout=30):
+    # feeds.txt is an operator's file, but urlopen also opens file:// and ftp://,
+    # so a pasted line could read a local file into the report. http(s) only.
+    if not url.lower().startswith(("https://", "http://")):
+        log(f"FEED FAIL {url} :: not an http(s) URL")
+        return None
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": UA,
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
         })
-        with urllib.request.urlopen(req, timeout=timeout,
+        # The scheme is checked at the top of this function.
+        with urllib.request.urlopen(req, timeout=timeout,  # nosec B310
                                     context=ssl.create_default_context()) as r:
-            return r.read()
+            # A feed is a few hundred KB; a hostile or broken server could
+            # stream without end. One byte over the cap means refuse it.
+            body = r.read(MAX_FEED_BYTES + 1)
+            if len(body) > MAX_FEED_BYTES:
+                log(f"FEED FAIL {url} :: larger than {MAX_FEED_BYTES // 1024 // 1024} MB")
+                return None
+            return body
     except Exception as e:                                      # noqa: BLE001
         log(f"FEED FAIL {url} :: {e}")
         return None
@@ -77,8 +92,8 @@ def parse_date(raw):
     raw = raw.strip()
     try:
         return parsedate_to_datetime(raw)                        # RFC 822 (RSS)
-    except Exception:                                           # noqa: BLE001
-        pass
+    except Exception:                                           # noqa: BLE001  # nosec B110
+        pass                                  # not RFC 822; try ISO 8601 next
     try:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))  # ISO (Atom)
     except Exception:                                           # noqa: BLE001
@@ -125,8 +140,19 @@ def parse_feed(raw, url):
             f"Check where the URL redirects to, and replace it in feeds.txt.")
         return items
 
+    # Feeds are untrusted XML and the standard library has no hardened parser
+    # (defusedxml would be the first dependency). XML-bomb and external-entity
+    # attacks both need an <!ENTITY> declaration, and a real feed has none, so
+    # one that does is refused. A bare <!DOCTYPE> (RSS 0.91 feeds carry one) is
+    # harmless to expat and still parsed.
+    data = raw if isinstance(raw, bytes) else raw.encode("utf-8", "replace")
+    if b"<!entity" in data.lower():
+        log(f"PARSE FAIL {url} :: the feed declares XML entities, which a real "
+            f"feed does not - refused")
+        return items
     try:
-        root = ET.fromstring(raw)
+        # Entity declarations were refused above.
+        root = ET.fromstring(raw)  # nosec B314
     except ET.ParseError as e:
         log(f"PARSE FAIL {url} :: malformed XML :: {e}")
         return items
@@ -152,11 +178,18 @@ def parse_feed(raw, url):
     return items
 
 
+# Fixed statements, not built from names: nothing here can carry input.
+_KNOWN_CVE_QUERIES = (
+    "SELECT cve FROM findings WHERE cve IS NOT NULL",
+    "SELECT cve FROM scout_items WHERE cve IS NOT NULL",
+)
+
+
 def known_cves(conn):
     seen = set()
-    for table, col in (("findings", "cve"), ("scout_items", "cve")):
+    for query in _KNOWN_CVE_QUERIES:
         try:
-            for (c,) in conn.execute(f"SELECT {col} FROM {table} WHERE {col} IS NOT NULL"):
+            for (c,) in conn.execute(query):
                 seen.add(c.upper())
         except sqlite3.Error:
             pass

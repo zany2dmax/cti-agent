@@ -311,7 +311,7 @@ The development box and the fleet box have different jobs and different gates.
 ```bash
 # --- on the Mac: write, prove, push ---
 task test           # while changing one thing
-task ship           # fmt, build, test, lint, scan, gosec, govulncheck, THEN push
+task ship           # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, THEN push
 
 # --- on the Fedora box: deploy, verify, then enable ---
 # KIT = wherever the kit checkout lives. Not ~, because the deploy runs

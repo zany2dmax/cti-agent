@@ -121,7 +121,8 @@ def token():
     try:
         req = urllib.request.Request(url, data=body, headers={
             "Content-Type": "application/x-www-form-urlencoded"})
-        with urllib.request.urlopen(req, timeout=30,
+        # The URL is built above as https://login.microsoftonline.com.
+        with urllib.request.urlopen(req, timeout=30,  # nosec B310
                                     context=ssl.create_default_context()) as r:
             return json.loads(r.read())["access_token"]
     except urllib.error.HTTPError as e:
@@ -137,7 +138,8 @@ def graph_post(path, payload, tok, retries=3):
             req = urllib.request.Request(f"{GRAPH}{path}", data=data, headers={
                 "Authorization": f"Bearer {tok}",
                 "Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=60,
+            # GRAPH is the https Graph endpoint constant.
+            with urllib.request.urlopen(req, timeout=60,  # nosec B310
                                         context=ssl.create_default_context()) as r:
                 return r.status, dict(r.headers), r.read().decode() or ""
         except urllib.error.HTTPError as e:

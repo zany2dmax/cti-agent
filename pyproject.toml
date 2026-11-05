@@ -1,0 +1,26 @@
+# Tool settings only: this is not a Python package. The fleet's Python is
+# standard-library only and runs from fleet-kit/, so there is nothing to build
+# or install. `task lint:py` and `task bandit` read this file.
+
+[tool.ruff]
+# The scripts without a .py name are listed by the task, not discovered.
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# Correctness and bug patterns only. The security rules (ruff's S set) are left
+# to bandit, so a finding is annotated once, with # nosec, and not twice.
+#   E4/E9     import and syntax errors (not E7, whose "ambiguous name l" and
+#             "assigned a lambda" are style, nor line length: the code's
+#             comments are deliberately long)
+#   F         pyflakes: unused names, undefined names, bad f-strings
+#   B         bugbear: mutable defaults, late-binding closures, bare excepts
+#   PLW1510   subprocess.run without an explicit check=
+select = ["E4", "E9", "F", "B", "PLW1510"]
+
+[tool.bandit]
+# Scanned: the lanes and the two extension-less Python scripts, not the tests
+# (which launch the scripts under test and write throwaway fixtures).
+# B404 is the bare `import subprocess`, which is not a finding; the calls are
+# audited by B603/B607 where they are made.
+skips = ["B404"]
