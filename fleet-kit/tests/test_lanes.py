@@ -356,7 +356,7 @@ class BriefRendering(unittest.TestCase):
                          for i in range(cap + 3)]
         d["counts"] = {"Sev5": 0, "Sev4": cap + 3, "Sev3": 0, "Sev2": 0, "Sev1": 0}
         text = brief.render_text(d, "daily")
-        self.assertIn(f"+3 more Sev4 in the full report", text,
+        self.assertIn("+3 more Sev4 in the full report", text,
                       "a list that silently stops is one the reader believes is complete")
 
     def test_sample_hosts_are_deduped(self):
@@ -1141,7 +1141,7 @@ class DigestSendLedger(unittest.TestCase):
 
     def run_db(self, *args):
         return subprocess.run([sys.executable, self.db, *args],
-                              env=self.env, capture_output=True, text=True)
+                              env=self.env, capture_output=True, text=True, check=False)
 
     def test_a_sent_digest_is_remembered_as_its_kind(self):
         self.run_db("init")
@@ -1414,7 +1414,7 @@ class RemediationNote(unittest.TestCase):
         # suite, which is how this was found.
         return subprocess.run([sys.executable, self.db, *args],
                               env=self.env, capture_output=True, text=True,
-                              input=stdin, timeout=30)
+                              input=stdin, timeout=30, check=False)
 
     def findings(self, *extra):
         r = self.run_db("findings", *extra)
@@ -1569,6 +1569,31 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()) as err:
             self.scout.parse_feed(bad, "https://example.invalid/f")
         self.assertIn("malformed XML", err.getvalue())
+
+    def test_a_feed_that_declares_entities_is_refused(self):
+        # XML-bomb and external-entity attacks both need an <!ENTITY>; a real
+        # feed has none. A bare DOCTYPE (RSS 0.91) is still parsed.
+        bomb = (b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY a "aaaa">]>'
+                b"<rss><channel><item><title>&a;</title></item></channel></rss>")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            items = self.scout.parse_feed(bomb, "https://example.invalid/f")
+        self.assertEqual(items, [])
+        self.assertIn("entities", err.getvalue())
+
+        plain = (b'<?xml version="1.0"?><!DOCTYPE rss PUBLIC "-//Netscape//DTD RSS 0.91//EN" '
+                 b'"http://my.netscape.com/publish/formats/rss-0.91.dtd">'
+                 b"<rss><channel><item><title>CVE-2026-9 patched</title>"
+                 b"<link>https://example.invalid/x</link></item></channel></rss>")
+        with quiet():
+            self.assertEqual(len(self.scout.parse_feed(plain, "https://example.invalid/f")), 1)
+
+    def test_only_http_urls_are_fetched(self):
+        # urlopen also opens file:// and ftp://: a pasted feeds.txt line must
+        # not read a local file into the report.
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertIsNone(self.scout.fetch("file:///etc/passwd"))
+            self.assertIsNone(self.scout.fetch("ftp://example.invalid/feed"))
+        self.assertIn("not an http(s) URL", err.getvalue())
 
     def test_the_dead_msrc_blog_feed_is_no_longer_polled(self):
         # Belt and braces: the URL is commented out in feeds.txt, and a future
@@ -2051,7 +2076,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                "CLAUDE_BIN": str(fake / "claude"),
                "ANTHROPIC_API_KEY": "test-placeholder"}
         r = subprocess.run(["bash", str(code / "bin" / "run-checkin")], env=env,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
         return r, (ran.read_text() if ran.exists() else "")
 
     def test_the_heartbeat_refuses_to_run_code_the_service_can_write(self):
@@ -2175,7 +2200,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             w.write_text(src.replace("\nJOURNALCTL=/usr/bin/journalctl\n", f"\nJOURNALCTL={fake}\n"))
 
             def run(*args):
-                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True)
+                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True, check=False)
 
             for args, want in (
                 (["-u", "cti-agent-*", "--since", "-3h", "--no-pager"],
@@ -2226,7 +2251,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         def run(payload):
             data = payload if isinstance(payload, str) else json.dumps(payload)
             return subprocess.run([sys.executable, "-I", str(guard)], input=data,
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, check=False)
 
         def bash(cmd):
             return run({"tool_name": "Bash", "tool_input": {"command": cmd}})
@@ -2289,17 +2314,17 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
 
             def post(*args):
                 return subprocess.run(["bash", str(board_bin), "post", *args],
-                                      env=env, capture_output=True, text=True)
+                                      env=env, capture_output=True, text=True, check=False)
 
             board = pathlib.Path(d) / "board.md"
             self.assertEqual(post("@you", "@all", "INFO", "ok", "line\r\nnext\x1b[2J").returncode, 0)
             say = subprocess.run(["bash", str(board_bin), "say", "@all", "INFO", "said"],
-                                 env=env, capture_output=True, text=True)
+                                 env=env, capture_output=True, text=True, check=False)
             self.assertEqual(say.returncode, 0, say.stderr)
             for h in ("(.*)*x", "@a|.*", "you"):
                 with self.subTest(read=h):
                     r = subprocess.run(["bash", str(board_bin), "read", h],
-                                       env=env, capture_output=True, text=True)
+                                       env=env, capture_output=True, text=True, check=False)
                     self.assertEqual(r.returncode, 2)
             for args in (
                 ("@you\n[2026-11-03 06:00] @systemd", "@operator", "ERROR", "x"),
@@ -2355,7 +2380,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
 
             def board(*args):
                 return subprocess.run(["bash", str(board_bin), *args], env=env,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, check=False)
 
             self.assertEqual(board("resolve", "q17").returncode, 0)
             left = (home / "board.md").read_text()
@@ -2402,7 +2427,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             w.write_text(src.replace("\nSYSTEMCTL=/usr/bin/systemctl\n", f"\nSYSTEMCTL={fake}\n"))
 
             def run(*args):
-                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True)
+                return subprocess.run(["bash", str(w), *args], capture_output=True, text=True, check=False)
 
             for args, want in (
                 ([], ["list-timers", "--no-pager", "--", "cti-agent-*"]),
@@ -2518,7 +2543,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
 
             def run(*args):
                 return subprocess.run(["bash", str(wrapper), *args], env=env,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, check=False)
 
             # fleet-owners runs as root, never through sudo -u: as anyone
             # else it is refused before anything runs.
@@ -3171,7 +3196,7 @@ class RunnersToDev(unittest.TestCase):
     def run_lane(self, runner, *args, dev="dev@example.com", env=""):
         self.envfile.write_text((f"FLEET_DEV_EMAIL={dev}\n" if dev else "") + env)
         r = subprocess.run(["bash", str(KIT / "fleet" / "bin" / runner), *args],
-                           env=self.base, capture_output=True, text=True, timeout=60)
+                           env=self.base, capture_output=True, text=True, timeout=60, check=False)
         return r, self.log.read_text().splitlines()
 
     def assertTestSend(self, runner, *args):

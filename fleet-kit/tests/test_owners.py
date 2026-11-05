@@ -30,7 +30,7 @@ class FleetOwners(unittest.TestCase):
 
     def run_tool(self, *args, ok=True):
         r = subprocess.run([sys.executable, str(TOOL), *args], env=self.env,
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30, check=False)
         if ok:
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r

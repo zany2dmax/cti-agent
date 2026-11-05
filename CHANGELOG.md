@@ -39,6 +39,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Static analysis for the Python and shell.** `task ship` and `task check` now
+  run `ruff` (`task lint:py`), `bandit` (`task bandit`) and `shellcheck`
+  (`task lint:shell`), the counterparts of staticcheck and gosec for the lanes
+  and the bash runners; settings are in `pyproject.toml`. `task test:syntax`
+  also parses `checkin-bash-guard`, which its hand-written list had missed. The
+  first run found real things: `scout.py` opened `file://` and `ftp://` feed
+  URLs, read a feed of any size, and parsed one that declared XML entities (all
+  three are refused now, with tests); every `run-*` script sources `fleet.env`
+  without telling shellcheck; and `run-mailbox-cleanup` had a mis-joined
+  string. Thirteen test `subprocess.run` calls now state `check=False`.
 - **AppSec: application owners in a database, `owners.db`, edited with
   `fleet-owners`.** Owners, watchers, `covers=`, `site:` entries and the owner
   lane's allowed domains move out of the hand-edited `app-owners.txt` into

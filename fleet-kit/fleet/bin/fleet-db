@@ -217,10 +217,11 @@ def main(argv):
             vals = [f.get(k) for k in cols]
             ph = ",".join("?" * len(cols))
             sets = ",".join(f"{k}=excluded.{k}" for k in cols if k != "cve")
-            c.execute(
-                f"INSERT INTO findings({','.join(cols)},first_seen,updated) "
-                f"VALUES({ph},?,?) ON CONFLICT(cve) DO UPDATE SET {sets}, updated=excluded.updated",
-                vals + [now(), now()])
+            # cols is the fixed list above; every value goes through a ? bind.
+            names = ",".join(cols)
+            upsert = f"ON CONFLICT(cve) DO UPDATE SET {sets}, updated=excluded.updated"  # nosec B608
+            sql = f"INSERT INTO findings({names},first_seen,updated) VALUES({ph},?,?) {upsert}"  # nosec B608
+            c.execute(sql, vals + [now(), now()])
         c.commit()
         print(f"upserted {len(rows)} findings")
 

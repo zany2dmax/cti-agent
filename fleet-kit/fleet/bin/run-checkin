@@ -33,7 +33,10 @@ FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 # unit or wrapper injected. Preserve what was given to us.
 _inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
 _inj_feeds="${FLEET_FEEDS:-}"
-set -a; [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"; set +a
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+set +a
 [ -n "$_inj_home" ]  && FLEET_HOME="$_inj_home"
 [ -n "$_inj_code" ]  && FLEET_CODE="$_inj_code"
 [ -n "$_inj_feeds" ] && FLEET_FEEDS="$_inj_feeds"

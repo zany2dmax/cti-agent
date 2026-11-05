@@ -354,7 +354,7 @@ deployment host.
 ```bash
 task build              # all eleven into bin/
 task test               # Go tests + Python lane tests
-task ship               # fmt, build, test, lint, scan, gosec, govulncheck, then push
+task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
 ```
 
@@ -363,10 +363,10 @@ Go throughout, with Python only where a standard-library SQL driver is needed -
 decision](SECURITY.md#why-two-languages-and-why-that-is-the-security-decision).
 
 Go is gated by `gofmt`, `go vet`, `staticcheck`, `golangci-lint`, `gosec` and
-`govulncheck`. The Python lanes are gated by their own unit tests and a syntax
-check — **no linter, formatter, type checker or security scanner**. That
-asymmetry is known and tracked in
-[SECURITY.md → known gaps](SECURITY.md#known-gaps-and-accepted-risks).
+`govulncheck`. The Python lanes are gated by their own unit tests, a syntax
+check, `ruff` and `bandit`, and the bash runners by `shellcheck` (settings in
+`pyproject.toml`; `task lint:py`, `task bandit`, `task lint:shell`). There is
+no type checker or formatter.
 
 ---
 

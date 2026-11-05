@@ -928,7 +928,7 @@ behind.
 `task ship` is the only thing that pushes, and it stops at the first failure:
 
 ```
-fmt → build → test → lint → scan → gosec → govulncheck → push
+fmt → build → test → lint → scan → gosec → govulncheck → lint:py → bandit → lint:shell → push
 ```
 
 It exists because a push once outran a red test when the two were separate
@@ -1108,16 +1108,17 @@ nor the portal reports the effective scope.
 - **No secret scanning in the build gate.** `task ship` does not run one.
   Prevention rests on `.gitignore` and review; `scripts/scrub-history.sh` is
   remediation, and remediation is late.
-- **The Python lanes have no static analysis.** Python is used only where a
-  stdlib SQL driver is needed (see Supply chain above), but that still leaves
-  the mailer outside the gates. Go passes through six tools;
-  `brief.py`, `enrich.py`, `mailer.py`, `scout.py` and `fleet-db` — about
-  2,200 lines, including the single outbound mail path and its recipient gate
-  — are covered only by unit tests and an `ast.parse` syntax check. One real
-  defect found this month (`f"..." " ".join(...)`, where a missing `+` made
-  the message the separator) is exactly what a linter catches. `ruff` would
-  cover linting, formatting and the bandit security rules in one dev-only
-  binary, with nothing added to the deployment host.
+- ~~**The Python lanes have no static analysis.**~~ Closed 2026-11-05. `task ship`
+  and `task check` now run `ruff` (bugs and bug patterns), `bandit` (insecure
+  patterns, the gosec of the fleet) over the lanes and the extension-less
+  Python scripts, and `shellcheck` over the runners and installers. All three
+  are dev-machine tools; nothing was added to the deployment host. What is left
+  is that bandit's `# nosec` annotations are not audited the way
+  `scripts/nosec-audit.py` audits gosec's, and that there is no type checker
+  (the code has no annotations to check). The first run found real
+  hardening to do in `scout.py`: `file://` and `ftp://` feed URLs were opened,
+  a feed could be any size, and a feed declaring XML entities was parsed; all
+  three are now refused.
 - **The Qualys KnowledgeBase API version is a dependency with a clock.** The
   calls use `/api/4.0/`; `/api/2.0/` reached End-of-Service in September 2026.
   A future EOS is silent until it is not, so it is worth a calendar reminder

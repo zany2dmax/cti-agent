@@ -21,6 +21,8 @@ cd "$ROOT"
 
 if [ "${1:-}" = "--status" ]; then
   bold "Developer setup"
+  # One hook today; a list so the next one is a word, not a rewrite.
+  # shellcheck disable=SC2043
   for h in pre-commit; do
     if [ -x ".git/hooks/$h" ]; then
       if cmp -s ".git/hooks/$h" "scripts/hooks/$h"; then
@@ -38,6 +40,7 @@ fi
 
 bold "Git hooks"
 mkdir -p .git/hooks
+# shellcheck disable=SC2043  # one hook today; see the loop above
 for h in pre-commit; do
   install -m 0755 "scripts/hooks/$h" ".git/hooks/$h"
   ok "$h"

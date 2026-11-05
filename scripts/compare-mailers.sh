@@ -14,7 +14,7 @@
 # hunting, and it looks like success from the happy path.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 PY="fleet-kit/fleet/lanes/mailer.py"
 [ -f "$PY" ] || { echo "cannot find $PY - run this from the repo" >&2; exit 2; }
@@ -47,7 +47,7 @@ json() { python3 -m json.tool --sort-keys < "$1" 2>/dev/null || cat "$1"; }
 
 compare() {
   local name="$1"; shift
-  local po go pc gc
+  local pc gc
   python3 "$PY" "$@" > "$TMP/py.out" 2> "$TMP/py.err"; pc=$?
   "$GO"          "$@" > "$TMP/go.out" 2> "$TMP/go.err"; gc=$?
 

@@ -72,7 +72,8 @@ def http_json(url, headers=None, timeout=45, retries=3):
         try:
             req = urllib.request.Request(url, headers=hdrs)
             ctx = ssl.create_default_context()
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            # Every URL is an https constant (NVD, EPSS, KEV, ...).
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:  # nosec B310
                 return json.loads(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
             if e.code in (403, 429, 503) and attempt < retries - 1:
@@ -98,8 +99,8 @@ def load_cache(path, ttl):
         fetched = datetime.fromisoformat(blob.get("fetched", "1970-01-01T00:00:00+00:00"))
         if datetime.now(timezone.utc) - fetched < ttl:
             return blob.get("data", {})
-    except Exception:                                           # noqa: BLE001
-        pass
+    except Exception:                                           # noqa: BLE001  # nosec B110
+        pass                                  # no usable cache: fetch fresh
     return None
 
 
@@ -673,7 +674,8 @@ def main():
         db = find_fleet_db()
         if db:
             try:
-                subprocess.run([sys.executable, db, "finding", "upsert"],
+                # argv is this interpreter and fleet-db's own path.
+                subprocess.run([sys.executable, db, "finding", "upsert"],  # nosec B603
                                input=json.dumps(rows), text=True, check=True,
                                stdout=subprocess.DEVNULL)
                 log(f"upserted {len(rows)} findings to memory.db")

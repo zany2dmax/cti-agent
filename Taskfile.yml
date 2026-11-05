@@ -243,6 +243,73 @@ tasks:
         fi
         govulncheck ./...
 
+  # ── Python and shell analysis ──────────────────────────────────────────────
+  # The fleet's lanes are standard-library Python plus bash runners. These are
+  # the counterparts of staticcheck/golangci-lint, gosec and (for shell) nothing
+  # the Go side had. All three run on the dev machine only; nothing is installed
+  # on the production box. Settings live in pyproject.toml.
+  #
+  # The file lists are derived from shebangs, not written out: the runners and
+  # two extension-less Python scripts live in fleet-kit/fleet/bin, and a list
+  # that has to be edited whenever a file is added is wrong the day somebody
+  # forgets (test:syntax's old list omitted run-mailbox-cleanup that way).
+
+  lint:py:
+    desc: Run ruff on the Python (bugs and bug patterns, not security)
+    cmds:
+      - |
+        if ! command -v ruff >/dev/null 2>&1; then
+          echo "ruff not installed:  brew install ruff   (or: pipx install ruff)" >&2
+          exit 1
+        fi
+        files="fleet-kit/fleet/lanes fleet-kit/tests"
+        for f in fleet-kit/fleet/bin/*; do
+          if head -1 "$f" | grep -q python; then files="$files $f"; fi
+        done
+        # shellcheck disable=SC2086
+        ruff check $files
+
+  bandit:
+    desc: Run bandit on the Python (insecure patterns, the gosec of the fleet)
+    # Not the tests: they launch the scripts under test and write throwaway
+    # fixtures, which is what bandit exists to flag. Its "nosec encountered but
+    # no failed test" and "Test in comment" lines on stderr are bandit's own
+    # logging and do not change the exit status.
+    cmds:
+      - |
+        export PATH="$HOME/.local/bin:$PATH"
+        if ! command -v bandit >/dev/null 2>&1; then
+          echo "bandit not installed:  pipx install bandit" >&2
+          echo "  (then run: pipx ensurepath, and open a new terminal)" >&2
+          exit 1
+        fi
+        files="fleet-kit/fleet/lanes"
+        for f in fleet-kit/fleet/bin/*; do
+          if head -1 "$f" | grep -q python; then files="$files $f"; fi
+        done
+        # shellcheck disable=SC2086
+        bandit -q -c pyproject.toml -r $files
+
+  lint:shell:
+    desc: Run shellcheck on the runners, installers and scripts (warnings and up)
+    # -S warning: the notes are style (use ${var//x/y}, quote this) and would
+    # bury the warnings, which are the ones that change behaviour. -x follows
+    # sourced files that shellcheck can find.
+    cmds:
+      - |
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          echo "shellcheck not installed:  brew install shellcheck" >&2
+          exit 1
+        fi
+        files=""
+        for f in fleet-kit/fleet/bin/* fleet-kit/bin/* fleet-kit/*.sh scripts/*.sh scripts/hooks/*; do
+          [ -f "$f" ] || continue
+          head -1 "$f" | grep -qE 'sh$|bash' || continue
+          files="$files $f"
+        done
+        # shellcheck disable=SC2086
+        shellcheck -x -S warning $files
+
   tidy:
     desc: Download and tidy Go dependencies
     cmds:
@@ -374,6 +441,9 @@ tasks:
       - task: scan
       - task: gosec
       - task: govulncheck
+      - task: lint:py
+      - task: bandit
+      - task: lint:shell
       - git push
 
   patchtuesday:
@@ -428,12 +498,18 @@ tasks:
       - python3 {{.LANE_TESTS}} -v
 
   test:syntax:
-    desc: Byte-compile the lanes and shell-check the fleet scripts
+    desc: Parse every Python script and syntax-check every shell script (lint:shell is the real shellcheck)
     cmds:
       - |
         set -e
-        for f in fleet-kit/fleet/lanes/*.py fleet-kit/fleet/bin/fleet-db; do
-          python3 -c "import ast,sys; ast.parse(open('$f').read())"
+        # Every Python script in bin/ by shebang, so checkin-bash-guard (which
+        # had no .py name and was not in a hand-written list) is parsed too.
+        pyfiles="$(ls fleet-kit/fleet/lanes/*.py)"
+        for f in fleet-kit/fleet/bin/*; do
+          if head -1 "$f" | grep -q python; then pyfiles="$pyfiles $f"; fi
+        done
+        for f in $pyfiles; do
+          python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f"
           echo "  ok  $f"
         done
         # Derived, not hand-written. The previous list named five runners and
@@ -481,6 +557,9 @@ tasks:
       - task: scan
       - task: gosec
       - task: govulncheck
+      - task: lint:py
+      - task: bandit
+      - task: lint:shell
 
 # ── build ────────────────────────────────────────────────────────────────────
 
