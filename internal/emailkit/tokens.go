@@ -46,5 +46,5 @@ func tone(name string) Tone {
 	if !ok || t.Fg == "" || t.Bg == "" {
 		panic(fmt.Sprintf("emailkit: tokens.json has no tone %q", name))
 	}
-	return Tone{Fg: t.Fg, Bg: t.Bg}
+	return Tone(t)
 }
