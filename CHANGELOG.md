@@ -39,6 +39,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
+- **One place for what a fleet email looks like.** `internal/emailkit` holds the
+  palette, the font and the 640px card, and the pieces every email is built
+  from: header band, lead block, severity tiles, section headings, cards,
+  callouts and a footer that carries the `FLEET_ATTRIBUTION` credit. (A CSS
+  file cannot do this: Outlook ignores linked stylesheets, which is why the
+  emails are inline-styled tables.) The application-owner email, the AppSec
+  weekly and the domains report are built from it, and the domains report now
+  carries the attribution line too. `TestNoLaneDrawsItsOwnPageShell` fails the
+  build when a Go lane writes its own header band or page background again;
+  Patch Tuesday, `cti-alert` and the Go mailer still do and are listed in that
+  test to be moved, and `brief.py` has its own copy of the same look.
 - **The application-owner emails match the rest of the fleet.** They were a bare
   paragraph; they now use the fleet's layout (navy header band with the org
   name, a lead block coloured by the worst finding, the five severity tiles,

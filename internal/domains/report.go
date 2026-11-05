@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/emailkit"
 )
 
 // Block is the rendered report.
@@ -374,7 +376,7 @@ func (r Report) actionsHTML(b *strings.Builder) {
 	}
 	f := NewActionsFile(r.Now, r.Actions)
 	sectionHTML(b, fmt.Sprintf("DNS CHANGES FOR IT (%d EXACT, %d TO REVIEW, ON %d DOMAINS)",
-		f.Exact, f.Review, f.Domains), "#12203a")
+		f.Exact, f.Review, f.Domains), emailkit.Navy)
 	var cur []string
 	flush := func(d, prof string) {
 		if d == "" {
@@ -514,78 +516,41 @@ func sortedResults(in []Result) []Result {
 // The daily brief's house style: table layout, inline CSS, 640px, the navy
 // header band. Domain names are text, never links.
 
-const font = `-apple-system,Segoe UI,Helvetica,Arial,sans-serif`
+const font = emailkit.Font
 
 func (r Report) html() string {
 	var b strings.Builder
 	h, m, c := r.counts()
-	fmt.Fprintf(&b, `<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s</title></head>
-<body style="margin:0;padding:0;background:#eef1f5">
-<table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
-       style="background:#eef1f5"><tr><td align="center" style="padding:16px 8px">
-<table width="640" cellpadding="0" cellspacing="0" role="presentation"
-       style="max-width:640px;background:#fff;border-radius:6px;overflow:hidden">
-
-  <tr><td style="background:#12203a;padding:16px 20px">
-    <div style="font:700 12px %s;color:#9fb0cc;letter-spacing:1.2px;text-transform:uppercase">%s</div>
-    <div style="font:700 17px %s;color:#fff">CTI Domains Weekly</div>
-    <div style="font:400 12px %s;color:#9fb0cc;margin-top:3px">Week of %s</div></td></tr>
-`, e(r.Subject()), font, e(orgName()), font, font, e(r.Now.Format("Monday 2 January 2006")))
+	emailkit.Open(&b, r.Subject(), orgName(), "CTI Domains Weekly",
+		"Week of "+r.Now.Format("Monday 2 January 2006"))
 
 	invLead := ""
 	if l := r.inventoryLine(); l != "" {
 		invLead = `<div style="margin-top:6px;font-weight:700">` + e(l) + `</div>`
 	}
-	leadFg, leadBg := "#2f855a", "#f0fff4"
+	leadTone := emailkit.Green
 	if h > 0 {
-		leadFg, leadBg = "#b3001b", "#fdecee"
+		leadTone = emailkit.Red
 	} else if m > 0 || r.Registrar == "" {
-		leadFg, leadBg = "#b25000", "#fff4e5"
+		leadTone = emailkit.Amber
 	}
-	fmt.Fprintf(&b, `
-  <tr><td style="padding:16px 20px 0 20px">
-    <table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
-      <tr><td style="background:%s;border-left:4px solid %s;padding:12px 14px;
-                     font:400 14px/1.55 %s;color:#1a202c">%s
-        <div style="margin-top:6px">%s</div>%s</td></tr>
-    </table></td></tr>
-`, leadBg, leadFg, font, e(r.leadLine()), e(r.websiteLine()), invLead)
+	emailkit.Lead(&b, leadTone, fmt.Sprintf(`%s
+        <div style="margin-top:6px">%s</div>%s`, e(r.leadLine()), e(r.websiteLine()), invLead))
 
-	type tile struct {
-		label  string
-		n      int
-		fg, bg string
-	}
-	tiles := []tile{
-		{"HIGH", h, "#b3001b", "#fdecee"},
-		{"MEDIUM", m, "#b25000", "#fff4e5"},
-		{"CHANGED", c, "#2c5282", "#ebf4ff"},
-		{"LIVE", r.live(), "#2f855a", "#f0fff4"},
-		{"DOMAINS", len(r.Results), "#4a5568", "#f4f5f7"},
-	}
-	b.WriteString(`
-  <tr><td style="padding:14px 20px 0 20px">
-    <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>`)
-	for _, t := range tiles {
-		fmt.Fprintf(&b, `
-      <td width="20%%" align="center" style="background:%s;border-top:3px solid %s;padding:10px 4px">
-        <div style="font:700 24px %s;color:%s">%d</div>
-        <div style="font:700 10px %s;color:%s;letter-spacing:.5px">%s</div></td>`,
-			t.bg, t.fg, font, t.fg, t.n, font, t.fg, t.label)
-	}
-	b.WriteString(`
-    </tr></table></td></tr>
-  <tr><td style="padding:16px 20px 4px 20px">
-    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">`)
+	emailkit.Tiles(&b, []emailkit.Tile{
+		{Label: "HIGH", N: h, Tone: emailkit.Red},
+		{Label: "MEDIUM", N: m, Tone: emailkit.Amber},
+		{Label: "CHANGED", N: c, Tone: emailkit.Blue},
+		{Label: "LIVE", N: r.live(), Tone: emailkit.Green},
+		{Label: "DOMAINS", N: len(r.Results), Tone: emailkit.Grey},
+	}, "")
+	emailkit.BodyOpen(&b)
 
-	cards := func(title, fg, bg string, f []Finding, tagSev bool) {
+	cards := func(title string, tone emailkit.Tone, f []Finding, tagSev bool) {
 		if len(f) == 0 {
 			return
 		}
-		sectionHTML(&b, fmt.Sprintf("%s (%d)", title, len(f)), fg)
+		sectionHTML(&b, fmt.Sprintf("%s (%d)", title, len(f)), tone.Fg)
 		for _, g := range grouped(f) {
 			var lines strings.Builder
 			for _, x := range g.items {
@@ -595,39 +560,32 @@ func (r Report) html() string {
 				}
 				fmt.Fprintf(&lines, `<div style="margin-top:4px">%s%s</div>`, tag, e(x.Text))
 			}
-			fmt.Fprintf(&b, `
-      <tr><td style="padding:0 0 10px 0">
-        <table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
-               style="border-left:4px solid %s;background:%s;border-radius:0 4px 4px 0">
-          <tr><td style="padding:10px 13px">
-            <div style="font:700 14px %s;color:#1a202c">%s</div>
-            <div style="font:400 13px/1.5 %s;color:#1a202c">%s</div>
-          </td></tr></table></td></tr>`, fg, bg, font, e(g.domain), font, lines.String())
+			emailkit.Card(&b, tone, g.domain, lines.String())
 		}
 	}
 	r.inventoryHTML(&b)
 	r.websitesHTML(&b)
 	if pf := proofpointFindings(r.Findings); len(pf) > 0 {
-		cards(proofpointTitle, "#6b46c1", "#f5f0ff", pf, true)
+		cards(proofpointTitle, emailkit.Violet, pf, true)
 	}
 	r.spfVendorsHTML(&b)
-	cards("NEEDS ACTION", "#b3001b", "#fdecee", r.high(), false)
-	cards("CHANGED SINCE LAST WEEK", "#2c5282", "#ebf4ff", r.changes(), true)
-	cards("REVIEW", "#b25000", "#fff4e5", r.medium(), false)
-	cards("NOTES", "#4a5568", "#f4f5f7", r.info(), false)
+	cards("NEEDS ACTION", emailkit.Red, r.high(), false)
+	cards("CHANGED SINCE LAST WEEK", emailkit.Blue, r.changes(), true)
+	cards("REVIEW", emailkit.Amber, r.medium(), false)
+	cards("NOTES", emailkit.Grey, r.info(), false)
 	if r.TicketSlot {
 		b.WriteString(slotSentinel)
 	}
 	r.actionsHTML(&b)
 
 	if len(r.Problems) > 0 {
-		sectionHTML(&b, fmt.Sprintf("INVENTORY FILE PROBLEMS (%d)", len(r.Problems)), "#b25000")
+		sectionHTML(&b, fmt.Sprintf("INVENTORY FILE PROBLEMS (%d)", len(r.Problems)), emailkit.Amber.Fg)
 		for _, p := range r.Problems {
 			itemHTML(&b, p)
 		}
 	}
 
-	sectionHTML(&b, fmt.Sprintf("INVENTORY (%d DOMAINS, %d LIVE)", len(r.Results), r.live()), "#12203a")
+	sectionHTML(&b, fmt.Sprintf("INVENTORY (%d DOMAINS, %d LIVE)", len(r.Results), r.live()), emailkit.Navy)
 	fmt.Fprintf(&b, `
       <tr><td style="padding:0 0 10px 0">
         <table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
@@ -650,30 +608,14 @@ func (r Report) html() string {
 	for _, s := range r.notChecked() {
 		nc.WriteString("&bull; " + e(s) + "<br>")
 	}
-	fmt.Fprintf(&b, `
-  <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
-    <div style="font:400 11px/1.6 %s;color:#718096">
-      <b>Not checked:</b><br>%s
-      Generated by the %s
-    </div></td></tr>
-
-</table></td></tr></table></body></html>`, font, nc.String(), e(orgName()))
+	emailkit.Foot(&b, "<b>Not checked:</b><br>"+strings.TrimSuffix(nc.String(), "<br>"),
+		emailkit.Credit(orgName(), "cti-domains", "Generated by the "+orgName()))
 	return b.String()
 }
 
-func sectionHTML(b *strings.Builder, title, colour string) {
-	fmt.Fprintf(b, `
-      <tr><td style="padding:6px 0 8px 0">
-        <div style="font:700 13px %s;color:%s;letter-spacing:.6px;text-transform:uppercase;
-                    border-bottom:2px solid %s;padding-bottom:5px">%s</div></td></tr>`,
-		font, colour, colour, e(title))
-}
+func sectionHTML(b *strings.Builder, title, colour string) { emailkit.Section(b, title, colour) }
 
-func itemHTML(b *strings.Builder, s string) {
-	fmt.Fprintf(b, `
-      <tr><td style="padding:0 0 8px 0">
-        <div style="font:400 13px/1.55 %s;color:#4a5568">%s</div></td></tr>`, font, e(s))
-}
+func itemHTML(b *strings.Builder, s string) { emailkit.Item(b, s) }
 
 // slotSentinel is what the renderer writes where the real slot goes. Render
 // then deletes any TicketSlot that arrived inside observed data - a TXT
