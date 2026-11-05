@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/useragent"
 )
 
 // Web is what a host serves.
@@ -231,7 +233,7 @@ func get(ctx context.Context, url string, timeout time.Duration, res *net.Resolv
 		f.Err = err.Error()
 		return f
 	}
-	req.Header.Set("User-Agent", "cti-agent-domains/1 (weekly domain inventory check)")
+	req.Header.Set("User-Agent", useragent.String("cti-agent-domains/1"))
 	resp, err := client.Do(req)
 	if err != nil {
 		f.Err = shortNetErr(err)

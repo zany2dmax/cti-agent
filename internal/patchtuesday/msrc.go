@@ -145,7 +145,7 @@ func FetchMSRC(ctx context.Context, client *http.Client, apiURL string,
 		s.Err = err.Error()
 		return s, nil
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", userAgent())
 	// Without this the API answers XML.
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)

@@ -50,7 +50,24 @@ SEV_ORDER = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
 # Used with fullmatch below, so the old upper bound of 7 rejected a longer ID
 # outright and the row was skipped without comment.
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
-UA = os.environ.get("FLEET_USER_AGENT", "cti-agent-enrich/1.0")
+# The agent carries the fleet's mailbox as a contact, read from fleet.env at
+# run time so the public repo never holds the address: a publisher who sees
+# our polling can write to us instead of blocking us. Never a browser's agent.
+# Mirrors internal/useragent; test_lanes checks the lanes agree.
+_MAILBOX_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def user_agent(product, env=os.environ):
+    ua = (env.get("FLEET_USER_AGENT") or "").strip()
+    if not ua or "\r" in ua or "\n" in ua:
+        ua = product
+    contact = (env.get("GRAPH_MAILBOX") or "").strip()
+    if "(" in ua or not _MAILBOX_RE.fullmatch(contact):
+        return ua
+    return f"{ua} (+mailto:{contact})"
+
+
+UA = user_agent("cti-agent-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.
 NVD_DELAY = 0.7 if os.environ.get("NVD_API_KEY") else 6.5

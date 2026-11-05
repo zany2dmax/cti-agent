@@ -1184,7 +1184,7 @@ pseudonym and breaks continuity with older digests.
 | Variable | Notes |
 |---|---|
 | `NVD_API_KEY` | free, from [nvd.nist.gov](https://nvd.nist.gov/developers/request-an-api-key). Without it NVD throttles to 5 req/30s, so a 50-CVE day spends ~5 minutes of the digest window. With it, 50 req/30s |
-| `FLEET_USER_AGENT` | what the enrich and scout lanes send to NVD, EPSS, CISA and your feeds. Some feeds block unrecognised agents, and naming yourself is courteous when polling someone's server six times a day |
+| `FLEET_USER_AGENT` | what the fleet sends to the sites it polls: NVD, EPSS, CISA and your feeds, Microsoft and the Patch Tuesday wrap-ups, and the domains web check. `GRAPH_MAILBOX` is appended as the contact, `(+mailto:...)`, so a publisher who sees the traffic can write instead of blocking; a `(...)` comment in the value replaces it. Never a browser's agent |
 
 ### 7. Claude Code — the heartbeat lane only
 
