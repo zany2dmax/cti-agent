@@ -310,6 +310,11 @@ for f in enrich.py scout.py brief.py mailer.py; do
   run install -m 0755 -o root -g root "$SRC/fleet/lanes/$f" "$CODE_DIR/lanes/$f"
   info "lanes/$f"
 done
+# The colours and font brief.py shares with the Go lanes (internal/emailkit).
+# Data, not code: 0644. Without it the digest still renders, from a built-in
+# copy of the same values.
+run install -m 0644 -o root -g root "$SRC/fleet/lanes/email-tokens.json" "$CODE_DIR/lanes/email-tokens.json"
+info "lanes/email-tokens.json"
 if [ -f "$CONF_DIR/feeds.txt" ]; then
   ok "feeds.txt exists in $CONF_DIR, not overwriting your edits"
 else

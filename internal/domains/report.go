@@ -516,7 +516,7 @@ func sortedResults(in []Result) []Result {
 // The daily brief's house style: table layout, inline CSS, 640px, the navy
 // header band. Domain names are text, never links.
 
-const font = emailkit.Font
+var font = emailkit.Font
 
 func (r Report) html() string {
 	var b strings.Builder

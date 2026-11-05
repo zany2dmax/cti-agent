@@ -45,11 +45,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   callouts and a footer that carries the `FLEET_ATTRIBUTION` credit. (A CSS
   file cannot do this: Outlook ignores linked stylesheets, which is why the
   emails are inline-styled tables.) The application-owner email, the AppSec
-  weekly and the domains report are built from it, and the domains report now
-  carries the attribution line too. `TestNoLaneDrawsItsOwnPageShell` fails the
-  build when a Go lane writes its own header band or page background again;
-  Patch Tuesday, `cti-alert` and the Go mailer still do and are listed in that
-  test to be moved, and `brief.py` has its own copy of the same look.
+  weekly, the domains report, the Patch Tuesday synopsis, `cti-alert` and the
+  Go mailer's escalation are all built from it, so the domains report, alerts
+  and escalations now carry the attribution line too, and Patch Tuesday and
+  alerts are the standard 640px instead of 680. An alert keeps a colour-coded
+  header band (red failure, amber hold, green test, navy escalation) and now
+  has a lead block with its "WHAT THIS MEANS" paragraph.
+  `TestNoLaneDrawsItsOwnPageShell` fails the build when a Go lane writes its
+  own header band or page background.
+- **The daily digest shares the palette.** The colours and font are one file,
+  `internal/emailkit/tokens.json`, which the Go lanes embed and `brief.py` reads
+  from `lanes/email-tokens.json` (installed by `install-fedora.sh`); a Go test
+  fails when the two copies differ, and a Python test pins `brief.py`'s built-in
+  fallback (used if the file is missing) to the file. Change the look in
+  `tokens.json`, then `cp` it over the lanes copy.
 - **The application-owner emails match the rest of the fleet.** They were a bare
   paragraph; they now use the fleet's layout (navy header band with the org
   name, a lead block coloured by the worst finding, the five severity tiles,

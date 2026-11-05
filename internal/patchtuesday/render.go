@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/emailkit"
 )
 
 // Report is everything the email needs: the public synopsis plus our exposure.
@@ -398,25 +400,8 @@ func (r *Report) HTML() string {
 		return fmt.Sprintf("<b>%d</b>", n)
 	}
 
-	fmt.Fprintf(&b, `<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s</title></head>
-<body style="margin:0;padding:0;background:#eef1f5">
-<table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
-       style="background:#eef1f5"><tr><td align="center" style="padding:16px 8px">
-<table width="680" cellpadding="0" cellspacing="0" role="presentation"
-       style="max-width:680px;background:#fff;border-radius:6px;overflow:hidden">
-
-  <tr><td style="background:#12203a;padding:16px 20px">
-    <div style="font:700 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#9fb0cc;letter-spacing:1.2px;text-transform:uppercase">%s</div>
-    <div style="font:700 18px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#fff">
-      Microsoft Patch Tuesday &mdash; %s</div>
-    <div style="font:400 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#9fb0cc;margin-top:3px">Released %s</div></td></tr>
-`, e(r.Subject()), e(r.Org), e(MonthLabel(d.Year, d.Month)),
-		PatchTuesday(d.Year, d.Month).Format("Monday 2 January 2006"))
+	emailkit.Open(&b, r.Subject(), r.Org, "Microsoft Patch Tuesday \u2014 "+MonthLabel(d.Year, d.Month),
+		"Released "+PatchTuesday(d.Year, d.Month).Format("Monday 2 January 2006"))
 
 	// Degraded banner first: a synopsis assembled from one source instead of
 	// two is still useful, but the reader has to know which.
@@ -633,9 +618,9 @@ func (r *Report) HTML() string {
       articles supply context, never proof of exposure.<br>
       %s
     </div></td></tr>
-
-</table></td></tr></table></body></html>`,
+`,
 		links.String(), countNote, footerCounts(d), r.creditHTML())
+	emailkit.Close(&b)
 
 	return b.String()
 }

@@ -402,7 +402,7 @@ internal/kev/                  deadline bands, present-only filtering
 internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
 internal/mailbox/              processed-message log and the cleanup decision table
-internal/emailkit/             the fleet email look: palette, header band, lead, tiles, cards, footer
+internal/emailkit/             the fleet email look (tokens.json is the palette, shared with brief.py): header band, lead, tiles, cards, footer
 internal/attribution/          the FLEET_ATTRIBUTION / FLEET_REPO_URL credit line
 internal/report/               markdown report writer, hostname redaction
 internal/triage/              deterministic extractor, and the verifier over model JSON

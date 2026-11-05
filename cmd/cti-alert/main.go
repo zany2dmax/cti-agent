@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 )
@@ -469,24 +470,25 @@ func (f failure) unitIsHealthy() bool {
 
 func renderHTML(f failure) string {
 	consequence := "Check what this unit is responsible for before assuming it is harmless."
-	// Red for a crash, amber for a deliberate stop. If every fleet email is
-	// the same alarming red, the colour stops carrying information.
-	banner, accent, tint := "CTI fleet failure", "#b3001b", "#fdecee"
+	// Red for a crash, amber for a deliberate stop, green for a test, blue for
+	// an escalation. If every fleet email is the same alarming red, the colour
+	// stops carrying information, so the header band itself says which it is.
+	banner, tone, band := "CTI fleet failure", emailkit.Red, emailkit.Red.Fg
 	verb, reasonRow := "failed", ""
 
 	if f.isTest() {
-		banner, accent, tint = "CTI fleet alert test", "#1f6f43", "#e9f7ef"
+		banner, tone, band = "CTI fleet alert test", emailkit.Green, emailkit.Green.Fg
 		verb = "is healthy - alert path tested"
 		consequence = "<b>This is a test.</b> The unit is healthy and nothing " +
 			"failed. Receiving this confirms the alert path works end to end."
 	} else if f.isHold() {
-		banner, accent, tint = "CTI fleet on hold", "#8a5a00", "#fff7e6"
+		banner, tone, band = "CTI fleet on hold", emailkit.Amber, emailkit.Amber.Fg
 		verb = "is holding"
 		consequence = "<b>Nothing is broken.</b> The lane stopped itself and will " +
 			"resume once the condition clears. No action is needed unless this " +
 			"repeats for longer than you expect."
 	} else if f.isEscalation() {
-		banner, accent, tint = "CTI fleet escalation", "#12203a", "#eef2f8"
+		banner, tone, band = "CTI fleet escalation", emailkit.Blue, emailkit.Navy
 		verb = "escalated"
 		consequence = "<b>Nothing has failed.</b> The orchestrator reached you " +
 			"deliberately because it found something it cannot act on alone. " +
@@ -501,51 +503,44 @@ func renderHTML(f failure) string {
 	if f.Reason != "" && !f.isHold() && !f.isEscalation() {
 		reasonRow = `<tr><td><b>reason</b></td><td>` + e(f.Reason) + `</td></tr>`
 	}
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html><body style="margin:0;padding:16px;background:#eef1f5">
-<table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
-<tr><td align="center">
-<table width="680" cellpadding="0" cellspacing="0" role="presentation"
-       style="max-width:680px;background:#fff;border-radius:6px;overflow:hidden">
-  <tr><td style="background:%s;padding:14px 18px;font:700 15px
-                 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#fff">
-    %s</td></tr>
-  <tr><td style="padding:16px 18px;font:400 14px/1.55 -apple-system,Segoe UI,
-                 Helvetica,Arial,sans-serif;color:#1a202c">
-    <p style="margin:0 0 12px 0"><code>%s</code> %s on <b>%s</b> at %s.</p>
-    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
-                color:#4a5568;margin:0 0 4px 0">WHAT THIS MEANS</div>
-    <p style="margin:0 0 14px 0;font-size:15px">%s</p>
+
+	org := emailkit.Org()
+	var b strings.Builder
+	emailkit.OpenBand(&b, banner, band, org, banner, f.When)
+	emailkit.Lead(&b, tone, fmt.Sprintf(`
+        <div style="font:700 12px %s;color:%s;letter-spacing:.5px;margin:0 0 4px 0">WHAT THIS MEANS</div>
+        <div style="font-size:15px">%s</div>`, emailkit.Font, emailkit.Soft, e(explain(f))))
+
+	fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 0 20px">
+    <p style="margin:0 0 8px 0;font:400 14px/1.55 %s;color:%s"><code>%s</code> %s on <b>%s</b> at %s.</p>
     <table cellpadding="4" cellspacing="0"
-           style="font:400 13px -apple-system,Segoe UI,Arial,sans-serif;color:#2d3748">
+           style="font:400 13px %s;color:%s">
       %s
       <tr><td><b>systemd result</b></td><td><code>%s</code></td></tr>
       <tr><td><b>exit status</b></td><td><code>%s</code></td></tr>
       <tr><td><b>restarts</b></td><td><code>%s</code></td></tr>
-    </table>
-    <p style="margin:12px 0 0 0;padding:10px 12px;background:%s;
-              border-left:4px solid %s">%s</p>
-  </td></tr>
-  <tr><td style="padding:0 18px 14px 18px">
-    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
-                color:#4a5568;margin-bottom:6px">LAST %s JOURNAL LINES</div>
-    <pre style="margin:0;padding:10px;background:#f4f5f7;border-radius:4px;
+    </table></td></tr>
+`, emailkit.Font, emailkit.Ink, e(f.Unit), verb, e(f.Host), e(f.When),
+		emailkit.Font, emailkit.Soft, reasonRow, e(f.Result), e(f.ExitCode), e(f.NRestarts))
+	emailkit.Callout(&b, tone, consequence)
+
+	fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 0 20px">
+    <div style="font:700 12px %s;color:%s;margin-bottom:6px">LAST %s JOURNAL LINES</div>
+    <pre style="margin:0;padding:10px;background:%s;border-radius:4px;
                 font:400 11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
-                color:#1a202c;overflow-x:auto;white-space:pre-wrap">%s</pre>
-  </td></tr>
-  <tr><td style="padding:0 18px 18px 18px;border-top:1px solid #e2e8f0">
-    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
-                color:#4a5568;margin:12px 0 6px 0">NEXT STEPS ON THE BOX</div>
+                color:%s;overflow-x:auto;white-space:pre-wrap">%s</pre></td></tr>
+
+  <tr><td style="padding:14px 20px 14px 20px">
+    <div style="font:700 12px %s;color:%s;margin-bottom:6px">NEXT STEPS ON THE BOX</div>
     <pre style="margin:0;font:400 12px/1.6 ui-monospace,SFMono-Regular,Menlo,
-                monospace;color:#2d3748">systemctl status %s
+                monospace;color:%s">systemctl status %s
 journalctl -u %s -n 100 --no-pager
 sudo cti-agent cti-budget status
-sudo ausearch -m avc -ts recent</pre>
-  </td></tr>
-</table></td></tr></table></body></html>`,
-		accent, banner,
-		e(f.Unit), verb, e(f.Host), e(f.When), e(explain(f)),
-		reasonRow, e(f.Result), e(f.ExitCode), e(f.NRestarts),
-		tint, accent, consequence,
-		journalLines, e(f.Journal), e(f.Unit), e(f.Unit))
+sudo ausearch -m avc -ts recent</pre></td></tr>
+`, emailkit.Font, emailkit.Soft, journalLines, emailkit.Grey.Bg, emailkit.Ink, e(f.Journal),
+		emailkit.Font, emailkit.Soft, emailkit.Soft, e(f.Unit), e(f.Unit))
+	emailkit.Foot(&b, emailkit.Credit(org, "cti-alert", "Generated by the "+org))
+	return b.String()
 }
