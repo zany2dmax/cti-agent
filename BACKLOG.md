@@ -114,6 +114,11 @@ is real, not before. Finished work moves out of this file into
   reports, ticket files, previews and KB cache that build up in `state/`.
   Problems and growth trends reported through the existing alert path or the
   check-in. Noted only, not designed
+- Orchestrator asks in plain English: when the orchestrator escalates or asks
+  the operator something (a board ERROR, a check-in question, an alert), it
+  opens with two or three lines saying in plain English what it is asking and
+  what happens if you do nothing, ahead of the detail. Noted only, not
+  designed
 - Supplier request mail: the shared inbox also collects supplier requests, and
   nothing tidies them. Probably its own lane (they are not CTI mail and need a
   different owner and rules than cti-mailbox). Not designed: what the requests
