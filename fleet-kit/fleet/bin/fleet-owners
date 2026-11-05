@@ -1,0 +1,832 @@
+#!/usr/bin/env python3
+"""fleet-owners - who owns each web application, kept in SQLite.
+
+  fleet-owners init
+  fleet-owners import FILE [--replace] [--allow-domains LIST]
+  fleet-owners list | show APP | check | history [N]
+  fleet-owners set APP --owner EMAIL [--component TEXT]
+  fleet-owners rm APP
+  fleet-owners watcher add|rm APP EMAIL...
+  fleet-owners covers add|rm APP HOST...
+  fleet-owners site set DOMAIN --owner EMAIL | site rm DOMAIN
+  fleet-owners domain allow DOMAIN... [--note TEXT] | domain rm DOMAIN... | domain list
+  fleet-owners export | snapshot | backup DEST
+
+APP is the scanner's web app id ("id:123", which survives a rename) or its
+exact name. Run as root: sudo cti-agent fleet-owners ...
+
+WHY THIS IS PYTHON, AND WHY GO READS A SNAPSHOT
+
+The Go module takes no dependencies and Go's standard library has no SQLite
+driver (SECURITY.md, Supply chain), so anything that needs SQLite is Python.
+The Go lanes never open owners.db: every change here rewrites owners.json,
+atomically, from the same transaction, and that is what cti-appscan and
+cti-mailer --lane owner read. Nothing else writes owners.db, so the snapshot
+cannot fall behind it.
+
+WHY ROOT
+
+These rows decide who outside the company receives a report of our unfixed
+vulnerabilities. owners.db is root:root 0600 and owners.json root:ctiagent
+0640: the service account - which runs an agent that reads untrusted mail -
+can read the recipients and cannot change them.
+
+The rules for an entry are the ones cti-appscan applies to app-owners.txt
+(internal/appscan/owners.go). Change them in both places.
+"""
+import argparse
+import fcntl
+import getpass
+import grp
+import json
+import os
+import re
+import sqlite3
+import stat
+import sys
+import tempfile
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+# The directory is a test hook, not a setting: cti-appscan and cti-mailer read
+# /etc/cti-agent/owners.json, and a snapshot written anywhere else is one
+# nothing reads.
+DIR = os.environ.get("FLEET_OWNERS_DIR", "/etc/cti-agent")
+DB = os.path.join(DIR, "owners.db")
+SNAPSHOT = os.path.join(DIR, "owners.json")
+OLD_FILE = os.path.join(DIR, "app-owners.txt")
+GROUP = os.environ.get("FLEET_GROUP", "ctiagent")
+
+SNAPSHOT_FORMAT = "cti-owners/1"
+MAX_WATCHERS = 10
+PLACEHOLDER = "OWNER@example.com"  # what cti-appscan --list-apps writes
+
+# cti-appscan's rule, less the separators it splits a watchers= list on: an
+# address stored here with a comma or semicolon in it would reach the Go side
+# as two. fullmatch, so a trailing newline is not "the end".
+EMAIL_RE = re.compile(r"[^@\s|,;]+@[^@\s|,;]+\.[^@\s|,;]+")
+ID_RE = re.compile(r"^id:\s*([0-9]{1,20})$", re.I)
+DOMAIN_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
+
+SCHEMA_VERSION = 1
+SCHEMA = """
+CREATE TABLE apps (
+  app TEXT PRIMARY KEY COLLATE NOCASE,   -- 'id:123' or the scanner's name
+  owner TEXT NOT NULL DEFAULT '',        -- '' only for an entry kept for covers=
+  component TEXT NOT NULL DEFAULT '',
+  updated TEXT NOT NULL, updated_by TEXT NOT NULL);
+CREATE TABLE app_watchers (
+  app TEXT NOT NULL COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
+  email TEXT NOT NULL, PRIMARY KEY (app, email));
+CREATE TABLE app_covers (
+  app TEXT NOT NULL COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
+  host TEXT NOT NULL, PRIMARY KEY (app, host));
+CREATE TABLE sites (
+  domain TEXT PRIMARY KEY, owner TEXT NOT NULL,
+  updated TEXT NOT NULL, updated_by TEXT NOT NULL);
+CREATE TABLE allowed_domains (
+  domain TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT '',
+  added TEXT NOT NULL, added_by TEXT NOT NULL);
+-- Append-only. Who changed what, for a list that decides who is mailed.
+CREATE TABLE changes (
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL, by TEXT NOT NULL,
+  action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+CREATE TRIGGER changes_no_update BEFORE UPDATE ON changes
+  BEGIN SELECT RAISE(ABORT, 'changes is append-only'); END;
+CREATE TRIGGER changes_no_delete BEFORE DELETE ON changes
+  BEGIN SELECT RAISE(ABORT, 'changes is append-only'); END;
+"""
+
+
+class Refused(Exception):
+    """An entry the rules do not allow. Nothing is written."""
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def who():
+    # sudo sets SUDO_USER; the wrapper runs this as root, so getuser() alone
+    # would record every change as "root".
+    return os.environ.get("SUDO_USER") or getpass.getuser()
+
+
+# ---------------------------------------------------------------- rules
+
+def app_key(raw):
+    # Inner runs of spaces collapse, as the scanner's own names are tidied and
+    # as Owners.For in Go looks them up.
+    s = " ".join((raw or "").split())
+    if not s:
+        raise Refused("an application is needed: id:<web app id> or its name")
+    m = ID_RE.match(s)
+    if m:
+        return "id:" + m.group(1)
+    if s.lower().startswith("site:"):
+        raise Refused(f"{s}: a website goes in with 'fleet-owners site set', not as an application")
+    if "|" in s or any(ord(ch) < 32 for ch in s):
+        raise Refused(f"{s!r}: not a usable application name")
+    return s
+
+
+def email(raw, what="owner"):
+    e = (raw or "").strip().lower()
+    if not EMAIL_RE.fullmatch(e):
+        raise Refused(f"{what} {raw!r} is not an email address")
+    if e == PLACEHOLDER.lower():
+        raise Refused(f"{what} is still the placeholder {PLACEHOLDER}")
+    return e
+
+
+def host_of(raw):
+    """internal/appscan hostOf: lower case, no scheme, path or port, no www."""
+    s = (raw or "").strip().lower()
+    if "://" in s:
+        try:
+            s = urlparse(s).hostname or ""
+        except ValueError:
+            s = ""
+    s = re.split(r"[:/]", s, maxsplit=1)[0]
+    if s.endswith("."):
+        s = s[:-1]
+    return s[4:] if s.startswith("www.") else s
+
+
+def host(raw):
+    """A covers= or site: host, accepted exactly when cti-appscan accepts it
+    from the file - it has a dot - and with nothing that would split it."""
+    h = host_of(raw)
+    if not h or "." not in h or re.search(r"[\s|,;]", h) or any(ord(ch) < 32 for ch in h):
+        raise Refused(f"{raw!r} is not a host name")
+    return h
+
+
+def domain(raw):
+    d = (raw or "").strip().lower().lstrip("@").rstrip(".")
+    if not DOMAIN_RE.fullmatch(d):
+        raise Refused(f"{raw!r} is not a domain")
+    return d
+
+
+def component(raw):
+    c = " ".join((raw or "").split())
+    if c.lower().startswith(("covers=", "watchers=")) or "|" in c:
+        raise Refused(f"component {raw!r} would be read as another field")
+    return c
+
+
+def trusted_dir(d):
+    """A directory nobody but root (or whoever runs this) can change."""
+    st = os.lstat(d)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Refused(f"{d} is writable by someone other than its owner, or not owned by you or root - "
+                      f"this runs as root and will not read or write files there")
+
+
+def trusted_path(raw, what):
+    """An absolute path in a directory only root controls. This runs as root,
+    and the service account can write its own state directory: a relative
+    path or a planted link there must not choose what root reads or writes."""
+    if not os.path.isabs(raw):
+        raise Refused(f"{what} {raw!r}: give an absolute path")
+    p = os.path.normpath(raw)
+    trusted_dir(os.path.dirname(p))
+    return p
+
+
+def read_trusted(raw, what):
+    p = trusted_path(raw, what)
+    fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, encoding="utf-8") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+            raise Refused(f"{p} must be a regular file owned by you or root and writable only by its owner")
+        return p, f.read(4 << 20)
+
+
+# ---------------------------------------------------------------- storage
+
+def connect(create=False):
+    if not create and not os.path.exists(DB):
+        raise Refused(f"no database at {DB} - run 'fleet-owners init' first")
+    old = os.umask(0o077)
+    try:
+        c = sqlite3.connect(DB, isolation_level=None)
+    finally:
+        os.umask(old)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA foreign_keys=ON")
+    c.execute("PRAGMA busy_timeout=5000")
+    v = c.execute("PRAGMA user_version").fetchone()[0]
+    if not create and v != SCHEMA_VERSION:
+        raise Refused(f"{DB} is schema version {v}; this fleet-owners knows {SCHEMA_VERSION}")
+    return c
+
+
+def record(c, action, subject, detail=""):
+    c.execute("INSERT INTO changes(at,by,action,subject,detail) VALUES(?,?,?,?,?)",
+              (now(), who(), action, subject, detail))
+
+
+def build_snapshot(c):
+    apps = []
+    for r in c.execute("SELECT app, owner, component FROM apps ORDER BY app COLLATE NOCASE"):
+        a = {"app": r["app"], "owner": r["owner"]}
+        if r["component"]:
+            a["component"] = r["component"]
+        w = [x[0] for x in c.execute(
+            "SELECT email FROM app_watchers WHERE app=? ORDER BY email", (r["app"],))]
+        h = [x[0] for x in c.execute(
+            "SELECT host FROM app_covers WHERE app=? ORDER BY host", (r["app"],))]
+        if w:
+            a["watchers"] = w
+        if h:
+            a["covers"] = h
+        apps.append(a)
+    last = c.execute("SELECT COALESCE(MAX(id),0) FROM changes").fetchone()[0]
+    return {
+        "format": SNAPSHOT_FORMAT,
+        "generated": now(),
+        "change": last,
+        "apps": apps,
+        "sites": [{"domain": r["domain"], "owner": r["owner"]}
+                  for r in c.execute("SELECT domain, owner FROM sites ORDER BY domain")],
+        "allowedDomains": [r[0] for r in c.execute(
+            "SELECT domain FROM allowed_domains ORDER BY domain")],
+    }
+
+
+def write_snapshot_tmp(c):
+    """Write the snapshot beside its final name, 0640 to the fleet's group,
+    and return the temporary path for publish() to rename into place."""
+    body = json.dumps(build_snapshot(c), indent=1) + "\n"
+    fd, tmp = tempfile.mkstemp(prefix=".owners.json.", dir=DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o640)
+        try:
+            os.chown(tmp, -1, grp.getgrnam(GROUP).gr_gid)
+        except (KeyError, PermissionError):
+            # No such group (a workstation, a test) or not root: the file
+            # stays owner-only rather than becoming readable to anyone else.
+            os.chmod(tmp, 0o600)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return tmp
+
+
+def change(c, fn):
+    """Run fn inside one transaction, and publish the snapshot of exactly
+    the state it committed. The snapshot is written before the commit and
+    renamed after it, so a failed commit leaves the old snapshot in place,
+    and a published snapshot always matches a committed state. The whole of
+    it holds a lock, so of two people editing at once the later commit is
+    always the snapshot left in place."""
+    lock = os.open(os.path.join(DIR, ".owners.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        c.execute("BEGIN IMMEDIATE")
+        tmp = None
+        try:
+            fn()
+            tmp = write_snapshot_tmp(c)
+            c.execute("COMMIT")
+        except BaseException:
+            if c.in_transaction:
+                c.execute("ROLLBACK")
+            if tmp:
+                os.unlink(tmp)
+            raise
+        try:
+            os.replace(tmp, SNAPSHOT)
+        except OSError as e:
+            os.unlink(tmp)
+            raise Refused(f"the change is saved in {DB}, but {SNAPSHOT} could not be "
+                          f"replaced ({e}) - the lanes still read the old one. Run "
+                          f"'fleet-owners snapshot' once the cause is fixed") from e
+    finally:
+        os.close(lock)
+
+
+def require_app(c, key):
+    r = c.execute("SELECT app FROM apps WHERE app=?", (key,)).fetchone()
+    if not r:
+        raise Refused(f"{key} is not in owners.db (fleet-owners list)")
+    return r["app"]
+
+
+# ---------------------------------------------------------------- import
+
+def parse_owners_file(text):
+    """app-owners.txt, read the way cti-appscan reads it. Returns
+    (apps, sites, problems); apps maps key -> dict."""
+    apps, sites, problems = {}, {}, []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        f = [x.strip() for x in line.split("|")]
+        where = f"app-owners line {n}"
+        if len(f) < 2 or not f[0] or not f[1]:
+            problems.append(f'{where}: want "application | owner email [| component]"')
+            continue
+        placeholder = f[1].lower() == PLACEHOLDER.lower()
+        if not placeholder and not EMAIL_RE.fullmatch(f[1]):
+            problems.append(f"{where}: {f[1]!r} is not an email address")
+            continue
+        comp, covers, watchers = "", [], []
+        for x in f[2:]:
+            if not x:
+                continue
+            lx = x.lower()
+            if lx.startswith("watchers="):
+                for e in re.split(r"[,; ]+", lx[len("watchers="):]):
+                    if not e:
+                        continue
+                    if not EMAIL_RE.fullmatch(e) or e == PLACEHOLDER.lower():
+                        problems.append(f"{where}: watchers={e} is not an email address - ignored")
+                    elif e in watchers:
+                        pass
+                    elif len(watchers) >= MAX_WATCHERS:
+                        problems.append(f"{where}: watchers={e} ignored (at most {MAX_WATCHERS} watchers per line)")
+                    else:
+                        watchers.append(e)
+            elif lx.startswith("covers="):
+                for h in re.split(r"[, ]+", lx[len("covers="):]):
+                    if not h:
+                        continue
+                    try:
+                        h = host(h)
+                    except Refused:
+                        problems.append(f"{where}: covers={h} is not a host name")
+                        continue
+                    if h not in covers:
+                        covers.append(h)
+            elif not comp:
+                comp = x
+            else:
+                problems.append(f"{where}: extra field {x!r} ignored (one component per line)")
+        if f[0].lower().startswith("site:"):
+            if covers:
+                problems.append(f"{where}: covers= belongs on a web app's line, not a site: line - ignored")
+            if watchers:
+                problems.append(f"{where}: watchers= belongs on a web app's line, not a site: line - ignored")
+            if placeholder:
+                problems.append(f"{where}: {f[0]} has no owner yet (still {PLACEHOLDER}) - not imported")
+                continue
+            d = host_of(f[0][len("site:"):])
+            if not d:
+                problems.append(f"{where}: site: needs a domain")
+                continue
+            sites[d] = f[1].lower()
+            continue
+        try:
+            key = app_key(f[0])
+        except Refused as e:
+            problems.append(f"{where}: {e}")
+            continue
+        if placeholder:
+            problems.append(f"{where}: {f[0]} has no owner yet (still {PLACEHOLDER})"
+                            + (" - imported for its covers= only" if covers else " - not imported"))
+            if not covers:
+                continue
+        if key.lower() in {k.lower() for k in apps}:
+            problems.append(f"{where}: {f[0]} already listed; the later line wins")
+            apps = {k: v for k, v in apps.items() if k.lower() != key.lower()}
+        apps[key] = {"owner": "" if placeholder else f[1].lower(), "component": comp,
+                     "watchers": watchers, "covers": covers}
+    return apps, sites, problems
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_init(a):
+    os.makedirs(DIR, exist_ok=True)
+    if os.path.exists(DB):
+        print(f"{DB} already exists - nothing changed")
+        return 0
+    c = connect(create=True)
+    c.executescript(SCHEMA)
+    c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    os.chmod(DB, 0o600)
+    change(c, lambda: record(c, "init", DB))
+    print(f"created {DB} and {SNAPSHOT} (empty). Next: fleet-owners import {OLD_FILE}")
+    return 0
+
+
+def cmd_import(a):
+    c = connect()
+    path, text = read_trusted(a.file, "import")
+    apps, sites, problems = parse_owners_file(text)
+    allow = []
+    for d in (a.allow_domains or "").split(","):
+        if d.strip():
+            allow.append(domain(d))
+    have = c.execute("SELECT COUNT(*) FROM apps").fetchone()[0] + \
+        c.execute("SELECT COUNT(*) FROM sites").fetchone()[0]
+    if have and not a.replace:
+        raise Refused(f"owners.db already has {have} entr(ies) - pass --replace to load "
+                      f"{path} over them (the history records each one it replaces)")
+
+    def do():
+        if a.replace:
+            # Each entry goes into the history before it is deleted, so a
+            # replace can be read back - and undone - from the history alone.
+            for e in build_snapshot(c)["apps"]:
+                record(c, "replaced", e["app"], json.dumps(e, sort_keys=True))
+            for e in c.execute("SELECT domain, owner FROM sites").fetchall():
+                record(c, "replaced", "site:" + e["domain"], f"owner {e['owner']}")
+            c.execute("DELETE FROM apps")
+            c.execute("DELETE FROM sites")
+        t, by = now(), who()
+        for key, v in apps.items():
+            c.execute("INSERT INTO apps(app,owner,component,updated,updated_by) VALUES(?,?,?,?,?)",
+                      (key, v["owner"], v["component"], t, by))
+            c.executemany("INSERT INTO app_watchers(app,email) VALUES(?,?)", [(key, w) for w in v["watchers"]])
+            c.executemany("INSERT INTO app_covers(app,host) VALUES(?,?)", [(key, h) for h in v["covers"]])
+            record(c, "import", key, json.dumps(dict(v, app=key), sort_keys=True))
+        for d, o in sites.items():
+            c.execute("INSERT INTO sites(domain,owner,updated,updated_by) VALUES(?,?,?,?)", (d, o, t, by))
+            record(c, "import", "site:" + d, f"owner {o}")
+        new = [d for d in allow if not c.execute(
+            "SELECT 1 FROM allowed_domains WHERE domain=?", (d,)).fetchone()]
+        for d in new:
+            c.execute("INSERT INTO allowed_domains(domain,note,added,added_by) VALUES(?,?,?,?)",
+                      (d, "imported", t, by))
+            record(c, "domain allow", d, "imported")
+        record(c, "import", path, f"{len(apps)} app(s), {len(sites)} site(s), {len(new)} new domain(s)"
+               + (", replacing what was there" if a.replace else ""))
+    change(c, do)
+    for p in problems:
+        print(f"  problem: {p}")
+    print(f"imported {len(apps)} application(s) and {len(sites)} site(s) from {path}"
+          f"{f', {len(allow)} allowed domain(s)' if allow else ''}; {len(problems)} line problem(s) above.")
+    print("Next: fleet-owners check")
+    return 0
+
+
+def cmd_list(a):
+    c = connect()
+    rows = c.execute("SELECT app, owner, component FROM apps ORDER BY app COLLATE NOCASE").fetchall()
+    for r in rows:
+        w = c.execute("SELECT COUNT(*) FROM app_watchers WHERE app=?", (r["app"],)).fetchone()[0]
+        h = [x[0] for x in c.execute("SELECT host FROM app_covers WHERE app=? ORDER BY host", (r["app"],))]
+        extra = []
+        if r["component"]:
+            extra.append(f"component={r['component']}")
+        if w:
+            extra.append(f"{w} watcher(s)")
+        if h:
+            extra.append("covers=" + ",".join(h))
+        print(f"{r['app']:<34} {r['owner'] or '(no owner)':<34} {'  '.join(extra)}")
+    sites = c.execute("SELECT domain, owner FROM sites ORDER BY domain").fetchall()
+    for r in sites:
+        print(f"{'site:' + r['domain']:<34} {r['owner']}")
+    print(f"\n{len(rows)} application(s), {len(sites)} site(s)")
+    return 0
+
+
+def cmd_show(a):
+    c = connect()
+    key = require_app(c, app_key(a.app))
+    r = c.execute("SELECT * FROM apps WHERE app=?", (key,)).fetchone()
+    print(f"application : {key}")
+    print(f"owner       : {r['owner'] or '(none - kept for covers=)'}")
+    print(f"component   : {r['component'] or '-'}")
+    print("watchers    : " + (", ".join(x[0] for x in c.execute(
+        "SELECT email FROM app_watchers WHERE app=? ORDER BY email", (key,))) or "-"))
+    print("covers      : " + (", ".join(x[0] for x in c.execute(
+        "SELECT host FROM app_covers WHERE app=? ORDER BY host", (key,))) or "-"))
+    print(f"updated     : {r['updated']} by {r['updated_by']}")
+    print("\nhistory:")
+    for h in c.execute("SELECT at, by, action, detail FROM changes WHERE subject=? COLLATE NOCASE "
+                       "ORDER BY id DESC LIMIT 20", (key,)):
+        print(f"  {h['at']}  {h['by']:<12} {h['action']:<14} {h['detail']}")
+    return 0
+
+
+def cmd_set(a):
+    c = connect()
+    key, owner = app_key(a.app), email(a.owner)
+    comp = component(a.component) if a.component is not None else None
+
+    def do():
+        old = c.execute("SELECT app, owner, component FROM apps WHERE app=?", (key,)).fetchone()
+        if old:
+            c.execute("UPDATE apps SET owner=?, component=COALESCE(?, component), updated=?, updated_by=? "
+                      "WHERE app=?", (owner, comp, now(), who(), old["app"]))
+            record(c, "set", old["app"], f"owner {old['owner'] or '(none)'} -> {owner}"
+                   + (f"; component {old['component'] or '-'} -> {comp or '-'}" if comp is not None else ""))
+        else:
+            c.execute("INSERT INTO apps(app,owner,component,updated,updated_by) VALUES(?,?,?,?,?)",
+                      (key, owner, comp or "", now(), who()))
+            record(c, "add", key, f"owner {owner}" + (f"; component {comp}" if comp else ""))
+    change(c, do)
+    print(f"{key}: owner {owner}")
+    return 0
+
+
+def cmd_rm(a):
+    c = connect()
+    key = require_app(c, app_key(a.app))
+
+    def do():
+        r = c.execute("SELECT owner FROM apps WHERE app=?", (key,)).fetchone()
+        ws = ",".join(x[0] for x in c.execute("SELECT email FROM app_watchers WHERE app=?", (key,)))
+        c.execute("DELETE FROM apps WHERE app=?", (key,))
+        record(c, "rm", key, f"was owner {r['owner'] or '(none)'}" + (f", watchers {ws}" if ws else ""))
+    change(c, do)
+    print(f"{key}: removed")
+    return 0
+
+
+def cmd_watcher(a):
+    c = connect()
+    key = require_app(c, app_key(a.app))
+    emails = [email(e, "watcher") for e in a.emails]
+
+    def do():
+        if a.op == "add":
+            n = c.execute("SELECT COUNT(*) FROM app_watchers WHERE app=?", (key,)).fetchone()[0]
+            new = [e for e in dict.fromkeys(emails) if not c.execute(
+                "SELECT 1 FROM app_watchers WHERE app=? AND email=?", (key, e)).fetchone()]
+            if n + len(new) > MAX_WATCHERS:
+                raise Refused(f"{key} would have {n + len(new)} watchers; at most {MAX_WATCHERS}")
+            c.executemany("INSERT INTO app_watchers(app,email) VALUES(?,?)", [(key, e) for e in new])
+            record(c, "watcher add", key, ",".join(new) or "(already watching)")
+        else:
+            gone = [e for e in emails if c.execute(
+                "DELETE FROM app_watchers WHERE app=? AND email=?", (key, e)).rowcount]
+            if not gone:
+                raise Refused(f"none of those watch {key}")
+            record(c, "watcher rm", key, ",".join(gone))
+    change(c, do)
+    print(f"{key}: watchers " + (", ".join(x[0] for x in c.execute(
+        "SELECT email FROM app_watchers WHERE app=? ORDER BY email", (key,))) or "none"))
+    return 0
+
+
+def cmd_covers(a):
+    c = connect()
+    key = require_app(c, app_key(a.app))
+    hosts = [host(h) for h in a.hosts]
+
+    def do():
+        if a.op == "add":
+            c.executemany("INSERT OR IGNORE INTO app_covers(app,host) VALUES(?,?)", [(key, h) for h in hosts])
+            record(c, "covers add", key, ",".join(hosts))
+        else:
+            gone = [h for h in hosts if c.execute(
+                "DELETE FROM app_covers WHERE app=? AND host=?", (key, h)).rowcount]
+            if not gone:
+                raise Refused(f"{key} covers none of those")
+            record(c, "covers rm", key, ",".join(gone))
+    change(c, do)
+    print(f"{key}: covers " + (", ".join(x[0] for x in c.execute(
+        "SELECT host FROM app_covers WHERE app=? ORDER BY host", (key,))) or "none"))
+    return 0
+
+
+def cmd_site(a):
+    c = connect()
+    d = host(a.domain)
+    subject = "site:" + d
+    if a.op == "set":
+        owner = email(a.owner)
+
+        def do():
+            old = c.execute("SELECT owner FROM sites WHERE domain=?", (d,)).fetchone()
+            c.execute("INSERT INTO sites(domain,owner,updated,updated_by) VALUES(?,?,?,?) "
+                      "ON CONFLICT(domain) DO UPDATE SET owner=excluded.owner, updated=excluded.updated, "
+                      "updated_by=excluded.updated_by", (d, owner, now(), who()))
+            record(c, "site set", subject, f"owner {old['owner'] if old else '(new)'} -> {owner}")
+        change(c, do)
+        print(f"{subject}: owner {owner}")
+    else:
+        def do():
+            if not c.execute("DELETE FROM sites WHERE domain=?", (d,)).rowcount:
+                raise Refused(f"{subject} is not in owners.db")
+            record(c, "site rm", subject)
+        change(c, do)
+        print(f"{subject}: removed")
+    return 0
+
+
+def cmd_domain(a):
+    c = connect()
+    if a.op == "list":
+        rows = c.execute("SELECT domain, note, added, added_by FROM allowed_domains ORDER BY domain").fetchall()
+        for r in rows:
+            print(f"{r['domain']:<32} {r['added'][:10]} {r['added_by']:<12} {r['note']}")
+        print(f"\n{len(rows)} allowed domain(s)")
+        return 0
+    if not a.domains:
+        raise Refused(f"domain {a.op} needs at least one domain")
+    ds = [domain(d) for d in a.domains]
+
+    if a.op == "allow":
+        new = [d for d in dict.fromkeys(ds) if not c.execute(
+            "SELECT 1 FROM allowed_domains WHERE domain=?", (d,)).fetchone()]
+        if not new:
+            print("already allowed: " + ", ".join(ds))
+            return 0
+        ds = new
+
+    def do():
+        if a.op == "allow":
+            c.executemany("INSERT INTO allowed_domains(domain,note,added,added_by) VALUES(?,?,?,?)",
+                          [(d, a.note or "", now(), who()) for d in ds])
+            record(c, "domain allow", ",".join(ds), a.note or "")
+        else:
+            gone = [d for d in ds if c.execute("DELETE FROM allowed_domains WHERE domain=?", (d,)).rowcount]
+            if not gone:
+                raise Refused("none of those are allowed domains")
+            record(c, "domain rm", ",".join(gone))
+    change(c, do)
+    print(("allowed: " if a.op == "allow" else "removed: ") + ", ".join(ds))
+    return 0
+
+
+def problems(c):
+    """What would stop a report reaching someone, then what is merely odd."""
+    allow = {r[0] for r in c.execute("SELECT domain FROM allowed_domains")}
+    block, note = [], []
+    if not allow:
+        block.append("no allowed domains - the owner lane sends nothing (fleet-owners domain allow ...)")
+    used = set()
+    for r in c.execute("SELECT app, owner FROM apps ORDER BY app COLLATE NOCASE"):
+        if not r["owner"]:
+            note.append(f"{r['app']}: no owner (kept for covers=) - its reports are held")
+            continue
+        d = r["owner"].rsplit("@", 1)[1]
+        used.add(d)
+        if allow and d not in allow:
+            block.append(f"{r['app']}: owner {r['owner']} is not at an allowed domain - nothing is sent for it")
+        for (w,) in c.execute("SELECT email FROM app_watchers WHERE app=?", (r["app"],)):
+            wd = w.rsplit("@", 1)[1]
+            used.add(wd)
+            if allow and wd not in allow:
+                block.append(f"{r['app']}: watcher {w} is not at an allowed domain - not sent to them")
+    for d in sorted(allow - used):
+        note.append(f"allowed domain {d} is used by no owner or watcher")
+    try:
+        with open(SNAPSHOT, encoding="utf-8") as f:
+            snap = json.load(f)
+        last = c.execute("SELECT COALESCE(MAX(id),0) FROM changes").fetchone()[0]
+        if snap.get("format") != SNAPSHOT_FORMAT or snap.get("change") != last:
+            block.append(f"{SNAPSHOT} does not match owners.db - run 'fleet-owners snapshot'")
+    except (OSError, ValueError) as e:
+        block.append(f"{SNAPSHOT} unreadable ({e}) - run 'fleet-owners snapshot'")
+    if os.path.exists(OLD_FILE):
+        note.append(f"{OLD_FILE} is no longer read - remove it once this check is clean")
+    return block, note
+
+
+def cmd_check(a):
+    c = connect()
+    block, note = problems(c)
+    for b in block:
+        print(f"  BLOCKS : {b}")
+    for n in note:
+        print(f"  note   : {n}")
+    n = c.execute("SELECT COUNT(*) FROM apps").fetchone()[0]
+    print(f"{n} application(s); {len(block)} problem(s) that stop a send, {len(note)} note(s)")
+    return 1 if block else 0
+
+
+def cmd_history(a):
+    c = connect()
+    for h in c.execute("SELECT id, at, by, action, subject, detail FROM changes ORDER BY id DESC LIMIT ?",
+                       (a.n,)):
+        print(f"#{h['id']:<5} {h['at']}  {h['by']:<12} {h['action']:<14} {h['subject']}  {h['detail']}")
+    return 0
+
+
+def cmd_export(a):
+    """app-owners.txt from owners.db: the way back, and a diffable backup."""
+    c = connect()
+    print(f"# app-owners.txt exported from {DB} at {now()} by fleet-owners export")
+    print("# application | owner email | Jira component | covers= | watchers=")
+    for r in c.execute("SELECT app, owner, component FROM apps ORDER BY app COLLATE NOCASE"):
+        if "#" in r["app"]:
+            print(f"fleet-owners: {r['app']!r} contains '#', which app-owners.txt reads as a comment - "
+                  f"use its id: form before going back to the file", file=sys.stderr)
+        f = [r["app"], r["owner"] or PLACEHOLDER]
+        if r["component"]:
+            f.append(r["component"])
+        h = [x[0] for x in c.execute("SELECT host FROM app_covers WHERE app=? ORDER BY host", (r["app"],))]
+        w = [x[0] for x in c.execute("SELECT email FROM app_watchers WHERE app=? ORDER BY email", (r["app"],))]
+        if h:
+            f.append("covers=" + ",".join(h))
+        if w:
+            f.append("watchers=" + ",".join(w))
+        print(" | ".join(f))
+    for r in c.execute("SELECT domain, owner FROM sites ORDER BY domain"):
+        print(f"site:{r['domain']} | {r['owner']}")
+    allow = [r[0] for r in c.execute("SELECT domain FROM allowed_domains ORDER BY domain")]
+    print(f"# allowed domains (OWNER_ALLOW_DOMAINS without owners.db): {','.join(allow)}")
+    return 0
+
+
+def cmd_snapshot(a):
+    c = connect()
+    change(c, lambda: record(c, "snapshot", SNAPSHOT))
+    print(f"wrote {SNAPSHOT}")
+    return 0
+
+
+def cmd_backup(a):
+    c = connect()
+    dest = trusted_path(a.dest, "backup")
+    # Created here, exclusively and without following a link, in a directory
+    # only root can write: the path SQLite then opens is the file just made.
+    try:
+        os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
+    except FileExistsError as e:
+        raise Refused(f"{dest} exists - not overwriting a backup") from e
+    out = sqlite3.connect(dest)
+    try:
+        c.backup(out)
+    finally:
+        out.close()
+    print(f"backed up {DB} to {dest} (0600). Restore: stop nothing, copy it over {DB}, "
+          f"then fleet-owners snapshot")
+    return 0
+
+
+def parser():
+    p = argparse.ArgumentParser(prog="fleet-owners", description=__doc__.split("\n\n")[0],
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    s = p.add_subparsers(dest="cmd", required=True)
+    s.add_parser("init").set_defaults(fn=cmd_init)
+    x = s.add_parser("import")
+    x.add_argument("file")
+    x.add_argument("--replace", action="store_true")
+    x.add_argument("--allow-domains", default="")
+    x.set_defaults(fn=cmd_import)
+    s.add_parser("list").set_defaults(fn=cmd_list)
+    x = s.add_parser("show")
+    x.add_argument("app")
+    x.set_defaults(fn=cmd_show)
+    x = s.add_parser("set")
+    x.add_argument("app")
+    x.add_argument("--owner", required=True)
+    x.add_argument("--component")
+    x.set_defaults(fn=cmd_set)
+    x = s.add_parser("rm")
+    x.add_argument("app")
+    x.set_defaults(fn=cmd_rm)
+    x = s.add_parser("watcher")
+    x.add_argument("op", choices=["add", "rm"])
+    x.add_argument("app")
+    x.add_argument("emails", nargs="+")
+    x.set_defaults(fn=cmd_watcher)
+    x = s.add_parser("covers")
+    x.add_argument("op", choices=["add", "rm"])
+    x.add_argument("app")
+    x.add_argument("hosts", nargs="+")
+    x.set_defaults(fn=cmd_covers)
+    x = s.add_parser("site")
+    x.add_argument("op", choices=["set", "rm"])
+    x.add_argument("domain")
+    x.add_argument("--owner")
+    x.set_defaults(fn=cmd_site)
+    x = s.add_parser("domain")
+    x.add_argument("op", choices=["allow", "rm", "list"])
+    x.add_argument("domains", nargs="*")
+    x.add_argument("--note", default="")
+    x.set_defaults(fn=cmd_domain)
+    s.add_parser("check").set_defaults(fn=cmd_check)
+    x = s.add_parser("history")
+    x.add_argument("n", nargs="?", type=int, default=30)
+    x.set_defaults(fn=cmd_history)
+    s.add_parser("export").set_defaults(fn=cmd_export)
+    s.add_parser("snapshot").set_defaults(fn=cmd_snapshot)
+    x = s.add_parser("backup")
+    x.add_argument("dest")
+    x.set_defaults(fn=cmd_backup)
+    return p
+
+
+def main(argv):
+    a = parser().parse_args(argv)
+    if a.cmd == "site" and a.op == "set" and not a.owner:
+        print("fleet-owners: site set needs --owner", file=sys.stderr)
+        return 2
+    try:
+        return a.fn(a)
+    except Refused as e:
+        print(f"fleet-owners: {e}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as e:
+        print(f"fleet-owners: {DB}: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

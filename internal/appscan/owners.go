@@ -80,6 +80,10 @@ type Owners struct {
 	// placeholder: the stand-in relationship is a fact about the web app,
 	// not about who owns it, and must survive --list-apps regenerating.
 	coversOnly map[string][]string // by "id:N" or lower-case name
+	// allow and managed are the owner lane's domain allowlist, set when the
+	// source keeps one (see AllowedDomains).
+	allow   []string
+	managed bool
 }
 
 // DefaultOwnersFile is where the file lives unless APPSCAN_OWNERS_FILE says.
@@ -101,8 +105,7 @@ var (
 // ParseOwners reads the file. Problems are lines it could not use, worded for
 // the report; they never stop the lane.
 func ParseOwners(r io.Reader) (Owners, []string, error) {
-	o := Owners{byID: map[string]Owner{}, byName: map[string]Owner{}, bySite: map[string]Owner{},
-		coversOnly: map[string][]string{}}
+	o := newOwners()
 	var problems []string
 	sc := bufio.NewScanner(r)
 	n := 0
@@ -120,57 +123,69 @@ func ParseOwners(r io.Reader) (Owners, []string, error) {
 		for i := range f {
 			f[i] = strings.TrimSpace(f[i])
 		}
-		if len(f) < 2 || f[0] == "" || f[1] == "" {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: want \"application | owner email [| component]\"", n))
-			continue
-		}
-		if !ownerEmailRE.MatchString(f[1]) {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: %q is not an email address", n, f[1]))
-			continue
-		}
-		component, covers, watchers, bad := extraFields(f[2:])
-		for _, b := range bad {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: %s", n, b))
-		}
-		if strings.EqualFold(f[1], PlaceholderOwner) {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: %s has no owner yet (still %s)", n, f[0], PlaceholderOwner))
-			if len(covers) > 0 {
-				o.coversOnly[appRef(f[0])] = covers
-			}
-			continue
-		}
-		own := Owner{Email: strings.ToLower(f[1]), Line: n, App: f[0], Component: component, Covers: covers, Watchers: watchers}
-		if len(covers) > 0 && strings.HasPrefix(strings.ToLower(f[0]), "site:") {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: covers= belongs on a web app's line, not a site: line - ignored", n))
-			own.Covers = nil
-		}
-		if len(watchers) > 0 && strings.HasPrefix(strings.ToLower(f[0]), "site:") {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: watchers= belongs on a web app's line, not a site: line - ignored", n))
-			own.Watchers = nil
-		}
-		if d, ok := strings.CutPrefix(strings.ToLower(f[0]), "site:"); ok {
-			d = hostOf(d)
-			if d == "" {
-				problems = append(problems, fmt.Sprintf("app-owners line %d: site: needs a domain", n))
-				continue
-			}
-			o.bySite[d] = own
-			continue
-		}
-		if m := ownerIDRE.FindStringSubmatch(strings.ToLower(f[0])); m != nil {
-			if prev, dup := o.byID[m[1]]; dup {
-				problems = append(problems, fmt.Sprintf("app-owners line %d: id %s already listed on line %d; the later line wins", n, m[1], prev.Line))
-			}
-			o.byID[m[1]] = own
-			continue
-		}
-		key := strings.ToLower(f[0])
-		if prev, dup := o.byName[key]; dup {
-			problems = append(problems, fmt.Sprintf("app-owners line %d: %q already listed on line %d; the later line wins", n, f[0], prev.Line))
-		}
-		o.byName[key] = own
+		problems = append(problems, o.add(fmt.Sprintf("app-owners line %d", n), n, f)...)
 	}
 	return o, problems, sc.Err()
+}
+
+func newOwners() Owners {
+	return Owners{byID: map[string]Owner{}, byName: map[string]Owner{}, bySite: map[string]Owner{},
+		coversOnly: map[string][]string{}}
+}
+
+// add records one entry - application, owner, then the optional fields - and
+// returns what was wrong with it. where names it in those messages. The one
+// path for the text file and the owners.db snapshot, so both are held to the
+// same rules.
+func (o Owners) add(where string, n int, f []string) []string {
+	var problems []string
+	if len(f) < 2 || f[0] == "" || f[1] == "" {
+		return []string{where + `: want "application | owner email [| component]"`}
+	}
+	if !ownerEmailRE.MatchString(f[1]) {
+		return []string{fmt.Sprintf("%s: %q is not an email address", where, f[1])}
+	}
+	component, covers, watchers, bad := extraFields(f[2:])
+	for _, b := range bad {
+		problems = append(problems, fmt.Sprintf("%s: %s", where, b))
+	}
+	if strings.EqualFold(f[1], PlaceholderOwner) {
+		problems = append(problems, fmt.Sprintf("%s: %s has no owner yet (still %s)", where, f[0], PlaceholderOwner))
+		if len(covers) > 0 {
+			o.coversOnly[appRef(f[0])] = covers
+		}
+		return problems
+	}
+	own := Owner{Email: strings.ToLower(f[1]), Line: n, App: f[0], Component: component, Covers: covers, Watchers: watchers}
+	if len(covers) > 0 && strings.HasPrefix(strings.ToLower(f[0]), "site:") {
+		problems = append(problems, where+": covers= belongs on a web app's line, not a site: line - ignored")
+		own.Covers = nil
+	}
+	if len(watchers) > 0 && strings.HasPrefix(strings.ToLower(f[0]), "site:") {
+		problems = append(problems, where+": watchers= belongs on a web app's line, not a site: line - ignored")
+		own.Watchers = nil
+	}
+	if d, ok := strings.CutPrefix(strings.ToLower(f[0]), "site:"); ok {
+		d = hostOf(d)
+		if d == "" {
+			return append(problems, where+": site: needs a domain")
+		}
+		o.bySite[d] = own
+		return problems
+	}
+	if m := ownerIDRE.FindStringSubmatch(strings.ToLower(f[0])); m != nil {
+		if prev, dup := o.byID[m[1]]; dup {
+			problems = append(problems, fmt.Sprintf("%s: id %s already listed on line %d; the later line wins", where, m[1], prev.Line))
+		}
+		o.byID[m[1]] = own
+		return problems
+	}
+	key := nameKey(f[0])
+	if prev, dup := o.byName[key]; dup {
+		problems = append(problems, fmt.Sprintf("%s: %q already listed on line %d; the later line wins", where, f[0], prev.Line))
+	}
+	o.byName[key] = own
+	return problems
 }
 
 // LoadOwners reads the file at path. A missing file is no owners and one
@@ -197,9 +212,14 @@ func (o Owners) For(appID, app string) (Owner, bool) {
 			return w, true
 		}
 	}
-	w, ok := o.byName[strings.ToLower(strings.TrimSpace(app))]
+	w, ok := o.byName[nameKey(app)]
 	return w, ok
 }
+
+// nameKey is how an application's name is matched: case and runs of spaces
+// do not count, as the scanner's names are tidied and as fleet-owners stores
+// them.
+func nameKey(app string) string { return strings.ToLower(strings.Join(strings.Fields(app), " ")) }
 
 // App is an application as the scanner defines it.
 type App struct {
@@ -264,7 +284,7 @@ func appRef(app string) string {
 	if m := ownerIDRE.FindStringSubmatch(strings.ToLower(strings.TrimSpace(app))); m != nil {
 		return "id:" + m[1]
 	}
-	return strings.ToLower(strings.TrimSpace(app))
+	return nameKey(app)
 }
 
 // CoversFor is the production hosts a web app stands in for, from its
@@ -278,7 +298,7 @@ func (o Owners) CoversFor(appID, app string) []string {
 			return c
 		}
 	}
-	return o.coversOnly[strings.ToLower(strings.TrimSpace(app))]
+	return o.coversOnly[nameKey(app)]
 }
 
 // stagingHint reports whether a web app's URL looks like a staging or test

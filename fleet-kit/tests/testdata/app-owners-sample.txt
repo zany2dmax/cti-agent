@@ -1,0 +1,13 @@
+# Invented applications and people. The repository is public.
+# application | owner | component | covers= | watchers=
+id:101          | Lead@Example.com | Web Portal | covers=https://www.example.com/ | watchers=qa@example.com,pm@devshop.example
+Name Only App   | two@example.com
+id:102          | OWNER@example.com | covers=shop.example.com
+id:103          | OWNER@example.com
+id:104          | not-an-email
+site:brochure.example.net | web@example.com
+site:parked.example.net   | OWNER@example.com
+site:gallery.example.net  | web@example.com | watchers=x@example.com
+id:105          | dup1@example.com
+id:105          | dup2@example.com
+Customer  Portal | three@example.com

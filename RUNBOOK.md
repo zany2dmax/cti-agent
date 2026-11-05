@@ -395,7 +395,7 @@ one is enabled.
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
-| 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | `app-owners.txt` reviewed, `OWNER_ALLOW_DOMAINS` set, one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
+| 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | owners moved into `owners.db` and `fleet-owners check` clean ([11f](#application-owners-in-ownersdb)), one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
 
 ```bash
 systemctl list-timers 'cti-agent-*' --all
@@ -1115,14 +1115,86 @@ sudo cti-agent run-appowners --to-dev    # every email and report to FLEET_DEV_E
 sudo cti-agent run-appowners             # fetch, redact, send, record
 ```
 
-**Who receives it.** `cti-mailer --lane owner` reads `app-owners.txt` itself
-and sends only to that application's owner and watchers, and only to
-addresses at a domain in `OWNER_ALLOW_DOMAINS` (exact domains, comma-separated;
-a subdomain is a different domain). A watcher at another domain is dropped and
-the operator is alerted; an owner at another domain stops that application's
-send. It takes no `--to` or `--cc`, and `--approve` does not widen it. With
-`OWNER_ALLOW_DOMAINS` unset the runner logs that the lane is off and exits 0.
-Replies go to `GRAPH_MAILBOX`.
+**Who receives it.** `cti-mailer --lane owner` reads the owners itself, from
+`owners.db` (below) or, until that exists, `app-owners.txt`, and sends only to
+that application's owner and watchers, and only to addresses at an allowed
+domain: `fleet-owners domain list` with `owners.db`, or `OWNER_ALLOW_DOMAINS`
+without it (exact domains; a subdomain is a different domain). A watcher at
+another domain is dropped and the operator is alerted; an owner at another
+domain stops that application's send. It takes no `--to` or `--cc`, and
+`--approve` does not widen it. With no allowed domain the runner logs that the
+lane is off and exits 0 (`cti-mailer --lane owner --armed` decides). Replies go
+to `GRAPH_MAILBOX`.
+
+### Application owners in owners.db
+
+The owners, watchers, staging links (`covers=`), websites with no scan yet and
+the allowed domains live in **`/etc/cti-agent/owners.db`**, edited with
+`fleet-owners`, instead of a hand-edited `app-owners.txt`. Every change is
+recorded with who made it (`SUDO_USER`) in a history that cannot be edited.
+
+Why it is shaped this way:
+
+- **Python, not Go.** The Go module takes no dependencies and Go has no SQLite
+  driver in its standard library (SECURITY.md, Supply chain), so `fleet-owners`
+  is Python, like `fleet-db`. After every change it rewrites
+  **`/etc/cti-agent/owners.json`** from the same transaction, and that snapshot
+  is what `cti-appscan` and `cti-mailer` read. Nothing else writes the
+  database, so the snapshot cannot fall behind it.
+- **Root only.** `owners.db` is root:root 0600 and `owners.json`
+  root:ctiagent 0640. These rows decide who outside the company gets our
+  vulnerability reports, and the service account runs an agent that reads
+  untrusted mail: it can read them and cannot change them. `fleet-owners` is
+  the one wrapper command that runs as root.
+- **No silent fallback.** The lanes read `app-owners.txt` only while there is
+  no `owners.json`. Once there is one, a snapshot that cannot be read stops
+  the owners lane; it never goes back to the file.
+
+**Moving from app-owners.txt** (once):
+
+```bash
+sudo cti-agent fleet-owners init
+sudo cti-agent fleet-owners import /etc/cti-agent/app-owners.txt \
+     --allow-domains "$(sudo sed -n 's/^OWNER_ALLOW_DOMAINS=//p' /etc/cti-agent/fleet.env)"
+sudo cti-agent fleet-owners check          # BLOCKS lines stop a send; notes do not
+sudo cti-agent run-appowners --dry-run     # same plan as before the move
+sudo mv /etc/cti-agent/app-owners.txt /root/app-owners.txt.pre-db
+```
+
+The import reports every line it could not use (`watchers=` on a `site:` line,
+a placeholder owner, an address that is not one) and imports the rest: fix
+those with the commands below rather than in the file. Delete the
+`OWNER_ALLOW_DOMAINS` line from `fleet.env` afterwards; with `owners.db` in use
+it is ignored, and `cti-mailer` says so.
+
+**Day to day:**
+
+```bash
+sudo cti-agent fleet-owners list
+sudo cti-agent fleet-owners show id:123456
+sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
+sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
+sudo cti-agent fleet-owners covers add id:123456 www.example.com
+sudo cti-agent fleet-owners site set brochure.example.net --owner web@example.com
+sudo cti-agent fleet-owners domain allow devshop.example --note "builds the shop"
+sudo cti-agent fleet-owners history
+```
+
+`cti-appscan --list-apps` still prints every web app the scanner defines with
+its owner from `owners.db`, and `OWNER@example.com` for one that has none: use
+it to find the ids to `set`.
+
+**Backup and restore.** `owners.db` is the record; take a copy with SQLite's
+backup API, and keep an export you can read and diff:
+
+```bash
+sudo cti-agent fleet-owners backup /root/owners-$(date +%F).db
+sudo cti-agent fleet-owners export | sudo tee /root/app-owners-$(date +%F).txt >/dev/null
+```
+
+To restore, copy a backup over `/etc/cti-agent/owners.db` (root:root 0600), then
+`sudo cti-agent fleet-owners snapshot` and `check`. To go back to the file,
+`export` to `/etc/cti-agent/app-owners.txt` and move `owners.json` away.
 
 **What is held back.** A scan that did not finish, whose login failed, or that
 reached no host, and an application with no line in `app-owners.txt`. The
@@ -1201,7 +1273,8 @@ ticket per application (label `cti-appscan-<web app id>`), and the email's
   `state/appscan-tickets-preview-DATE.txt` (0600), not the journal. Jira
   trouble never stops the email.
 
-Set up the owners file from the scanner's own list, then fill in the owners.
+Owners come from `owners.db` (see "Application owners in owners.db" above).
+Before the move, they came from the file, set up from the scanner's own list:
 `--list-apps` keeps every owner already on file, adds each new web app with
 `OWNER@example.com`, and lists stale lines at the end; the weekly email also
 names any web app with no owner, so re-run it when one appears:

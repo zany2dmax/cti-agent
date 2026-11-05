@@ -11,11 +11,12 @@
 #
 # WHO RECEIVES IT IS DECIDED IN cti-mailer, NOT HERE
 #
-#   cti-mailer --lane owner reads app-owners.txt itself and sends only to the
-#   owner and watchers on the application's line, and only at a domain listed
-#   in OWNER_ALLOW_DOMAINS. Nothing this runner passes can add a recipient.
-#   With OWNER_ALLOW_DOMAINS unset the lane is off: this runner says so and
-#   exits.
+#   cti-mailer --lane owner reads the owners itself - owners.db's snapshot,
+#   or app-owners.txt until there is one - and sends only to the owner and
+#   watchers of that application, and only at an allowed domain (owners.db's
+#   list, or OWNER_ALLOW_DOMAINS without it). Nothing this runner passes can
+#   add a recipient. With no allowed domain the lane is off: this runner asks
+#   cti-mailer --armed, says so and exits.
 #
 # WHAT IS HELD BACK
 #
@@ -59,13 +60,6 @@ if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
 fi
 
-# Off until armed. A test send is allowed first, which is when you want to see
-# the emails.
-if [ -z "$TODEV" ] && [ -z "${OWNER_ALLOW_DOMAINS:-}" ]; then
-  log "OWNER_ALLOW_DOMAINS is not set in $FLEET_ENV - the owners lane is off. Nothing to do."
-  exit 0
-fi
-
 APPSCAN="$FLEET_CODE/bin/cti-appscan"
 APPREPORT="$FLEET_CODE/bin/cti-appreport"
 MAILER="$FLEET_CODE/bin/cti-mailer"
@@ -73,6 +67,20 @@ ALERT="$FLEET_CODE/bin/cti-alert"
 for b in "$APPSCAN" "$APPREPORT" "$MAILER"; do
   [ -x "$b" ] || fail "$(basename "$b") not found at $b - rerun the installer"
 done
+
+# Off until armed, and the mailer decides - it is the one that reads the
+# allowlist, wherever it is kept. 3 is "off"; anything else non-zero means the
+# owners could not be read, which is a failure, not a quiet day. A test send
+# is allowed first, which is when you want to see the emails.
+if [ -z "$TODEV" ]; then
+  rc=0
+  "$MAILER" --lane owner --armed || rc=$?
+  case "$rc" in
+    0) ;;
+    3) log "no allowed domains - the owners lane is off. Nothing to do."; exit 0 ;;
+    *) fail "cti-mailer could not read the owners (exit $rc) - see its line above" ;;
+  esac
+fi
 
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
@@ -151,7 +159,7 @@ if [ -s "$WORK/held.txt" ] || [ -n "$refused" ]; then
     reason="$n application report(s) held back from their owners: $(awk '{printf "%s%s", sep, $0; sep="; "} END {print ""}' "$WORK/held.txt")."
   fi
   if [ -n "$refused" ]; then
-    reason="$reason Some watchers were not sent the report because their domain is not in OWNER_ALLOW_DOMAINS: $refused (the journal names the addresses)."
+    reason="$reason Some watchers were not sent the report because their domain is not allowed: $refused (the journal names the addresses)."
   fi
   log "operator: $reason"
   if [ -n "$DRY" ]; then

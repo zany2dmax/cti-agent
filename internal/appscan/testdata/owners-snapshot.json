@@ -1,0 +1,52 @@
+{
+ "format": "cti-owners/1",
+ "generated": "2026-11-05T20:16:20+00:00",
+ "change": 11,
+ "apps": [
+  {
+   "app": "Customer Portal",
+   "owner": "three@example.com"
+  },
+  {
+   "app": "id:101",
+   "owner": "lead@example.com",
+   "component": "Web Portal",
+   "watchers": [
+    "pm@devshop.example",
+    "qa@example.com"
+   ],
+   "covers": [
+    "example.com"
+   ]
+  },
+  {
+   "app": "id:102",
+   "owner": "",
+   "covers": [
+    "shop.example.com"
+   ]
+  },
+  {
+   "app": "id:105",
+   "owner": "dup2@example.com"
+  },
+  {
+   "app": "Name Only App",
+   "owner": "two@example.com"
+  }
+ ],
+ "sites": [
+  {
+   "domain": "brochure.example.net",
+   "owner": "web@example.com"
+  },
+  {
+   "domain": "gallery.example.net",
+   "owner": "web@example.com"
+  }
+ ],
+ "allowedDomains": [
+  "devshop.example",
+  "example.com"
+ ]
+}

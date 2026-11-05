@@ -37,6 +37,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **AppSec: application owners in a database, `owners.db`, edited with
+  `fleet-owners`.** Owners, watchers, `covers=`, `site:` entries and the owner
+  lane's allowed domains move out of the hand-edited `app-owners.txt` into
+  `/etc/cti-agent/owners.db` (SQLite, root:root 0600), with a history of every
+  change and who made it. `fleet-owners` is Python (Go has no stdlib SQLite
+  driver and `go.mod` stays empty) and rewrites `/etc/cti-agent/owners.json`
+  after every change; `cti-appscan` and `cti-mailer --lane owner` read that
+  snapshot through the new `appscan.OwnerSource`, and read `app-owners.txt`
+  only while there is no snapshot. An unreadable snapshot stops the owners
+  lane. New: `cti-mailer --lane owner --armed`, which `run-appowners` now asks
+  instead of reading `OWNER_ALLOW_DOMAINS` itself. The wrapper runs
+  `fleet-owners` as root, the one command that does.
+  **Upgrade:** pull, reinstall. Nothing changes until you run
+  `fleet-owners init` and `import` (RUNBOOK 11f, "Application owners in
+  owners.db").
+
 ### Changed
 
 - **`task cheatsheet:pdf` uses pandoc and pdflatex, not reportlab.** The

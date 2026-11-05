@@ -36,6 +36,9 @@ config.local.yaml
 # Not output: the heartbeat's root-owned --settings file. Without it a clean
 # clone cannot install, and run-checkin refuses every beat.
 !fleet-kit/fleet/checkin-settings.json
+# Not output: the owners snapshot both languages' tests read, made from the
+# invented fleet-kit/tests/testdata/app-owners-sample.txt. No real names.
+!internal/appscan/testdata/owners-snapshot.json
 # The scanner KB cache is ~17MB of generated data that changes on every
 # refresh. It was tracked, so `git add -A` after a rebuild committed a new
 # copy each time and bloated history for no benefit - it is rebuildable from

@@ -9,7 +9,7 @@ import (
 func TestOwnerAudience(t *testing.T) {
 	to, cc, refused, err := OwnerAudience("Lead@Example.com",
 		[]string{"qa@dev-shop.example", "pm@exmaple.com", "lead@example.com", "not-an-address"},
-		"example.com, @dev-shop.example")
+		"example.com, @dev-shop.example", OwnerAllowVar)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,14 +22,14 @@ func TestOwnerAudience(t *testing.T) {
 }
 
 func TestOwnerAudienceRefuses(t *testing.T) {
-	if _, _, _, err := OwnerAudience("lead@example.com", nil, " "); err == nil || !strings.Contains(err.Error(), OwnerAllowVar) {
+	if _, _, _, err := OwnerAudience("lead@example.com", nil, " ", OwnerAllowVar); err == nil || !strings.Contains(err.Error(), OwnerAllowVar) {
 		t.Errorf("unset allowlist: %v", err)
 	}
-	if _, _, _, err := OwnerAudience("lead@exmaple.com", []string{"qa@example.com"}, "example.com"); err == nil {
+	if _, _, _, err := OwnerAudience("lead@exmaple.com", []string{"qa@example.com"}, "example.com", OwnerAllowVar); err == nil {
 		t.Error("an owner outside the domains must refuse the send")
 	}
 	// A subdomain is a different domain.
-	if _, _, _, err := OwnerAudience("lead@mail.example.com", nil, "example.com"); err == nil {
+	if _, _, _, err := OwnerAudience("lead@mail.example.com", nil, "example.com", OwnerAllowVar); err == nil {
 		t.Error("subdomain accepted")
 	}
 }

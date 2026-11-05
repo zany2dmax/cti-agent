@@ -881,7 +881,7 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-appowners|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-appowners|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-owners|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
 shift
 # A fleet command by NAME, nothing else. \$cmd used to be joined onto bin/
 # as given, so "cti-agent ../../../usr/bin/env" ran env as the service
@@ -910,6 +910,19 @@ LOADENV='_h="\$FLEET_HOME" _c="\$FLEET_CODE" _e="\$FLEET_ENV" _f="\$FLEET_FEEDS"
 set -a; if [ -r "\$FLEET_ENV" ]; then . "\$FLEET_ENV"; fi; set +a
 export FLEET_HOME="\$_h" FLEET_CODE="\$_c" FLEET_ENV="\$_e" FLEET_FEEDS="\$_f" HOME="\$_h"
 exec "\$@"'
+# fleet-owners is the one command that runs as ROOT, not as $FLEET_USER: it
+# writes owners.db and owners.json, which decide who outside the company is
+# mailed our vulnerability reports, and the service account must be able to
+# read them and not change them. No fleet.env: it needs none. SUDO_USER
+# reaches it, so the change history names the person and not "root".
+if [ "\$cmd" = fleet-owners ]; then
+  [ "\$(id -u)" = 0 ] || { echo "cti-agent: fleet-owners runs as root - sudo cti-agent fleet-owners ..." >&2; exit 2; }
+  # Out of the state directory, which the service account can write: root must
+  # not resolve a relative path, or follow a planted link, in there.
+  cd /
+  exec env -i PATH=/usr/bin:/bin FLEET_GROUP=$FLEET_GROUP SUDO_USER="\${SUDO_USER:-}" \\
+       /usr/bin/python3 -I "\$target" "\$@"
+fi
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
               /bin/bash -c "\$LOADENV" cti-agent /usr/bin/python3 "\$target" "\$@" ;;

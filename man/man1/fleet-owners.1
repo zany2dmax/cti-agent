@@ -1,0 +1,207 @@
+.TH FLEET-OWNERS 1 "2026-11-05" "cti-agent 1.5" "CTI Fleet Manual"
+.SH NAME
+fleet-owners \- who owns each web application: owners.db, and the snapshot the lanes read
+.SH SYNOPSIS
+.B sudo cti\-agent fleet\-owners
+.I command
+.RI [ args ]
+.SH DESCRIPTION
+.B fleet-owners
+keeps the application owners, watchers, staging links
+.RB ( covers ),
+websites with no scan yet, and the domains an owner or watcher may be at, in
+the SQLite database
+.IR /etc/cti\-agent/owners.db ,
+with a history of every change. It replaces hand-editing
+.IR app\-owners.txt .
+.PP
+After every change it rewrites
+.IR /etc/cti\-agent/owners.json ,
+atomically and from the same transaction. That snapshot is what
+.BR cti\-appscan (1)
+and
+.B cti\-mailer \-\-lane owner
+read: Go's standard library has no SQLite driver and the Go module takes no
+dependencies, so the Go lanes never open the database. While there is no
+snapshot they read
+.IR app\-owners.txt ;
+once there is one they read only the snapshot, and an unreadable snapshot
+stops the owners lane rather than falling back to the file.
+.PP
+It runs as
+.BR root ,
+through the wrapper, and is the one fleet command that does.
+.I owners.db
+is root:root 0600 and
+.I owners.json
+root:ctiagent 0640, so the service account can read who receives reports and
+cannot change it. The change history records
+.B SUDO_USER
+and cannot be edited or deleted.
+.PP
+.I APP
+is the scanner's web app id,
+.BI id: N
+(it survives a rename; use it), or the application's exact name. Entries
+follow the same rules as
+.I app\-owners.txt
+lines: one owner email, at most 10 watchers, no placeholder address.
+.SH COMMANDS
+.TP
+.B init
+Create an empty
+.I owners.db
+and snapshot. Does nothing if the database exists.
+.TP
+.BI import " FILE"
+Load an
+.I app\-owners.txt
+into an empty database, reporting each line it could not use.
+.I FILE
+must be an absolute path to a regular file owned by root, writable by
+nobody else, in a directory with the same rule. A placeholder
+line with
+.B covers=
+is kept for its covers only.
+.TP
+.B \-\-replace
+With
+.BR import :
+replace the applications and sites already in the database.
+.TP
+.BI \-\-allow\-domains " LIST"
+With
+.BR import :
+also allow these comma-separated domains, typically the value of
+.BR OWNER_ALLOW_DOMAINS .
+.TP
+.B list
+Every application and site with its owner, component, watcher count and
+covers.
+.TP
+.BI show " APP"
+One application, with its last 20 changes.
+.TP
+.BI set " APP " \-\-owner " EMAIL"
+Add the application, or change its owner.
+.TP
+.BI \-\-owner " EMAIL"
+With
+.B set
+or
+.BR "site set" :
+the owner.
+.TP
+.BI \-\-component " TEXT"
+With
+.BR set :
+the Jira component (for tickets, when they are on).
+.TP
+.BI rm " APP"
+Remove the application, its watchers and covers.
+.TP
+.BI "watcher add|rm" " APP EMAIL..."
+Add or remove watchers (Cc on the report).
+.TP
+.BI "covers add|rm" " APP HOST..."
+Record or remove production hosts this web app stands in for.
+.TP
+.BI "site set" " DOMAIN " \-\-owner " EMAIL"
+Who should set up a scan for a live website no web app covers;
+.BI "site rm" " DOMAIN"
+removes it.
+.TP
+.BI "domain allow" " DOMAIN... " \fR[\fB\-\-note " TEXT" \fR]
+Allow owners and watchers at these exact domains (a subdomain is a different
+domain).
+.BI "domain rm" " DOMAIN..."
+removes them;
+.B domain list
+lists them. With
+.I owners.db
+in use this list, not
+.BR OWNER_ALLOW_DOMAINS ,
+is the owner lane's allowlist.
+.TP
+.BI \-\-note " TEXT"
+With
+.BR "domain allow" :
+why, for the history.
+.TP
+.B check
+What would stop a report reaching someone: no allowed domain, an owner or
+watcher at a domain not allowed, a snapshot that does not match the
+database. Then notes: applications kept only for covers, allowed domains
+nobody uses,
+.I app\-owners.txt
+still present.
+.TP
+.BI history " \fR[\fIN\fR]"
+The last
+.I N
+changes (default 30).
+.TP
+.B export
+Print the database as an
+.IR app\-owners.txt ,
+the way back to the file and a backup you can diff.
+.TP
+.B snapshot
+Rewrite
+.I owners.json
+from the database, after a restore or a failed write.
+.TP
+.BI backup " DEST"
+Copy the database to
+.I DEST
+(0600) with SQLite's backup API. An absolute path in a root-controlled
+directory; created exclusively, without following a link, and never
+overwritten.
+.SH ENVIRONMENT
+.TP
+.B FLEET_GROUP
+The group given read access to the snapshot; set by the wrapper. Without
+it, or as non-root, the snapshot is 0600.
+.TP
+.B SUDO_USER
+Recorded as who made each change.
+.SH FILES
+.TP
+.I /etc/cti\-agent/owners.db
+The database, root:root 0600.
+.TP
+.I /etc/cti\-agent/owners.json
+The snapshot the lanes read, root:ctiagent 0640.
+.TP
+.I /etc/cti\-agent/app\-owners.txt
+Read by the lanes only while there is no snapshot.
+.SH EXIT STATUS
+.TP
+.B 0
+Done; for
+.BR check ,
+nothing stops a send.
+.TP
+.B 1
+Refused or failed, with the reason on stderr and nothing written; for
+.BR check ,
+something stops a send.
+.TP
+.B 2
+Usage.
+.SH EXAMPLES
+.nf
+sudo cti\-agent fleet\-owners init
+sudo cti\-agent fleet\-owners import /etc/cti\-agent/app\-owners.txt \e
+     \-\-allow\-domains example.com,devshop.example
+sudo cti\-agent fleet\-owners check
+sudo cti\-agent fleet\-owners set id:123456 \-\-owner lead@example.com
+sudo cti\-agent fleet\-owners watcher add id:123456 qa@example.com
+sudo cti\-agent fleet\-owners domain allow partner.example \-\-note "agency that builds the shop"
+sudo cti\-agent fleet\-owners backup /root/owners\-$(date +%F).db
+.fi
+.SH SEE ALSO
+.BR run\-appowners (1),
+.BR cti\-mailer (1),
+.BR cti\-appscan (1),
+.BR fleet\-db (1)
