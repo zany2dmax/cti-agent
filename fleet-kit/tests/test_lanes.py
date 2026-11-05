@@ -1507,6 +1507,40 @@ class RemediationNote(unittest.TestCase):
                          "clearing the note should make it stale again")
 
 
+class EmailTokens(unittest.TestCase):
+    """brief.py reads the palette the Go lanes read (internal/emailkit)."""
+
+    def setUp(self):
+        self.brief = load("brief")
+        self.file = json.loads((KIT / "fleet" / "lanes" / "email-tokens.json").read_text())
+
+    def test_the_builtin_fallback_is_the_file(self):
+        # The fallback exists so a missing file cannot cost the 6am digest; it
+        # must therefore say exactly what the file says.
+        self.assertEqual(self.brief._TOKEN_FALLBACK, self.file)
+
+    def test_the_severity_bands_use_the_shared_tones(self):
+        tones = self.file["tones"]
+        for sev, name in (("Sev5", "red"), ("Sev4", "amber"), ("Sev3", "yellow"),
+                          ("Sev2", "blue"), ("Sev1", "grey")):
+            self.assertEqual(self.brief.PRI[sev][:2], (tones[name]["fg"], tones[name]["bg"]), sev)
+
+    def test_the_digest_page_is_drawn_from_the_tokens(self):
+        data = {"counts": {}, "findings": [], "total": 0, "generated": "now", "source_meta": {}}
+        with quiet():
+            html = self.brief.render(data, "daily")
+        for key in ("navy", "page_bg", "band_text"):
+            self.assertIn(self.file[key], html, key)
+
+    def test_a_missing_tokens_file_does_not_stop_the_digest(self):
+        real = os.path.join
+        try:
+            os.path.join = lambda *a: "/nonexistent/email-tokens.json" if a[-1] == "email-tokens.json" else real(*a)
+            self.assertEqual(self.brief.email_tokens(), self.brief._TOKEN_FALLBACK)
+        finally:
+            os.path.join = real
+
+
 class DeadFeedsAreNamedAsDead(unittest.TestCase):
     """A feed that starts serving HTML must not be reported as malformed XML.
 

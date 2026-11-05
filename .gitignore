@@ -39,6 +39,10 @@ config.local.yaml
 # Not output: the owners snapshot both languages' tests read, made from the
 # invented fleet-kit/tests/testdata/app-owners-sample.txt. No real names.
 !internal/appscan/testdata/owners-snapshot.json
+# Not output: the email palette. internal/emailkit embeds the first (a clean
+# clone does not build without it) and brief.py reads the second.
+!internal/emailkit/tokens.json
+!fleet-kit/fleet/lanes/email-tokens.json
 # The scanner KB cache is ~17MB of generated data that changes on every
 # refresh. It was tracked, so `git add -A` after a rebuild committed a new
 # copy each time and bloated history for no benefit - it is rebuildable from

@@ -18,6 +18,56 @@ import re
 import sys
 from datetime import datetime, timezone
 
+
+# THE LOOK OF THE EMAIL: ONE DEFINITION, SHARED WITH THE GO LANES
+#
+# The palette and font live in email-tokens.json beside this file, the same
+# file the Go lanes read (internal/emailkit/tokens.json; a Go test fails when
+# the two copies differ). A shared CSS file would do nothing - Outlook ignores
+# linked stylesheets - so this is the next best thing: change a colour in one
+# place and every fleet email follows.
+#
+# If the file is missing the digest still renders, from the same values below:
+# an install that has not picked up the new file must not lose its 6am email
+# over a colour. test_lanes.py asserts this fallback equals the file.
+_TOKEN_FALLBACK = {
+    "font": "-apple-system,Segoe UI,Helvetica,Arial,sans-serif",
+    "mono": "Consolas,monospace",
+    "page_bg": "#eef1f5", "navy": "#12203a", "band_text": "#9fb0cc",
+    "ink": "#1a202c", "soft": "#4a5568", "muted": "#718096", "rule": "#e2e8f0",
+    "tones": {
+        "red": {"fg": "#b3001b", "bg": "#fdecee"},
+        "amber": {"fg": "#b25000", "bg": "#fff4e5"},
+        "yellow": {"fg": "#8a6d00", "bg": "#fffbe6"},
+        "blue": {"fg": "#2c5282", "bg": "#ebf4ff"},
+        "green": {"fg": "#2f855a", "bg": "#f0fff4"},
+        "grey": {"fg": "#4a5568", "bg": "#f4f5f7"},
+        "violet": {"fg": "#6b46c1", "bg": "#f5f0ff"},
+    },
+}
+
+
+def email_tokens():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "email-tokens.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            t = json.load(f)
+        if isinstance(t, dict) and isinstance(t.get("tones"), dict):
+            return t
+    except (OSError, ValueError):
+        pass
+    return _TOKEN_FALLBACK
+
+
+TOKENS = email_tokens()
+
+
+def tone(name):
+    """(strong, tint) for a named tone, as the Go lanes' Tone{Fg, Bg}."""
+    t = TOKENS["tones"][name]
+    return t["fg"], t["bg"]
+
+
 # Band labels must not claim more than the scanner said.
 #
 # Sev5 (highest) down to Sev1. Deliberately NOT P1-P4: that is the
@@ -31,15 +81,15 @@ from datetime import datetime, timezone
 # its own.
 SEV_ORDER = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
 PRI = {
-    "Sev5": ("#b3001b", "#fdecee",
+    "Sev5": (*tone("red"),
              "Exploited AND confirmed present - act today"),
-    "Sev4": ("#b25000", "#fff4e5",
+    "Sev4": (*tone("amber"),
              "Confirmed present, not known to be exploited - this patch cycle"),
-    "Sev3": ("#8a6d00", "#fffbe6",
+    "Sev3": (*tone("yellow"),
              "Exploited, coverage UNVERIFIED - we cannot say whether we are exposed"),
-    "Sev2": ("#2c5282", "#ebf4ff",
+    "Sev2": (*tone("blue"),
              "Exploited but not detected here, or unverified critical - verify coverage"),
-    "Sev1": ("#4a5568", "#f4f5f7", "Awareness only"),
+    "Sev1": (*tone("grey"), "Awareness only"),
 }
 
 # With five bands each label is already honest, so these are explanations of
@@ -551,7 +601,7 @@ def render(data, kind):
     # variable keeps its line rather than losing one.
     attr_text, attr_url = attribution()
     if attr_text and attr_url:
-        credit_html = (f'<a href="{esc(attr_url)}" style="color:#9fb0cc">'
+        credit_html = (f'<a href="{esc(attr_url)}" style="color:{tone("blue")[0]}">'
                        f'{esc(attr_text)}</a>')
     elif attr_text:
         credit_html = esc(attr_text)
@@ -578,12 +628,12 @@ def render(data, kind):
         lead = (f"<b>{c['Sev5']} vulnerabilit{'y' if c['Sev5'] == 1 else 'ies'} "
                 f"confirmed present in our environment and known to be exploited.</b> "
                 f"These need attention today.{unverified_clause}")
-        lead_bg, lead_border = "#fdecee", "#b3001b"
+        lead_border, lead_bg = tone("red")
     elif n_present:
         lead = (f"No actively-exploited vulnerabilities are confirmed present. "
                 f"{n_present} confirmed present in the environment for this "
                 f"week's patch cycle.{unverified_clause}")
-        lead_bg, lead_border = "#fff4e5", "#b25000"
+        lead_border, lead_bg = tone("amber")
     elif n_unverified:
         # Nothing confirmed, but coverage gaps on things being exploited. This
         # is neither a clean day nor a confirmed exposure, and saying either
@@ -595,15 +645,15 @@ def render(data, kind):
                 f"{'them' if n_unverified != 1 else 'it'}. That means we did "
                 f"not look, not that we are clean. Resolving the coverage gap "
                 f"is the action here.")
-        lead_bg, lead_border = "#fff4e5", "#b25000"
+        lead_border, lead_bg = tone("amber")
     elif data["total"] == 0:
         lead = ("No CVEs appeared in the threat-intel mailbox in this window. "
                 "Nothing to action.")
-        lead_bg, lead_border = "#f0fff4", "#2f855a"
+        lead_border, lead_bg = tone("green")
     else:
         lead = (f"{data['total']} CVEs reviewed. None confirmed present in the "
                 f"environment and none on the CISA KEV list. Nothing to action.")
-        lead_bg, lead_border = "#f0fff4", "#2f855a"
+        lead_border, lead_bg = tone("green")
 
     degraded = ""
     if data.get("degraded"):
@@ -707,30 +757,31 @@ def render(data, kind):
         f"Since {esc(meta['since'])[:16]}" if meta.get("since") else "",
     ]))
 
+    T = TOKENS
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(subject(data, kind))}</title></head>
-<body style="margin:0;padding:0;background:#eef1f5">
+<body style="margin:0;padding:0;background:{T['page_bg']}">
 <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
-       style="background:#eef1f5"><tr><td align="center" style="padding:16px 8px">
+       style="background:{T['page_bg']}"><tr><td align="center" style="padding:16px 8px">
 <table width="640" cellpadding="0" cellspacing="0" role="presentation"
        style="max-width:640px;background:#fff;border-radius:6px;overflow:hidden">
 
-  <tr><td style="background:#12203a;padding:16px 20px">
-    <div style="font:700 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#9fb0cc;letter-spacing:1.2px;text-transform:uppercase">
+  <tr><td style="background:{T['navy']};padding:16px 20px">
+    <div style="font:700 12px {T['font']};
+                color:{T['band_text']};letter-spacing:1.2px;text-transform:uppercase">
       {esc(org)}</div>
-    <div style="font:700 17px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#fff">
+    <div style="font:700 17px {T['font']};color:#fff">
       CTI {'Weekly' if kind == 'weekly' else 'Daily'} Brief</div>
-    <div style="font:400 12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#9fb0cc;margin-top:3px">{esc(now)}</div></td></tr>
+    <div style="font:400 12px {T['font']};
+                color:{T['band_text']};margin-top:3px">{esc(now)}</div></td></tr>
 
   <tr><td style="padding:16px 20px 0 20px">
     <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
       <tr><td style="background:{lead_bg};border-left:4px solid {lead_border};
-                     padding:12px 14px;font:400 14px/1.55 -apple-system,Segoe UI,
-                     Helvetica,Arial,sans-serif;color:#1a202c">{lead}</td></tr>
+                     padding:12px 14px;font:400 14px/1.55 {T['font']};
+                     color:{T['ink']}">{lead}</td></tr>
     </table></td></tr>
 
   <tr><td style="padding:14px 20px 0 20px">
@@ -743,9 +794,9 @@ def render(data, kind):
     </table></td></tr>
 
 {held_section(data)}{fleet_tickets_section(data)}{subjects_section(data)}
-  <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
-    <div style="font:400 11px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
-                color:#718096">
+  <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid {T['rule']}">
+    <div style="font:400 11px/1.6 {T['font']};
+                color:{T['muted']}">
       {provenance}<br>
       Presence is determined solely by the vulnerability lookup provider.
       Advisory text supplies urgency, never proof of exposure.

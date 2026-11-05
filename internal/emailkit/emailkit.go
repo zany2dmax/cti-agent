@@ -20,26 +20,26 @@ package emailkit
 import (
 	"fmt"
 	"html"
+	"os"
 	"strings"
 
 	"github.com/zany2dmax/cti-agent/internal/attribution"
 )
 
-// Font is the fleet emails' font stack.
-const Font = `-apple-system,Segoe UI,Helvetica,Arial,sans-serif`
+// The page, the header band and the text colours. Values come from
+// tokens.json.
+var (
+	// Font is the fleet emails' font stack; Mono is for paths and file names.
+	Font = tok.Font
+	Mono = tok.Mono
 
-// Mono is the stack for paths, hosts and file names.
-const Mono = `Consolas,monospace`
-
-// The page and the header band.
-const (
-	PageBG   = "#eef1f5"
-	Navy     = "#12203a"
-	BandText = "#9fb0cc"
-	Ink      = "#1a202c"
-	Soft     = "#4a5568"
-	Muted    = "#718096"
-	Rule     = "#e2e8f0"
+	PageBG   = tok.PageBG
+	Navy     = tok.Navy
+	BandText = tok.BandText
+	Ink      = tok.Ink
+	Soft     = tok.Soft
+	Muted    = tok.Muted
+	Rule     = tok.Rule
 )
 
 // Tone is one colour pair: the strong colour (text, borders, the tile's top
@@ -50,13 +50,13 @@ type Tone struct{ Fg, Bg string }
 // Yellow for caution between them, Blue for information and change, Green for
 // all clear, Grey for neutral counts, Violet for the gateway section.
 var (
-	Red    = Tone{"#b3001b", "#fdecee"}
-	Amber  = Tone{"#b25000", "#fff4e5"}
-	Yellow = Tone{"#8a6d00", "#fffbe6"}
-	Blue   = Tone{"#2c5282", "#ebf4ff"}
-	Green  = Tone{"#2f855a", "#f0fff4"}
-	Grey   = Tone{"#4a5568", "#f4f5f7"}
-	Violet = Tone{"#6b46c1", "#f5f0ff"}
+	Red    = tone("red")
+	Amber  = tone("amber")
+	Yellow = tone("yellow")
+	Blue   = tone("blue")
+	Green  = tone("green")
+	Grey   = tone("grey")
+	Violet = tone("violet")
 )
 
 func esc(s string) string { return html.EscapeString(s) }
@@ -65,6 +65,13 @@ func esc(s string) string { return html.EscapeString(s) }
 // the navy header band. org, heading and subtitle are plain; subtitle may be
 // empty.
 func Open(b *strings.Builder, title, org, heading, subtitle string) {
+	OpenBand(b, title, Navy, org, heading, subtitle)
+}
+
+// OpenBand is Open with the header band in another colour. An alert uses it so
+// that the band says failure, hold or test before a word is read; every other
+// email keeps the navy band.
+func OpenBand(b *strings.Builder, title, band, org, heading, subtitle string) {
 	fmt.Fprintf(b, `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -78,7 +85,7 @@ func Open(b *strings.Builder, title, org, heading, subtitle string) {
   <tr><td style="background:%s;padding:16px 20px">
     <div style="font:700 12px %s;color:%s;letter-spacing:1.2px;text-transform:uppercase">%s</div>
     <div style="font:700 17px %s;color:#fff">%s</div>`,
-		esc(title), PageBG, PageBG, Navy, Font, BandText, esc(org), Font, esc(heading))
+		esc(title), PageBG, PageBG, band, Font, BandText, esc(org), Font, esc(heading))
 	if subtitle != "" {
 		fmt.Fprintf(b, `
     <div style="font:400 12px %s;color:%s;margin-top:3px">%s</div>`, Font, BandText, esc(subtitle))
@@ -202,8 +209,22 @@ func Foot(b *strings.Builder, lines ...string) {
     <div style="font:400 11px/1.6 %s;color:%s">
       %s
     </div></td></tr>
+`, Rule, Font, Muted, strings.Join(lines, "<br>\n      "))
+	Close(b)
+}
 
-</table></td></tr></table></body></html>`, Rule, Font, Muted, strings.Join(lines, "<br>\n      "))
+// Close ends the page. Foot calls it; a lane with a footer of its own (Patch
+// Tuesday's sources list) writes that and calls Close.
+func Close(b *strings.Builder) {
+	b.WriteString("\n</table></td></tr></table></body></html>")
+}
+
+// Org is the organisation name for the header band: FLEET_ORG, else "Security".
+func Org() string {
+	if s := strings.TrimSpace(os.Getenv("FLEET_ORG")); s != "" {
+		return s
+	}
+	return "Security"
 }
 
 // Credit is the footer's credit line, HTML: the configured attribution
