@@ -37,6 +37,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Changed
+
+- **The application-owner emails match the rest of the fleet.** They were a bare
+  paragraph; they now use the fleet's layout (navy header band with the org
+  name, a lead block coloured by the worst finding, the five severity tiles,
+  the attachment and confidentiality notes, a footer) and carry the
+  `FLEET_ATTRIBUTION` credit line, linked when `FLEET_REPO_URL` is set. The
+  AppSec weekly's footer takes the same attribution. The reading of
+  `FLEET_ATTRIBUTION` / `FLEET_REPO_URL` for Go lanes is now one package,
+  `internal/attribution`.
+
 ### Added
 
 - **Static analysis for the Python and shell.** `task ship` and `task check` now
