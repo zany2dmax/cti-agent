@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/attribution"
 )
 
 // THE SCANNER'S REPORT, MAILED TO THE APPLICATION'S OWNERS
@@ -282,12 +284,22 @@ type OwnerMail struct {
 	HTML    string
 }
 
+// mailFont is the fleet emails' font stack.
+const mailFont = `-apple-system,Segoe UI,Helvetica,Arial,sans-serif`
+
 // RenderOwnerMail writes the email that carries the report. attached is the
 // attachment's file name, or "" when the report was not attached, with why
 // saying so.
+//
+// It is laid out like the fleet's other emails - the navy header band, a
+// coloured lead block, the severity tiles, a credit line at the foot - so a
+// recipient who has seen the daily or the weekly recognises it. The owners are
+// often outside the company, and a bare paragraph from an unknown sender is
+// what gets reported as phishing.
 func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	subj := "Web application scan results: " + oneLineName(d.App)
 	finished := "finished recently"
+	headDate := ""
 	if !d.Finished.IsZero() {
 		subj += " (" + d.Finished.Local().Format("2 Jan 2006") + ")"
 		verb := "finished on "
@@ -295,29 +307,148 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 			verb = "started on "
 		}
 		finished = verb + d.Finished.Local().Format("Mon 2 Jan 2006")
+		headDate = d.Finished.Local().Format("Monday 2 January 2006")
 	}
-	var b strings.Builder
-	b.WriteString(`<!doctype html><html><body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2328">`)
-	fmt.Fprintf(&b, `<p>The scheduled security scan of <b>%s</b> %s (%s).</p>`, e(d.App), e(finished), e(d.AuthLabel))
+	org := orgName()
+
+	// The lead is red when something is Urgent, amber for Critical, blue for
+	// anything lower and green for a clean scan - the colours of the tiles.
+	leadFg, leadBg := "#2f855a", "#f0fff4"
 	if !d.NoNotice {
-		fmt.Fprintf(&b, `<p><b>Open findings in the application:</b> %s</p>`, e(ownerCounts(d.Active)))
-		if d.FirstScan {
-			b.WriteString(`<p>This is the first scan of the application, so nothing is compared with an earlier one.</p>`)
-		} else {
-			fmt.Fprintf(&b, `<p><b>Found by this scan:</b> %s</p>`, e(ownerCounts(d.ScanCounts)))
+		switch {
+		case d.Active.Urgent > 0:
+			leadFg, leadBg = "#b3001b", "#fdecee"
+		case d.Active.Crit > 0:
+			leadFg, leadBg = "#b25000", "#fff4e5"
+		case d.Active.Total() > 0:
+			leadFg, leadBg = "#2c5282", "#ebf4ff"
 		}
-	}
-	if d.AuthLabel == "unauthenticated scan" {
-		b.WriteString(`<p>The scan did not log in, so it covers only the parts of the application that need no login.</p>`)
-	}
-	if attached != "" {
-		fmt.Fprintf(&b, `<p>The scanner's report on the open findings is attached (<code>%s</code>), with the request, response and suggested fix for each.</p>`, e(attached))
 	} else {
-		fmt.Fprintf(&b, `<p>The scanner's report is not attached: %s. The security team will send it another way.</p>`, e(why))
+		leadFg, leadBg = "#2c5282", "#ebf4ff"
 	}
-	b.WriteString(`<p style="color:#59636e">This describes unfixed weaknesses in the application. Please keep it to the people working on it and do not forward it further. Session cookies and login headers from the scan have been removed from the report. Questions, or to change who receives this: reply to this email.</p>`)
-	b.WriteString(`</body></html>`)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%s</title></head>
+<body style="margin:0;padding:0;background:#eef1f5">
+<table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
+       style="background:#eef1f5"><tr><td align="center" style="padding:16px 8px">
+<table width="640" cellpadding="0" cellspacing="0" role="presentation"
+       style="max-width:640px;background:#fff;border-radius:6px;overflow:hidden">
+
+  <tr><td style="background:#12203a;padding:16px 20px">
+    <div style="font:700 12px %s;color:#9fb0cc;letter-spacing:1.2px;text-transform:uppercase">%s</div>
+    <div style="font:700 17px %s;color:#fff">Web application scan results</div>
+    <div style="font:400 12px %s;color:#9fb0cc;margin-top:3px">%s</div></td></tr>
+`, e(subj), mailFont, e(org), mailFont, mailFont, e(oneLineName(d.App)+headDateSuffix(headDate)))
+
+	fmt.Fprintf(&b, `
+  <tr><td style="padding:16px 20px 0 20px">
+    <table width="100%%" cellpadding="0" cellspacing="0" role="presentation">
+      <tr><td style="background:%s;border-left:4px solid %s;padding:12px 14px;
+                     font:400 14px/1.55 %s;color:#1a202c">
+        The scheduled security scan of <b>%s</b> %s (%s).</td></tr>
+    </table></td></tr>
+`, leadBg, leadFg, mailFont, e(d.App), e(finished), e(d.AuthLabel))
+
+	if !d.NoNotice {
+		b.WriteString(`
+  <tr><td style="padding:14px 20px 0 20px">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>`)
+		for _, t := range []struct {
+			label  string
+			n      int
+			fg, bg string
+		}{
+			{"URGENT", d.Active.Urgent, "#b3001b", "#fdecee"},
+			{"CRITICAL", d.Active.Crit, "#b25000", "#fff4e5"},
+			{"SERIOUS", d.Active.Serious, "#8a6d00", "#fffbe6"},
+			{"MEDIUM", d.Active.Medium, "#2c5282", "#ebf4ff"},
+			{"MINIMAL", d.Active.Minimal, "#4a5568", "#f4f5f7"},
+		} {
+			fmt.Fprintf(&b, `
+      <td width="20%%" align="center" style="background:%s;border-top:3px solid %s;padding:10px 4px">
+        <div style="font:700 24px %s;color:%s">%d</div>
+        <div style="font:700 10px %s;color:%s;letter-spacing:.5px">%s</div></td>`,
+				t.bg, t.fg, mailFont, t.fg, t.n, mailFont, t.fg, t.label)
+		}
+		fmt.Fprintf(&b, `
+    </tr></table>
+    <div style="font:400 12px/1.5 %s;color:#4a5568;margin-top:6px">
+      <b>Open findings in the application:</b> %s</div>`, mailFont, e(ownerCounts(d.Active)))
+		if d.FirstScan {
+			fmt.Fprintf(&b, `
+    <div style="font:400 12px/1.5 %s;color:#4a5568;margin-top:3px">
+      This is the first scan of the application, so nothing is compared with an earlier one.</div>`, mailFont)
+		} else {
+			fmt.Fprintf(&b, `
+    <div style="font:400 12px/1.5 %s;color:#4a5568;margin-top:3px">
+      <b>Found by this scan:</b> %s</div>`, mailFont, e(ownerCounts(d.ScanCounts)))
+		}
+		b.WriteString(`</td></tr>
+`)
+	}
+
+	if d.AuthLabel == "unauthenticated scan" {
+		fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 0 20px">
+    <div style="font:400 13px/1.5 %s;color:#744210;background:#fffbe6;padding:8px 10px;
+                border-left:4px solid #8a6d00">
+      The scan did not log in, so it covers only the parts of the application that need no login.</div></td></tr>
+`, mailFont)
+	}
+
+	if attached != "" {
+		fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 0 20px">
+    <div style="font:400 13px/1.55 %s;color:#1a202c;background:#f4f5f7;padding:10px 12px;
+                border-left:4px solid #4a5568">
+      The scanner's report on the open findings is attached
+      (<code style="font-family:Consolas,monospace">%s</code>), with the request, response and
+      suggested fix for each.</div></td></tr>
+`, mailFont, e(attached))
+	} else {
+		fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 0 20px">
+    <div style="font:400 13px/1.55 %s;color:#1a202c;background:#f4f5f7;padding:10px 12px;
+                border-left:4px solid #4a5568">
+      The scanner's report is not attached: %s. The security team will send it another way.</div></td></tr>
+`, mailFont, e(why))
+	}
+
+	fmt.Fprintf(&b, `
+  <tr><td style="padding:14px 20px 16px 20px">
+    <div style="font:400 12px/1.6 %s;color:#4a5568">
+      This describes unfixed weaknesses in the application. Please keep it to the people working
+      on it and do not forward it further. Session cookies and login headers from the scan have
+      been removed from the report. Questions, or to change who receives this: reply to this
+      email.</div></td></tr>
+
+  <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid #e2e8f0">
+    <div style="font:400 11px/1.6 %s;color:#718096">%s</div></td></tr>
+
+</table></td></tr></table></body></html>`, mailFont, mailFont, creditHTML(org))
 	return OwnerMail{Subject: subj, HTML: b.String()}
+}
+
+// headDateSuffix is " - Monday 2 January 2006" for the banner, or nothing.
+func headDateSuffix(date string) string {
+	if date == "" {
+		return ""
+	}
+	return " \u00b7 " + date
+}
+
+// creditHTML is the foot of an AppSec email: the configured attribution when
+// there is one (FLEET_ATTRIBUTION, FLEET_REPO_URL), otherwise the plain line
+// this lane has always carried.
+func creditHTML(org string) string {
+	if a := attribution.Load(org, "cti-appscan"); !a.Empty() {
+		return a.HTML("#2c5282")
+	}
+	return e(fmt.Sprintf("Generated by the %s Agent Fleet AppSec lane.", org))
 }
 
 func ownerCounts(c Counts) string {
