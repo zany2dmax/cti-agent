@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/emailkit"
 )
 
 // WHO EACH SPF INCLUDE IS FOR
@@ -267,13 +269,14 @@ func (r Report) spfVendorsHTML(b *strings.Builder) {
 	if len(inc) == 0 {
 		return
 	}
-	sectionHTML(b, fmt.Sprintf("%s (%d)", SPFVendorsTitle, len(inc)), "#2c5282")
+	sectionHTML(b, fmt.Sprintf("%s (%d)", SPFVendorsTitle, len(inc)), emailkit.Blue.Fg)
 	itemHTML(b, spfVendorsNote)
 	for _, x := range inc {
-		colour, bg := "#2c5282", "#ebf4ff"
+		tone := emailkit.Blue
 		if x.Vendor == "" {
-			colour, bg = "#b25000", "#fff4e5"
+			tone = emailkit.Amber
 		}
+		colour, bg := tone.Fg, tone.Bg
 		fmt.Fprintf(b, `
       <tr><td style="padding:0 0 8px 0">
         <table width="100%%" cellpadding="0" cellspacing="0" role="presentation"
