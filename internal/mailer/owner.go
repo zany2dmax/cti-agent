@@ -28,7 +28,10 @@ const OwnerAllowVar = "OWNER_ALLOW_DOMAINS"
 // is dropped and returned in refused, for the operator; an owner outside it
 // refuses the whole send, since a report to the watchers alone reaches nobody
 // accountable for the fix.
-func OwnerAudience(owner string, watchers []string, allowDomains string) (to, cc, refused []string, err error) {
+//
+// allowName is what the allowlist is called in messages: the fleet.env
+// variable, or where owners.db keeps it.
+func OwnerAudience(owner string, watchers []string, allowDomains, allowName string) (to, cc, refused []string, err error) {
 	allow := map[string]bool{}
 	for _, d := range SplitList(allowDomains) {
 		d = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
@@ -37,9 +40,9 @@ func OwnerAudience(owner string, watchers []string, allowDomains string) (to, cc
 		}
 	}
 	if len(allow) == 0 {
-		return nil, nil, nil, fmt.Errorf("%s is not set, so the owner lane will not send. "+
+		return nil, nil, nil, fmt.Errorf("%s is empty, so the owner lane will not send. "+
 			"List the domains application owners and watchers may be at (yours and each "+
-			"outside developer's) in fleet.env", OwnerAllowVar)
+			"outside developer's)", allowName)
 	}
 	permitted := func(a string) bool {
 		if !ValidAddress(a) {
@@ -51,8 +54,8 @@ func OwnerAudience(owner string, watchers []string, allowDomains string) (to, cc
 	owner = strings.TrimSpace(owner)
 	if !permitted(owner) {
 		return nil, nil, nil, fmt.Errorf("the owner %s is not at a domain in %s, so nothing is "+
-			"sent for this application. Fix the address in app-owners.txt, or add its domain to %s",
-			owner, OwnerAllowVar, OwnerAllowVar)
+			"sent for this application. Fix the owner's address, or add its domain to %s",
+			owner, allowName, allowName)
 	}
 	seen := map[string]bool{strings.ToLower(owner): true}
 	for _, w := range watchers {

@@ -132,6 +132,12 @@ sudo cti-agent run-digest daily --to-dev
 sudo cti-agent run-digest weekly --to-dev
 sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you too; previews each app's Jira ticket
 sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys, plus site: lines for live sites nothing scans
+# application owners live in owners.db (RUNBOOK 11f); edit them with fleet-owners, as root:
+sudo cti-agent fleet-owners list                                  # every app, owner, watchers, covers
+sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
+sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
+sudo cti-agent fleet-owners domain allow devshop.example          # owners/watchers may be mailed there
+sudo cti-agent fleet-owners check                                 # what would stop a report going out
 #   staging copy scanned instead of production: on its line add  | covers=www.example.com
 #   copy others on an app's ticket: add  | watchers=a@example.com,b@example.com  (Jira "Manage watcher list")
 #   scanner report on each ticket (off until tested, RUNBOOK 11f): sudo cti-agent cti-appreport --list-ids, then --check
@@ -322,7 +328,7 @@ the app's Jira ticket by itself (needs `JIRA_ALLOW_CLOSE`). Confirm, and tidy:
 
 ```bash
 sudo cti-agent cti-appscan --list-apps 2>&1 | grep -iE 'name-of-site'   # gone
-sudo nano /etc/cti-agent/app-owners.txt   # remove its line (harmless if left)
+sudo cti-agent fleet-owners rm id:123456   # its owners entry (harmless if left)
 ```
 
 Keep the domain in `domains.txt` while you still own it.

@@ -843,10 +843,37 @@ about where:
 | `enrich.py` | yes | Python | yes |
 | `scout.py` | yes | Python | yes |
 | `fleet-db` | yes | Python | yes |
+| `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |
 | `brief.py` | no | Python | **no** — historical |
 | `mailer.py` | no | Python | being retired — see below |
 | `cti-mailer` | no | Go | yes |
 | the other six `cti-*` binaries | no | Go | yes |
+
+**`fleet-owners` and the recipient list.** The application owners and the
+domains they may be at decide who outside the company receives a report of
+our unfixed vulnerabilities, so they sit behind two controls. `owners.db` is
+root:root 0600 and `fleet-owners` runs as root, so the service account, which
+runs an agent that reads untrusted mail, cannot change them; it reads the
+root-owned `owners.json` snapshot. And the gate itself stays in Go:
+`cti-mailer --lane owner` applies the same entry rules to the snapshot as to
+`app-owners.txt` (`appscan.Owners.add`), checks every address against the
+allowed domains, and stops rather than fall back to the file when the snapshot
+is unreadable, missing beside `owners.db`, or not root's alone (owner uid 0,
+no group or other write, in a directory with the same rule). Both paths are
+fixed in code, not settings, so no environment variable can point the lane
+elsewhere once the database exists. What is in Python is the editing tool,
+with no gate of its own to get wrong; because it runs as root, the wrapper
+leaves the service account's state directory first, and `import` and
+`backup` take only absolute paths in root-controlled directories, opened
+without following links.
+
+Before the move to `owners.db`, the owner lane reads `app-owners.txt` and
+`OWNER_ALLOW_DOMAINS` as it always has, and a process running as the service
+account can override both through its environment. That is the existing
+position of every fleet.env setting, not something this adds; the move to
+`owners.db` is what closes it for the recipient list. A shared fixture (`fleet-kit/tests/testdata/app-owners-sample.txt` and
+`internal/appscan/testdata/owners-snapshot.json`) is read by both languages'
+tests, so they cannot drift apart on the format.
 
 `mailer.py` **has been ported to `cmd/cti-mailer`**, because it is the single
 outbound channel and holds the `VM_ALLOW_TO` recipient gate — the control

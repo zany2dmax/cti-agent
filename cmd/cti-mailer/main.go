@@ -50,6 +50,8 @@ import (
 const (
 	exitOK      = 0
 	exitFailure = 1
+	// exitOff is --armed's "the lane is not configured": not a failure.
+	exitOff = 3
 
 	// maxInlineAttachment matches what mailer.py enforced. Graph accepts more
 	// via an upload session, which this does not implement: an attachment
@@ -92,6 +94,9 @@ func run() int {
 			"audience")
 	appID := flag.String("app-id", "",
 		"with --lane owner: the scanner's web app id whose app-owners.txt line names the recipients")
+	armed := flag.Bool("armed", false,
+		"with --lane owner: exit 0 if the lane has a domain allowlist (owners.db, or "+
+			"OWNER_ALLOW_DOMAINS without one), 3 if not, 1 if the owners cannot be read; send nothing")
 	appName := flag.String("app-name", "",
 		"with --lane owner: the application's name, for an app-owners.txt line keyed by name")
 	cc := flag.String("cc", "",
@@ -130,6 +135,13 @@ func run() int {
 		// first-time configuration into a series of one-line errors, each
 		// needing another run to reveal the next.
 		return preflight(mailbox)
+	}
+
+	if *armed {
+		if !strings.EqualFold(strings.TrimSpace(*lane), "owner") {
+			return die("--armed is for --lane owner")
+		}
+		return ownerArmed()
 	}
 
 	if mailbox == "" {
@@ -176,30 +188,34 @@ func run() int {
 		// and OWNER_ALLOW_DOMAINS only - see internal/mailer/owner.go.
 		if *to != "" || *cc != "" {
 			return die("--lane owner takes no --to or --cc: the recipients are the application's " +
-				"owner and watchers in app-owners.txt, and nothing else")
+				"owner and watchers in owners.db (or app-owners.txt), and nothing else")
 		}
 		if strings.TrimSpace(*appID) == "" && strings.TrimSpace(*appName) == "" {
-			return die("--lane owner needs --app-id (or --app-name) to find the application's line in app-owners.txt")
+			return die("--lane owner needs --app-id (or --app-name) to find the application's owners")
 		}
-		// The file's problems are logged by the planning step; repeated
+		// The source's problems are logged by the planning step; repeated
 		// here they would be the same lines once per application. Only a
 		// failed lookup shows them, since one of them may be the reason.
-		owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
+		owners, src, oprobs, oerr := appscan.LoadConfiguredOwners()
+		if oerr != nil {
+			return die("owners unreadable, nothing sent: %s", safelog.Line(oerr.Error()))
+		}
 		w, ok := owners.For(strings.TrimSpace(*appID), *appName)
 		if !ok {
 			for _, p := range oprobs {
 				logf("owners : %s", safelog.Line(p))
 			}
-			return die("no line for this application in %s, so there is nobody to send its report to",
-				safelog.Line(appscan.OwnersPath()))
+			return die("no entry for this application in %s, so there is nobody to send its report to",
+				safelog.Line(src.Name()))
 		}
-		recipients, copies, refused, err = mailer.OwnerAudience(w.Email, w.Watchers, os.Getenv(mailer.OwnerAllowVar))
+		allow, allowName := ownerAllowlist(owners)
+		recipients, copies, refused, err = mailer.OwnerAudience(w.Email, w.Watchers, allow, allowName)
 		if err != nil {
 			return die("%s", safelog.Line(err.Error()))
 		}
 		for _, r := range refused {
-			logf("REFUSED: %s (app-owners.txt line %d) is not at a domain in %s - not sent to them",
-				safelog.Line(r), w.Line, mailer.OwnerAllowVar)
+			logf("REFUSED: %s (%s, %s) is not at a domain in %s - not sent to them",
+				safelog.Line(r), safelog.Line(w.App), safelog.Line(src.Name()), allowName)
 		}
 	} else if *lane != "" {
 		// A lane send uses its OWN recipient list and its OWN allowlist, and
@@ -361,6 +377,36 @@ func run() int {
 		"subject": subj, "to": recipients, "cc": orEmpty(copies), "refused": orEmpty(refused),
 		"ts": time.Now().UTC().Format(time.RFC3339),
 	})
+	return exitOK
+}
+
+// ownerAllowlist is the owner lane's domain allowlist and what to call it in
+// messages: owners.db's when it keeps one, else OWNER_ALLOW_DOMAINS. Never
+// both - two lists, either of which might be the one in force, is how a
+// domain somebody removed keeps receiving reports.
+func ownerAllowlist(o appscan.Owners) (list, name string) {
+	if domains, managed := o.AllowedDomains(); managed {
+		if strings.TrimSpace(os.Getenv(mailer.OwnerAllowVar)) != "" {
+			logf("note   : %s in fleet.env is ignored - the allowed domains are in owners.db "+
+				"(fleet-owners domain list); delete the line", mailer.OwnerAllowVar)
+		}
+		return strings.Join(domains, ","), "the allowed domains in owners.db"
+	}
+	return os.Getenv(mailer.OwnerAllowVar), mailer.OwnerAllowVar
+}
+
+// ownerArmed is --lane owner --armed: whether the lane may send at all.
+func ownerArmed() int {
+	owners, src, _, err := appscan.LoadConfiguredOwners()
+	if err != nil {
+		return die("owners unreadable: %s", safelog.Line(err.Error()))
+	}
+	list, name := ownerAllowlist(owners)
+	if len(mailer.SplitList(list)) == 0 {
+		logf("owner lane: off - %s is empty (owners from %s)", name, safelog.Line(src.Name()))
+		return exitOff
+	}
+	logf("owner lane: armed - %d allowed domain(s) in %s", len(mailer.SplitList(list)), name)
 	return exitOK
 }
 

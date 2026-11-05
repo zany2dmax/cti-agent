@@ -2520,6 +2520,13 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 return subprocess.run(["bash", str(wrapper), *args], env=env,
                                       capture_output=True, text=True)
 
+            # fleet-owners runs as root, never through sudo -u: as anyone
+            # else it is refused before anything runs.
+            (code / "bin" / "fleet-owners").write_text("#!/bin/sh\n")
+            if os.geteuid() != 0:
+                r = run("fleet-owners", "list")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertEqual(r.stdout, "", "sudo must not have been reached")
             r = run("fleet-db", "recent")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn(f"{code}/bin/fleet-db", r.stdout.splitlines())
@@ -2848,6 +2855,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         subs = re.findall(r'^\s*(?:if|elif) cmd == "([a-z-]+)"', db, re.M)
         self.assertGreater(len(subs), 5)
         self._assert_documented("fleet-db", subs, kind="word")
+        owners = (root / "fleet-kit" / "fleet" / "bin" / "fleet-owners").read_text(encoding="utf-8")
+        subs = re.findall(r'add_parser\("([a-z-]+)"', owners)
+        self.assertGreater(len(subs), 10)
+        self._assert_documented("fleet-owners", subs, kind="word")
+        self._assert_documented("fleet-owners", re.findall(r'add_argument\("--([a-z-]+)"', owners))
         board = (root / "fleet-kit" / "fleet" / "bin" / "fleet-board").read_text(encoding="utf-8")
         self._assert_documented("fleet-board", re.findall(r"^\s{2}([a-z]+)\)", board, re.M), kind="word")
 
@@ -3093,6 +3105,7 @@ for a in "$@"; do
   esac
 done
 case "$me $*" in
+  "cti-mailer --lane owner --armed"*) [ -n "${OWNER_ALLOW_DOMAINS:-}" ] || exit 3 ;;
   "cti-appscan --subject-only"*)      echo "AppSec weekly" ;;
   "cti-patchtuesday"*"--subject-only"*) echo "Microsoft Patch Tuesday for October 2026" ;;
   "fleet-db was-sent"*)               echo no ;;
@@ -3235,7 +3248,7 @@ class RunnersToDev(unittest.TestCase):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-domains", *args)
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-                idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
+                idx = lambda pred, calls=calls: next(i for i, c in enumerate(calls) if pred(c))
                 jira = idx(lambda c: c.startswith("cti-jira ") and "--domains-actions" in c)
                 stamp = idx(lambda c: "--stamp-ticket" in c)
                 send = idx(lambda c: c.startswith("cti-mailer "))
@@ -3259,7 +3272,7 @@ class RunnersToDev(unittest.TestCase):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-appscan", *args, env="WAS_TICKETS=1\n")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-                idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
+                idx = lambda pred, calls=calls: next(i for i, c in enumerate(calls) if pred(c))
                 jira = idx(lambda c: c.startswith("cti-jira ") and "--appscan-tickets" in c)
                 stamp = idx(lambda c: "--stamp-tickets" in c)
                 send = idx(lambda c: c.startswith("cti-mailer "))
@@ -3272,14 +3285,17 @@ class RunnersToDev(unittest.TestCase):
     def test_appowners_is_off_until_armed(self):
         r, calls = self.run_lane("run-appowners")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(calls, [], "the owners lane did work with OWNER_ALLOW_DOMAINS unset")
+        self.assertEqual(calls, ["cti-mailer --lane owner --armed"],
+                         "the owners lane did work with no allowed domains")
 
     def test_appowners_sends_through_the_owner_lane_then_records(self):
         r, calls = self.run_lane("run-appowners", env="OWNER_ALLOW_DOMAINS=example.com\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        idx = lambda pred: next(i for i, c in enumerate(calls) if pred(c))
-        send = idx(lambda c: c.startswith("cti-mailer "))
+        idx = lambda pred, calls=calls: next(i for i, c in enumerate(calls) if pred(c))
+        send = idx(lambda c: c.startswith("cti-mailer ") and "--armed" not in c)
         self.assertIn("--lane owner --app-id 1 --app-name App One", calls[send])
+        self.assertLess(idx(lambda c: "--armed" in c), idx(lambda c: c.startswith("cti-appscan ")),
+                        "the lane did work before asking whether it is armed")
         self.assertNotIn("--to ", calls[send])
         commit = idx(lambda c: "--commit-delivered" in c)
         self.assertLess(send, commit, "recorded as sent before the send")
@@ -3297,7 +3313,7 @@ class RunnersToDev(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         report = [c for c in calls if c.startswith("cti-appreport ")]
         self.assertIn("--no-fetch", report[0])
-        sends = [c for c in calls if c.startswith("cti-mailer ")]
+        sends = [c for c in calls if c.startswith("cti-mailer ") and "--armed" not in c]
         self.assertTrue(sends and all("--dry-run" in c for c in sends), calls)
         for c in calls:
             self.assertNotIn("--commit-delivered", c)

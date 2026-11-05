@@ -482,6 +482,19 @@ With
 the application's name, for an
 .I app\-owners.txt
 line keyed by name rather than id.
+.TP
+.B \-\-armed
+With
+.BR "\-\-lane owner" :
+say whether the owner lane may send, and send nothing. Exit 0 when there is
+an allowed domain (in
+.I owners.db
+through its snapshot, or
+.B OWNER_ALLOW_DOMAINS
+when there is no snapshot), 3 when there is none, 1 when the owners cannot be
+read.
+.BR run\-appowners (1)
+calls it before doing any work.
 .SH ENVIRONMENT
 Read from the process environment, after
 .I fleet.env

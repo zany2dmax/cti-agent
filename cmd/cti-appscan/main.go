@@ -199,9 +199,11 @@ func run() int {
 
 	// One Jira ticket's input per application, for cti-jira --appscan-tickets.
 	if *ticketsOut != "" {
-		owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
-		for _, p := range oprobs {
-			logf("owners : %s", safelog.Line(p))
+		// Unreadable owners cost assignment, not safety: a ticket with no
+		// assignee is still filed, and says so.
+		owners, ownersFrom, err := loadOwners()
+		if err != nil {
+			logf("warn   : owners unreadable, tickets go out unassigned: %s", safelog.Line(err.Error()))
 		}
 		tf := appscan.BuildTickets(scans, owners, time.Now())
 		// Every web app the scanner defines, not only this week's scans:
@@ -248,7 +250,7 @@ func run() int {
 		for _, t := range tf.Tickets {
 			if !t.OwnerListed && t.Skip == "" && len(t.Findings) > 0 {
 				logf("owners : %s has no owner in %s - its ticket will be unassigned",
-					safelog.Line(t.App), safelog.Line(appscan.OwnersPath()))
+					safelog.Line(t.App), safelog.Line(ownersFrom))
 			}
 		}
 		if err := os.WriteFile(*ticketsOut, tf.JSON(), 0o600); err != nil {
@@ -361,6 +363,19 @@ func writeAuthFailures(path string, scans []appscan.ScanResult) error {
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
+// loadOwners reads the configured owner source (owners.db's snapshot, or
+// app-owners.txt until there is one) and logs what it could not use.
+func loadOwners() (appscan.Owners, string, error) {
+	o, src, problems, err := appscan.LoadConfiguredOwners()
+	if err != nil {
+		return o, src.Name(), err
+	}
+	for _, p := range problems {
+		logf("owners : %s", safelog.Line(p))
+	}
+	return o, src.Name(), nil
+}
+
 // writeDeliveries writes the owners lane's plan.
 func writeDeliveries(path, logPath string, scans []appscan.ScanResult) int {
 	if logPath == "" {
@@ -370,9 +385,11 @@ func writeDeliveries(path, logPath string, scans []appscan.ScanResult) int {
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
-	owners, oprobs := appscan.LoadOwners(appscan.OwnersPath())
-	for _, p := range oprobs {
-		logf("owners : %s", safelog.Line(p))
+	// Fatal here: these owners decide who is mailed, and a plan made
+	// without them would hold every report as "no owner".
+	owners, _, err := loadOwners()
+	if err != nil {
+		return die("owners unreadable, nothing planned: %s", safelog.Line(err.Error()))
 	}
 	f := appscan.BuildDeliveries(scans, owners, done, time.Now())
 	send := 0
@@ -732,9 +749,9 @@ func doListApps(cfg config.Config) int {
 	if err != nil {
 		return die("listing the web apps: %s", safelog.Line(err.Error()))
 	}
-	owners, problems := appscan.LoadOwners(appscan.OwnersPath())
-	for _, p := range problems {
-		logf("owners : %s", safelog.Line(p))
+	owners, _, err := loadOwners()
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
 	}
 	sites, _ := loadSites()
 	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
