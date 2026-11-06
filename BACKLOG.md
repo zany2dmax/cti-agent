@@ -106,6 +106,15 @@ is real, not before. Finished work moves out of this file into
   Thursday and summarize both in one email on Friday. Noted only, not
   designed; which two scans (and which audience) to be settled when it is
   picked up
+- Subnet coverage in Qualys: take the network team's subnet spreadsheet and
+  check that every subnet is accounted for in Qualys. Probably a combination
+  of the Asset Groups API (which subnets each asset group holds) and the
+  coverage of the two weekly scans sent on Thursday (which asset groups those
+  scans actually target), so a subnet that is in the spreadsheet but in no
+  scanned asset group is reported. Related to the weekly Qualys scan summary
+  above. Noted only, not designed; open questions: the spreadsheet's format
+  and where it is kept (it must stay out of the repo), how subnets are
+  matched (exact, or contained within a larger range), and who gets the result
 - Fleet housekeeping: watch and trim the fleet's own data so the box never
   fills up quietly - the orchestrator's `board.md` and its archive (rotate or
   trim by size/age), `state/memory.db` (size, rollup and pruning, periodic
