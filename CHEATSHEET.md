@@ -137,13 +137,14 @@ sudo cti-agent run-digest weekly --to-dev
 sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you too; previews each app's Jira ticket
 sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys, plus site: lines for live sites nothing scans
 # application owners live in owners.db (RUNBOOK 11f); edit them with fleet-owners, as root:
-sudo cti-agent fleet-owners list                                  # every app, owner, watchers, covers
+sudo cti-agent fleet-owners list                                  # every app: id, scanner name, owner, watchers, covers
+sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names /root/apps.txt   # (re)fill the app names from Qualys
 sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
 sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
 sudo cti-agent fleet-owners domain allow devshop.example          # owners/watchers may be mailed there
 sudo cti-agent fleet-owners check                                 # what would stop a report going out
 #   staging copy scanned instead of production: on its line add  | covers=www.example.com
-#   copy others on an app's ticket: add  | watchers=a@example.com,b@example.com  (Jira "Manage watcher list")
+#   copy others on an app's ticket: fleet-owners watcher add id:123456 a@example.com b@example.com  (Jira "Manage watcher list")
 #   scanner report on each ticket (off until tested, RUNBOOK 11f): sudo cti-agent cti-appreport --list-ids, then --check
 #   rehearse one ticket: cti-appreport --app-id 1234 --out-dir /tmp/report, then
 #   cti-jira --appscan-tickets <state/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]

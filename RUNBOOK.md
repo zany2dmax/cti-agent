@@ -1170,8 +1170,10 @@ it is ignored, and `cti-mailer` says so.
 **Day to day:**
 
 ```bash
-sudo cti-agent fleet-owners list
+sudo cti-agent fleet-owners list           # id, scanner name, owner, watchers, covers
 sudo cti-agent fleet-owners show id:123456
+# the scanner's names (display only; fills the name column of list):
+sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names /root/apps.txt
 sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
 sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
 sudo cti-agent fleet-owners covers add id:123456 www.example.com

@@ -197,6 +197,65 @@ class FleetOwners(unittest.TestCase):
         os.chmod(loose, 0o666)
         self.assertEqual(self.run_tool("import", loose, "--replace", ok=False).returncode, 1)
 
+    def listing(self, body="", name="apps.txt"):
+        """A file in the shape cti-appscan --list-apps writes, in the 0700 test dir."""
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# Application owners\n" + body)
+        os.chmod(path, 0o600)
+        return path
+
+    def test_names_come_from_the_listing_and_show_in_list(self):
+        self.run_tool("init")
+        f = self.listing(
+            "id:123456 | lead@example.com    # Billing Portal  https://billing.example.com/app  <- no owner\n"
+            "id:777 | lead@example.com | watchers=qa@example.com    # Old   Wiki https://wiki.example.net/\n"
+            "id:55 | lead@example.com    # no url here\n"
+            "Named Entry | lead@example.com\n")
+        self.run_tool("import", f, "--allow-domains", "example.com,example.net")
+        out = self.run_tool("list").stdout
+        self.assertIn("Billing Portal", out)
+        self.assertIn("Old Wiki", out)  # inner spaces tidied
+        self.assertIn("no url here", out)
+        self.assertNotIn("<- no owner", out)
+        self.assertIn("billing.example.com", self.run_tool("show", "id:123456").stdout)
+        # The names are display-only: the lanes' snapshot never carries them.
+        self.assertNotIn("Billing Portal", json.dumps(self.snapshot()))
+
+    def test_names_refresh_reports_and_changes_only_what_differs(self):
+        self.imported()
+        self.run_tool("set", "id:900", "--owner", "lead@example.com")
+        first = self.run_tool("names", self.listing(
+            "id:900 | lead@example.com    # Shop  https://shop.example.com/\n"
+            "id:31337 | lead@example.com    # Not In The Database https://x.example.com/\n")).stdout
+        self.assertIn("1 set, 0 unchanged, 1 for applications not in owners.db", first)
+        again = self.run_tool("names", self.listing(
+            "id:900 | lead@example.com    # Shop  https://shop.example.com/\n", "again.txt")).stdout
+        self.assertIn("0 set, 1 unchanged", again)
+        renamed = self.run_tool("names", self.listing(
+            "id:900 | lead@example.com    # Shop v2  https://shop.example.com/\n", "third.txt")).stdout
+        self.assertIn("1 set", renamed)
+        self.assertIn("Shop v2", self.run_tool("list").stdout)
+        self.assertIn("1 set, 0 unchanged", self.run_tool("history").stdout)  # who refreshed them is on record
+
+    def test_scanner_text_cannot_carry_terminal_escapes(self):
+        self.run_tool("init")
+        f = self.listing("id:5 | lead@example.com    # Evil\x1b[31m name\x07  https://e.example.org/\n")
+        self.run_tool("import", f, "--allow-domains", "example.com")
+        out = self.run_tool("list").stdout
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\x07", out)
+        self.assertIn("Evil [31m name", out)
+
+    def test_a_database_from_before_names_gains_the_table(self):
+        self.imported()
+        db = os.path.join(self.dir, "owners.db")
+        c = sqlite3.connect(db)
+        c.execute("DROP TABLE app_names")
+        c.commit()
+        c.close()
+        self.assertIn("run: fleet-owners names", self.run_tool("list").stdout)
+
     def test_an_address_is_one_address(self):
         self.imported()
         for bad in ("x@evil.example,y@example.com", "qa@example.com;evil.example", "qa@example.com\nx@evil.example"):
