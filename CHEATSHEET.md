@@ -31,7 +31,7 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 | State, reports, memory database | `/var/lib/cti-agent/{state,reports}` |
 | Message board | `sudo cti-agent fleet-board tail 30` |
 | Go source the installer builds from (root's clone) | `/opt/cti-agent/agent` |
-| Kit you install from (runners, units, lanes) | any operator's own clone, e.g. `~/cti-agent` |
+| Kit you install from (runners, units, lanes) | a root-owned clone, `/root/cti-agent-kit` (not under `/home`) |
 
 ## 2. The one-minute health check
 
@@ -40,7 +40,7 @@ heartbeat, in one read-only run (exit 1 on any FAIL; `--deep` also checks the
 Graph, Jira and GitHub logins):
 
 ```bash
-sudo ~/cti-agent/scripts/healthcheck.sh
+sudo /root/cti-agent-kit/scripts/healthcheck.sh
 ```
 
 Or by hand:
@@ -301,19 +301,20 @@ sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:
 
 ## 11. Updating the box
 
-Run the installer from your own clone. Make one the first time
-(the repository is public, so no key is needed):
+Run the installer from the kit checkout in `/root/cti-agent-kit`, never from a
+personal home directory. Make it the first time (the repository is public, so
+no key is needed):
 
 ```bash
-git clone https://github.com/zany2dmax/cti-agent.git ~/cti-agent   # once
+sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit   # once
 ```
 
 Then, each update:
 
 ```bash
-cd ~/cti-agent && git pull
-sudo sh fleet-kit/install-fedora.sh --dry-run   # what it would change
-sudo sh fleet-kit/install-fedora.sh             # install; keeps fleet.env and state
+sudo git -C /root/cti-agent-kit pull
+sudo sh /root/cti-agent-kit/fleet-kit/install-fedora.sh --dry-run   # what it would change
+sudo sh /root/cti-agent-kit/fleet-kit/install-fedora.sh             # install; keeps fleet.env and state
 sudo cat /etc/cti-agent/version                 # confirm the new commit
 systemctl list-timers 'cti-agent-*'             # timers still scheduled
 ```
