@@ -62,7 +62,23 @@ is real, not before. Finished work moves out of this file into
   guess). Needs `CYBR` in `JIRA_ALLOW_CREATE`, a project-key setting for the
   lane (the way the domains lane has its own), and the service account's
   permissions in CYBR. Still open: whether a digest line also lists the day's
-  requests, and Unsure-means-Yes wording on the item
+  requests, and Unsure-means-Yes wording on the item.
+  **Framing and shape (added 2026-11-06):** a Yes to the question means the
+  supplier is *critical* - it touches company data, systems or networks, or
+  provides technology (hardware, software or connected equipment) - and a
+  critical supplier has to go through the third-party risk management (TPRM)
+  process; a No is a supplier of materials or other non-technology goods. The
+  lane's job is to find the critical suppliers. Scope: every message in the
+  shared mailbox with the supplier-request address in To **or Cc**, not only
+  the new-supplier-form messages; the evidence is the message body and the
+  attachments that are safe to read (the form), never the tax and bank forms.
+  It is built generically so another organisation could use it: the
+  supplier-request address, the question's wording, the TPRM wording, the Jira
+  project and owner, and the readable attachment types come from `fleet.env`
+  settings (a template file for the longer text), with generic defaults and no
+  organisation name, address or supplier in tracked files. Like the other
+  lanes, an unset address means the lane does nothing, and its output goes
+  only to the security team
 - `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
   age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
   to include closed ones and `--json`. No write gate needed; it would also give
