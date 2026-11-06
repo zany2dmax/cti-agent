@@ -444,7 +444,39 @@ tasks:
       - task: lint:py
       - task: bandit
       - task: lint:shell
+      - task: cheatsheet:check
       - git push
+
+  cheatsheet:check:
+    desc: "Fail if CHEATSHEET.md names a different release than the latest tag"
+    # The sheet says which release it describes so nobody works from an old
+    # copy. Pushing a new tag without bumping that line leaves a sheet that
+    # claims to be current and is not, so ship refuses until it is stamped.
+    cmds:
+      - |
+        want="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+        if [ -z "$want" ]; then echo "cheatsheet:check: no release tag, skipping"; exit 0; fi
+        if ! grep -q "^\*\*This copy is for release $want " CHEATSHEET.md; then
+          echo "CHEATSHEET.md does not name release $want. Run: task cheatsheet:stamp, then commit." >&2
+          exit 1
+        fi
+
+  cheatsheet:stamp:
+    desc: "Write the latest release and its date into CHEATSHEET.md"
+    cmds:
+      - |
+        tag="$(git describe --tags --abbrev=0)"
+        day="$(git log -1 --format=%ad --date=short "$tag")"
+        python3 - "${tag#v}" "$day" <<'PY'
+        import re, sys
+        ver, day = sys.argv[1:3]
+        s = open("CHEATSHEET.md").read()
+        s, n = re.subn(r"^\*\*This copy is for release [^(]*\([^)]*\)\.\*\*",
+                       "**This copy is for release %s (%s).**" % (ver, day), s, count=1, flags=re.M)
+        if n != 1:
+            sys.exit("stamp line not found in CHEATSHEET.md")
+        open("CHEATSHEET.md", "w").write(s)
+        PY
 
   patchtuesday:
     desc: "Build the synopsis without sending. Usage: task patchtuesday MONTH=2026-08"
