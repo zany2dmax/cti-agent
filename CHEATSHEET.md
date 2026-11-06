@@ -4,6 +4,10 @@ For anyone who needs to SSH to the fleet box and answer: is it up, is it working
 when does it run next, and what would it send? Everything here is read-only or a
 dry run unless it is marked **SENDS MAIL** or **WRITES**.
 
+**This copy is for release 1.5 (2026-11-03).** Compare it with the installed
+version (section 3). If the box reports a newer release, this sheet is out of
+date: pull and re-read it.
+
 Full detail: `man cti-agent`, `man <command>` for any command below, and
 `RUNBOOK.md`.
 
