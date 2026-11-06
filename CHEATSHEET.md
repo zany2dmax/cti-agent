@@ -212,10 +212,11 @@ usually up within a few hours.
 them `qualys.html` and `bleeping.html`. (Copying the article text into
 `qualys.txt` / `bleeping.txt` also works.)
 
-**3. Copy them to the box** (from your Mac; replace `<fedora-box>`):
+**3. Copy them to the box** (from the machine you saved them on; replace
+`<fedora-box>` and `<path-to>`):
 
 ```bash
-scp ~/Downloads/qualys.html ~/Downloads/bleeping.html <fedora-box>:/tmp/
+scp <path-to>/qualys.html <path-to>/bleeping.html <fedora-box>:/tmp/
 ```
 
 **4. Put them in the release's folder** (on the box). The folder is
