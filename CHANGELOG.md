@@ -37,6 +37,18 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **`fleet-owners list` shows each application's name.** An id says which
+  application; the name says which one to a person, so you no longer look it up
+  in Qualys. Names are kept beside each entry (a new `app_names` table, created
+  on first use in an existing `owners.db`, no schema change), shown by `list`
+  and `show`, and never written to `owners.json`, so no lane reads them and
+  they decide nothing. `fleet-owners names FILE` fills or refreshes them from a
+  `cti-appscan --list-apps` listing; `import` takes them from the file it
+  loads. Names come from the scanner, so they are stripped of control
+  characters and capped before they reach your terminal.
+
 ### Changed
 
 - **One place for what a fleet email looks like.** `internal/emailkit` holds the
@@ -124,7 +136,10 @@ already required. To ask CISA to allow the fleet, quote the
 `x-reference-error` value from a 403 response. To build the cheat sheet PDF on
 a Mac: `brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
 basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and
-`task cheatsheet:pdf`.
+`task cheatsheet:pdf`. To fill the application names once `owners.db` exists
+(the listing must be root-owned): `sudo sh -c 'cti-agent cti-appscan
+--list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names
+/root/apps.txt`, then `sudo cti-agent fleet-owners list`.
 
 ## 1.5 — 2026-11-03
 

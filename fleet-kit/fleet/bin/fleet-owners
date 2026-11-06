@@ -4,6 +4,7 @@
   fleet-owners init
   fleet-owners import FILE [--replace] [--allow-domains LIST]
   fleet-owners list | show APP | check | history [N]
+  fleet-owners names FILE
   fleet-owners set APP --owner EMAIL [--component TEXT]
   fleet-owners rm APP
   fleet-owners watcher add|rm APP EMAIL...
@@ -14,6 +15,15 @@
 
 APP is the scanner's web app id ("id:123", which survives a rename) or its
 exact name. Run as root: sudo cti-agent fleet-owners ...
+
+NAMES. An id says which application, a name says which one to a person. The
+names are display-only, kept beside the entry in their own table (app_names)
+and shown by list and show; they never reach owners.json, so no lane reads
+them and they decide nothing. They come from the scanner: import takes them
+from the comments cti-appscan --list-apps writes, and 'names FILE' refreshes
+them from a newer listing:
+  sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && \
+    sudo cti-agent fleet-owners names /root/apps.txt
 
 WHY THIS IS PYTHON, AND WHY GO READS A SNAPSHOT
 
@@ -69,6 +79,9 @@ ID_RE = re.compile(r"^id:\s*([0-9]{1,20})$", re.I)
 DOMAIN_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
 
 SCHEMA_VERSION = 1
+NAMES_DDL = """CREATE TABLE IF NOT EXISTS app_names (
+  app TEXT PRIMARY KEY COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
+  name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '')"""
 SCHEMA = """
 CREATE TABLE apps (
   app TEXT PRIMARY KEY COLLATE NOCASE,   -- 'id:123' or the scanner's name
@@ -87,6 +100,10 @@ CREATE TABLE sites (
 CREATE TABLE allowed_domains (
   domain TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT '',
   added TEXT NOT NULL, added_by TEXT NOT NULL);
+-- Display only (see NAMES above): never in owners.json, never read by a lane.
+CREATE TABLE IF NOT EXISTS app_names (
+  app TEXT PRIMARY KEY COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
+  name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '');
 -- Append-only. Who changed what, for a list that decides who is mailed.
 CREATE TABLE changes (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL, by TEXT NOT NULL,
@@ -221,6 +238,10 @@ def connect(create=False):
     v = c.execute("PRAGMA user_version").fetchone()[0]
     if not create and v != SCHEMA_VERSION:
         raise Refused(f"{DB} is schema version {v}; this fleet-owners knows {SCHEMA_VERSION}")
+    if not create:
+        # Databases made before names existed gain the table here: it is
+        # display-only, so this is not a schema change and the version stays.
+        c.execute(NAMES_DDL)
     return c
 
 
@@ -403,6 +424,39 @@ def parse_owners_file(text):
     return apps, sites, problems
 
 
+def tidy(text, limit):
+    """Scanner text is untrusted and is printed to a terminal: printable
+    characters only (no escape sequences), one line, bounded."""
+    t = "".join(ch if ch.isprintable() else " " for ch in (text or ""))
+    return " ".join(t.split())[:limit]
+
+
+def parse_names(text):
+    """The names cti-appscan --list-apps writes after the '#' on each line:
+    '# <name> <url> [<- note]'. Returns key -> (name, host). A line with no
+    comment, a site: line or an unusable key is skipped."""
+    out = {}
+    for line in text.splitlines():
+        head, _, comment = line.partition("#")
+        try:
+            key = app_key(head.split("|", 1)[0])
+        except Refused:
+            continue
+        comment = comment.split("<-", 1)[0]
+        m = re.search(r"(?:^|\s)(https?://\S+)", comment)
+        name = comment[:m.start()] if m else comment
+        host = ""
+        if m:
+            try:
+                host = urlparse(m.group(1)).hostname or ""
+            except ValueError:
+                host = ""
+        name, host = tidy(name, 80), tidy(host, 120)
+        if name:
+            out[key] = (name, host)
+    return out
+
+
 # ---------------------------------------------------------------- commands
 
 def cmd_init(a):
@@ -450,6 +504,9 @@ def cmd_import(a):
             c.executemany("INSERT INTO app_watchers(app,email) VALUES(?,?)", [(key, w) for w in v["watchers"]])
             c.executemany("INSERT INTO app_covers(app,host) VALUES(?,?)", [(key, h) for h in v["covers"]])
             record(c, "import", key, json.dumps(dict(v, app=key), sort_keys=True))
+        for key, (nm, hst) in parse_names(text).items():
+            if key in apps:
+                c.execute("INSERT OR REPLACE INTO app_names(app,name,host) VALUES(?,?,?)", (key, nm, hst))
         for d, o in sites.items():
             c.execute("INSERT INTO sites(domain,owner,updated,updated_by) VALUES(?,?,?,?)", (d, o, t, by))
             record(c, "import", "site:" + d, f"owner {o}")
@@ -472,7 +529,9 @@ def cmd_import(a):
 
 def cmd_list(a):
     c = connect()
-    rows = c.execute("SELECT app, owner, component FROM apps ORDER BY app COLLATE NOCASE").fetchall()
+    rows = c.execute(
+        "SELECT a.app, a.owner, a.component, COALESCE(n.name,'') AS name FROM apps a "
+        "LEFT JOIN app_names n ON n.app=a.app ORDER BY a.app COLLATE NOCASE").fetchall()
     for r in rows:
         w = c.execute("SELECT COUNT(*) FROM app_watchers WHERE app=?", (r["app"],)).fetchone()[0]
         h = [x[0] for x in c.execute("SELECT host FROM app_covers WHERE app=? ORDER BY host", (r["app"],))]
@@ -483,11 +542,47 @@ def cmd_list(a):
             extra.append(f"{w} watcher(s)")
         if h:
             extra.append("covers=" + ",".join(h))
-        print(f"{r['app']:<34} {r['owner'] or '(no owner)':<34} {'  '.join(extra)}")
+        # An entry kept by name is its own name; an id with none stored says so.
+        name = r["name"] or ("(run: fleet-owners names FILE)" if ID_RE.match(r["app"]) else "")
+        if len(name) > 36:
+            name = name[:35] + "~"
+        print(f"{r['app']:<14} {name:<36} {r['owner'] or '(no owner)':<34} {'  '.join(extra)}")
     sites = c.execute("SELECT domain, owner FROM sites ORDER BY domain").fetchall()
     for r in sites:
-        print(f"{'site:' + r['domain']:<34} {r['owner']}")
+        print(f"{'site:' + r['domain']:<14} {'':<36} {r['owner']}")
     print(f"\n{len(rows)} application(s), {len(sites)} site(s)")
+    return 0
+
+
+def cmd_names(a):
+    c = connect()
+    path, text = read_trusted(a.file, "names")
+    found = parse_names(text)
+    counts = {"set": 0, "same": 0, "unknown": 0}
+
+    def do():
+        for key, (nm, hst) in found.items():
+            r = c.execute("SELECT app FROM apps WHERE app=?", (key,)).fetchone()
+            if not r:
+                counts["unknown"] += 1
+                continue
+            old = c.execute("SELECT name, host FROM app_names WHERE app=?", (r["app"],)).fetchone()
+            if old and (old["name"], old["host"]) == (nm, hst):
+                counts["same"] += 1
+                continue
+            c.execute("INSERT OR REPLACE INTO app_names(app,name,host) VALUES(?,?,?)", (r["app"], nm, hst))
+            counts["set"] += 1
+        record(c, "names", path, f"{counts['set']} set, {counts['same']} unchanged, "
+               f"{counts['unknown']} not in owners.db")
+    change(c, do)
+    bare = [r[0] for r in c.execute(
+        "SELECT a.app FROM apps a LEFT JOIN app_names n ON n.app=a.app WHERE n.app IS NULL "
+        "AND a.app LIKE 'id:%' ORDER BY a.app")]
+    print(f"names from {path}: {counts['set']} set, {counts['same']} unchanged, "
+          f"{counts['unknown']} for applications not in owners.db.")
+    if bare:
+        print(f"{len(bare)} application(s) still without a name: {', '.join(bare[:10])}"
+              f"{' ...' if len(bare) > 10 else ''} (not in that listing - removed from the scanner?)")
     return 0
 
 
@@ -495,7 +590,9 @@ def cmd_show(a):
     c = connect()
     key = require_app(c, app_key(a.app))
     r = c.execute("SELECT * FROM apps WHERE app=?", (key,)).fetchone()
+    nm = c.execute("SELECT name, host FROM app_names WHERE app=?", (key,)).fetchone()
     print(f"application : {key}")
+    print(f"name        : {(nm['name'] + (' (' + nm['host'] + ')' if nm['host'] else '')) if nm else '-'}")
     print(f"owner       : {r['owner'] or '(none - kept for covers=)'}")
     print(f"component   : {r['component'] or '-'}")
     print("watchers    : " + (", ".join(x[0] for x in c.execute(
@@ -770,6 +867,9 @@ def parser():
     x.add_argument("--allow-domains", default="")
     x.set_defaults(fn=cmd_import)
     s.add_parser("list").set_defaults(fn=cmd_list)
+    x = s.add_parser("names")
+    x.add_argument("file")
+    x.set_defaults(fn=cmd_names)
     x = s.add_parser("show")
     x.add_argument("app")
     x.set_defaults(fn=cmd_show)

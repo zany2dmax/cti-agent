@@ -76,8 +76,31 @@ also allow these comma-separated domains, typically the value of
 .BR OWNER_ALLOW_DOMAINS .
 .TP
 .B list
-Every application and site with its owner, component, watcher count and
-covers.
+Every application and site with its scanner name, owner, component, watcher
+count and covers. An id with no stored name says so; see
+.BR names .
+.TP
+.BI names " FILE"
+Store the scanner's application names, from a listing written by
+.B cti\-agent cti\-appscan \-\-list\-apps
+(the text after the
+.B #
+on each line). Names are for people: they appear in
+.B list
+and
+.BR show ,
+are never written to
+.IR owners.json ,
+and decide nothing. Only applications already in the database are named; the
+rest are counted. Run it after the scanner gains or renames an application.
+.I FILE
+follows the same trust rules as
+.BR import :
+an absolute path, a regular file owned by root and writable by nobody else, so
+write it as root, for example
+.BR "sudo sh \-c 'cti\-agent cti\-appscan \-\-list\-apps > /root/apps.txt'" .
+.B import
+also takes the names from the file it loads.
 .TP
 .BI show " APP"
 One application, with its last 20 changes.
