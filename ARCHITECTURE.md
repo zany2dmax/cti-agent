@@ -376,6 +376,7 @@ no type checker or formatter.
 README.md                      the front page and the documentation map
 ARCHITECTURE.md                this page: how it works, the decisions, the layout
 INTERFACES.md                  the Go interfaces a new tool plugs into
+HARNESS.md                     the agent harness: what exists, traces and evals to come
 BACKLOG.md                     what is planned, and what is only an idea
 
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
@@ -451,6 +452,7 @@ scripts/                       history scrub, exposure remediation notes,
 | The full design argument | [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) |
 | Run it, or fix it at 06:30 | [RUNBOOK.md](RUNBOOK.md) |
 | Swap in a different scanner, registrar or ticketing tool | [INTERFACES.md](INTERFACES.md) |
+| How the model-driven check-in is run, recorded and tested | [HARNESS.md](HARNESS.md) |
 | See what is planned | [BACKLOG.md](BACKLOG.md) |
 | The threat model and accepted risks | [SECURITY.md](SECURITY.md) |
 | What changed, and what upgrading requires of you | [CHANGELOG.md](CHANGELOG.md) |

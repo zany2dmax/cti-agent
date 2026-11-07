@@ -31,6 +31,23 @@ is real, not before. Finished work moves out of this file into
   - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
     scanner detection IDs) for the Patch Tuesday correlation, which is
     Qualys-only today
+- **Agent harness** (the reasoning, what already exists and the order, is in
+  [HARNESS.md](HARNESS.md); each item ships on its own and feeds the next):
+  - H1. Beat traces: run the check-in with `--output-format stream-json`, keep
+    each beat as `state/traces/*.jsonl` (0600, rotated), and add a
+    `fleet-trace` reader. `cti-budget record` must still get the CLI's error
+    text so rate-limit and out-of-credit detection keep working
+  - H2. Eval harness: 5 to 10 check-in scenarios with fake `$FLEET_HOME`
+    fixtures (quiet day, silent lane, Sev5/KEV, prompt injection in an
+    advisory, existing HOLD), behavior checked from the trace, run by hand
+    with `task eval` (3 runs each, pass rate), never in `task ship`
+  - H3. Structured check-in verdict: the skill ends in one `cti-checkin/1`
+    JSON object, verified in Go the way `internal/triage` verifies
+    `cti-triage/1`; invalid or missing is a board ERROR
+  - H4. Shared model-lane runner pulled out of `run-checkin`, only when a
+    second model lane (triage agent, supplier-request triage) is real
+  - H5. Optional learning exercise: reproduce one beat with the Claude Agent
+    SDK outside production. Not a migration
 - AppSec tickets in their own Jira project: CR is the infrastructure help desk,
   and the AppSec teams track their work in other projects, so the AppSec lane
   should file there (project TBD) instead of CR. Points to settle when it is
