@@ -12,26 +12,8 @@ import (
 // day; two days costs one larger response and nothing else.
 const ScanMargin = 48 * time.Hour
 
-// Reconciliation says what joining the mailbox to the scan list found.
-//
-// Every number here is something that would otherwise have been silent: a
-// notification the API has no record of, or a scan the API ran whose email
-// never arrived.
-type Reconciliation struct {
-	Matched int
-	// Unmatched are scan references from notifications that the scan list did
-	// not contain. Usually a scan launched before the API window; worth a
-	// warning, never a reason to drop the notification's counts.
-	Unmatched []string
-	// Skipped counts scans deliberately left out: discovery scans, which test
-	// nothing, and scans still running.
-	Skipped int
-	// IDMismatch are scan references whose notification named a different
-	// application id from the one the scan list gives. The API's id is the
-	// one kept; a mismatch means a forged notice or a template change, and
-	// either is worth a warning.
-	IDMismatch []string
-}
+// Reconciliation is the vendor-neutral summary; see appscan.Reconciliation.
+type Reconciliation = appscan.Reconciliation
 
 // Reconcile joins notification results to the API scan list on the scan
 // reference, and adds the vulnerability scans the mailbox never heard about.

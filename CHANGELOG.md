@@ -141,6 +141,16 @@ basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and
 --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names
 /root/apps.txt`, then `sudo cti-agent fleet-owners list`.
 
+- **The AppSec lane no longer calls Qualys directly.** `cmd/cti-appscan` asks
+  the scanner for what it can do through interfaces in `internal/appscan`
+  (`Scanner`, `Reconciler`, `AppLister`, `OpenFetcher`, with the existing
+  `DetailFetcher` and `RemedyFetcher`), and each is optional: a scanner with
+  only some of them is used for those and skipped for the rest. Qualys is named
+  in one file, `cmd/cti-appscan/wiring.go`, and `TestOnlyWiringNamesAVendor`
+  fails the build if that stops being true. Behaviour is unchanged (the
+  scan-list log lines now say "scan list" rather than "WAS scan list").
+  **Upgrade:** nothing.
+
 ### Fixed
 
 - **The AppSec and domains timers ran on the server's clock.** The owner

@@ -411,7 +411,8 @@ internal/defender/             Defender for Cloud attack-path notification parsi
 internal/ticketref/            what a Jira step tells a report: ticket key, action, link (validated)
 internal/safelink/             Proofpoint/redirector unwrapping with a host allowlist
 internal/shellgate/            shell lint: the patterns that make a runner exit quietly
-internal/appscan/              DAST boundary: scan results, auth state, the report
+internal/appscan/              DAST boundary: scan results, auth state, the report, and the
+                               optional scanner capabilities (scanner.go) the lane asks for
 internal/appscan/qualys/       Qualys WAS: notification parser, Findings API, report download
 internal/qualysrl/             header-driven Qualys API rate limiter (WAS client)
 internal/domains/              inventory, probes, findings by role, week-over-week diff
