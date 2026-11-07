@@ -732,3 +732,41 @@ func TestTheWeeklyFootCarriesTheFleetAttribution(t *testing.T) {
 		t.Errorf("html credit not linked: %q", got)
 	}
 }
+
+// ─── "nothing urgent" only speaks for scans that have counts ────────────────
+
+// Seen live: one counted scan out of thirteen, the other twelve with no
+// completion notice, and the subject said "nothing urgent open".
+func TestNothingUrgentDoesNotSpeakForScansWithNoCounts(t *testing.T) {
+	b := render(t, publicScan(), emailless(), emailless())
+	if strings.HasSuffix(b.Subject, "nothing urgent open") {
+		t.Errorf("subject reads as an all-clear: %q", b.Subject)
+	}
+	if !strings.Contains(b.Subject, "1 scan(s) with counts") || !strings.Contains(b.Subject, "2 scan(s) have none") {
+		t.Errorf("subject does not say what it covers: %q", b.Subject)
+	}
+	if !strings.Contains(b.Text, "2 of them reached us with no completion notice") {
+		t.Errorf("lead does not say why: %s", firstLines(b.Text, 12))
+	}
+}
+
+func TestNoCountsAtAllIsNotNothingUrgent(t *testing.T) {
+	b := render(t, emailless(), emailless())
+	if !strings.Contains(b.Subject, "no counts for 2 scan(s)") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+}
+
+func TestAWeekWithCountsEverywhereKeepsItsPlainSubject(t *testing.T) {
+	if b := render(t, publicScan()); !strings.HasSuffix(b.Subject, "nothing urgent open") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+}
+
+func firstLines(s string, n int) string {
+	l := strings.SplitN(s, "\n", n+1)
+	if len(l) > n {
+		l = l[:n]
+	}
+	return strings.Join(l, "\n")
+}

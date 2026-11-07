@@ -298,9 +298,24 @@ func (r *report) subject() string {
 			apps++
 		}
 	}
-	if urgent > 0 {
+	// A scan with no completion notice has no counts, so it cannot be part of
+	// "nothing urgent": saying so anyway reads as an all-clear for scans nobody
+	// has numbers for. Seen live, on a week with one counted scan out of
+	// thirteen.
+	blind := len(r.unnotified)
+	switch {
+	case urgent > 0 && blind > 0:
+		return fmt.Sprintf("%s: %d Urgent finding(s) open across %d application(s); "+
+			"%d scan(s) have no counts", label, urgent, apps, blind)
+	case urgent > 0:
 		return fmt.Sprintf("%s: %d Urgent finding(s) open across %d application(s)",
 			label, urgent, apps)
+	case blind > 0 && len(r.counted) == 0:
+		return fmt.Sprintf("%s: no counts for %d scan(s) - no completion notice arrived",
+			label, blind)
+	case blind > 0:
+		return fmt.Sprintf("%s: nothing urgent in the %d scan(s) with counts; "+
+			"%d scan(s) have none", label, len(r.counted), blind)
 	}
 	return label + ": nothing urgent open"
 }
@@ -334,10 +349,19 @@ func (r *report) leadLine() string {
 	for _, s := range r.counted {
 		urgent += s.AppState.Active.Urgent
 	}
+	blind := ""
+	if n := len(r.unnotified); n > 0 {
+		blind = fmt.Sprintf(" %d of them reached us with no completion notice, so there "+
+			"are no counts for those and they are not part of this total.", n)
+	}
 	if urgent > 0 {
 		return fmt.Sprintf("%d application(s) scanned this week, with %d Urgent "+
-			"finding(s) open. Every scan ran as configured.",
-			len(r.scans), urgent)
+			"finding(s) open.%s Every scan ran as configured.",
+			len(r.scans), urgent, blind)
+	}
+	if blind != "" {
+		return fmt.Sprintf("%d application(s) scanned this week.%s Nothing Urgent "+
+			"is open among the %d that have counts.", len(r.scans), blind, len(r.counted))
 	}
 	return fmt.Sprintf("%d application(s) scanned this week. Nothing Urgent is "+
 		"open and every scan ran as configured.", len(r.scans))
