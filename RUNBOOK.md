@@ -1139,8 +1139,10 @@ Qualys Asset Groups the scans cover, by address (the scans' group names and the
 spreadsheet's location names do not match, so names are only for display). It
 reports three things, each line naming the location, the spreadsheet row and
 what to do, so the email can go to the network and acquisitions teams as well as
-security: **add to Qualys** (a corp network in no Asset Group, in a group no scan
-covers, or only partly covered), **fix or clarify in the spreadsheet** (a corp row
+security: **not scanned** (a corp network in no Asset Group, in a group no scan
+covers, or only partly covered; the lane records only that, because why differs
+per location and it cannot check, so the network and M&A teams are asked to say,
+in a blank column of the CSV), **fix in the spreadsheet** (a corp row
 with no network, one that is not a valid CIDR, one outside its location's own
 block, an overlap, or no clear corp row), and **check in Qualys** (a scanned group
 whose addresses are nowhere in the sheet, a group with no IP ranges, a Target

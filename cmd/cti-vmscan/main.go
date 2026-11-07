@@ -68,7 +68,7 @@ func run() int {
 		"read the network spreadsheet (.xlsx) from this file instead of SharePoint, for testing")
 	csvOut := flag.String("csv-out", "",
 		"write the coverage findings as a worksheet (CSV) here, for the runner to attach: "+
-			"one row per thing to add to Qualys or fix in the spreadsheet, with its sheet row")
+			"one row per network not scanned or spreadsheet row to fix, with its sheet row and a blank column for the teams to say why")
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	flag.Parse()

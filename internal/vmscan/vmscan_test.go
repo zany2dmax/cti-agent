@@ -260,9 +260,9 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 		t.Errorf("subject = %q", b.Subject)
 	}
 	for _, want := range []string{
-		"ADD TO QUALYS (2)",
+		"NOT SCANNED (2)",
 		"Alpha Site (sheet row 12): 10.1.30.0/24 is in no Qualys Asset Group.",
-		"Create a Qualys Asset Group for this network and add it to a scheduled scan.",
+		"Network or M&A team: say why this is not scanned.",
 		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which neither weekly scan covers.",
 		"FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "The security team only reads this spreadsheet",
 		"Delta Site (sheet row 41)", "Network team: fill in this location's corp network.",
@@ -275,7 +275,7 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 			t.Errorf("text lacks %q:\n%s", want, b.Text)
 		}
 	}
-	for _, want := range []string{"ADD TO QUALYS (2)", "FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "How the spreadsheet is read", "sheet row 41"} {
+	for _, want := range []string{"NOT SCANNED (2)", "FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "How the spreadsheet is read", "sheet row 41"} {
 		if !strings.Contains(b.HTML, want) {
 			t.Errorf("html lacks %q", want)
 		}
@@ -293,10 +293,10 @@ func TestTheFindingsComeAsAWorksheet(t *testing.T) {
 	if len(rows) != 1+2+3+1 {
 		t.Fatalf("%d rows:\n%s", len(rows), c.CSV())
 	}
-	if strings.Join(rows[0], ",") != "category,location,sheet_row,network,asset_group,what_to_do" {
+	if strings.Join(rows[0], ",") != "category,location,sheet_row,network,asset_group,what_to_do,reason_or_status" {
 		t.Errorf("header = %v", rows[0])
 	}
-	if rows[1][0] != "ADD TO QUALYS" || rows[1][1] != "Alpha Site" || rows[1][2] != "12" || rows[1][3] != "10.1.30.0/24" {
+	if rows[1][0] != "NOT SCANNED" || rows[1][1] != "Alpha Site" || rows[1][2] != "12" || rows[1][3] != "10.1.30.0/24" {
 		t.Errorf("first row = %v", rows[1])
 	}
 	var fix int

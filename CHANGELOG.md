@@ -67,8 +67,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   the operator. An optional `/etc/cti-agent/netrules.txt` lets the security team
   record how to treat a location meanwhile. The email is written for the network and
   acquisitions teams as well as security: each line names the location, the
-  spreadsheet row and what to do (add to Qualys, fix or clarify in the
-  spreadsheet, check in Qualys), the findings are attached as a CSV worksheet,
+  spreadsheet row and what to do (not scanned, fix in the spreadsheet, check in
+  Qualys; why a network is not scanned is left to the network and M&A teams, with
+  a blank column for them in the CSV), the findings are attached as a CSV worksheet,
   and it ends with how the spreadsheet has to be laid out to be read. It needs
   `SUBNETS_DRIVE_ID` and
   `SUBNETS_ITEM_ID` and a Graph application permission that reaches the file

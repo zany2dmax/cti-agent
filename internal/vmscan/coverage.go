@@ -76,15 +76,12 @@ func gapLine(f netmap.Finding) string {
 	}
 }
 
-func gapAction(k netmap.Kind) string {
-	switch k {
-	case netmap.NotInAnyGroup:
-		return "Create a Qualys Asset Group for this network and add it to a scheduled scan."
-	case netmap.GroupNotScanned:
-		return "Add this Asset Group to a scheduled scan, or confirm another scan already covers it."
-	default:
-		return "Extend the Asset Group(s) to the whole network, or correct the spreadsheet if it is the sheet that is wrong."
-	}
+// gapAction is what is asked about an unscanned network. The lane marks it as
+// not scanned and nothing more: why differs from one location to the next (not
+// set up yet, not reachable, no network architecture yet) and the security team
+// has no way to check which, so the network and M&A teams are asked to say.
+func gapAction(netmap.Kind) string {
+	return "Network or M&A team: say why this is not scanned."
 }
 
 // questionAction is what the network team is asked to do. The security team only
@@ -171,7 +168,8 @@ func (c *Coverage) text() string {
 	}
 	fmt.Fprintf(&b, "  %d corporate networks checked, %d fully inside the groups the scans cover.\n", c.Checked, c.Covered)
 	if g := c.Gaps(); len(g) > 0 {
-		fmt.Fprintf(&b, "\nADD TO QUALYS (%d) - networks in the spreadsheet that no weekly scan reaches\n%s\n", len(g), strings.Repeat("-", 72))
+		fmt.Fprintf(&b, "\nNOT SCANNED (%d) - networks in the spreadsheet that no weekly scan reaches\n%s\n", len(g), strings.Repeat("-", 72))
+		b.WriteString("  The security team does not know why in each case. The network and M&A teams are\n  asked to find out and say.\n")
 		for _, k := range gapOrder {
 			for _, f := range c.gapsOf(k) {
 				fmt.Fprintf(&b, "  - %s\n      -> %s\n", gapLine(f), gapAction(k))
@@ -222,8 +220,9 @@ func (c *Coverage) html(b *strings.Builder) {
 				fmt.Fprintf(&l, "&bull; %s<br><span style=\"color:%s\">&rarr; %s</span><br>", e(gapLine(f)), emailkit.Muted, e(gapAction(k)))
 			}
 		}
-		emailkit.Card(b, emailkit.Red, fmt.Sprintf("ADD TO QUALYS (%d)", len(g)),
-			"Networks in the spreadsheet that no weekly scan reaches.<br><br>"+l.String())
+		emailkit.Card(b, emailkit.Red, fmt.Sprintf("NOT SCANNED (%d)", len(g)),
+			"Networks in the spreadsheet that no weekly scan reaches. The security team does not know why "+
+				"in each case; the network and M&amp;A teams are asked to find out and say.<br><br>"+l.String())
 	}
 	if len(c.Questions) > 0 {
 		var l strings.Builder
@@ -270,7 +269,7 @@ func (c *Coverage) CSV() string {
 	// A spreadsheet opens a cell that starts with = + - or @ as a formula. The
 	// text here came from a spreadsheet and from Qualys, so it is made inert.
 	w := csvWriter{cw}
-	_ = w.Write([]string{"category", "location", "sheet_row", "network", "asset_group", "what_to_do"})
+	_ = w.Write([]string{"category", "location", "sheet_row", "network", "asset_group", "what_to_do", "reason_or_status"})
 	row := func(n int) string {
 		if n <= 0 {
 			return ""
@@ -279,16 +278,16 @@ func (c *Coverage) CSV() string {
 	}
 	for _, k := range gapOrder {
 		for _, f := range c.gapsOf(k) {
-			_ = w.Write([]string{"ADD TO QUALYS", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k)})
+			_ = w.Write([]string{"NOT SCANNED", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k), ""})
 		}
 	}
 	for _, k := range questionOrder {
 		for _, q := range c.questionsOf(k) {
-			_ = w.Write([]string{"NETWORK TEAM: FIX IN THE SPREADSHEET", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
+			_ = w.Write([]string{"NETWORK TEAM: FIX IN THE SPREADSHEET", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k), ""})
 		}
 	}
 	for _, f := range c.Oddities() {
-		_ = w.Write([]string{"CHECK IN QUALYS", "", "", "", f.Group, f.Detail})
+		_ = w.Write([]string{"CHECK IN QUALYS", "", "", "", f.Group, f.Detail, ""})
 	}
 	cw.Flush()
 	return buf.String()
