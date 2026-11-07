@@ -1,0 +1,18 @@
+#compdef cti-agent
+# zsh completion for cti-agent: commands with their one-line purpose, then each
+# command's flags and subcommands with what they do. Installed by
+# install-fedora.sh with @CODE_DIR@ filled in; reads the command manifest
+# through cti-agent-usage. Works under sudo too.
+_cti-agent() {
+  local usage=@CODE_DIR@/share/cti-agent-usage
+  [[ -x $usage ]] || return 0
+  local -a items
+  if (( CURRENT == 2 )); then
+    items=("${(@f)$($usage describe 2>/dev/null)}")
+    _describe -t commands 'fleet command' items
+  else
+    items=("${(@f)$($usage describe ${words[2]} $CURRENT 2>/dev/null)}")
+    (( ${#items} )) && _describe -t options "${words[2]} option" items
+  fi
+}
+_cti-agent "$@"

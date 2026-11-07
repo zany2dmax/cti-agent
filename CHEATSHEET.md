@@ -17,6 +17,12 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
   It switches to the `ctiagent` service account, loads `/etc/cti-agent/fleet.env`
   and sets the same paths the timers use. Running the binaries directly gives
   you different settings from the timers.
+- **Do not remember the commands: ask.** `sudo cti-agent` with no arguments lists
+  every command and whether it only reads, writes its own files, or changes
+  something outside (`effect`). `sudo cti-agent <command> --help` shows that
+  command's flags. In a new shell, press **TAB** after `cti-agent` (or
+  `sudo cti-agent`) for the commands, and after a command for its flags; bash
+  and zsh both work. All three read one list, `/opt/cti-agent/commands.manifest`.
 - **Dry runs are safe.** `--dry-run` builds the whole report and sends nothing.
   A command without it may send mail or write to Jira.
 - **Do not edit the state files by hand** (anything under `/var/lib/cti-agent`)

@@ -37,6 +37,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **Ask the CLI instead of remembering it: a command list, usage and TAB
+  completion.** `sudo cti-agent` with no arguments lists every fleet command
+  and whether it only reads, writes its own files, or changes something
+  outside (`effect`); `sudo cti-agent <command> --help` shows that command's
+  flags and subcommands without running it. The installer adds bash and zsh
+  completion, so TAB after `cti-agent` lists the commands and TAB after a
+  command lists its flags (and `fleet-db`'s or `fleet-board`'s subcommands).
+  All of it reads one file, `fleet-kit/fleet/commands.manifest`, installed as
+  `/opt/cti-agent/commands.manifest`, so it cannot go stale: a test fails the
+  build when a command or a flag exists in the code and not in the manifest, or
+  the reverse. This is the first of two steps: a later release makes every
+  `effect` command refuse to run without an explicit `--dry-run` or
+  `--for-real`. **Upgrade:** re-run the installer, then open a new shell.
+
 ### Changed
 
 - **The mailbox lane now moves mail unless you say `--dry-run`, like every other
