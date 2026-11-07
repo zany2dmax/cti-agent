@@ -130,6 +130,60 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   instead of running; add `--dry-run` or `--for-real`. Notes and scripts of
   yours that call these without a mode need the same.
 
+### Fixed
+
+- **Section headings in the Go lanes' emails showed in lowercase in Outlook.**
+  They were typed in normal case and relied on a CSS `text-transform` that
+  Outlook ignores, so "Coverage check" and its like appeared as written. The
+  capitals are now written into the heading. **Upgrade:** nothing.
+
+## 1.5.2 — 2026-11-07
+
+**Upgrade:** pull and re-run the installer. Nothing else is required.
+
+### Fixed
+
+- **The lock-down ticket stopped updating once its list got long.** Jira
+  refuses a comment or description over 32767 characters, all or nothing, and
+  the weekly list of 206 DNS changes plus 7 to review went over it
+  (`INF-590 ... exceeds the allowed limit of 32767 characters (HTTP 400)`), so
+  the ticket was not updated and the lane only said so in the journal. Text over
+  30000 characters is now posted as several comments at line breaks, each saying
+  "part n of m"; a description that long becomes the first part with the rest
+  added as comments. This covers every Jira write, not only the domains ticket.
+  The report email was never affected. **Upgrade:** nothing; the next domains
+  run updates the ticket.
+
+- **The AppSec weekly no longer says "nothing urgent open" about scans it has
+  no counts for.** A week with one counted scan and twelve whose completion
+  notices never arrived (the scanner account's notices were being sent from the
+  team mailbox and, correctly, not read) was subject-lined as an all-clear. The
+  subject and the opening paragraph now say how many scans have counts and how
+  many do not: "nothing urgent in the 1 scan(s) with counts; 12 scan(s) have
+  none", or "no counts for 12 scan(s)" when there are none at all. A week where
+  every scan has counts reads as before. **Upgrade:** nothing.
+
+## 1.5.1 — 2026-11-07
+
+**Upgrade:** pull, then re-run the installer (it pins three more timers to
+`FLEET_TIMEZONE`, installs `email-tokens.json` and the `FLEET_MAILBOX_TIME`
+drop-in). Set `PROOFPOINT_POD_IPS` (comma separated) if the mail admin lists
+PoD addresses in SPF. Nothing else is required.
+
+### Added
+
+- **`fleet-owners list` shows each application's name.** An id says which
+  application; the name says which one to a person, so you no longer look it up
+  in Qualys. Names are kept beside each entry (a new `app_names` table, created
+  on first use in an existing `owners.db`, no schema change), shown by `list`
+  and `show`, and never written to `owners.json`, so no lane reads them and
+  they decide nothing. `fleet-owners names FILE` fills or refreshes them from a
+  `cti-appscan --list-apps` listing; `import` takes them from the file it
+  loads. Names come from the scanner, so they are stripped of control
+  characters and capped before they reach your terminal.
+
+### Changed
+
 - **One place for what a fleet email looks like.** `internal/emailkit` holds the
   palette, the font and the 640px card, and the pieces every email is built
   from: header band, lead block, severity tiles, section headings, cards,
