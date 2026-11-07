@@ -1,4 +1,5 @@
-// cti-vmscan combines the week's Qualys VM scan-result notices into one report.
+// cti-vmscan combines the week's Qualys VM scan-result notices into one notice that
+// the scheduled scans ran and what they covered (no severity counts, on purpose).
 //
 //	cti-vmscan --out w.html --text-out w.txt --subject-out w.subject --seen-out w.seen.json
 //	cti-vmscan --commit-seen w.seen.json     # after the send: let cleanup archive them

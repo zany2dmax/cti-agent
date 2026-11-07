@@ -46,9 +46,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO` (no fallback; set both to
   `$VM_ALLOW_TO` to reuse the VM audience - a lane's recipient list may now
   reference another list the way an allowlist always could), with the two scans in separate
-  sections: when each ran and for how long, addresses scanned and alive, its
-  Target Groups, and confirmed counts by severity with their trend. Potential
-  findings are shown apart. A scheduled scan with no result leads the report
+  sections: that it ran, when and for how long, addresses scanned and alive, and
+  the locations it covered (its Qualys Target Groups). It carries no severity
+  counts, on purpose: the audience does not act on them from this email and the
+  two scans overlap. A scheduled scan with no result leads the report
   (`[NO RESULT]` in the subject), and one that did not finish is `[INCOMPLETE]`.
   The notices it used are recorded after a real send, so the mailbox cleanup
   archives them 48 hours later; the other Qualys notices for the same scan are

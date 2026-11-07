@@ -27,11 +27,14 @@ reads the
 .B "Qualys: Scan Results"
 notices that arrived in the CTI mailbox over the last week (Graph, read-only),
 takes the newest result for each scheduled scan it is told to expect, and
-renders one report with the scans kept separate: when each ran and for how
-long, how many addresses it scanned and how many were alive, its Target Groups,
-and the confirmed vulnerability counts by severity with their trend since the
-last scan. Potential findings are shown apart and never added to the confirmed
-counts.
+renders one notice with the scans kept separate: that each ran, when and for
+how long, how many addresses it scanned and how many were alive, and the
+locations it covered (its Qualys Target Groups).
+.PP
+It carries no vulnerability counts or severities, on purpose. The report goes
+to people who do not act on them from here, and the two scans overlap, so the
+counts would confuse more than they tell. The notice parser still reads them;
+the report does not show them.
 .PP
 It sends nothing. It is run by
 .BR run\-vmscan (1),

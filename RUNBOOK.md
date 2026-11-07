@@ -1106,9 +1106,10 @@ map of where to look, and it is handled like the VM reports for that reason.
 Qualys VM scans ("Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly")
 each email a "Qualys: Scan Results" notice when they finish. This lane reads
 those notices from the CTI mailbox and sends **one** email with both scans, kept
-in separate sections: when each ran and for how long, addresses scanned and
-alive, its Target Groups, and the confirmed counts by severity with their trend.
-Potential findings are shown apart and never added to the confirmed counts.
+in separate sections: that it ran, when and for how long, addresses scanned and
+alive, and the locations it covered (its Qualys Target Groups). It carries no
+severity counts, on purpose: the audience does not act on them from this email,
+and the two scans overlap.
 
 ```bash
 sudo cti-agent run-vmscan --dry-run   # render, print the subject, send nothing
@@ -1122,7 +1123,7 @@ fallback (unset = refuses). To send to the VM audience, reference it in both:
 
 What the subject can say first: `[NO RESULT]` when a scheduled scan left no
 notice (it did not finish, or its mail never arrived), `[INCOMPLETE]` when one
-did not finish, otherwise the Urgent and Critical totals.
+did not finish, otherwise how many scans ran and how many locations they covered.
 
 **Getting the notices into the mailbox.** Qualys sends them to the people on
 each schedule's notification list and, for the owner-only notice, to the scan's

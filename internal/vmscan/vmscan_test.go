@@ -192,10 +192,11 @@ func TestAnUnfinishedScanIsFlagged(t *testing.T) {
 	}
 }
 
-func TestTheCombinedReportKeepsTheTwoScansSeparate(t *testing.T) {
+func TestTheCombinedReportSaysTheyRanAndWhatTheyCoveredAndNothingMore(t *testing.T) {
 	w := Combine(both(t), DefaultScans)
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
-	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR NON-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB WEEKLY", "9730", "7168"} {
+	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR NON-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB WEEKLY", "ARD Miami", "REDACTED-SUB Charlotte",
+		"Locations covered (24)", "Locations covered (21)", "9730", "7168"} {
 		if !strings.Contains(b.Text, want) {
 			t.Errorf("text lacks %q", want)
 		}
@@ -205,11 +206,30 @@ func TestTheCombinedReportKeepsTheTwoScansSeparate(t *testing.T) {
 			t.Errorf("html lacks %q", want)
 		}
 	}
-	// 1612 + 4092 Urgent across the two.
-	if got := w.total(5); got != 1612+4092 {
-		t.Errorf("urgent total = %d", got)
+	// The audience does not act on severities from here and the scans overlap,
+	// so the report carries none: not in the subject, text or HTML.
+	for _, bad := range []string{"Urgent", "Critical", "Serious", "Severity", "vulnerab", "Potential"} {
+		for name, body := range map[string]string{"subject": b.Subject, "text": b.Text, "html": b.HTML} {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s mentions %q", name, bad)
+			}
+		}
+	}
+	if !strings.Contains(b.Subject, "2 scheduled scans ran") {
+		t.Errorf("subject = %q", b.Subject)
 	}
 	if strings.Contains(b.HTML, "<a href") {
-		t.Error("a report link was rendered as an anchor")
+		t.Error("a link was rendered as an anchor")
+	}
+}
+
+func TestLocationsAreCountedOnceAcrossScans(t *testing.T) {
+	s := both(t)
+	// "REDACTED-SUB Data Center" and "Data Center" are different groups; the same group
+	// named in both scans counts once.
+	s[0].TargetGroups = append(s[0].TargetGroups, "Data Center")
+	w := Combine(s, DefaultScans)
+	if got := w.groups(); got != 24+21 {
+		t.Errorf("distinct groups = %d, want %d", got, 24+21)
 	}
 }

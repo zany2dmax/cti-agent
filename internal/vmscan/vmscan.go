@@ -1,5 +1,12 @@
 // Package vmscan reads Qualys VMDR (vulnerability management) scan-result
-// notifications and combines the week's scheduled scans into one report.
+// notifications and combines the week's scheduled scans into one notice that
+// they ran and what they covered.
+//
+// The report carries no vulnerability counts or severities, on purpose: its
+// audience does not act on them from this email, and the two scheduled scans
+// overlap, so adding them up would mislead. The parser still reads the
+// counts (they are in the notice, and a later use may want them); the report
+// does not show them.
 //
 // The notice is Qualys's "Qualys: Scan Results" email, generated from a fixed
 // template, so this keys on its label text ("Scan Title :", "Target Groups :")
