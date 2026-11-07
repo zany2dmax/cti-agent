@@ -35,7 +35,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.5.1 — 2026-11-07
+
+**Upgrade:** pull, then re-run the installer (it pins three more timers to
+`FLEET_TIMEZONE`, installs `email-tokens.json` and the `FLEET_MAILBOX_TIME`
+drop-in). Set `PROOFPOINT_POD_IPS` (comma separated) if the mail admin lists
+PoD addresses in SPF. Nothing else is required.
 
 ### Added
 
