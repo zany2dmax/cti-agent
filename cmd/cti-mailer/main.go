@@ -241,11 +241,18 @@ func run() int {
 		// No CC. A lane has one audience; a second list to get wrong is a
 		// second way to reach people nobody chose.
 		prefix := strings.ToUpper(strings.TrimSpace(*lane))
+		// A recipient list may reference another list, VMSCAN_TO=$VM_ALLOW_TO,
+		// so a lane for the same people does not carry a copy that can drift.
+		toRaw, err := mailer.ExpandTo(prefix+"_TO", pick(*to, os.Getenv(prefix+"_TO")),
+			mailer.AllowLookup(os.LookupEnv, vmAllow))
+		if err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
 		l := mailer.Lane{
 			Name:     strings.ToLower(prefix),
 			ToVar:    prefix + "_TO",
 			AllowVar: prefix + "_ALLOW_TO",
-			To:       pick(*to, os.Getenv(prefix+"_TO")),
+			To:       toRaw,
 			Allow:    os.Getenv(prefix + "_ALLOW_TO"),
 			Operator: operator,
 			Lookup:   mailer.AllowLookup(os.LookupEnv, vmAllow),

@@ -21,9 +21,11 @@ Recipients are
 .BR VMSCAN_TO ,
 checked against
 .BR VMSCAN_ALLOW_TO ,
-which has no fallback: unset means the mailer refuses. Setting
-.B VMSCAN_ALLOW_TO=$VM_ALLOW_TO
-reuses the VM audience.
+neither of which has a fallback: unset means the mailer refuses. To send to the
+VM audience, reference it in both:
+.B VMSCAN_TO=$VM_ALLOW_TO
+and
+.BR VMSCAN_ALLOW_TO=$VM_ALLOW_TO .
 .PP
 It is run by
 .B cti\-agent\-vmscan.service

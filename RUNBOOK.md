@@ -1116,9 +1116,9 @@ sudo cti-agent run-vmscan --to-dev    # the same email to FLEET_DEV_EMAIL only
 sudo cti-agent run-vmscan --for-real  # send, and record the notices as used
 ```
 
-Recipients are `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO`, which has no
-fallback (unset = refuses). `VMSCAN_ALLOW_TO=$VM_ALLOW_TO` reuses the VM
-audience. `VMSCAN_SCANS` names the scans to combine; unset, it is the two above.
+Recipients are `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO`; neither has a
+fallback (unset = refuses). To send to the VM audience, reference it in both:
+`VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO`. `VMSCAN_SCANS` names the scans to combine; unset, it is the two above.
 
 What the subject can say first: `[NO RESULT]` when a scheduled scan left no
 notice (it did not finish, or its mail never arrived), `[INCOMPLETE]` when one

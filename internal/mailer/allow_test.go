@@ -60,3 +60,26 @@ func TestLaneReferencesResolveUnderEitherName(t *testing.T) {
 		}
 	}
 }
+
+func TestALaneRecipientListMayReferenceAnotherList(t *testing.T) {
+	lookup := func(n string) (string, bool) {
+		if n == "VM_ALLOW_TO" {
+			return "a@example.com,b@example.com", true
+		}
+		return "", false
+	}
+	got, err := ExpandTo("VMSCAN_TO", "$VM_ALLOW_TO", lookup)
+	if err != nil || got != "a@example.com,b@example.com" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if got, _ := ExpandTo("VMSCAN_TO", "c@example.com", lookup); got != "c@example.com" {
+		t.Errorf("a plain list changed: %q", got)
+	}
+	// An unset reference is an error, never a literal address.
+	if _, err := ExpandTo("VMSCAN_TO", "$NOPE", lookup); err == nil {
+		t.Error("an unset reference was accepted")
+	}
+	if _, err := ExpandTo("VMSCAN_TO", "$VM_*", lookup); err == nil {
+		t.Error("a wildcard reference was accepted")
+	}
+}

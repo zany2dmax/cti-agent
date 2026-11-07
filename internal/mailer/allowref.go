@@ -149,3 +149,22 @@ func refName(tok string) (string, refKind) {
 	}
 	return t, refValid
 }
+
+// ExpandTo is ExpandAllow for a lane's recipient list: VMSCAN_TO=$VM_ALLOW_TO
+// sends the VM scan report to the same people the VM list names, without
+// copying the addresses into a second place that can drift. A value with no
+// reference comes back unchanged; one that cannot be expanded is an error,
+// never a literal address called "$VM_ALLOW_TO".
+//
+// Recipients are still checked against the lane's own allowlist afterwards, so
+// this only saves typing; it does not widen who may be mailed.
+func ExpandTo(name, raw string, lookup func(string) (string, bool)) (string, error) {
+	if !strings.Contains(raw, "$") {
+		return raw, nil
+	}
+	got, err := ExpandAllow(name, raw, lookup)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(got, ","), nil
+}
