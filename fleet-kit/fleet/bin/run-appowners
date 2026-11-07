@@ -24,8 +24,8 @@
 #   and an application with no owner on file. Each is recorded once, and the
 #   operator is told through cti-alert; the owners get nothing for that scan.
 #
-# USAGE
-#   run-appowners              fetch, redact and send
+# USAGE (one of the three is required; with none it prints usage and exits 2)
+#   run-appowners --for-real   fetch, redact and send
 #   run-appowners --dry-run    plan and check every recipient; fetch and send nothing
 #   run-appowners --to-dev     every email to FLEET_DEV_EMAIL only, [DEV TEST]
 #                              subject, reports attached; nothing recorded
@@ -49,16 +49,25 @@ STATE="$FLEET_HOME/state"
 fail() { echo "[run-appowners] error: $*" >&2; exit 1; }
 log()  { echo "[run-appowners] $*" >&2; }
 
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 DRY=""
+REAL=""
 TODEV=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY="--dry-run" ;;
+    --for-real) REAL=1 ;;
     --to-dev)   TODEV=1 ;;
-    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+    *)          fail "unknown argument: $1 (only --dry-run, --for-real and --to-dev are accepted)" ;;
   esac
   shift
 done
+fleet_require_mode run-appowners "$DRY" "$REAL" "$TODEV" allow-dev
+# What the children are told: a test send says --to-dev (and --dry-run if rehearsing),
+# a real run says --for-real.
+ALERTMODE="--for-real"; [ -n "$TODEV" ] && ALERTMODE="--to-dev"
+if [ -n "$TODEV" ]; then MAILMODE="$DRY"; else MAILMODE="${DRY:---for-real}"; fi
 if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
 fi
@@ -125,7 +134,7 @@ while IFS=$'\t' read -r key ref appid dir att; do
   fi
   # shellcheck disable=SC2086
   if out="$("$MAILER" ${AUDIENCE[@]+"${AUDIENCE[@]}"} --html "$dir/mail.html" --subject "$subject" \
-             ${ATTACH[@]+"${ATTACH[@]}"} $DRY)"; then
+             ${ATTACH[@]+"${ATTACH[@]}"} ${MAILMODE:+"$MAILMODE"})"; then
     sent=$((sent + 1))
     printf '%s\t%s\tsent\n' "$key" "$ref" >> "$SENT"
     case "$out" in
@@ -168,7 +177,7 @@ if [ -s "$WORK/held.txt" ] || [ -n "$refused" ]; then
   if [ -n "$DRY" ]; then
     log "dry run - would alert the operator"
   elif [ -x "$ALERT" ]; then
-    "$ALERT" --unit cti-agent-appowners.service --kind HOLD ${TODEV:+--to-dev} --reason "$reason" \
+    "$ALERT" --unit cti-agent-appowners.service --kind HOLD "$ALERTMODE" --reason "$reason" \
       || log "warn: cti-alert failed - the holds are in this run's journal"
   else
     log "warn: cti-alert not found at $ALERT - not escalated"

@@ -138,7 +138,19 @@ A refusal is final: the message names the variable or flag to change.
 Progress and errors go to standard error, prefixed
 .BR [mailer] ;
 the result goes to standard output as one JSON line.
+.SH HOW TO RUN
+\fBmailer.py\fR sends mail through Graph, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (build and validate, send nothing), or \fB\-\-for\-real\fR (send the message).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
+\fB\-\-check\fR only reads, so it needs none.
 .SH OPTIONS
+.TP
+.B \-\-for\-real
+Send the message. One of this or \fB\-\-dry\-run\fR is required, except with \fB\-\-check\fR.
 .TP
 .BI \-\-html " FILE"
 Send this rendered HTML file as the body. The file must exist.

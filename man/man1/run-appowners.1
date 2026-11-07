@@ -3,12 +3,10 @@
 run-appowners \- daily: mail each application's scanner report to its owners
 .SH SYNOPSIS
 .B run\-appowners
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .PP
 .B sudo cti\-agent run\-appowners
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .SH DESCRIPTION
 .B run-appowners
 sends each application's Qualys WAS report of open findings, with the scan
@@ -63,7 +61,19 @@ Held scans and watchers refused for their domain go to
 as one HOLD. Never fatal.
 .PP
 The working directory is deleted on every way out.
+.SH HOW TO RUN
+\fBrun-appowners\fR mails each application owner their report, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (plan and check every recipient, fetch and send nothing), \fB\-\-for\-real\fR (fetch, redact and send),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
+.TP
+.B \-\-for\-real
+Fetch, redact and send. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required.
 .TP
 .B \-\-dry\-run
 Plan and check every recipient through

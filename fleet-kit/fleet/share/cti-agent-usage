@@ -32,6 +32,8 @@ run_awk() {
     /^command:/ { cmd = val($0, "command"); order[++nc] = cmd; next }
     /^about:/   { about[cmd] = val($0, "about"); next }
     /^runs:/    { runs[cmd] = val($0, "runs"); next }
+    /^modes:/   { modes[cmd] = val($0, "modes"); next }
+    /^exempt:/  { exempt[cmd] = val($0, "exempt"); next }
     /^flag:/    { v = val($0, "flag"); split(v, p, " \\| ");
                   split(p[1], w, " "); fl[cmd, ++nf[cmd]] = w[1];
                   fspec[cmd, nf[cmd]] = p[1]; fdesc[cmd, nf[cmd]] = p[2]; next }
@@ -53,8 +55,16 @@ run_awk() {
         if (runs[c] == "read")   printf "  (changes nothing)"
         printf "\n\nusage: cti-agent %s", c
         if (ns[c]) printf " <command>"
+        if (modes[c] != "") { m = modes[c]; gsub(/ /, "|", m); printf " %s", m }
         if (nf[c]) printf " [flags]"
         printf "\n"
+        if (modes[c] != "") {
+          m2 = modes[c]; gsub(/ /, ", ", m2)
+          printf "\nSay how to run it: one of %s is required", m2
+          if (index(modes[c], "--to-dev")) printf " (--to-dev may go with --dry-run)"
+          if (exempt[c] != "") printf " (except %s, which only reads)", exempt[c]
+          printf ".\nWith none it prints usage and exits 2.\n"
+        }
         if (ns[c]) { printf "\ncommands:\n"; for (i = 1; i <= ns[c]; i++) printf "  %-14s %s\n", sb[c, i], sdesc[c, i] }
         if (nf[c]) { printf "\nflags:\n"; for (i = 1; i <= nf[c]; i++) printf "  %-26s %s\n", fspec[c, i], fdesc[c, i] }
       } else if (mode == "words") {

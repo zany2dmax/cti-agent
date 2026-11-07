@@ -41,11 +41,14 @@ def parse():
         if key == "command":
             if val in cmds:
                 raise AssertionError(f"line {n}: {val} listed twice")
-            cur = cmds[val] = {"about": "", "runs": "", "flags": {}, "subs": {}}
+            cur = cmds[val] = {"about": "", "runs": "", "modes": [], "exempt": [],
+                               "flags": {}, "subs": {}}
         elif cur is None:
             raise AssertionError(f"line {n}: {key!r} before any command")
         elif key in ("about", "runs"):
             cur[key] = val
+        elif key in ("modes", "exempt"):
+            cur[key] = val.split()
         elif key in ("flag", "sub"):
             spec, sep, desc = val.partition(" | ")
             if not sep or not desc.strip():
@@ -126,6 +129,90 @@ class TestCommandManifest(unittest.TestCase):
                 with self.subTest(command=name, sub=sub):
                     self.assertRegex(text, r"[\"'\s(|]" + re.escape(sub) + r"[\"')\s|:]",
                                      f"{name} has no {sub!r} subcommand")
+
+
+class TestEveryEffectCommandMustBeToldHowToRun(unittest.TestCase):
+    """The rule: a command that changes something has no default. It takes
+    --dry-run or --for-real (or --to-dev where it has one), and with none it
+    prints usage and exits 2 without touching anything."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cmds = parse()
+
+    def test_the_manifest_names_the_modes_of_every_effect_command(self):
+        for name, c in self.cmds.items():
+            with self.subTest(command=name):
+                if c["runs"] != "effect":
+                    self.assertEqual(c["modes"], [], "only effect commands take a mode")
+                    continue
+                self.assertTrue({"--dry-run", "--for-real"} <= set(c["modes"]),
+                                "an effect command must offer --dry-run and --for-real")
+                for m in c["modes"] + c["exempt"]:
+                    self.assertIn(m, c["flags"], f"{m} is not a flag of {name}")
+
+    BASH = ("run-digest", "run-appscan", "run-domains", "run-appowners",
+            "run-patchtuesday", "run-mailbox-cleanup", "run-checkin")
+
+    def _bash(self, name, *args):
+        script = ROOT / "fleet-kit" / "fleet" / "bin" / name
+        return subprocess.run(
+            ["bash", str(script), *args], check=False, capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin", "FLEET_HOME": "/nonexistent", "HOME": "/nonexistent"})
+
+    def test_a_runner_with_no_mode_prints_usage_and_exits_2(self):
+        for name in self.BASH:
+            with self.subTest(runner=name):
+                r = self._bash(name)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("say how to run it", r.stderr)
+                self.assertIn("--dry-run", r.stderr)
+                self.assertIn("--for-real", r.stderr)
+
+    def test_contradictory_modes_are_refused(self):
+        for name in self.BASH:
+            with self.subTest(runner=name):
+                r = self._bash(name, "--dry-run", "--for-real")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("contradict", r.stderr)
+
+    def test_the_timers_say_for_real(self):
+        """A unit that lost its flag must fail loudly, so each says it."""
+        units = ROOT / "fleet-kit" / "fleet" / "systemd-fedora"
+        for f in sorted(units.glob("*.service")):
+            text = f.read_text(encoding="utf-8")
+            line = next((ln for ln in text.splitlines() if ln.startswith("ExecStart=")), "")
+            cmd = line.split("/")[-1].split()[0] if line else ""
+            if cmd in self.cmds and self.cmds[cmd]["runs"] == "effect":
+                with self.subTest(unit=f.name):
+                    self.assertIn("--for-real", line, f"{f.name} does not say --for-real")
+
+    def test_go_and_python_commands_refuse_to_run_without_a_mode(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            checks = [("cti-alert", ["--unit", "cti-agent-digest.service"]),
+                      ("cti-mailbox", []), ("cti-mailer", []),
+                      ("cti-jira", ["--test-ticket"])]
+            for name, args in checks:
+                exe = pathlib.Path(tmp) / name
+                b = subprocess.run(["go", "build", "-o", str(exe), f"./cmd/{name}"], cwd=ROOT,
+                                   check=False, capture_output=True, text=True)
+                self.assertEqual(b.returncode, 0, b.stderr)
+                with self.subTest(command=name):
+                    r = subprocess.run([str(exe), *args], check=False, capture_output=True,
+                                       text=True, env={"PATH": "/usr/bin:/bin", "HOME": tmp})
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertIn("say how to run it", r.stderr)
+            py = subprocess.run(
+                ["python3", str(ROOT / "fleet-kit" / "fleet" / "lanes" / "mailer.py"),
+                 "--html", "x"], check=False, capture_output=True, text=True,
+                env={"PATH": "/usr/bin:/bin", "HOME": tmp})
+            self.assertEqual(py.returncode, 2, py.stderr)
+            self.assertIn("say how to run it", py.stderr)
+
+    def test_the_read_only_check_flags_need_no_mode(self):
+        for name in ("cti-mailer", "cti-jira"):
+            self.assertEqual(self.cmds[name]["exempt"], ["--check"])
 
 
 class TestCompletionAnswers(unittest.TestCase):

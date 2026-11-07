@@ -9,8 +9,7 @@ cti-alert \- tell the operator that a fleet unit failed, is holding, or needs a 
 .IR KIND ]
 .RB [ \-\-reason
 .IR TEXT ]
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .PP
 .B cti-alert
 .RI [ options ]
@@ -134,12 +133,24 @@ or the
 .B VM_ALLOW_TO
 gate: mail to the operator is pre-approved. It never restarts, stops or
 changes the unit it reports on.
+.SH HOW TO RUN
+\fBcti-alert\fR sends mail to the operator and posts to the board, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (print what would be sent, send and post nothing), \fB\-\-for\-real\fR (send the alert and post to the board),
+or \fB\-\-to\-dev\fR (send to FLEET_DEV_EMAIL only, post nothing; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash
 .RB ( \-unit ),
 and a value may follow
 .B =
 or a space.
+.TP
+.B \-\-for\-real
+Send the alert and post to the board. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required. The systemd unit passes it.
 .TP
 .BI \-\-unit " UNIT"
 The unit to report on, for example

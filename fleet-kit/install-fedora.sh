@@ -322,7 +322,10 @@ info "lanes/email-tokens.json"
 # completions all read this one file.
 run install -m 0644 -o root -g root "$SRC/fleet/commands.manifest" "$CODE_DIR/commands.manifest"
 run install -m 0755 -o root -g root "$SRC/fleet/share/cti-agent-usage" "$CODE_DIR/share/cti-agent-usage"
-info "commands.manifest, share/cti-agent-usage"
+# Sourced by every runner that changes something: the "say how to run it" rule.
+# Not executable, and the runners fail at start without it, so it is checked.
+run install -m 0644 -o root -g root "$SRC/fleet/share/fleet-mode.sh" "$CODE_DIR/share/fleet-mode.sh"
+info "commands.manifest, share/cti-agent-usage, share/fleet-mode.sh"
 # Shell completion: bash-completion's directory and zsh's site-functions. The
 # CODE_DIR in each is filled in, so a relocated install still completes.
 if [ "$MODE" != dryrun ]; then
@@ -897,9 +900,13 @@ if [ "$MODE" != dryrun ]; then
 #!/usr/bin/env bash
 # cti-agent - run a fleet command by hand with the FHS paths already set.
 #
-#   cti-agent run-digest daily --dry-run
-#   cti-agent run-digest daily
-#   cti-agent run-checkin
+#   cti-agent run-digest daily --dry-run     (rehearse; nothing is sent)
+#   cti-agent run-digest daily --for-real    (send)
+#   cti-agent run-checkin --for-real
+#
+# Every command that changes something needs --dry-run or --for-real; with
+# neither it prints usage and exits 2. `cti-agent` alone lists the commands.
+#
 #   cti-agent mailer.py --check
 #   cti-agent fleet-db recent
 #   cti-agent fleet-board tail 30
@@ -907,7 +914,7 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent cti-budget status
 #   cti-agent cti-kev --horizon 30
 #   cti-agent run-patchtuesday --dry-run
-#   cti-agent run-patchtuesday --month 2026-08   (replay, never sends)
+#   cti-agent run-patchtuesday --month 2026-08 --dry-run   (replay, never sends)
 #
 # Runs as $FLEET_USER via sudo, so invoke it with sudo yourself.
 set -euo pipefail
@@ -1238,7 +1245,7 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
    /var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/ first (CHEATSHEET 7a).
    Leave its timer disabled. A replay cannot send:
 
-     sudo cti-agent run-patchtuesday --month 2026-10
+     sudo cti-agent run-patchtuesday --month 2026-10 --dry-run
 
    Needs outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com
    (blog.qualys.com is optional; it refuses Azure addresses).

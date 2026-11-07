@@ -2059,11 +2059,15 @@ class TestFileShape(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, True)
         self.addCleanup(subprocess.run, ["chmod", "-R", "u+w", str(d)])
         code, home, fake, tmp = d / "code", d / "home", d / "fakebin", d / "tmp"
-        for p in (code / "bin", code / "orchestrator" / ".claude" / "skills" / "checkin",
+        for p in (code / "bin", code / "share",
+                  code / "orchestrator" / ".claude" / "skills" / "checkin",
                   home, fake, tmp):
             p.mkdir(parents=True)
         ran = d / "ran"
         shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "run-checkin", code / "bin" / "run-checkin")
+        # Sourced by every runner that changes something (the "say how" rule).
+        shutil.copy(root / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh",
+                    code / "share" / "fleet-mode.sh")
         for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert"):
             (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
         # run-checkin pipes a redirect through the guard and wants exit 2.
@@ -2109,7 +2113,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                "FLEET_ENV": str(d / "none.env"), "TMPDIR": str(tmp),
                "CLAUDE_BIN": str(fake / "claude"),
                "ANTHROPIC_API_KEY": "test-placeholder"}
-        r = subprocess.run(["bash", str(code / "bin" / "run-checkin")], env=env,
+        r = subprocess.run(["bash", str(code / "bin" / "run-checkin"), "--for-real"], env=env,
                            capture_output=True, text=True, check=False)
         return r, (ran.read_text() if ran.exists() else "")
 
@@ -3285,7 +3289,7 @@ class RunnersToDev(unittest.TestCase):
         # - a full re-run that repeated every Qualys WAS call for one line.
         # One report run per send, with --subject-out; --stamp-tickets and
         # --commit-seen only read files and do not count.
-        for args in (["--to-dev"], ["--dry-run"], []):
+        for args in (["--to-dev"], ["--dry-run"], ["--for-real"]):
             with self.subTest(args=args):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-appscan", *args)
@@ -3300,7 +3304,7 @@ class RunnersToDev(unittest.TestCase):
         # The mailbox cleanup archives a WAS notice once the AppSec lane has
         # "seen" it. That has to mean the report reached App Dev - a dry run
         # or a test send to the developer must not license archiving.
-        for args, want in ((["--to-dev"], False), (["--dry-run"], False), ([], True)):
+        for args, want in ((["--to-dev"], False), (["--dry-run"], False), (["--for-real"], True)):
             with self.subTest(args=args):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-appscan", *args)
@@ -3315,7 +3319,7 @@ class RunnersToDev(unittest.TestCase):
     def test_domains_names_its_ticket_in_the_email(self):
         # The ticket is filed (or previewed) BEFORE the send and stamped into
         # the report, so the email says which ticket IT is working from.
-        for args, real in (([], True), (["--to-dev"], False), (["--dry-run"], False)):
+        for args, real in ((["--for-real"], True), (["--to-dev"], False), (["--dry-run"], False)):
             with self.subTest(args=args):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-domains", *args)
@@ -3333,13 +3337,13 @@ class RunnersToDev(unittest.TestCase):
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
 
     def test_appscan_files_no_tickets_unless_asked(self):
-        r, calls = self.run_lane("run-appscan")
+        r, calls = self.run_lane("run-appscan", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([c for c in calls if c.startswith("cti-jira ")], [], calls)
         self.assertNotIn("--tickets-out", calls[0])
 
     def test_appscan_files_its_application_tickets_before_the_send(self):
-        for args, real in (([], True), (["--to-dev"], False), (["--dry-run"], False)):
+        for args, real in ((["--for-real"], True), (["--to-dev"], False), (["--dry-run"], False)):
             with self.subTest(args=args):
                 self.log.write_text("")
                 r, calls = self.run_lane("run-appscan", *args, env="WAS_TICKETS=1\n")
@@ -3355,13 +3359,13 @@ class RunnersToDev(unittest.TestCase):
                 self.assertIn("--ticket-slot", calls[idx(lambda c: c.startswith("cti-appscan --out"))])
 
     def test_appowners_is_off_until_armed(self):
-        r, calls = self.run_lane("run-appowners")
+        r, calls = self.run_lane("run-appowners", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(calls, ["cti-mailer --lane owner --armed"],
                          "the owners lane did work with no allowed domains")
 
     def test_appowners_sends_through_the_owner_lane_then_records(self):
-        r, calls = self.run_lane("run-appowners", env="OWNER_ALLOW_DOMAINS=example.com\n")
+        r, calls = self.run_lane("run-appowners", "--for-real", env="OWNER_ALLOW_DOMAINS=example.com\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         idx = lambda pred, calls=calls: next(i for i, c in enumerate(calls) if pred(c))
         send = idx(lambda c: c.startswith("cti-mailer ") and "--armed" not in c)

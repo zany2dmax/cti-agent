@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/cli"
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/jira"
@@ -57,7 +58,9 @@ func run() int {
 	testTicket := flag.Bool("test-ticket", false,
 		"build a clearly-labelled test ticket")
 	forReal := flag.Bool("for-real", false,
-		"actually create it; without this, nothing is written")
+		"write to Jira: create, comment, close")
+	dryRun := flag.Bool("dry-run", false,
+		"show what would be written to Jira and write nothing")
 	fromEnriched := flag.String("from-enriched", "",
 		"file tickets for the present KEV, Sev5 and CVSS 9.0+ findings in this enriched JSON")
 	approve := flag.Bool("approve", false,
@@ -106,6 +109,15 @@ func run() int {
 		flag.Usage()
 		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up, " +
 			"--domains-actions, --appscan-tickets or --appscan-close-test")
+	}
+	// --check only reads. Everything else writes tickets, so it is told how.
+	if !*check {
+		if _, msg := cli.Resolve("cti-jira", *dryRun, *forReal, false, false, cli.Words{
+			DryRun:  "show what would be written to Jira and write nothing",
+			ForReal: "write to Jira: create, comment, close"}); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+			return 2
+		}
 	}
 
 	// fleet.env, then the environment wins, same as every other lane. A

@@ -3,10 +3,10 @@
 run-mailbox-cleanup \- daily tidy of the CTI mailbox: archive what was processed, delete auto-replies
 .SH SYNOPSIS
 .B run\-mailbox\-cleanup
-.RB [ \-\-dry\-run ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .PP
 .B sudo cti\-agent run\-mailbox\-cleanup
-.RB [ \-\-dry\-run ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .SH DESCRIPTION
 .B run-mailbox-cleanup
 runs
@@ -18,13 +18,13 @@ header-confirmed out-of-office replies to Deleted Items, and leaves
 everything else where it is. It refuses to act on a day with no processed
 CTI email, and that refusal is a success.
 .PP
-It moves mail unless
+It has no default: it has to be told how to run, with exactly one of
 .B \-\-dry\-run
-is given, like every other lane (which sends unless
-.BR \-\-dry\-run ).
-This lane used to be the exception, a dry run unless
-.BR \-\-for\-real ,
-so the command typed for any other lane rehearsed here. Run it with
+(print the plan and the reason for every message, move nothing) or
+.B \-\-for\-real
+(move the mail). With neither it prints usage and exits 2 without touching the
+mailbox. Every fleet command that changes something works this way. Run it
+with
 .B \-\-dry\-run
 first.
 .PP
@@ -53,7 +53,7 @@ is executable; fatal if not.
 .B 2.
 Runs
 .B cti\-mailbox
-.RB [ \-\-dry\-run ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .RB [ \-\-backlog\-threshold
 .IR N ]
 .B \-\-json
@@ -92,11 +92,16 @@ Pass
 .B \-\-dry\-run
 to
 .BR cti\-mailbox ,
-which then prints its plan and moves nothing. Without it the mail the plan lists
-is moved.
+which then prints its plan and moves nothing. One of this or
+.B \-\-for\-real
+is required.
 .TP
 .B \-\-for\-real
-The old spelling of the default. Accepted and ignored.
+Pass
+.B \-\-for\-real
+to
+.BR cti\-mailbox ,
+which then moves the mail its plan lists.
 .SH ENVIRONMENT
 .I fleet.env
 is sourced with every assignment exported, and its values replace the
@@ -159,12 +164,10 @@ sudo cti\-agent run\-mailbox\-cleanup \-\-dry\-run
 sudo less /var/lib/cti\-agent/state/mailbox\-cleanup\-$(date +%F).json
 .EE
 .PP
-Run the cleanup by hand (this moves mail; add
-.B \-\-dry\-run
-to rehearse):
+Run the cleanup by hand (this moves mail):
 .PP
 .EX
-sudo cti\-agent run\-mailbox\-cleanup
+sudo cti\-agent run\-mailbox\-cleanup \-\-for\-real
 .EE
 .SH SEE ALSO
 .BR cti\-mailbox (1),

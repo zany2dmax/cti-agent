@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
+	"github.com/zany2dmax/cti-agent/internal/cli"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailer"
@@ -112,6 +113,7 @@ func run() int {
 	boardID := flag.String("board-id", "",
 		"board line id, so your reply can be matched back to the question")
 	dryRun := flag.Bool("dry-run", false, "render and validate, send nothing")
+	forReal := flag.Bool("for-real", false, "send the message")
 	requireApproval := flag.Bool("require-approval", false,
 		"refuse unless --approve is also passed (off-cycle sends)")
 	approve := flag.Bool("approve", false,
@@ -120,6 +122,14 @@ func run() int {
 	check := flag.Bool("check", false, "verify configuration, token and granted roles")
 	flag.Var(&attach, "attach", "file to attach (repeatable, keep under ~3MB total)")
 	flag.Parse()
+	// --check only reads; anything else sends, so it has to be told how.
+	if !*check {
+		if _, msg := cli.Resolve("cti-mailer", *dryRun, *forReal, *toDev, true, cli.Words{
+			DryRun: "render and validate, send nothing", ForReal: "send the message"}); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+			return 2
+		}
+	}
 
 	// fleet.env, so a run by hand or by cron gets the same settings systemd
 	// gives it. Existing environment always wins.

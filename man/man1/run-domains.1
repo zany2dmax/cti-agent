@@ -3,12 +3,10 @@
 run-domains \- weekly domains check: run cti-domains, then mail the report to the domains audience
 .SH SYNOPSIS
 .B run\-domains
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .PP
 .B sudo cti\-agent run\-domains
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .SH DESCRIPTION
 .B run-domains
 runs
@@ -91,8 +89,20 @@ to
 so it still probes every domain and queries the registrar, and overwrites
 today's report files, but leaves last week's baseline in place: the real run
 still reports this week's changes. It sends nothing.
+.SH HOW TO RUN
+\fBrun-domains\fR mails the weekly report, files the lock-down ticket and advances the baseline, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (probe and render, change nothing), \fB\-\-for\-real\fR (send, file and advance),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
 Shell arguments, in any order.
+.TP
+.B \-\-for\-real
+Send the report, file or update the lock-down ticket, and advance the baseline. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required.
 .TP
 .B \-\-dry\-run
 Probe, render and print the subject; do not send and do not advance the

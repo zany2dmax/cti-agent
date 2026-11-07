@@ -320,7 +320,7 @@ stage_send() {
   fi
 
   if python3 "$KIT/fleet/lanes/mailer.py" --html "$HTML" --text "$TXT" \
-       --subject "$subject" --to "$to" --attach "$RAW" $dry \
+       --subject "$subject" --to "$to" --attach "$RAW" "${dry:---for-real}" \
        2>&1 | sed 's/^\[mailer\] /    /'; then
     if [ "$FOR_REAL" = "yes" ]; then
       ok "sent to $to - check the inbox, and the Sent Items of ${GRAPH_MAILBOX:-the sending mailbox}"
