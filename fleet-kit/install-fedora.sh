@@ -173,6 +173,7 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
+  rm -f /usr/local/sbin/cti-agent-update
   bold "Removing tab completion"
   rm -f /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent
   bold "Removing man pages"
@@ -1001,8 +1002,20 @@ esac
 WRAP
   chmod 0755 /usr/local/bin/cti-agent
   ok "installed - try: sudo cti-agent fleet-db recent"
+  # The updater: pull this kit, then run the installer from it. A fixed path to
+  # the kit it was installed from, so `sudo cti-agent-update --for-real` is the
+  # whole update. In /usr/local/sbin, which sudo's secure_path includes.
+  install -d -m 0755 /usr/local/sbin
+  cat > /usr/local/sbin/cti-agent-update <<UPDATER
+#!/usr/bin/env bash
+# cti-agent-update - pull the kit and run the installer from it. Written by
+# install-fedora.sh. Say how: --dry-run (look) or --for-real (update).
+exec "$SRC/update-fedora.sh" "\$@"
+UPDATER
+  chmod 0755 /usr/local/sbin/cti-agent-update
+  ok "installed - update the box with: sudo cti-agent-update --for-real"
 else
-  info "would write /usr/local/bin/cti-agent"
+  info "would write /usr/local/bin/cti-agent and /usr/local/sbin/cti-agent-update"
 fi
 
 # ────────────────────────────────────────────────────────── verification ─────

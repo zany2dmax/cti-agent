@@ -316,8 +316,7 @@ task ship           # fmt, build, test, lint, scan, gosec, govulncheck, ruff, ba
 # --- on the Fedora box: deploy, verify, then enable ---
 # KIT = wherever the kit checkout lives. Not ~, because the deploy runs
 # under sudo and $HOME is then root's.
-sudo git -C "$KIT" pull
-sudo "$KIT/fleet-kit/install-fedora.sh"
+sudo "$KIT/fleet-kit/update-fedora.sh" --for-real   # pull the kit, then install (= sudo cti-agent-update --for-real)
 sudo vi /etc/cti-agent/fleet.env            # any new settings
 sudo cti-agent mailer.py --check            # token + granted roles
 sudo cti-agent run-digest daily --dry-run   # read it before enabling anything

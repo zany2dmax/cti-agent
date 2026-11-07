@@ -131,6 +131,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   instead of running; add `--dry-run` or `--for-real`. Notes and scripts of
   yours that call these without a mode need the same.
 
+### Added (updating)
+
+- **`cti-agent-update`: one command to update the box.** There are two checkouts
+  on the box: the kit (`install-fedora.sh`, the runners, the units, the manifest)
+  and the Go source under `/opt/cti-agent/agent`, which the installer pulls
+  itself. Nothing pulled the kit, and the installer runs from it, so the old
+  "`git pull`, then the installer" was easy to do halfway or in the wrong order,
+  and a tag pushed after the commit it names left a box reporting the wrong
+  version. `sudo cti-agent-update --for-real` pulls the kit (with tags), then runs
+  the installer from the updated kit; `--dry-run` shows what is incoming and
+  changes nothing. It says how to run, like every command that changes
+  something. It refuses a kit with local edits or one inside the installed tree,
+  says when the result is not an exact release tag, and survives updating its own
+  file. The installer puts `cti-agent-update` in `/usr/local/sbin`; before that,
+  run `fleet-kit/update-fedora.sh` by path. **Upgrade:** re-run the installer once.
+
 ### Fixed
 
 - **Section headings in the Go lanes' emails showed in lowercase in Outlook.**

@@ -392,9 +392,19 @@ sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit
 # No `cd ~/...`: the deploy runs under sudo, so ~ is whichever account is
 # logged in, not where the checkout is.
 KIT=/root/cti-agent-kit
-sudo git -C "$KIT" pull
-sudo "$KIT/fleet-kit/install-fedora.sh"
+sudo "$KIT/fleet-kit/update-fedora.sh" --for-real    # pulls the kit, then installs from it
+# (the installer leaves this as `sudo cti-agent-update --for-real`; --dry-run
+# shows what is incoming and changes nothing)
 ```
+
+`update-fedora.sh` exists because there are two checkouts on the box. The kit is
+this one (`install-fedora.sh`, the runners, the units, the manifest); the Go
+source under `/opt/cti-agent/agent` is pulled by the installer itself. Nothing
+pulled the kit, and the installer runs from it, so the old two-step
+(`git pull`, then the installer) was easy to do halfway. The updater pulls with
+tags, refuses a kit with local edits or one inside the installed tree, says if
+the result is not an exact release tag, and hands over with `exec` so it can
+safely update its own file.
 
 The repository is public and `AGENT_REPO` is plain HTTPS, so the clone needs no
 credentials on the box.
@@ -1873,6 +1883,7 @@ for a copy that leaves the distribution list.
 fleet-kit/
 ├── README.md                      this runbook
 ├── install-fedora.sh              idempotent installer (Fedora/RHEL, FHS layout)
+├── update-fedora.sh               pull the kit, then run the installer from it (cti-agent-update)
 ├── bin/dev-run                    local runner: doctor/ingest/enrich/brief/send
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate

@@ -328,15 +328,27 @@ no key is needed):
 sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit   # once
 ```
 
-Then, each update:
+Then, each update is one command. It pulls the kit (and its tags), then runs the
+installer from the updated kit, so the installer and the files it copies are the
+same version:
 
 ```bash
-sudo git -C /root/cti-agent-kit pull
-sudo sh /root/cti-agent-kit/fleet-kit/install-fedora.sh --dry-run   # what it would change
-sudo sh /root/cti-agent-kit/fleet-kit/install-fedora.sh             # install; keeps fleet.env and state
-sudo cat /etc/cti-agent/version                 # confirm the new commit
-systemctl list-timers 'cti-agent-*'             # timers still scheduled
+sudo cti-agent-update --dry-run      # what is incoming; changes nothing
+sudo cti-agent-update --for-real     # pull the kit, then install; keeps fleet.env and state
+sudo cat /etc/cti-agent/version      # confirm: tag, commit, no -DIRTY
+systemctl list-timers 'cti-agent-*'  # timers still scheduled
 ```
+
+`cti-agent-update` is put on the box by the installer. The first time (or on a
+box installed before it existed) run it by path:
+`sudo /root/cti-agent-kit/fleet-kit/update-fedora.sh --for-real`. If its last
+line says the kit is "not an exact release tag", the commit was pushed without
+its tag: push the tag, then run it again.
+
+Why not just `git pull` and the installer? There are two checkouts: this kit, and
+the Go source under `/opt/cti-agent/agent` that the installer pulls itself. Nothing
+else updates the kit, and the installer runs from it, so skipping that pull runs
+last release's installer over this release's source.
 
 Install a new domain inventory:
 
