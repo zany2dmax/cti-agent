@@ -35,7 +35,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.5.2 — 2026-11-07
+
+**Upgrade:** pull and re-run the installer. Nothing else is required.
 
 ### Fixed
 
