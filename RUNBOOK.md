@@ -1100,6 +1100,43 @@ A dry run leaves the rendered report at
 the timer: it names which applications have open Urgent findings, so it is a
 map of where to look, and it is handled like the VM reports for that reason.
 
+### The weekly VM scan report (run-vmscan)
+
+`cti-agent-vmscan.timer`, Mondays 08:00, runner `run-vmscan`. The two scheduled
+Qualys VM scans ("Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly")
+each email a "Qualys: Scan Results" notice when they finish. This lane reads
+those notices from the CTI mailbox and sends **one** email with both scans, kept
+in separate sections: when each ran and for how long, addresses scanned and
+alive, its Target Groups, and the confirmed counts by severity with their trend.
+Potential findings are shown apart and never added to the confirmed counts.
+
+```bash
+sudo cti-agent run-vmscan --dry-run   # render, print the subject, send nothing
+sudo cti-agent run-vmscan --to-dev    # the same email to FLEET_DEV_EMAIL only
+sudo cti-agent run-vmscan --for-real  # send, and record the notices as used
+```
+
+Recipients are `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO`, which has no
+fallback (unset = refuses). `VMSCAN_ALLOW_TO=$VM_ALLOW_TO` reuses the VM
+audience. `VMSCAN_SCANS` names the scans to combine; unset, it is the two above.
+
+What the subject can say first: `[NO RESULT]` when a scheduled scan left no
+notice (it did not finish, or its mail never arrived), `[INCOMPLETE]` when one
+did not finish, otherwise the Urgent and Critical totals.
+
+**Getting the notices into the mailbox.** Qualys sends them to the people on
+each schedule's notification list and, for the owner-only notice, to the scan's
+owner. A schedule owned by a user whose email is not `cybersecurity@` does not
+reach this mailbox. Reassign the schedule to the `REDACTED-USER` service account, add
+`cybersecurity@` to its notification recipients, and set the notification From
+Address to `qualys@qualys.net`: a notice that looks as if it came from
+`cybersecurity@` is treated as the fleet's own mail, and the lane logs it and
+reads nothing.
+
+The notices it uses are archived by the mailbox cleanup 48 hours after a real
+send. The other Qualys notices for the same scan (Scan Completed, the
+owner-only notice, scan scheduled to start) are left in the inbox for a person.
+
 ### Reports to application owners, by email
 
 `cti-agent-appowners.timer`, daily 07:15, runner `run-appowners`. For every

@@ -220,6 +220,18 @@ flag: --to STRING | end of the window (default: one hour after --since)
 flag: --top INT | rows to print per table (default 20)
 flag: --type STRING | stream type: message, maillog or audit (default "message")
 
+command: cti-vmscan
+about: Combine the week's Qualys VM scan-result notices into one report
+runs: local
+risk: --commit-seen writes
+flag: --since DURATION | how far back to look for scan-result notices
+flag: --scans STRING | comma-separated titles of the scheduled scans to combine (default VMSCAN_SCANS, else the two weeklies)
+flag: --out FILE | write the HTML here
+flag: --text-out FILE | write the plain-text version here
+flag: --subject-out FILE | write the subject line here
+flag: --seen-out FILE | write the notices this report covered here, for --commit-seen after the send
+flag: --commit-seen FILE | record a --seen-out file in the processed log the mailbox cleanup reads, then exit
+
 command: enrich.py
 about: Enrich CVEs with NVD, EPSS and KEV
 runs: local
@@ -373,6 +385,14 @@ flag: --to-dev | test send to FLEET_DEV_EMAIL only
 flag: --month YYYY-MM | a past release: --dry-run replays it; --for-real needs FLEET_CONFIRM_RESEND=MONTH too
 flag: --for-real | send the synopsis and mark it sent
 flag: --resend | with --for-real: send a release that was already sent
+
+command: run-vmscan
+about: Weekly Qualys VM scan report: the two scheduled scans combined into one email
+runs: effect
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print the subject, send and record nothing
+flag: --for-real | send the report and record the notices as used
+flag: --to-dev | test send to FLEET_DEV_EMAIL only
 
 command: scout.py
 about: Poll the CTI feeds for new CVE IDs

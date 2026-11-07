@@ -1,0 +1,98 @@
+.TH RUN-VMSCAN 1 "2026-11-07" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+run-vmscan \- weekly Qualys VM scan report: the two scheduled scans combined into one email
+.SH SYNOPSIS
+.B run\-vmscan
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
+.PP
+.B sudo cti\-agent run\-vmscan
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
+.SH DESCRIPTION
+.B run-vmscan
+runs
+.BR cti\-vmscan (1)
+to build the combined report from the week's
+.B "Qualys: Scan Results"
+notices and mails it through
+.BR cti\-mailer (1)
+\-\-lane vmscan. Both scans appear in the one email, each in its own section.
+.PP
+Recipients are
+.BR VMSCAN_TO ,
+checked against
+.BR VMSCAN_ALLOW_TO ,
+which has no fallback: unset means the mailer refuses. Setting
+.B VMSCAN_ALLOW_TO=$VM_ALLOW_TO
+reuses the VM audience.
+.PP
+It is run by
+.B cti\-agent\-vmscan.service
+as
+.B run\-vmscan \-\-for\-real
+from
+.BR cti\-agent\-vmscan.timer ,
+Mondays at 08:00 local (the installer pins it to
+.B FLEET_TIMEZONE
+with
+.BR FLEET_VMSCAN_TIME ).
+.SH HOW TO RUN
+\fBrun\-vmscan\fR mails a report, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (render and print the subject, send nothing), \fB\-\-for\-real\fR (send the report and record the notices as used),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way.
+.SH OPTIONS
+A shell argument, matched exactly. Any other argument is refused.
+.TP
+.B \-\-dry\-run
+Render the report, print the subject, send nothing and record nothing.
+.TP
+.B \-\-for\-real
+Send the report. After a real send the notices it covered are recorded, so the
+mailbox cleanup archives them 48 hours on.
+.TP
+.B \-\-to\-dev
+Mail the report to
+.B FLEET_DEV_EMAIL
+only, subject prefixed [DEV TEST]. Nothing is recorded.
+.SH ENVIRONMENT
+.TP
+.B VMSCAN_TO
+Recipients.
+.TP
+.B VMSCAN_ALLOW_TO
+The allowlist they are checked against.
+.TP
+.B VMSCAN_SCANS
+The scans to combine, by title.
+.TP
+.B FLEET_VMSCAN_TIME
+When the installer pins the timer, in
+.BR FLEET_TIMEZONE .
+.SH EXIT STATUS
+.TP
+.B 0
+The report was sent (or rendered, for
+.BR \-\-dry\-run ).
+.TP
+.B 1
+cti\-vmscan or cti\-mailer failed, or a binary is missing.
+.TP
+.B 2
+No mode was given, or an unknown argument.
+.SH EXAMPLES
+Rehearse this week's report:
+.PP
+.EX
+sudo cti\-agent run\-vmscan \-\-dry\-run
+.EE
+.PP
+Send it to yourself first:
+.PP
+.EX
+sudo cti\-agent run\-vmscan \-\-to\-dev
+.EE
+.SH SEE ALSO
+.BR cti\-vmscan (1),
+.BR cti\-mailer (1),
+.BR cti\-mailbox (1)

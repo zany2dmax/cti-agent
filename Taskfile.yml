@@ -597,7 +597,7 @@ tasks:
 # ── build ────────────────────────────────────────────────────────────────────
 
   build:
-    desc: Build all ten binaries, stamped with the current tag and commit
+    desc: Build all eleven binaries, stamped with the current tag and commit
     deps: [tidy]
     # Stamped here as well as in install-fedora.sh, so a binary built on the
     # workstation does not claim "unknown" while the one in production can
@@ -631,6 +631,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailer ./cmd/cti-mailer
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-jira ./cmd/cti-jira
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-appscan ./cmd/cti-appscan
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-vmscan ./cmd/cti-vmscan
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-appreport ./cmd/cti-appreport
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-domains ./cmd/cti-domains
 

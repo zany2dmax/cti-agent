@@ -39,6 +39,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The weekly Qualys VM scan report: the two scheduled scans in one email.**
+  `run-vmscan` (timer `cti-agent-vmscan`, Mondays 08:00, `FLEET_VMSCAN_TIME`)
+  reads the "Qualys: Scan Results" notices for "Weekly Scheduled Scan for
+  non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly" from the CTI mailbox and sends one email to
+  `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO` (no fallback; set it to
+  `$VM_ALLOW_TO` to reuse the VM audience), with the two scans in separate
+  sections: when each ran and for how long, addresses scanned and alive, its
+  Target Groups, and confirmed counts by severity with their trend. Potential
+  findings are shown apart. A scheduled scan with no result leads the report
+  (`[NO RESULT]` in the subject), and one that did not finish is `[INCOMPLETE]`.
+  The notices it used are recorded after a real send, so the mailbox cleanup
+  archives them 48 hours later; the other Qualys notices for the same scan are
+  left alone. `VMSCAN_SCANS` changes which scans are combined. New commands
+  `cti-vmscan` and `run-vmscan`, with man pages. **Upgrade:** re-run the
+  installer and set `VMSCAN_TO` and `VMSCAN_ALLOW_TO` in `fleet.env`, then enable
+  `cti-agent-vmscan.timer`. For the REDACTED-SUB/REDACTED-SUB scan's notices to reach the mailbox,
+  reassign that schedule to the `REDACTED-USER` account and set its notification From
+  Address to `qualys@qualys.net` (see RUNBOOK).
+
 - **Ask the CLI instead of remembering it: a command list, usage and TAB
   completion.** `sudo cti-agent` with no arguments lists every fleet command
   and whether it only reads, writes its own files, or changes something

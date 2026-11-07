@@ -241,6 +241,8 @@ func ownedBy(owner string) string {
 		return "processed and carried at least one CVE"
 	case OwnerAppScan:
 		return "a scan notification the application-security weekly reported on"
+	case OwnerVMScan:
+		return "a vulnerability-scan result the VM scan weekly combined and sent"
 	default:
 		return "read by the " + owner + " lane, which owns it"
 	}

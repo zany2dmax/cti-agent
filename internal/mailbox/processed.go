@@ -105,6 +105,10 @@ func LogPath() string {
 // OwnerAppScan is the application-security lane's name in Processed.Owner.
 const OwnerAppScan = "appscan"
 
+// OwnerVMScan is the VM scan lane's name in Processed.Owner: the Qualys VMDR
+// results notices its weekly combined and sent.
+const OwnerVMScan = "vmscan"
+
 // OwnerLogPath is where a lane other than the digest records the mail it
 // owns: $FLEET_HOME/state/processed-<owner>.json, "" without FLEET_HOME.
 //

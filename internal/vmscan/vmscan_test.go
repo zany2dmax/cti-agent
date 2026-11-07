@@ -1,0 +1,215 @@
+package vmscan
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestParsesTheNonUMIWeekly(t *testing.T) {
+	s, problems := Provider{}.Parse(fixture(t, "results-non-umi.html"))
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	if s.Title != "Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" || !s.Finished() {
+		t.Errorf("title/status = %q %q", s.Title, s.Status)
+	}
+	want := time.Date(2026, 11, 5, 13, 0, 24, 0, time.UTC)
+	if !s.Start.Equal(want) {
+		t.Errorf("start = %v, want %v", s.Start, want)
+	}
+	if s.Duration != 11*time.Hour+45*time.Minute+11*time.Second {
+		t.Errorf("duration = %v", s.Duration)
+	}
+	if s.HostsScanned != 9730 || s.ActiveHosts != 1689 {
+		t.Errorf("hosts = %d / %d", s.HostsScanned, s.ActiveHosts)
+	}
+	if len(s.TargetGroups) != 24 {
+		t.Errorf("%d target groups, want 24: %v", len(s.TargetGroups), s.TargetGroups)
+	}
+	if s.Confirmed[5] != (Counts{Total: 1612, New: 99, Reopened: 0, Active: 1513, Closed: -5}) {
+		t.Errorf("sev 5 = %+v", s.Confirmed[5])
+	}
+	if s.Confirmed.Sum() != 7539 || s.Potential.Sum() != 2464 {
+		t.Errorf("sums = %d, %d", s.Confirmed.Sum(), s.Potential.Sum())
+	}
+	if s.InfoTotal != 49650 {
+		t.Errorf("info = %d", s.InfoTotal)
+	}
+	if s.Ref != "scan/1793883625.34774" || !strings.HasPrefix(s.ReportURL, "https://qualysguard.qg3.apps.qualys.com/") {
+		t.Errorf("link = %q (%q)", s.ReportURL, s.Ref)
+	}
+}
+
+// The real notice has an invisible byte-order mark in front of one group name.
+func TestAnInvisibleMarkDoesNotSpoilAGroupName(t *testing.T) {
+	s, _ := Provider{}.Parse(fixture(t, "results-non-umi.html"))
+	found := false
+	for _, g := range s.TargetGroups {
+		if strings.ContainsRune(g, '\ufeff') {
+			t.Errorf("%q still carries a byte-order mark", g)
+		}
+		if g == "ARD Miami" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ARD Miami missing: %v", s.TargetGroups)
+	}
+}
+
+func TestParsesTheUMITRJWeeklyAndADayLongDuration(t *testing.T) {
+	s, problems := Provider{}.Parse(fixture(t, "results-umi-trj.html"))
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	if s.Title != "REDACTED-SUB/REDACTED-SUB Weekly" || len(s.TargetGroups) != 21 {
+		t.Errorf("title %q, %d groups", s.Title, len(s.TargetGroups))
+	}
+	if s.Duration != 24*time.Hour+2*time.Minute+33*time.Second {
+		t.Errorf("duration = %v (%s)", s.Duration, FormatDuration(s.Duration))
+	}
+	if FormatDuration(s.Duration) != "1d 00h02m" {
+		t.Errorf("formatted = %s", FormatDuration(s.Duration))
+	}
+	if s.Confirmed[5].Total != 4092 || s.Potential[5].Total != 36 {
+		t.Errorf("sev 5: %+v / %+v", s.Confirmed[5], s.Potential[5])
+	}
+}
+
+// The hidden preheader repeats "Scan Title : ..." on one line; it must not be
+// read as the field.
+func TestOnlyTheVisibleBodyIsRead(t *testing.T) {
+	body := fixture(t, "results-umi-trj.html")
+	s, _ := Provider{}.Parse(body)
+	if strings.Contains(s.Title, "Start Date") {
+		t.Errorf("the preheader leaked into the title: %q", s.Title)
+	}
+}
+
+func TestRecognisesOnlyQualysResultsNotices(t *testing.T) {
+	p := Provider{}
+	for _, c := range []struct {
+		from, subject string
+		want          bool
+	}{
+		{"qualys@qualys.net", "Qualys: Scan Results", true},
+		{"Qualys <qualys@qualys.net>", "Qualys: Scan Results", true},
+		{"qualys@qualys.net", "Qualys: Scan Completed", false},
+		{"qualys@qualys.net", "FW: Qualys: Scan Results", false},
+		{"qualys@qualys.net", "Qualys: Web Application Vulnerability Scan Results", false},
+		{"qualys@qualys.net.attacker.example", "Qualys: Scan Results", false},
+		{"\"qualys@qualys.net\" <evil@example.com>", "Qualys: Scan Results", false},
+		{"user@example.com", "Qualys: Scan Results", false},
+	} {
+		if got := p.Recognises(c.from, c.subject); got != c.want {
+			t.Errorf("Recognises(%q, %q) = %v, want %v", c.from, c.subject, got, c.want)
+		}
+	}
+}
+
+// Seen for real with the WAS lane: a scanner account whose notification
+// sender was the team mailbox.
+func TestALookalikeFromTheTeamMailboxIsFlaggedNotRead(t *testing.T) {
+	p := Provider{}
+	if !p.Lookalike("user@example.com", "Qualys: Scan Results") {
+		t.Error("a results notice from the team mailbox is not flagged")
+	}
+	if p.Lookalike("qualys@qualys.net", "Qualys: Scan Results") {
+		t.Error("the real notice is flagged")
+	}
+	if p.Lookalike("someone@example.com", "FW: Qualys: Scan Results") {
+		t.Error("a person's forward is flagged; it needs a human, not a warning")
+	}
+}
+
+func TestATemplateChangeAnnouncesItself(t *testing.T) {
+	_, problems := Provider{}.Parse("<pre>nothing useful here</pre>")
+	if len(problems) < 3 {
+		t.Errorf("an unreadable notice reported only %v", problems)
+	}
+}
+
+func both(t *testing.T) []Scan {
+	t.Helper()
+	a, _ := Provider{}.Parse(fixture(t, "results-non-umi.html"))
+	b, _ := Provider{}.Parse(fixture(t, "results-umi-trj.html"))
+	return []Scan{b, a}
+}
+
+func TestCombineKeepsBothWeekliesInTheExpectedOrder(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	if len(w.Scans) != 2 || len(w.Missing) != 0 {
+		t.Fatalf("scans %d, missing %v", len(w.Scans), w.Missing)
+	}
+	if w.Scans[0].Title != DefaultScans[0] || w.Scans[1].Title != DefaultScans[1] {
+		t.Errorf("order: %q, %q", w.Scans[0].Title, w.Scans[1].Title)
+	}
+}
+
+func TestCombineCountsADuplicateNoticeOnceAndTakesTheNewestRun(t *testing.T) {
+	s := both(t)
+	older := s[1]
+	older.Ref, older.Start = "scan/1", older.Start.Add(-7*24*time.Hour)
+	dup := s[1] // same Ref as the newest
+	w := Combine(append(s, older, dup), DefaultScans)
+	if len(w.Scans) != 2 || !w.Scans[0].Start.Equal(s[1].Start) {
+		t.Errorf("did not keep the newest run once: %+v", w.Scans)
+	}
+}
+
+// A scheduled scan that left no notice is the first thing to say.
+func TestAMissingScanIsReportedFirst(t *testing.T) {
+	w := Combine(both(t)[:1], DefaultScans) // only REDACTED-SUB/REDACTED-SUB
+	if len(w.Missing) != 1 || w.Missing[0] != DefaultScans[0] {
+		t.Fatalf("missing = %v", w.Missing)
+	}
+	sub := w.Subject("Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
+	if !strings.HasPrefix(sub, "[NO RESULT]") {
+		t.Errorf("subject = %q", sub)
+	}
+	if !strings.Contains(w.Text("Acme", time.Now()), "No result came back for") {
+		t.Error("the text does not lead with the missing scan")
+	}
+}
+
+func TestAnUnfinishedScanIsFlagged(t *testing.T) {
+	s := both(t)
+	s[0].Status = "Canceled"
+	w := Combine(s, DefaultScans)
+	if sub := w.Subject("Acme", time.Now()); !strings.HasPrefix(sub, "[INCOMPLETE]") {
+		t.Errorf("subject = %q", sub)
+	}
+}
+
+func TestTheCombinedReportKeepsTheTwoScansSeparate(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
+	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR NON-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB WEEKLY", "9730", "7168"} {
+		if !strings.Contains(b.Text, want) {
+			t.Errorf("text lacks %q", want)
+		}
+	}
+	for _, want := range []string{"Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB Weekly", "ARD Miami", "REDACTED-SUB Charlotte"} {
+		if !strings.Contains(b.HTML, want) {
+			t.Errorf("html lacks %q", want)
+		}
+	}
+	// 1612 + 4092 Urgent across the two.
+	if got := w.total(5); got != 1612+4092 {
+		t.Errorf("urgent total = %d", got)
+	}
+	if strings.Contains(b.HTML, "<a href") {
+		t.Error("a report link was rendered as an anchor")
+	}
+}

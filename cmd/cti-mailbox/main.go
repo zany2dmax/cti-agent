@@ -126,7 +126,7 @@ func run() int {
 	// not run yet, or is not installed); corrupt is the same hard stop as the
 	// digest's log, for the same reason.
 	var owned []*mailbox.Log
-	for _, owner := range []string{mailbox.OwnerAppScan} {
+	for _, owner := range []string{mailbox.OwnerAppScan, mailbox.OwnerVMScan} {
 		p := mailbox.OwnerLogPath(owner)
 		ol, err := mailbox.NewStore(p).Load()
 		if err != nil {

@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+#
+# run-vmscan - the weekly Qualys VM scan report, the two scheduled scans
+# combined into one email.
+#
+# Reads the "Qualys: Scan Results" notices that arrived in the CTI mailbox over
+# the last week, takes the newest result for each scheduled scan (VMSCAN_SCANS,
+# by default "Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly"),
+# renders one report with the scans kept separate, and mails it through
+# cti-mailer --lane vmscan. A scheduled scan with no result is the first thing
+# the report says.
+#
+# Recipients are VMSCAN_TO, checked against VMSCAN_ALLOW_TO, which has no
+# fallback: unset means the mailer refuses. Set VMSCAN_ALLOW_TO=$VM_ALLOW_TO to
+# reuse the VM audience. See cti-mailer(1).
+#
+# USAGE (one of the three is required; with none it prints usage and exits 2)
+#   run-vmscan --for-real   render, send, and record the notices as used
+#   run-vmscan --dry-run    render, print the subject, send nothing
+#   run-vmscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST] subject
+set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+
+# Sourced here AND loaded by the binary, as every runner does: the `sudo
+# cti-agent` wrapper passes only the layout variables, so the credentials can
+# only arrive through fleet.env.
+FLEET_HOME="${FLEET_HOME:-$HOME}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+export FLEET_HOME FLEET_CODE
+STATE="$FLEET_HOME/state"
+
+fail() { echo "[run-vmscan] error: $*" >&2; exit 1; }
+log()  { echo "[run-vmscan] $*" >&2; }
+
+DRY=""
+REAL=""
+TODEV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run" ;;
+    --for-real) REAL=1 ;;
+    --to-dev)   TODEV=1 ;;
+    *)          fail "unknown argument: $1 (only --dry-run, --for-real and --to-dev are accepted)" ;;
+  esac
+  shift
+done
+fleet_require_mode run-vmscan "$DRY" "$REAL" "$TODEV" allow-dev
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
+fi
+
+VMSCAN="$FLEET_CODE/bin/cti-vmscan"
+MAILER="$FLEET_CODE/bin/cti-mailer"
+[ -x "$VMSCAN" ] || fail "cti-vmscan not found at $VMSCAN - rerun the installer"
+[ -x "$MAILER" ] || fail "cti-mailer not found at $MAILER - rerun the installer"
+
+mkdir -p "$STATE"
+chmod 0700 "$STATE" 2>/dev/null || true
+
+STAMP="$(date -u +%Y-%m-%d)"
+HTML="$STATE/vmscan-$STAMP.html"
+TXT="$STATE/vmscan-$STAMP.txt"
+SUBJFILE="$STATE/vmscan-subject-$STAMP.txt"
+SEEN="$STATE/vmscan-seen-$STAMP.json"
+# Mode set before anything is written: the report names which scans found what.
+: > "$HTML"; chmod 0600 "$HTML"
+: > "$TXT";  chmod 0600 "$TXT"
+rm -f "$SUBJFILE" "$SEEN"
+
+"$VMSCAN" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJFILE" --seen-out "$SEEN" \
+  || fail "cti-vmscan exited non-zero (check outbound 443 to Graph)"
+[ -s "$SUBJFILE" ] || fail "cti-vmscan wrote no subject line"
+SUBJECT="$(head -n 1 "$SUBJFILE")"
+log "subject: $SUBJECT"
+
+if [ -n "$TODEV" ]; then
+  # FLEET_DEV_EMAIL only. VMSCAN_TO / VMSCAN_ALLOW_TO are not consulted, so a
+  # test works before the lane's audience is configured.
+  # shellcheck disable=SC2086
+  "$MAILER" --to-dev --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+    || fail "test send failed"
+else
+  # shellcheck disable=SC2086
+  "$MAILER" --lane vmscan --html "$HTML" --text "$TXT" --subject "$SUBJECT" "${DRY:---for-real}" \
+    || fail "send failed - if VMSCAN_TO or VMSCAN_ALLOW_TO is unset the mailer refuses by design"
+  # Sent: the lane has now used these notices, so the mailbox cleanup may
+  # archive them 48 hours on. Non-fatal - the report is out, and an unrecorded
+  # notice is only left in the inbox.
+  if [ -z "$DRY" ] && [ -s "$SEEN" ]; then
+    "$VMSCAN" --commit-seen "$SEEN" \
+      || log "warn: could not record the notices for the mailbox cleanup; they stay in the inbox"
+  fi
+fi
+rm -f "$SEEN"
+
+if [ -n "$DRY" ]; then
+  log "dry run - nothing was sent. The rendered report is at $HTML"
+elif [ -n "$TODEV" ]; then
+  log "test send - mailed to FLEET_DEV_EMAIL only. The rendered report is at $HTML"
+fi
+log "done"

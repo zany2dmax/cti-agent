@@ -158,7 +158,7 @@ class TestEveryEffectCommandMustBeToldHowToRun(unittest.TestCase):
                     self.assertIn(m, c["flags"], f"{m} is not a flag of {name}")
 
     BASH = ("run-digest", "run-appscan", "run-domains", "run-appowners",
-            "run-patchtuesday", "run-mailbox-cleanup", "run-checkin")
+            "run-patchtuesday", "run-mailbox-cleanup", "run-checkin", "run-vmscan")
 
     def _bash(self, name, *args):
         script = ROOT / "fleet-kit" / "fleet" / "bin" / name

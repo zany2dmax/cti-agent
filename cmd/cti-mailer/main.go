@@ -499,6 +499,8 @@ var optional = [][2]string{
 	{"WAS_ALLOW_TO", "--lane was allowlist; NO fallback - unset means it will not send"},
 	{"DOM_TO", "--lane dom recipients; the weekly domains check, security team only"},
 	{"DOM_ALLOW_TO", "--lane dom allowlist; NO fallback - unset means it will not send"},
+	{"VMSCAN_TO", "--lane vmscan recipients; the weekly Qualys VM scan report"},
+	{"VMSCAN_ALLOW_TO", "--lane vmscan allowlist; NO fallback - unset means it will not send"},
 	{"OWNER_ALLOW_DOMAINS", "--lane owner: domains an app owner or watcher may be at; unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},

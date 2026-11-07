@@ -1,0 +1,125 @@
+.TH CTI-VMSCAN 1 "2026-11-07" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
+.SH SYNOPSIS
+.B cti-vmscan
+.RB [ \-\-since
+.IR DURATION ]
+.RB [ \-\-scans
+.IR TITLES ]
+.RB [ \-\-out
+.IR FILE ]
+.RB [ \-\-text\-out
+.IR FILE ]
+.RB [ \-\-subject\-out
+.IR FILE ]
+.RB [ \-\-seen\-out
+.IR FILE ]
+.PP
+.B cti-vmscan \-\-commit\-seen
+.I FILE
+.PP
+.B sudo cti\-agent cti\-vmscan
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-vmscan
+reads the
+.B "Qualys: Scan Results"
+notices that arrived in the CTI mailbox over the last week (Graph, read-only),
+takes the newest result for each scheduled scan it is told to expect, and
+renders one report with the scans kept separate: when each ran and for how
+long, how many addresses it scanned and how many were alive, its Target Groups,
+and the confirmed vulnerability counts by severity with their trend since the
+last scan. Potential findings are shown apart and never added to the confirmed
+counts.
+.PP
+It sends nothing. It is run by
+.BR run\-vmscan (1),
+which hands the files to
+.BR cti\-mailer (1)
+\-\-lane vmscan.
+.PP
+A scheduled scan that left no result in the window is the first thing the
+report says, and its subject begins
+.BR [NO\ RESULT] ;
+a scan that did not finish is flagged
+.BR [INCOMPLETE] .
+.PP
+A message with the results subject that did not come from Qualys is not read.
+It is logged with a pointer to the usual cause, a schedule whose notification
+From Address is set to this mailbox. Set it to qualys@qualys.net.
+.PP
+Only the results notices of the expected scans are recorded as used. The other
+Qualys notices for the same scan (Scan Completed, the owner-only notification,
+scan scheduled to start) carry nothing the report uses and are left alone.
+.SH OPTIONS
+.TP
+.BI \-\-since " DURATION"
+How far back to look for scan-result notices. Default 168h.
+.TP
+.BI \-\-scans " TITLES"
+Comma-separated titles of the scheduled scans to combine. Default
+.BR VMSCAN_SCANS ,
+else
+.B Weekly Scheduled Scan for non\-REDACTED-SUB/REDACTED-SUB
+and
+.BR "REDACTED-SUB/REDACTED-SUB Weekly" .
+Titles are compared ignoring case and spacing.
+.TP
+.BI \-\-out " FILE"
+Write the HTML report here (mode 0600).
+.TP
+.BI \-\-text\-out " FILE"
+Write the plain-text version here.
+.TP
+.BI \-\-subject\-out " FILE"
+Write the subject line here, so the runner need not run a second time.
+.TP
+.BI \-\-seen\-out " FILE"
+Write the notices this report covered here, as JSON, for
+.BR \-\-commit\-seen .
+.TP
+.BI \-\-commit\-seen " FILE"
+Record a
+.B \-\-seen\-out
+file in the VM scan lane's processed log, then exit. The mailbox cleanup reads
+that log and archives those notices once they are 48 hours old.
+.B run\-vmscan
+does this only after a real send.
+.SH ENVIRONMENT
+.TP
+.B VMSCAN_SCANS
+The scans to combine, by title, comma separated.
+.TP
+.B FLEET_ORG
+The organisation name in the report header.
+.PP
+The Graph settings are those of the other lanes
+.RB ( TENANT_ID ,
+.BR CLIENT_ID ,
+.BR CLIENT_SECRET ,
+.BR GRAPH_MAILBOX ).
+.SH FILES
+.TP
+.I $FLEET_HOME/state/processed\-vmscan.json
+The notices this lane has used, written by
+.BR \-\-commit\-seen .
+.SH EXIT STATUS
+.TP
+.B 0
+The report was written. A missing or unfinished scan is in the report, not an
+error.
+.TP
+.B 1
+The mailbox could not be read, a file could not be written, or the processed
+log does not parse.
+.SH EXAMPLES
+Render this week's report without sending it:
+.PP
+.EX
+sudo cti\-agent cti\-vmscan \-\-out /tmp/vm.html \-\-text\-out /tmp/vm.txt
+.EE
+.SH SEE ALSO
+.BR run\-vmscan (1),
+.BR cti\-mailer (1),
+.BR cti\-mailbox (1)

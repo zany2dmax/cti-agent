@@ -460,6 +460,12 @@ func TestOnlyCTIAdvisoriesAndAutoRepliesEverMove(t *testing.T) {
 		{"Qualys: Scheduled Web Application Vulnerability Scan Notification",
 			Processed{Owner: OwnerAppScan}, false, ActionArchive,
 			"a scan notice the appscan weekly reported on - its owner has seen it"},
+		{"Qualys: Scan Results",
+			Processed{Owner: OwnerVMScan}, false, ActionArchive,
+			"a VM scan result the vmscan weekly combined and sent - its owner has used it"},
+		{"Qualys: Scan Completed",
+			Processed{}, false, ActionLeave,
+			"the other notice for the same scan: nothing uses it, so it stays for a person"},
 
 		// Everything a shared security mailbox actually receives. Every one of
 		// these was archived by the first version of this rule.
