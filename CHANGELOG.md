@@ -35,6 +35,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The lock-down ticket stopped updating once its list got long.** Jira
+  refuses a comment or description over 32767 characters, all or nothing, and
+  the weekly list of 206 DNS changes plus 7 to review went over it
+  (`INF-590 ... exceeds the allowed limit of 32767 characters (HTTP 400)`), so
+  the ticket was not updated and the lane only said so in the journal. Text over
+  30000 characters is now posted as several comments at line breaks, each saying
+  "part n of m"; a description that long becomes the first part with the rest
+  added as comments. This covers every Jira write, not only the domains ticket.
+  The report email was never affected. **Upgrade:** nothing; the next domains
+  run updates the ticket.
+
 ## 1.5.1 — 2026-11-07
 
 **Upgrade:** pull, then re-run the installer (it pins three more timers to
