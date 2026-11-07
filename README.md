@@ -76,7 +76,7 @@ server installs idempotently, and each release tag is copied to the company
 GitHub for scanning (the gates are described in
 [SECURITY.md](SECURITY.md#build-and-release-gates)):
 
-![From the laptop to production: task ship gates every push, the Fedora installer is idempotent, and a sync workflow copies each release tag to the company GitHub, where PrimeSec AI scans it.](docs/cti-agent-flow.svg)
+![From the laptop to production: task ship gates every push, cti-agent-update pulls the kit and runs the idempotent Fedora installer, and a sync workflow copies each release tag to the company GitHub, where PrimeSec AI scans it.](docs/cti-agent-flow.svg)
 
 ---
 
