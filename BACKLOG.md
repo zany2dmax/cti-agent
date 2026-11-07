@@ -48,14 +48,14 @@ is real, not before. Finished work moves out of this file into
     second model lane (triage agent, supplier-request triage) is real
   - H5. Optional learning exercise: reproduce one beat with the Claude Agent
     SDK outside production. Not a migration
-- AppSec tickets in their own Jira project: CR is the infrastructure help desk,
-  and the AppSec teams track their work in other projects, so the AppSec lane
-  should file there (project TBD) instead of CR. Points to settle when it is
-  designed: a separate project key for the lane (CVE and domains tickets stay in
-  CR), its own issue type and `JIRA_ALLOW_CREATE` / `JIRA_ALLOW_CLOSE` entries,
-  the service account's permissions in the new project (`--check` per project),
-  the searches that assume one project (open ticket, prior-ticket link, retired
-  app close), and moving the six existing AppSec tickets
+- AppSec remediation is tracked by email, not Jira (decided 2026-11-07). The
+  app owners are mostly marketing teams with no Jira logins and no habit of
+  working there, so a separate AppSec Jira project would track work nobody can
+  update. The owner report and the weekly are the tracking: each finding stays
+  in them until a scan no longer sees it. The tickets the lane already files in
+  CR stay where they are. Not designed, if this proves too passive: a reminder
+  in the owner email for findings open past a set age, and an escalation line
+  to the AppSec team for ones that stay open
 - Supplier-request triage for third-party risk: the security team's shared
   mailbox is now on the supplier-request distribution list, and each request
   has to be judged for "will this supplier have access to company data or
