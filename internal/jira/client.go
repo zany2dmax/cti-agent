@@ -128,7 +128,17 @@ func (c *Client) BrowseURL(key string) string {
 }
 
 // CreateIssue files a new issue and returns its key.
+//
+// A description over MaxText is cut: the first part is the description, ending
+// with a note, and the rest is added as comments once the issue exists. If
+// those comments fail the issue is real, so the result is returned along with
+// a *ContinuationError rather than an empty result.
 func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, error) {
+	parts := SplitText(r.Description, MaxText)
+	r.Description = parts[0]
+	if len(parts) > 1 {
+		r.Description += "\n\n_The rest of this text is in the comments below._"
+	}
 	fields := map[string]any{
 		"project":     map[string]string{"key": r.ProjectKey},
 		"issuetype":   map[string]string{"name": r.IssueType},
@@ -154,8 +164,27 @@ func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, 
 	if out.Key == "" {
 		return IssueResult{}, fmt.Errorf("jira accepted the create but returned no issue key")
 	}
+	for i, part := range parts[1:] {
+		if err := c.addComment(ctx, out.Key, part); err != nil {
+			return out, &ContinuationError{Key: out.Key, Part: i + 2, Of: len(parts), Err: err}
+		}
+	}
 	return out, nil
 }
+
+// ContinuationError means the issue was created but the overflow of its
+// description could not be posted as comments. The issue exists.
+type ContinuationError struct {
+	Key      string
+	Part, Of int
+	Err      error
+}
+
+func (e *ContinuationError) Error() string {
+	return fmt.Sprintf("%s was created but part %d of %d of its text was refused: %v", e.Key, e.Part, e.Of, e.Err)
+}
+
+func (e *ContinuationError) Unwrap() error { return e.Err }
 
 // AccountIDForEmail finds the Jira user with exactly this email address.
 //
@@ -293,8 +322,26 @@ type Issue struct {
 func (i Issue) IsDone() bool { return i.Fields.Status.StatusCategory.Key == "done" }
 
 // AddComment appends a comment. Used to note a changed host count on a ticket
-// that already exists, rather than filing a second one.
+// that is already open.
+//
+// Text over MaxText is posted as several comments, in order, rather than sent
+// whole and refused. If one of them fails the earlier ones stay posted and the
+// error says which; the caller sees a failure and retries from the start, so a
+// part can appear twice, which is better than a list that never arrives.
 func (c *Client) AddComment(ctx context.Context, key, text string) error {
+	parts := SplitText(text, MaxText)
+	for i, part := range parts {
+		if err := c.addComment(ctx, key, part); err != nil {
+			if len(parts) > 1 {
+				return fmt.Errorf("comment part %d of %d: %w", i+1, len(parts), err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) addComment(ctx context.Context, key, text string) error {
 	body := map[string]any{"body": text}
 	path := "/rest/api/2/issue/" + url.PathEscape(key) + "/comment"
 	return c.do(ctx, http.MethodPost, path, body, nil)

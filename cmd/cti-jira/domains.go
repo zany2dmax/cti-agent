@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -154,6 +155,12 @@ func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,
 			Description: domainsBody(af, now),
 			Labels:      []string{"cti-agent", domainsLabel},
 		})
+		var cont *jira.ContinuationError
+		if errors.As(err, &cont) {
+			// The ticket exists and carries the start of the list and the CSV.
+			logf("WARNING: %s", safelog.Line(err.Error()))
+			err = nil
+		}
 		if err != nil {
 			ref("error", nil, "Jira refused to create it")
 			return die("creating the lock-down ticket: %s", safelog.Line(err.Error()))
