@@ -154,7 +154,11 @@ func BodyClose(b *strings.Builder) {
 
 // Section is the underlined capitals heading. title is plain; colour is the
 // tone's Fg (or Navy for the main sections).
+//
+// The capitals are written, not left to CSS: Outlook ignores text-transform, so
+// a heading that relied on it showed in whatever case it was typed in.
 func Section(b *strings.Builder, title, colour string) {
+	title = strings.ToUpper(title)
 	fmt.Fprintf(b, `
       <tr><td style="padding:6px 0 8px 0">
         <div style="font:700 13px %s;color:%s;letter-spacing:.6px;text-transform:uppercase;

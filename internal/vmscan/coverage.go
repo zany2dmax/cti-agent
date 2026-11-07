@@ -279,16 +279,16 @@ func (c *Coverage) CSV() string {
 	}
 	for _, k := range gapOrder {
 		for _, f := range c.gapsOf(k) {
-			_ = w.Write([]string{"add to Qualys", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k)})
+			_ = w.Write([]string{"ADD TO QUALYS", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k)})
 		}
 	}
 	for _, k := range questionOrder {
 		for _, q := range c.questionsOf(k) {
-			_ = w.Write([]string{"network team: fix in the spreadsheet", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
+			_ = w.Write([]string{"NETWORK TEAM: FIX IN THE SPREADSHEET", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
 		}
 	}
 	for _, f := range c.Oddities() {
-		_ = w.Write([]string{"check in Qualys", "", "", "", f.Group, f.Detail})
+		_ = w.Write([]string{"CHECK IN QUALYS", "", "", "", f.Group, f.Detail})
 	}
 	cw.Flush()
 	return buf.String()

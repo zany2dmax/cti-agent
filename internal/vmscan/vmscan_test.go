@@ -296,12 +296,12 @@ func TestTheFindingsComeAsAWorksheet(t *testing.T) {
 	if strings.Join(rows[0], ",") != "category,location,sheet_row,network,asset_group,what_to_do" {
 		t.Errorf("header = %v", rows[0])
 	}
-	if rows[1][0] != "add to Qualys" || rows[1][1] != "Alpha Site" || rows[1][2] != "12" || rows[1][3] != "10.1.30.0/24" {
+	if rows[1][0] != "ADD TO QUALYS" || rows[1][1] != "Alpha Site" || rows[1][2] != "12" || rows[1][3] != "10.1.30.0/24" {
 		t.Errorf("first row = %v", rows[1])
 	}
 	var fix int
 	for _, r := range rows[1:] {
-		if r[0] == "network team: fix in the spreadsheet" {
+		if r[0] == "NETWORK TEAM: FIX IN THE SPREADSHEET" {
 			fix++
 			if r[2] == "" {
 				t.Errorf("a spreadsheet fix with no row: %v", r)
@@ -352,5 +352,14 @@ func TestNoCoverageCheckLeavesTheReportAsItWas(t *testing.T) {
 	b := Render(w, "Acme", time.Now())
 	if strings.Contains(b.Text, "COVERAGE CHECK") || strings.Contains(b.HTML, "Coverage check") {
 		t.Error("a coverage section appeared with no check asked for")
+	}
+}
+
+func TestTheHTMLHeadingIsInCapitalsWithoutHelpFromCSS(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	w.Coverage = &Coverage{Checked: 1, Covered: 1}
+	h := Render(w, "Acme", time.Now()).HTML
+	if !strings.Contains(h, "COVERAGE CHECK: THE NETWORK SPREADSHEET AGAINST WHAT THE SCANS COVER") {
+		t.Error("the section heading is not written in capitals; Outlook ignores text-transform")
 	}
 }

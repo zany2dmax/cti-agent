@@ -28,7 +28,7 @@ func TestThePageIsTheFleetsShell(t *testing.T) {
 		"CR</div>", "Weekly", "Week of Monday",
 		"border-left:4px solid #b3001b", // lead
 		"HIGH", "LIVE", `width="50%"`,   // tiles: upper-cased, equal width
-		"caption", "needs action", "text-transform:uppercase",
+		"caption", "NEEDS ACTION", "text-transform:uppercase", // heading capitals are written, not left to CSS
 		"border-left:4px solid #b25000", // card
 		"one<br>", "two",
 		"</body></html>",
