@@ -103,9 +103,6 @@ is real, not before. Finished work moves out of this file into
 - Qualys severity bands beside the QDS number, once the thresholds are verified
   against Qualys' own documentation rather than guessed
 - A container image for deployment
-- AppSec lane fully provider-neutral: `cmd/cti-appscan` fetching detail through
-  `appscan.DetailFetcher` (and scan-list reconciliation as an optional provider
-  capability) instead of calling the Qualys API type directly
 - Message trace for the domains lane: which domains actually send mail and from
   where, on a separate read-only app registration. Probably unnecessary:
   outbound mail relays through Proofpoint on Demand, so the PoD Log API

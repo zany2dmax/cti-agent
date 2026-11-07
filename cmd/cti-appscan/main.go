@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
-	"github.com/zany2dmax/cti-agent/internal/appscan/qualys"
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
@@ -158,8 +157,8 @@ func run() int {
 	deliverOnly := *deliveriesOut != "" && *out == "" && *textOut == "" && *ticketsOut == "" &&
 		*subjectOut == "" && !*subjectOnly
 	if !*noDetail {
-		if api := wasAPI(cfg); api != nil {
-			scans = reconcile(ctx, api, scans, windowStart, qualys.PortalOrigin(cfg.QualysBaseURL))
+		if api := newScanner(cfg); api != nil {
+			scans = reconcile(ctx, api, scans, windowStart)
 			scans = newestPerApp(scans)
 			if deliverOnly {
 				return writeDeliveries(*deliveriesOut, *deliveredLog, scans)
@@ -184,7 +183,11 @@ func run() int {
 	// The only hosts a link may be clickable for. Registered here rather than
 	// inside internal/appscan, which is vendor-neutral; forgetting it degrades
 	// every link to plain text rather than dropping one or opening the gate.
-	appscan.AllowPortalHosts(qualys.Provider{}.Name(), qualys.PortalHosts...)
+	for _, p := range providers {
+		if h, ok := p.(appscan.PortalHoster); ok {
+			appscan.AllowPortalHosts(p.Name(), h.PortalHosts()...)
+		}
+	}
 
 	render := appscan.Render
 	if *ticketSlot {
@@ -208,8 +211,8 @@ func run() int {
 		tf := appscan.BuildTickets(scans, owners, time.Now())
 		// Every web app the scanner defines, not only this week's scans:
 		// an application nobody owns is a ticket nobody will be assigned.
-		if api := wasAPI(cfg); api != nil && !*noDetail {
-			if apps, err := api.WebApps(ctx); err != nil {
+		if lister, _ := newScanner(cfg).(appscan.AppLister); lister != nil && !*noDetail {
+			if apps, err := lister.Apps(ctx); err != nil {
 				logf("warn   : web app list unavailable, owners not checked: %s", safelog.Line(err.Error()))
 			} else {
 				for _, a := range apps {
@@ -219,11 +222,11 @@ func run() int {
 				}
 				sort.Strings(tf.ScannerApps)
 				sites, asOf := loadSites()
-				_, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
+				_, unowned, stale := appscan.OwnersSkeleton(apps, sites, owners)
 				for _, a := range unowned {
 					tf.Unowned = append(tf.Unowned, a.Name)
 				}
-				gap, proxied := appscan.Coverage(sites, toApps(apps), owners)
+				gap, proxied := appscan.Coverage(sites, apps, owners)
 				for _, s := range gap {
 					ns := appscan.NotScanned{Domain: s.Domain, URL: s.URL}
 					if w, ok := owners.ForSite(s.Domain); ok {
@@ -237,7 +240,7 @@ func run() int {
 				}
 				tf.SitesAsOf = asOf
 				if n := len(tf.NotScanned); n > 0 {
-					logf("coverage: %d live website(s) with no Qualys WAS web app - see NOT SCANNED", n)
+					logf("coverage: %d live website(s) with no web app in the scanner - see NOT SCANNED", n)
 				}
 				if len(unowned) > 0 {
 					logf("owners : %d web app(s) with no owner - run cti-appscan --list-apps", len(unowned))
@@ -433,7 +436,6 @@ func doCommitDelivered(path, logPath string) int {
 // A slice rather than a single value so adding Invicti or Wiz is one entry and
 // a parser, with nothing else to change: the loop below asks each in turn
 // whether a message is theirs.
-var providers = []appscan.Provider{qualys.Provider{}}
 
 // collect turns mailbox messages into scan results.
 func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, []string) {
@@ -472,7 +474,7 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			// this report covers - a notice that did not parse was not reported
 			// on, and stays in the inbox for a person. Duplicates of a parsed
 			// scan are claimed too: each is a message this lane has read.
-			if qualys.WellFormedReference(s.Reference) {
+			if appscan.WellFormed(p, s.Reference) {
 				seenMsgs = append(seenMsgs, mailbox.Processed{
 					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
@@ -603,45 +605,39 @@ func newestPerApp(scans []appscan.ScanResult) []appscan.ScanResult {
 	return out
 }
 
-// wasAPI is the Qualys WAS client, or nil when no credentials are set.
-func wasAPI(cfg config.Config) *qualys.API {
-	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
-		logf("note   : no Qualys credentials configured - reporting counts from the notifications only")
-		return nil
-	}
-	return qualys.NewAPI(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
-}
-
 // reconcile joins the notifications to the WAS scan list.
 //
 // A failure is a warning and the email-only results go on unchanged: the
 // counts are in the notifications, and losing the scan list costs the real
 // application names, the email-less scans and the id-keyed detail lookup.
-func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time, portal string) []appscan.ScanResult {
-	list, err := api.Scans(ctx, since.Add(-qualys.ScanMargin))
-	if err != nil {
-		logf("warn   : WAS scan list unavailable, reporting from the notifications only: %s",
-			safelog.Line(err.Error()))
+func reconcile(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult, since time.Time) []appscan.ScanResult {
+	r, ok := sc.(appscan.Reconciler)
+	if !ok {
 		return scans
 	}
-	if portal == "" {
-		logf("note   : QUALYS_BASE_URL does not map to a known Qualys UI host, so " +
+	out, rec, err := r.Reconcile(ctx, scans, since)
+	if err != nil {
+		logf("warn   : %s scan list unavailable, reporting from the notifications only: %s",
+			sc.Name(), safelog.Line(err.Error()))
+		return scans
+	}
+	if rec.NoPortal {
+		logf("note   : the scanner's address does not map to a known web UI host, so " +
 			"report links stay plain text from the notifications")
 	}
-	out, rec := qualys.Reconcile(scans, list, since, portal)
 	added := len(out) - len(scans)
-	logf("scans  : %d in the WAS scan list, %d matched a notification, %d added "+
+	logf("scans  : %d in the %s scan list, %d matched a notification, %d added "+
 		"with no notification, %d skipped (discovery, in flight, or on-demand faults)",
-		len(list), rec.Matched, added, rec.Skipped)
+		rec.Listed, sc.Name(), rec.Matched, added, rec.Skipped)
 	for _, ref := range rec.Unmatched {
 		// The reference is a scanner identifier, not text from the mail body.
-		logf("warn   : notification for %s has no match in the WAS scan list - "+
+		logf("warn   : notification for %s has no match in the scan list - "+
 			"its counts are kept; it was probably launched before the list window",
 			safelog.Line(ref))
 	}
 	for _, ref := range rec.IDMismatch {
 		logf("warn   : notification for %s names a different application id from "+
-			"the WAS scan list - the scan list's is used; check the notice is genuine",
+			"the scan list - the scan list's is used; check the notice is genuine",
 			safelog.Line(ref))
 	}
 	return out
@@ -652,11 +648,15 @@ func reconcile(ctx context.Context, api *qualys.API, scans []appscan.ScanResult,
 // Every failure here is a warning, never fatal. The report is already useful
 // without it, and a lane that produces nothing because an API was slow is
 // worse than one that produces counts.
-func attachDetail(ctx context.Context, api *qualys.API, scans []appscan.ScanResult, since time.Time) {
+func attachDetail(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult, since time.Time) {
+	api, ok := sc.(appscan.DetailFetcher)
+	if !ok {
+		return
+	}
 	for i := range scans {
 		// No detail for a scan we have no notification for: there are no
 		// counts to explain, and an empty findings list would read as "none".
-		if scans[i].Provider != "qualys-was" || scans[i].NoNotification {
+		if scans[i].Provider != sc.Name() || scans[i].NoNotification {
 			continue
 		}
 		if scans[i].AppID == "" {
@@ -678,9 +678,13 @@ func attachDetail(ctx context.Context, api *qualys.API, scans []appscan.ScanResu
 // tickets. Only for applications the scan list identified: a lookup by a
 // name derived from a scan title can come back empty without error, and
 // empty here would tell a ticket everything was fixed.
-func attachOpen(ctx context.Context, api *qualys.API, scans []appscan.ScanResult) {
+func attachOpen(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult) {
+	api, ok := sc.(appscan.OpenFetcher)
+	if !ok {
+		return
+	}
 	for i := range scans {
-		if scans[i].Provider != "qualys-was" || scans[i].NoNotification || scans[i].AppID == "" {
+		if scans[i].Provider != sc.Name() || scans[i].NoNotification || scans[i].AppID == "" {
 			continue
 		}
 		f, err := api.OpenFindings(ctx, scans[i])
@@ -696,7 +700,11 @@ func attachOpen(ctx context.Context, api *qualys.API, scans []appscan.ScanResult
 // attachRemedies fills each finding's fix from the KnowledgeBase, one lookup
 // for every QID in the week. A failure is a warning: the tickets still go,
 // and each finding without a fix says so.
-func attachRemedies(ctx context.Context, api appscan.RemedyFetcher, scans []appscan.ScanResult) {
+func attachRemedies(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult) {
+	api, ok := sc.(appscan.RemedyFetcher)
+	if !ok {
+		return
+	}
 	var ids []string
 	for _, s := range scans {
 		for _, f := range s.Findings {
@@ -727,25 +735,17 @@ func attachRemedies(ctx context.Context, api appscan.RemedyFetcher, scans []apps
 	logf("fixes  : remediation text for %d of the week's findings, %d QID(s) looked up", n, len(rem))
 }
 
-func toApps(in []qualys.WebApp) []appscan.App {
-	out := make([]appscan.App, 0, len(in))
-	for _, w := range in {
-		out = append(out, appscan.App{ID: w.ID, Name: w.Name, URL: w.URL})
-	}
-	return out
-}
-
 // doListApps prints a complete owners file to stdout. Read-only: one WAS
 // search, and the current owners file. Redirect it, edit the placeholders,
 // install it.
 func doListApps(cfg config.Config) int {
-	api := wasAPI(cfg)
+	api, _ := newScanner(cfg).(appscan.AppLister)
 	if api == nil {
-		return die("--list-apps needs QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD")
+		return die("--list-apps needs the scanner's credentials (QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD) and a scanner that can list its applications")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	apps, err := api.WebApps(ctx)
+	apps, err := api.Apps(ctx)
 	if err != nil {
 		return die("listing the web apps: %s", safelog.Line(err.Error()))
 	}
@@ -754,9 +754,9 @@ func doListApps(cfg config.Config) int {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	sites, _ := loadSites()
-	text, unowned, stale := appscan.OwnersSkeleton(toApps(apps), sites, owners)
+	text, unowned, stale := appscan.OwnersSkeleton(apps, sites, owners)
 	fmt.Print(text)
-	gap, proxied := appscan.Coverage(sites, toApps(apps), owners)
+	gap, proxied := appscan.Coverage(sites, apps, owners)
 	logf("apps   : %d web app(s) in the scanner, %d with no owner yet, %d live website(s) not scanned, "+
 		"%d covered only via a stand-in (covers=), %d owners-file line(s) matching nothing",
 		len(apps), len(unowned), len(gap), len(proxied), len(stale))
