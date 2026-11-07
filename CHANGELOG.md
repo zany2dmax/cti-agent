@@ -64,7 +64,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   typo in the sheet, or HQ-style addressing) is asked about too. A location with
   no clear one (HQ and the datacenter)
   becomes a board question the heartbeat emails, answered with a line in
-  `/etc/cti-agent/netrules.txt`. It needs `SUBNETS_DRIVE_ID` and
+  `/etc/cti-agent/netrules.txt`. The email is written for the network and
+  acquisitions teams as well as security: each line names the location, the
+  spreadsheet row and what to do (add to Qualys, fix or clarify in the
+  spreadsheet, check in Qualys), the findings are attached as a CSV worksheet,
+  and it ends with how the spreadsheet has to be laid out to be read. It needs
+  `SUBNETS_DRIVE_ID` and
   `SUBNETS_ITEM_ID` and a Graph application permission that reaches the file
   (`Sites.Selected` on the site, or `Files.Read.All`); without them the report
   says the check did not run. New: `internal/netmap`, `Client.DriveItemContent`.

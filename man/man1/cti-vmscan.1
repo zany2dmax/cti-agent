@@ -18,6 +18,8 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .RB [ \-\-no\-coverage ]
 .RB [ \-\-subnets\-file
 .IR FILE ]
+.RB [ \-\-csv\-out
+.IR FILE ]
 .RB [ \-\-questions\-out
 .IR FILE ]
 .PP
@@ -49,21 +51,31 @@ its corporate network (the rows labelled
 .BR corp ,
 or whichever rows an operator rule names) and reports:
 .TP
-.B NOT SCANNED
-A corp network in no Asset Group, one held by a group no scan covers, or one
-only partly inside the scanned groups. This is how a missed location shows up.
+.B ADD TO QUALYS
+A corp network in no Asset Group (create one and add it to a scheduled scan), in
+a group no weekly scan covers (add the group to a scan), or only partly inside
+the scanned groups. This is how a missed location shows up.
 .TP
-.B CHECK THESE
+.B FIX OR CLARIFY IN THE SPREADSHEET
+A location the check could not use: a corp row with no network written in it, a
+corp network that is not a valid CIDR, one outside the location's own block (a
+likely typo), one that overlaps another location's, or no row that clearly counts
+as the corp network. The location is not checked until this is fixed, or an
+operator rule says which rows count (see FILES). The lane never guesses.
+.TP
+.B CHECK IN QUALYS
 A scanned Asset Group whose addresses appear nowhere in the spreadsheet, a group
 with no IP ranges (so it cannot be checked), or a Target Group the scan names
 that Qualys has no Asset Group for.
-.TP
-.B NOT CHECKED, NEEDS A DECISION
-A location with no row that clearly counts as its corp network, a corp network
-that is not a valid CIDR, or one that overlaps another location's. The lane
-never guesses: such a location is left out and put to the operator
-.RB ( \-\-questions\-out ),
-who answers with a rule (see FILES).
+.PP
+Every line names the location, the spreadsheet row to look at, and what to do, so
+the report can go to the network and acquisitions teams as well as security. The
+email ends with a short note on how the spreadsheet has to be laid out to be read
+(a header row per location, a row labelled corp with a CIDR, DECOMMISSIONED for
+retired locations), and the same findings come as a worksheet
+.RB ( \-\-csv\-out ,
+attached by
+.BR run\-vmscan ).
 .PP
 Decommissioned, free and open-to-use locations are skipped. If the check cannot
 run (the spreadsheet or the Asset Groups cannot be read) the report says so; it
@@ -122,6 +134,11 @@ Skip the coverage check.
 .BI \-\-subnets\-file " FILE"
 Read the network spreadsheet (an .xlsx) from this file instead of SharePoint,
 for a manual test.
+.TP
+.BI \-\-csv\-out " FILE"
+Write the coverage findings as a worksheet (CSV) here: category, location, sheet
+row, network, asset group and what to do. Written only when there is something to
+work through. Cells that would open as a formula are made inert.
 .TP
 .BI \-\-questions\-out " FILE"
 Write the locations the check could not decide, one per line as

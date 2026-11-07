@@ -20,6 +20,11 @@ type Subnet struct {
 	// Inactive is set for a location (or row) marked decommissioned, free or
 	// open to use: not a network anyone expects to be scanned.
 	Inactive bool
+	// Row is the spreadsheet row of this network, and LocRow the row of its
+	// location's header, so a finding can name where to look. Zero when the rows
+	// were given without numbers.
+	Row    int
+	LocRow int
 }
 
 // roleLabels are the labels a network row carries. A row that starts with one is
@@ -106,10 +111,21 @@ func maskBits(m string) (int, bool) {
 // that layout and nothing cleverer; a row it cannot read as a network keeps
 // Valid false so the caller can say so rather than drop it.
 func ParseSites(rows [][]string) []Subnet {
+	numbered := make([]Row, len(rows))
+	for i, r := range rows {
+		numbered[i] = Row{Num: i + 1, Cells: r}
+	}
+	return ParseSiteRows(numbered)
+}
+
+// ParseSiteRows is ParseSites for rows that carry their sheet row numbers.
+func ParseSiteRows(rows []Row) []Subnet {
 	var out []Subnet
 	loc := ""
+	locRow := 0
 	locInactive := false
-	for _, row := range rows {
+	for _, r := range rows {
+		row := r.Cells
 		a, b, c := cell(row, 0), cell(row, 1), cell(row, 2)
 		if a == "" {
 			continue // a note under the previous row
@@ -121,7 +137,7 @@ func ParseSites(rows [][]string) []Subnet {
 			continue // a device row: an address and its name
 		}
 		if b == "" && c == "" && !isRoleLabel(a) {
-			loc, locInactive = a, inactiveText(a)
+			loc, locInactive, locRow = a, inactiveText(a), r.Num
 			continue
 		}
 		if roleSkip(a) {
@@ -134,6 +150,7 @@ func ParseSites(rows [][]string) []Subnet {
 		out = append(out, Subnet{
 			Location: loc, Role: a, Raw: b, Prefix: p, Valid: ok,
 			Inactive: locInactive || inactiveText(a),
+			Row:      r.Num, LocRow: locRow,
 		})
 	}
 	return out

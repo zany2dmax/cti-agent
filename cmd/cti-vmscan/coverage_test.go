@@ -63,6 +63,18 @@ func TestTheCoverageCheckEndToEnd(t *testing.T) {
 	if len(c.Questions) != 1 || !strings.HasPrefix(c.Questions[0].Location, "Delta Site") {
 		t.Errorf("questions = %+v", c.Questions)
 	}
+	// Every finding names its spreadsheet row, so the person fixing the sheet can
+	// go straight to it. Beta is on row 7, Gamma on row 9, Delta's header on 10.
+	rows := map[string]int{}
+	for _, f := range c.Gaps() {
+		rows[f.Location] = f.Row
+	}
+	if rows["Beta Site - ST - 10.2.0.0/16"] != 7 || rows["Gamma Site - 10.3.0.0/16"] != 9 {
+		t.Errorf("rows = %v", rows)
+	}
+	if c.Questions[0].Row != 10 {
+		t.Errorf("the question points at row %d, want the location's header, row 10", c.Questions[0].Row)
+	}
 }
 
 func TestAnOperatorRuleSilencesAQuestion(t *testing.T) {

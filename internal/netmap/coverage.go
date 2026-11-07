@@ -134,6 +134,9 @@ type Finding struct {
 	Subnet   string
 	Group    string
 	Detail   string
+	// Row is the spreadsheet row of the network, zero for a finding about a
+	// Qualys group.
+	Row int
 }
 
 // Result is the check's output.
@@ -188,13 +191,13 @@ func Check(corp []Corp, all []Subnet, groups []Group, scanned []string) Result {
 			continue
 		case partial:
 			res.Findings = append(res.Findings, Finding{Kind: PartlyCovered, Location: c.Location,
-				Subnet: c.Subnet.Prefix.String(), Detail: "only part of this network is in the groups the scans cover"})
+				Subnet: c.Subnet.Prefix.String(), Row: c.Subnet.Row, Detail: "only part of this network is in the groups the scans cover"})
 			continue
 		}
 		switch coverage(mAll, t) {
 		case none:
 			res.Findings = append(res.Findings, Finding{Kind: NotInAnyGroup, Location: c.Location,
-				Subnet: c.Subnet.Prefix.String(), Detail: "no Asset Group holds this network"})
+				Subnet: c.Subnet.Prefix.String(), Row: c.Subnet.Row, Detail: "no Asset Group holds this network"})
 		default:
 			var in []string
 			for _, g := range groups {
@@ -203,7 +206,7 @@ func Check(corp []Corp, all []Subnet, groups []Group, scanned []string) Result {
 				}
 			}
 			res.Findings = append(res.Findings, Finding{Kind: GroupNotScanned, Location: c.Location,
-				Subnet: c.Subnet.Prefix.String(), Group: strings.Join(in, ", "),
+				Subnet: c.Subnet.Prefix.String(), Row: c.Subnet.Row, Group: strings.Join(in, ", "),
 				Detail: "held by an Asset Group that no scan covers"})
 		}
 	}

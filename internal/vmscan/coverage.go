@@ -1,6 +1,8 @@
 package vmscan
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"strings"
 
@@ -10,6 +12,11 @@ import (
 
 // Coverage is the result of checking the scans' locations against the network
 // spreadsheet, or the reason it could not be checked.
+//
+// It is written for the people who have to act on it: the security team (add a
+// network to Qualys) and the network and acquisitions teams (fix or add to the
+// spreadsheet), so every line names the location, the spreadsheet row and what
+// to do about it.
 type Coverage struct {
 	Checked   int
 	Covered   int
@@ -50,19 +57,102 @@ func (c *Coverage) Oddities() []netmap.Finding {
 	return out
 }
 
+func rowRef(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (sheet row %d)", n)
+}
+
+// gapLine is one network that is not scanned, and what to do.
 func gapLine(f netmap.Finding) string {
 	switch f.Kind {
 	case netmap.NotInAnyGroup:
-		return fmt.Sprintf("%s: %s is in no Qualys Asset Group, so no scan reaches it.", f.Location, f.Subnet)
+		return fmt.Sprintf("%s%s: %s is in no Qualys Asset Group.", f.Location, rowRef(f.Row), f.Subnet)
 	case netmap.GroupNotScanned:
-		return fmt.Sprintf("%s: %s is in the Asset Group %q, but neither weekly scan covers that group.", f.Location, f.Subnet, f.Group)
+		return fmt.Sprintf("%s%s: %s is in the Asset Group %q, which neither weekly scan covers.", f.Location, rowRef(f.Row), f.Subnet, f.Group)
 	default:
-		return fmt.Sprintf("%s: only part of %s is in the groups the weekly scans cover.", f.Location, f.Subnet)
+		return fmt.Sprintf("%s%s: only part of %s is in the groups the weekly scans cover.", f.Location, rowRef(f.Row), f.Subnet)
 	}
+}
+
+func gapAction(k netmap.Kind) string {
+	switch k {
+	case netmap.NotInAnyGroup:
+		return "Create a Qualys Asset Group for this network and add it to a scheduled scan."
+	case netmap.GroupNotScanned:
+		return "Add this Asset Group to a scheduled scan, or confirm another scan already covers it."
+	default:
+		return "Extend the Asset Group(s) to the whole network, or correct the spreadsheet if it is the sheet that is wrong."
+	}
+}
+
+func questionAction(k netmap.QuestionKind) string {
+	switch k {
+	case netmap.QBlank:
+		return "Fill in this location's corp network in the spreadsheet."
+	case netmap.QInvalid:
+		return "Correct the network in the spreadsheet: it is not a valid CIDR (for example 10.4.30.0/24)."
+	case netmap.QOutside:
+		return "Check the corp network against the location's own block: fix the typo in the sheet, or tell the security team it is meant."
+	case netmap.QOverlap:
+		return "Two locations claim overlapping networks: correct the spreadsheet."
+	default:
+		return "Add a row labelled corp for this location, or tell the security team which rows count as its corp network."
+	}
+}
+
+func questionTitle(k netmap.QuestionKind) string {
+	switch k {
+	case netmap.QBlank:
+		return "Corp row with no network written in it"
+	case netmap.QInvalid:
+		return "Corp network that is not a valid CIDR"
+	case netmap.QOutside:
+		return "Corp network outside the location's own block"
+	case netmap.QOverlap:
+		return "Networks that overlap another location's"
+	default:
+		return "No row counts as the location's corp network"
+	}
+}
+
+var questionOrder = []netmap.QuestionKind{netmap.QBlank, netmap.QInvalid, netmap.QOutside, netmap.QOverlap, netmap.QNoCorpRow}
+
+func (c *Coverage) questionsOf(k netmap.QuestionKind) []netmap.Question {
+	var out []netmap.Question
+	for _, q := range c.Questions {
+		if q.Kind == k {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func (c *Coverage) gapsOf(k netmap.Kind) []netmap.Finding {
+	var out []netmap.Finding
+	for _, f := range c.Gaps() {
+		if f.Kind == k {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func oddLine(f netmap.Finding) string {
 	return fmt.Sprintf("%s: %s", f.Group, f.Detail)
+}
+
+var gapOrder = []netmap.Kind{netmap.NotInAnyGroup, netmap.GroupNotScanned, netmap.PartlyCovered}
+
+// layoutGuide is how the spreadsheet has to be laid out to be read. It is in
+// the email because the people who maintain the sheet are on it.
+var layoutGuide = []string{
+	"One header row per location: the name on its own in the first column, ideally ending with the location's /16 block, for example \"Example Site - ST - 10.4.0.0/16\".",
+	"Under it, a row labelled corp with the corporate network as a CIDR, for example 10.4.30.0/24. Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check.",
+	"Do not leave the network cell blank or write it without a mask length: \"10.29.30\" cannot be read.",
+	"A location that has been retired: put DECOMMISSIONED in its header. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
+	"A location whose corporate network is laid out differently (headquarters, the datacenter) is not a mistake: the security team records which rows count as its corp network and the check follows that.",
 }
 
 // text is the coverage section of the plain-text report.
@@ -71,32 +161,40 @@ func (c *Coverage) text() string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("COVERAGE CHECK: THE NETWORK SPREADSHEET AGAINST WHAT THE SCANS COVER\n" + strings.Repeat("-", 72) + "\n")
+	b.WriteString("COVERAGE CHECK: THE NETWORK SPREADSHEET AGAINST WHAT THE SCANS COVER\n" + strings.Repeat("=", 72) + "\n")
 	if c.Unavailable != "" {
 		fmt.Fprintf(&b, "  Not run this week: %s\n\n", c.Unavailable)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "  %d corporate networks checked, %d fully inside the groups the scans cover.\n", c.Checked, c.Covered)
 	if g := c.Gaps(); len(g) > 0 {
-		fmt.Fprintf(&b, "\n  NOT SCANNED (%d):\n", len(g))
-		for _, f := range g {
-			fmt.Fprintf(&b, "    - %s\n", gapLine(f))
-		}
-	}
-	if o := c.Oddities(); len(o) > 0 {
-		fmt.Fprintf(&b, "\n  CHECK THESE (%d):\n", len(o))
-		for _, f := range o {
-			fmt.Fprintf(&b, "    - %s\n", oddLine(f))
+		fmt.Fprintf(&b, "\nADD TO QUALYS (%d) - networks in the spreadsheet that no weekly scan reaches\n%s\n", len(g), strings.Repeat("-", 72))
+		for _, k := range gapOrder {
+			for _, f := range c.gapsOf(k) {
+				fmt.Fprintf(&b, "  - %s\n      -> %s\n", gapLine(f), gapAction(k))
+			}
 		}
 	}
 	if len(c.Questions) > 0 {
-		fmt.Fprintf(&b, "\n  NOT CHECKED, NEEDS A DECISION (%d):\n", len(c.Questions))
-		for _, q := range c.Questions {
-			fmt.Fprintf(&b, "    - %s: %s\n", q.Location, q.Why)
+		fmt.Fprintf(&b, "\nFIX OR CLARIFY IN THE SPREADSHEET (%d) - not checked until this is done\n%s\n", len(c.Questions), strings.Repeat("-", 72))
+		for _, k := range questionOrder {
+			for _, q := range c.questionsOf(k) {
+				fmt.Fprintf(&b, "  - %s%s: %s\n      -> %s\n", q.Location, rowRef(q.Row), q.Why, questionAction(k))
+			}
+		}
+	}
+	if o := c.Oddities(); len(o) > 0 {
+		fmt.Fprintf(&b, "\nCHECK IN QUALYS (%d)\n%s\n", len(o), strings.Repeat("-", 72))
+		for _, f := range o {
+			fmt.Fprintf(&b, "  - %s\n", oddLine(f))
 		}
 	}
 	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 {
 		b.WriteString("  Nothing missing.\n")
+	}
+	b.WriteString("\nHOW THE SPREADSHEET IS READ\n" + strings.Repeat("-", 72) + "\n")
+	for _, l := range layoutGuide {
+		fmt.Fprintf(&b, "  - %s\n", l)
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -115,26 +213,91 @@ func (c *Coverage) html(b *strings.Builder) {
 	emailkit.Item(b, fmt.Sprintf("%d corporate networks checked, %d fully inside the groups the scans cover.", c.Checked, c.Covered))
 	if g := c.Gaps(); len(g) > 0 {
 		var l strings.Builder
-		for _, f := range g {
-			l.WriteString("&bull; " + e(gapLine(f)) + "<br>")
+		for _, k := range gapOrder {
+			for _, f := range c.gapsOf(k) {
+				fmt.Fprintf(&l, "&bull; %s<br><span style=\"color:%s\">&rarr; %s</span><br>", e(gapLine(f)), emailkit.Muted, e(gapAction(k)))
+			}
 		}
-		emailkit.Card(b, emailkit.Red, fmt.Sprintf("NOT SCANNED (%d)", len(g)), l.String())
+		emailkit.Card(b, emailkit.Red, fmt.Sprintf("ADD TO QUALYS (%d)", len(g)),
+			"Networks in the spreadsheet that no weekly scan reaches.<br><br>"+l.String())
+	}
+	if len(c.Questions) > 0 {
+		var l strings.Builder
+		for _, k := range questionOrder {
+			qs := c.questionsOf(k)
+			if len(qs) == 0 {
+				continue
+			}
+			fmt.Fprintf(&l, "<b>%s</b><br>", e(questionTitle(k)))
+			for _, q := range qs {
+				fmt.Fprintf(&l, "&bull; %s<br>", e(q.Location+rowRef(q.Row)+": "+q.Why))
+			}
+			fmt.Fprintf(&l, "<span style=\"color:%s\">&rarr; %s</span><br><br>", emailkit.Muted, e(questionAction(k)))
+		}
+		emailkit.Card(b, emailkit.Yellow, fmt.Sprintf("FIX OR CLARIFY IN THE SPREADSHEET (%d)", len(c.Questions)),
+			"These locations are not checked until this is done.<br><br>"+l.String())
 	}
 	if o := c.Oddities(); len(o) > 0 {
 		var l strings.Builder
 		for _, f := range o {
 			l.WriteString("&bull; " + e(oddLine(f)) + "<br>")
 		}
-		emailkit.Card(b, emailkit.Amber, fmt.Sprintf("CHECK THESE (%d)", len(o)), l.String())
-	}
-	if len(c.Questions) > 0 {
-		var l strings.Builder
-		for _, q := range c.Questions {
-			l.WriteString("&bull; " + e(q.Location+": "+q.Why) + "<br>")
-		}
-		emailkit.Card(b, emailkit.Yellow, fmt.Sprintf("NOT CHECKED, NEEDS A DECISION (%d)", len(c.Questions)), l.String())
+		emailkit.Card(b, emailkit.Amber, fmt.Sprintf("CHECK IN QUALYS (%d)", len(o)), l.String())
 	}
 	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 {
 		emailkit.Item(b, "Nothing missing.")
 	}
+	var g strings.Builder
+	for _, l := range layoutGuide {
+		g.WriteString("&bull; " + e(l) + "<br>")
+	}
+	emailkit.Card(b, emailkit.Grey, "How the spreadsheet is read", g.String())
+}
+
+// CSV is every finding as a worksheet the teams can work through: one row per
+// thing to do, with the spreadsheet row and what to do about it.
+func (c *Coverage) CSV() string {
+	if c == nil || c.Unavailable != "" {
+		return ""
+	}
+	var buf bytes.Buffer
+	cw := csv.NewWriter(&buf)
+	// A spreadsheet opens a cell that starts with = + - or @ as a formula. The
+	// text here came from a spreadsheet and from Qualys, so it is made inert.
+	w := csvWriter{cw}
+	_ = w.Write([]string{"category", "location", "sheet_row", "network", "asset_group", "what_to_do"})
+	row := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return fmt.Sprint(n)
+	}
+	for _, k := range gapOrder {
+		for _, f := range c.gapsOf(k) {
+			_ = w.Write([]string{"add to Qualys", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k)})
+		}
+	}
+	for _, k := range questionOrder {
+		for _, q := range c.questionsOf(k) {
+			_ = w.Write([]string{"fix in the spreadsheet", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
+		}
+	}
+	for _, f := range c.Oddities() {
+		_ = w.Write([]string{"check in Qualys", "", "", "", f.Group, f.Detail})
+	}
+	cw.Flush()
+	return buf.String()
+}
+
+type csvWriter struct{ *csv.Writer }
+
+func (w csvWriter) Write(rec []string) error {
+	out := make([]string, len(rec))
+	for i, v := range rec {
+		if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+			v = "'" + v
+		}
+		out[i] = v
+	}
+	return w.Writer.Write(out)
 }

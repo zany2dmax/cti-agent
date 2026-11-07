@@ -16,6 +16,12 @@ to build the combined report from the week's
 notices and mails it through
 .BR cti\-mailer (1)
 \-\-lane vmscan. Both scans appear in the one email, each in its own section.
+The email also carries the coverage check of the network spreadsheet against what
+the scans cover (see
+.BR cti\-vmscan (1)),
+written for the network and acquisitions teams as well as security. When it has
+findings they are attached as a CSV worksheet, and locations it cannot decide are
+put to the operator as a board question on a real run.
 .PP
 Recipients are
 .BR VMSCAN_TO ,

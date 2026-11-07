@@ -232,6 +232,7 @@ flag: --subject-out FILE | write the subject line here
 flag: --seen-out FILE | write the notices this report covered here, for --commit-seen after the send
 flag: --no-coverage | skip the check of the network spreadsheet against the Asset Groups the scans cover
 flag: --subnets-file FILE | read the network spreadsheet (.xlsx) from this file instead of SharePoint, for testing
+flag: --csv-out FILE | write the coverage findings as a worksheet (CSV) here, for the runner to attach: one row per thing to add to Qualys or fix in the spreadsheet, with its sheet row
 flag: --questions-out FILE | write the locations the coverage check could not decide, one per line, for the runner to put to the operator
 flag: --commit-seen FILE | record a --seen-out file in the processed log the mailbox cleanup reads, then exit
 

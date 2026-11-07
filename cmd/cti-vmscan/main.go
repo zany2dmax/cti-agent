@@ -66,6 +66,9 @@ func run() int {
 		"skip the check of the network spreadsheet against the Asset Groups the scans cover")
 	subnetsFile := flag.String("subnets-file", "",
 		"read the network spreadsheet (.xlsx) from this file instead of SharePoint, for testing")
+	csvOut := flag.String("csv-out", "",
+		"write the coverage findings as a worksheet (CSV) here, for the runner to attach: "+
+			"one row per thing to add to Qualys or fix in the spreadsheet, with its sheet row")
 	questionsOut := flag.String("questions-out", "",
 		"write the locations the coverage check could not decide, one per line, for the runner "+
 			"to put to the operator")
@@ -130,6 +133,15 @@ func run() int {
 	}
 	fmt.Println(block.Subject)
 
+	if *csvOut != "" && week.Coverage != nil {
+		c := week.Coverage
+		// Nothing to work through, nothing to attach.
+		if len(c.Gaps())+len(c.Questions)+len(c.Oddities()) > 0 {
+			if err := os.WriteFile(*csvOut, []byte(c.CSV()), 0o600); err != nil {
+				logf("warn   : could not write %s: %s", safelog.Line(*csvOut), safelog.Line(err.Error()))
+			}
+		}
+	}
 	if *questionsOut != "" && week.Coverage != nil {
 		var q strings.Builder
 		for _, x := range week.Coverage.Questions {
@@ -177,11 +189,11 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	if err != nil {
 		return unavailable("the network spreadsheet could not be read: %s", safelog.Line(err.Error()))
 	}
-	rows, err := netmap.ReadSheet(data, sheetName)
+	rows, err := netmap.ReadSheetRows(data, sheetName)
 	if err != nil {
 		return unavailable("the network spreadsheet could not be parsed: %s", safelog.Line(err.Error()))
 	}
-	all := netmap.ParseSites(rows)
+	all := netmap.ParseSiteRows(rows)
 
 	rules := netmap.Rules{}
 	rulesPath := strings.TrimSpace(os.Getenv("NETRULES_FILE"))

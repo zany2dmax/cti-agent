@@ -112,7 +112,28 @@ func (r Rules) find(location string) string {
 type Question struct {
 	Location string
 	Why      string
+	// Kind says what sort of problem it is, so a report can say who fixes it.
+	Kind QuestionKind
+	// Row is the spreadsheet row to look at (the corp row, or the location's
+	// header when no row qualifies); zero when unknown.
+	Row int
 }
+
+// QuestionKind classifies a Question.
+type QuestionKind string
+
+const (
+	// QNoCorpRow: no row clearly counts as the location's corp network.
+	QNoCorpRow QuestionKind = "no-corp-row"
+	// QBlank: a corp row with no network written in it.
+	QBlank QuestionKind = "blank-network"
+	// QInvalid: a corp network that is not a valid CIDR.
+	QInvalid QuestionKind = "invalid-network"
+	// QOutside: a corp network outside the location's own block.
+	QOutside QuestionKind = "outside-block"
+	// QOverlap: a corp network that overlaps another location's.
+	QOverlap QuestionKind = "overlap"
+)
 
 // Corp is a location's corporate network as the sheet gives it.
 type Corp struct {
@@ -160,7 +181,11 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		var picked []Subnet
 		var seenRoles []string
 		bad, blank := "", false
+		badRow, headRow := 0, 0
 		for _, s := range rows {
+			if headRow == 0 {
+				headRow = s.LocRow
+			}
 			seenRoles = append(seenRoles, s.Role)
 			if s.Inactive || !hasRole(roles, s.Role) {
 				continue
@@ -171,6 +196,7 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 				} else {
 					bad = s.Raw
 				}
+				badRow = s.Row
 				continue
 			}
 			picked = append(picked, s)
@@ -182,8 +208,9 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 			for _, s := range picked {
 				if !within(blocks, s.Prefix) {
 					bad = ""
-					qs = append(qs, Question{loc, fmt.Sprintf("its corp network %s is outside the location's own block (%s); "+
-						"either the sheet has a typo or say so with a rule", s.Prefix, headerBlockList(blocks))})
+					qs = append(qs, Question{Location: loc, Kind: QOutside, Row: s.Row,
+						Why: fmt.Sprintf("its corp network %s is outside the location's own block (%s); "+
+							"either the sheet has a typo or say so with a rule", s.Prefix, headerBlockList(blocks))})
 					picked = nil
 					break
 				}
@@ -194,12 +221,14 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		}
 		switch {
 		case blank && len(picked) == 0 && bad == "":
-			qs = append(qs, Question{loc, "its corp row has no network written in it"})
+			qs = append(qs, Question{Location: loc, Kind: QBlank, Row: badRow, Why: "its corp row has no network written in it"})
 		case bad != "":
-			qs = append(qs, Question{loc, fmt.Sprintf("its corp network %q is not a valid network", bad)})
+			qs = append(qs, Question{Location: loc, Kind: QInvalid, Row: badRow,
+				Why: fmt.Sprintf("its corp network %q is not a valid network", bad)})
 		case len(picked) == 0:
-			qs = append(qs, Question{loc, fmt.Sprintf("no row counts as its corp network (rows: %s); say which with a rule",
-				strings.Join(dedupe(seenRoles), ", "))})
+			qs = append(qs, Question{Location: loc, Kind: QNoCorpRow, Row: headRow,
+				Why: fmt.Sprintf("no row counts as its corp network (rows: %s); say which with a rule",
+					strings.Join(dedupe(seenRoles), ", "))})
 		default:
 			for _, s := range picked {
 				corp = append(corp, Corp{Location: loc, Subnet: s})
@@ -219,7 +248,8 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 						if k == j {
 							other = corp[i].Location
 						}
-						qs = append(qs, Question{corp[k].Location, fmt.Sprintf("its corp network %s overlaps %s's", corp[k].Subnet.Prefix, other)})
+						qs = append(qs, Question{Location: corp[k].Location, Kind: QOverlap, Row: corp[k].Subnet.Row,
+							Why: fmt.Sprintf("its corp network %s overlaps %s's", corp[k].Subnet.Prefix, other)})
 					}
 				}
 			}

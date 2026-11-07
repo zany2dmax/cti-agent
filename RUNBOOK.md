@@ -1137,10 +1137,15 @@ reads nothing.
 **The coverage check.** The same email checks the network spreadsheet against the
 Qualys Asset Groups the scans cover, by address (the scans' group names and the
 spreadsheet's location names do not match, so names are only for display). It
-reports three things: networks not scanned (in no Asset Group, in a group no
-scan covers, or only partly covered), things to look at (a scanned group whose
-addresses are nowhere in the spreadsheet, a group with no IP ranges, a Target
-Group Qualys does not list), and locations it could not decide.
+reports three things, each line naming the location, the spreadsheet row and
+what to do, so the email can go to the network and acquisitions teams as well as
+security: **add to Qualys** (a corp network in no Asset Group, in a group no scan
+covers, or only partly covered), **fix or clarify in the spreadsheet** (a corp row
+with no network, one that is not a valid CIDR, one outside its location's own
+block, an overlap, or no clear corp row), and **check in Qualys** (a scanned group
+whose addresses are nowhere in the sheet, a group with no IP ranges, a Target
+Group Qualys does not list). The same findings are attached as a CSV worksheet,
+and the email ends with a note on how the spreadsheet has to be laid out.
 
 It only reads. It never guesses which row is a location's corp network: a
 location with no `corp` row (HQ and the datacenter are like that), a corp network

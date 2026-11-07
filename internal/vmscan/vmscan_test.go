@@ -1,6 +1,7 @@
 package vmscan
 
 import (
+	"encoding/csv"
 	"os"
 	"strings"
 	"testing"
@@ -236,28 +237,89 @@ func TestLocationsAreCountedOnceAcrossScans(t *testing.T) {
 	}
 }
 
-func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
-	w.Coverage = &Coverage{Checked: 3, Covered: 1,
+func sampleCoverage() *Coverage {
+	return &Coverage{Checked: 3, Covered: 1,
 		Findings: []netmap.Finding{
-			{Kind: netmap.NotInAnyGroup, Location: "Alpha Site", Subnet: "10.1.30.0/24"},
-			{Kind: netmap.GroupNotScanned, Location: "Beta Site", Subnet: "10.2.30.0/24", Group: "Beta"},
+			{Kind: netmap.NotInAnyGroup, Location: "Alpha Site", Subnet: "10.1.30.0/24", Row: 12},
+			{Kind: netmap.GroupNotScanned, Location: "Beta Site", Subnet: "10.2.30.0/24", Group: "Beta", Row: 20},
 			{Kind: netmap.ScannedNotInSheet, Group: "Mystery", Detail: "none of this scanned group's addresses appear in the spreadsheet"},
 		},
-		Questions: []netmap.Question{{Location: "Gamma Site", Why: "no row counts as its corp network"}},
+		Questions: []netmap.Question{
+			{Location: "Gamma Site", Kind: netmap.QNoCorpRow, Row: 30, Why: "no row counts as its corp network"},
+			{Location: "Delta Site", Kind: netmap.QBlank, Row: 41, Why: "its corp row has no network written in it"},
+			{Location: "Zeta Site", Kind: netmap.QInvalid, Row: 50, Why: `its corp network "10.29.30" is not a valid network`},
+		},
 	}
+}
+
+func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	w.Coverage = sampleCoverage()
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
 	if !strings.Contains(b.Subject, "2 network(s) NOT SCANNED") {
 		t.Errorf("subject = %q", b.Subject)
 	}
-	for _, want := range []string{"NOT SCANNED (2)", "Alpha Site: 10.1.30.0/24 is in no Qualys Asset Group",
-		"Beta Site: 10.2.30.0/24 is in the Asset Group \"Beta\"", "CHECK THESE (1)", "Mystery", "NEEDS A DECISION (1)", "Gamma Site"} {
+	for _, want := range []string{
+		"ADD TO QUALYS (2)",
+		"Alpha Site (sheet row 12): 10.1.30.0/24 is in no Qualys Asset Group.",
+		"Create a Qualys Asset Group for this network and add it to a scheduled scan.",
+		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which neither weekly scan covers.",
+		"FIX OR CLARIFY IN THE SPREADSHEET (3)",
+		"Delta Site (sheet row 41)", "Fill in this location's corp network in the spreadsheet.",
+		"Zeta Site (sheet row 50)", "not a valid CIDR",
+		"Gamma Site (sheet row 30)", "Add a row labelled corp",
+		"CHECK IN QUALYS (1)", "Mystery",
+		"HOW THE SPREADSHEET IS READ", "DECOMMISSIONED",
+	} {
 		if !strings.Contains(b.Text, want) {
 			t.Errorf("text lacks %q:\n%s", want, b.Text)
 		}
 	}
-	if !strings.Contains(b.HTML, "NOT SCANNED (2)") || !strings.Contains(b.HTML, "Gamma Site") {
-		t.Error("html lacks the coverage section")
+	for _, want := range []string{"ADD TO QUALYS (2)", "FIX OR CLARIFY IN THE SPREADSHEET (3)", "How the spreadsheet is read", "sheet row 41"} {
+		if !strings.Contains(b.HTML, want) {
+			t.Errorf("html lacks %q", want)
+		}
+	}
+}
+
+// The email goes to the network and acquisitions teams as well as security, so
+// the same findings come as a worksheet they can work through.
+func TestTheFindingsComeAsAWorksheet(t *testing.T) {
+	c := sampleCoverage()
+	rows, err := csv.NewReader(strings.NewReader(c.CSV())).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1+2+3+1 {
+		t.Fatalf("%d rows:\n%s", len(rows), c.CSV())
+	}
+	if strings.Join(rows[0], ",") != "category,location,sheet_row,network,asset_group,what_to_do" {
+		t.Errorf("header = %v", rows[0])
+	}
+	if rows[1][0] != "add to Qualys" || rows[1][1] != "Alpha Site" || rows[1][2] != "12" || rows[1][3] != "10.1.30.0/24" {
+		t.Errorf("first row = %v", rows[1])
+	}
+	var fix int
+	for _, r := range rows[1:] {
+		if r[0] == "fix in the spreadsheet" {
+			fix++
+			if r[2] == "" {
+				t.Errorf("a spreadsheet fix with no row: %v", r)
+			}
+		}
+	}
+	if fix != 3 {
+		t.Errorf("%d spreadsheet fixes", fix)
+	}
+	if (&Coverage{Unavailable: "x"}).CSV() != "" || (*Coverage)(nil).CSV() != "" {
+		t.Error("an unavailable or absent check produced a worksheet")
+	}
+}
+
+func TestAWorksheetCellCannotRunAsAFormula(t *testing.T) {
+	c := &Coverage{Findings: []netmap.Finding{{Kind: netmap.NotInAnyGroup, Location: "=HYPERLINK(\"x\")", Subnet: "10.1.1.0/24"}}}
+	if !strings.Contains(c.CSV(), "'=HYPERLINK") {
+		t.Errorf("a formula was written as one:\n%s", c.CSV())
 	}
 }
 

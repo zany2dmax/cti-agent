@@ -58,6 +58,7 @@ type xmlCell struct {
 }
 
 type xmlRow struct {
+	R     int       `xml:"r,attr"`
 	Cells []xmlCell `xml:"c"`
 }
 
@@ -92,6 +93,26 @@ func readPart(zr *zip.Reader, name string) ([]byte, error) {
 // Blank rows are not returned, so an index is not a row number. A workbook that
 // is not an .xlsx, or a sheet that is not there, is an error that says so.
 func ReadSheet(data []byte, sheetName string) ([][]string, error) {
+	rows, err := ReadSheetRows(data, sheetName)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.Cells
+	}
+	return out, nil
+}
+
+// Row is one worksheet row with its row number in the sheet, so a finding can
+// say "row 1180" and the person fixing the spreadsheet can go straight to it.
+type Row struct {
+	Num   int
+	Cells []string
+}
+
+// ReadSheetRows is ReadSheet with each row's number.
+func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("not an .xlsx workbook: %w", err)
@@ -161,8 +182,12 @@ func ReadSheet(data []byte, sheetName string) ([][]string, error) {
 	if err := xml.Unmarshal(sheetB, &sd); err != nil {
 		return nil, fmt.Errorf("%s: %w", target, err)
 	}
-	var out [][]string
-	for _, row := range sd.Rows {
+	var out []Row
+	for n, row := range sd.Rows {
+		num := row.R
+		if num == 0 {
+			num = n + 1
+		}
 		var cells []string
 		for _, c := range row.Cells {
 			col := colIndex(c.Ref)
@@ -180,7 +205,7 @@ func ReadSheet(data []byte, sheetName string) ([][]string, error) {
 				cells[col] = c.Value
 			}
 		}
-		out = append(out, cells)
+		out = append(out, Row{Num: num, Cells: cells})
 	}
 	return out, nil
 }

@@ -72,28 +72,33 @@ TXT="$STATE/vmscan-$STAMP.txt"
 SUBJFILE="$STATE/vmscan-subject-$STAMP.txt"
 SEEN="$STATE/vmscan-seen-$STAMP.json"
 QUESTIONS="$STATE/vmscan-questions-$STAMP.tsv"
+FINDINGS="$STATE/vmscan-findings-$STAMP.csv"
 BOARD="$FLEET_CODE/bin/fleet-board"
 # Mode set before anything is written: the report names which scans found what.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
-rm -f "$SUBJFILE" "$SEEN" "$QUESTIONS"
+rm -f "$SUBJFILE" "$SEEN" "$QUESTIONS" "$FINDINGS"
 
 "$VMSCAN" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJFILE" --seen-out "$SEEN" \
-  --questions-out "$QUESTIONS" \
+  --questions-out "$QUESTIONS" --csv-out "$FINDINGS" \
   || fail "cti-vmscan exited non-zero (check outbound 443 to Graph)"
 [ -s "$SUBJFILE" ] || fail "cti-vmscan wrote no subject line"
 SUBJECT="$(head -n 1 "$SUBJFILE")"
 log "subject: $SUBJECT"
+# The coverage findings as a worksheet for the network and acquisitions teams,
+# attached when there is anything to work through.
+ATTACH=()
+[ -s "$FINDINGS" ] && ATTACH=(--attach "$FINDINGS")
 
 if [ -n "$TODEV" ]; then
   # FLEET_DEV_EMAIL only. VMSCAN_TO / VMSCAN_ALLOW_TO are not consulted, so a
   # test works before the lane's audience is configured.
   # shellcheck disable=SC2086
-  "$MAILER" --to-dev --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+  "$MAILER" --to-dev --html "$HTML" --text "$TXT" --subject "$SUBJECT" ${ATTACH[@]+"${ATTACH[@]}"} $DRY \
     || fail "test send failed"
 else
   # shellcheck disable=SC2086
-  "$MAILER" --lane vmscan --html "$HTML" --text "$TXT" --subject "$SUBJECT" "${DRY:---for-real}" \
+  "$MAILER" --lane vmscan --html "$HTML" --text "$TXT" --subject "$SUBJECT" ${ATTACH[@]+"${ATTACH[@]}"} "${DRY:---for-real}" \
     || fail "send failed - if VMSCAN_TO or VMSCAN_ALLOW_TO is unset the mailer refuses by design"
   # Sent: the lane has now used these notices, so the mailbox cleanup may
   # archive them 48 hours on. Non-fatal - the report is out, and an unrecorded
