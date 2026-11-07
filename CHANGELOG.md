@@ -50,6 +50,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   The report email was never affected. **Upgrade:** nothing; the next domains
   run updates the ticket.
 
+- **The AppSec weekly no longer says "nothing urgent open" about scans it has
+  no counts for.** A week with one counted scan and twelve whose completion
+  notices never arrived (the scanner account's notices were being sent from the
+  team mailbox and, correctly, not read) was subject-lined as an all-clear. The
+  subject and the opening paragraph now say how many scans have counts and how
+  many do not: "nothing urgent in the 1 scan(s) with counts; 12 scan(s) have
+  none", or "no counts for 12 scan(s)" when there are none at all. A week where
+  every scan has counts reads as before. **Upgrade:** nothing.
+
 ## 1.5.1 — 2026-11-07
 
 **Upgrade:** pull, then re-run the installer (it pins three more timers to
