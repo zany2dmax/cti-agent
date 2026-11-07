@@ -483,9 +483,10 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 #                           - every runner either sends mail or moves it.
 #                             Timers own those; a beat that needs one re-run
 #                             escalates with the exact command for a person.
-#   cti-mailbox --for-real  - listed WITHOUT :* so only the bare command
-#                             matches, which is the dry run. Moving mail is a
-#                             scheduled decision, not a beat-time one.
+#   cti-mailbox (bare)      - moves mail, so only the exact command
+#                             `cti-mailbox --dry-run` is granted below, with no
+#                             :* after it. Moving mail is a scheduled decision,
+#                             not a beat-time one.
 #   anything outside this list - including a plain shell.
 #
 # PER SUBCOMMAND, NOT PER BINARY. `fleet-db:*` granted `fleet-db sent`, which
@@ -523,7 +524,7 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
 # Rendering only. cti-patchtuesday refuses --mark-sent with --dry-run, so no
 # invocation that starts with --dry-run can change state.
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday --dry-run:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox --dry-run)"
 # Read-only, and the only way a beat can see that a timer was disabled - the
 # failure that raises no alarm at all, and the one ARCHITECTURE.md says the
 # orchestrator exists to catch. Through fleet-timers, not systemctl itself:

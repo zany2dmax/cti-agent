@@ -2694,10 +2694,13 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             f"{F}/bin/fleet-db finding upsert {{}}",
             f"{F}/bin/fleet-db note CVE-2026-0001 handled",
             f"{F}/bin/fleet-db init",
+            f"{F}/bin/cti-mailbox",
             f"{F}/bin/cti-mailbox --for-real",
+            f"{F}/bin/cti-mailbox --dry-run --lookback 8760h",
             f"{F}/bin/run-digest daily",
             f"{F}/bin/run-patchtuesday",
             f"{F}/bin/run-appscan",
+            f"{F}/bin/run-mailbox-cleanup",
             f"{F}/bin/run-mailbox-cleanup --for-real",
             f"{F}/bin/cti-mailer --to someone@example.com",
             f"{F}/bin/cti-appscan --since 336h",
@@ -2706,6 +2709,16 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             "systemctl disable cti-agent-digest.timer",
             "cat /etc/cti-agent/fleet.env",
         ):
+            self.assertFalse(self._allowed(rules, cmd), f"granted: {cmd}")
+
+    def test_the_mailbox_plan_is_granted_only_as_a_dry_run(self):
+        """cti-mailbox moves mail unless --dry-run, so the grant is that exact
+        command: not the bare one, not --for-real, nothing appended."""
+        rules = self._orchestrator_grant()
+        F = "$FLEET_CODE"
+        self.assertTrue(self._allowed(rules, f"{F}/bin/cti-mailbox --dry-run"))
+        for cmd in (f"{F}/bin/cti-mailbox", f"{F}/bin/cti-mailbox --for-real",
+                    f"{F}/bin/cti-mailbox --dry-run --lookback 8760h"):
             self.assertFalse(self._allowed(rules, cmd), f"granted: {cmd}")
 
     def test_dry_run_cannot_mark_a_manifest_sent(self):

@@ -1218,7 +1218,7 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
    if you have not: without it that role is tenant-wide.
 
      sudo cti-agent mailer.py --check          # expect OK Mail.ReadWrite
-     sudo cti-agent cti-mailbox                # dry run, moves nothing
+     sudo cti-agent cti-mailbox --dry-run      # moves nothing
      sudo systemctl enable --now cti-agent-mailbox.timer
 
    The first dry run reports everything as "leave". That is correct: the lane

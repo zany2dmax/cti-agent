@@ -243,8 +243,8 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task run` | Run the Go agent directly from env vars |
 | `task install` | Copy the binary to `~/bin` |
 | `task fmt` / `task fmt:check` | Format / fail if unformatted |
-| `<fleet> cti-mailbox` | Dry run of mailbox cleanup: what it would archive, delete and leave |
-| `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Add `--for-real` to apply |
+| `<fleet> cti-mailbox --dry-run` | Mailbox cleanup rehearsal: what it would archive, delete and leave. Without `--dry-run` it moves the mail |
+| `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Moves mail; add `--dry-run` to rehearse |
 | `task test:mailbox` | The processed-message gate, precedence, retention, backlog note |
 | `task test:patchtuesday` | Date maths, source parsing, exposure, QQL, the QID table and the release manifest the daily reads |
 | `task test:env` | `fleet.env` parsing and the per-command credential requirements. A lane that refuses to run over credentials it never uses, or over ones already in the file, has happened twice; this is the regression test for both |
@@ -432,7 +432,7 @@ nothing in this codebase calls.
 # ── 4. dry run each lane you are about to enable ─────────────────────────────
 sudo cti-agent run-digest daily --dry-run
 sudo cti-agent run-patchtuesday --dry-run --month 2026-08
-sudo cti-agent cti-mailbox                       # moves nothing
+sudo cti-agent cti-mailbox --dry-run             # moves nothing
 sudo cti-agent run-appscan --dry-run             # needs WAS_TO and WAS_ALLOW_TO
 sudo cti-agent run-domains --dry-run             # needs domains.txt, DOM_TO, DOM_ALLOW_TO
 
@@ -1008,8 +1008,8 @@ anything else left exactly where it is.
 | `MAILBOX_LOOKBACK_HOURS` | How far back the cleanup looks (default 336 = 14 days since 1.3.2, so the weekly AppSec lane's notices are still in view; was 72). `cti-mailbox --lookback 720h` for a one-off sweep |
 
 ```bash
-sudo cti-agent cti-mailbox                       # dry run: what it would do
-sudo cti-agent run-mailbox-cleanup               # dry run via the runner
+sudo cti-agent cti-mailbox --dry-run             # what it would do; moves nothing
+sudo cti-agent run-mailbox-cleanup --dry-run     # the same via the runner
 sudo systemctl enable --now cti-agent-mailbox.timer
 ```
 

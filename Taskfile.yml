@@ -353,12 +353,13 @@ tasks:
 
   mailbox:
     desc: "Show what mailbox cleanup WOULD do. Moves nothing."
-    # No --for-real here on purpose. A task that modifies a shared mailbox
-    # should be typed out in full, not reachable by tab-completing a name.
+    # --dry-run here on purpose: cti-mailbox moves mail unless told not to, and
+    # a task that modifies a shared mailbox must not be reachable by
+    # tab-completing a name. Apply by typing the command out without it.
     cmds:
       - |
         if [ -f ./.env ]; then set -a; . ./.env; set +a; fi
-        go run ./cmd/cti-mailbox
+        go run ./cmd/cti-mailbox --dry-run
 
   test:patchtuesday:
     desc: Patch Tuesday date maths, source parsing, exposure and QQL
