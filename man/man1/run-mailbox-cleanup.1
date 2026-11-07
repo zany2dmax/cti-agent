@@ -3,10 +3,10 @@
 run-mailbox-cleanup \- daily tidy of the CTI mailbox: archive what was processed, delete auto-replies
 .SH SYNOPSIS
 .B run\-mailbox\-cleanup
-.RB [ \-\-for\-real ]
+.RB [ \-\-dry\-run ]
 .PP
 .B sudo cti\-agent run\-mailbox\-cleanup
-.RB [ \-\-for\-real ]
+.RB [ \-\-dry\-run ]
 .SH DESCRIPTION
 .B run-mailbox-cleanup
 runs
@@ -18,15 +18,20 @@ header-confirmed out-of-office replies to Deleted Items, and leaves
 everything else where it is. It refuses to act on a day with no processed
 CTI email, and that refusal is a success.
 .PP
-It is a dry run unless
-.B \-\-for\-real
-is given. This is the only lane that changes the mailbox, so the effect has
-to be asked for: a unit file that loses its argument does nothing.
+It moves mail unless
+.B \-\-dry\-run
+is given, like every other lane (which sends unless
+.BR \-\-dry\-run ).
+This lane used to be the exception, a dry run unless
+.BR \-\-for\-real ,
+so the command typed for any other lane rehearsed here. Run it with
+.B \-\-dry\-run
+first.
 .PP
 It is run by
 .B cti\-agent\-mailbox.service
 as
-.B run\-mailbox\-cleanup \-\-for\-real
+.B run\-mailbox\-cleanup
 from
 .BR cti\-agent\-mailbox.timer ,
 every day at 07:00, an hour after the digest that writes the
@@ -48,7 +53,7 @@ is executable; fatal if not.
 .B 2.
 Runs
 .B cti\-mailbox
-.RB [ \-\-for\-real ]
+.RB [ \-\-dry\-run ]
 .RB [ \-\-backlog\-threshold
 .IR N ]
 .B \-\-json
@@ -82,12 +87,16 @@ line. It moves and deletes nothing.
 A shell argument, matched exactly. Any other argument is refused with a
 usage line and exit status 2.
 .TP
-.B \-\-for\-real
+.B \-\-dry\-run
 Pass
-.B \-\-for\-real
+.B \-\-dry\-run
 to
 .BR cti\-mailbox ,
-which then moves the mail its plan lists. Without it nothing is moved.
+which then prints its plan and moves nothing. Without it the mail the plan lists
+is moved.
+.TP
+.B \-\-for\-real
+The old spelling of the default. Accepted and ignored.
 .SH ENVIRONMENT
 .I fleet.env
 is sourced with every assignment exported, and its values replace the
@@ -146,14 +155,16 @@ An unknown argument.
 See what tomorrow's cleanup would move:
 .PP
 .EX
-sudo cti\-agent run\-mailbox\-cleanup
+sudo cti\-agent run\-mailbox\-cleanup \-\-dry\-run
 sudo less /var/lib/cti\-agent/state/mailbox\-cleanup\-$(date +%F).json
 .EE
 .PP
-Run the real cleanup by hand:
+Run the cleanup by hand (this moves mail; add
+.B \-\-dry\-run
+to rehearse):
 .PP
 .EX
-sudo cti\-agent run\-mailbox\-cleanup \-\-for\-real
+sudo cti\-agent run\-mailbox\-cleanup
 .EE
 .SH SEE ALSO
 .BR cti\-mailbox (1),

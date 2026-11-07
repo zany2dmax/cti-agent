@@ -419,11 +419,11 @@ nobody watching. Treat the rollout accordingly.
    it the lane can read and plan but every move fails.
 2. **Dry run, by hand, for several days:**
    ```bash
-   sudo cti-agent cti-mailbox
+   sudo cti-agent cti-mailbox --dry-run
    ```
-   Dry run is the default. `--for-real` is the only thing that moves mail, and
-   a flag that must be added to cause an effect cannot be triggered by a
-   misconfigured unit file.
+   `--dry-run` is how every lane is rehearsed, and this one moves mail without
+   it (it used to be the reverse, `--for-real`, which is still accepted and
+   ignored).
 3. **Read the archive list every time.** It should contain nothing but CTI
    advisories. If a colleague's phishing report, a Defender alert or an
    ordinary email from a person appears there, stop and work out why — that is
@@ -444,8 +444,8 @@ nobody watching. Treat the rollout accordingly.
 
 On a day no CTI email was processed nothing is archived, but auto-replies
 still go. For a one-off sweep of old auto-replies:
-`sudo cti-agent cti-mailbox --lookback 720h --timeout 10m` (dry run), then add
-`--for-real`.
+`sudo cti-agent cti-mailbox --lookback 720h --timeout 10m --dry-run`, then run it
+again without `--dry-run`.
 
 A shared security mailbox receives reported phishing, alerts, scan
 notifications and ordinary mail from colleagues. "The agent read it looking for
@@ -1978,7 +1978,7 @@ sudo journalctl -u cti-agent-digest --since today \
   | grep -E "brief\] wrote|recorded|distinct CVE"
 
 # The cleanup plan, and whether the archive list is only CTI mail
-sudo cti-agent cti-mailbox
+sudo cti-agent cti-mailbox --dry-run
 
 # Would the heartbeat start? Integrity and steering checks, no beat
 sudo cti-agent run-checkin --audit

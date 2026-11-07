@@ -3,7 +3,7 @@
 cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lane has read, delete auto-replies, leave the rest
 .SH SYNOPSIS
 .B cti-mailbox
-.RB [ \-\-for\-real ]
+.RB [ \-\-dry\-run ]
 .RB [ \-\-json
 .IR FILE ]
 .RB [ \-\-backlog\-threshold
@@ -21,15 +21,19 @@ is the only command in the fleet that modifies the mailbox. It is run by
 .BR run\-mailbox\-cleanup (1)
 from
 .B cti\-agent\-mailbox.timer
-every day at 07:00, an hour after the digest; the unit passes
-.B \-\-for\-real
-explicitly.
+every day at 07:00, an hour after the digest.
 .PP
-.B Without
-.B \-\-for\-real
+It moves mail unless given
+.BR \-\-dry\-run ,
+the same flag every other lane uses to rehearse.
+.B With
+.B \-\-dry\-run
 .B nothing is moved.
 The plan is computed and printed in full, and the output says
 .BR "DRY RUN" .
+Run it with
+.B \-\-dry\-run
+first when trying a new window or after a change.
 .PP
 Before looking at the mailbox it loads the processed-message logs: the
 digest's, which it writes as it reads mail, and one per lane that owns mail of
@@ -122,13 +126,14 @@ Items is a person's job. Processing records older than 14 days are pruned by
 the digest, after which a message can no longer be moved on their strength.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash
-.RB ( \-for\-real ),
+.RB ( \-dry\-run ),
 and a value may follow
 .B =
 or a space.
 .TP
-.B \-\-for\-real
-Actually move the messages in the plan. Archive goes to the well-known
+.B \-\-dry\-run
+Show what would be moved and move nothing. Without it the messages in the plan
+are moved: archive goes to the well-known
 .B archive
 folder, delete to
 .BR deleteditems .
@@ -137,7 +142,13 @@ Each move prints the new message ID, or
 with the Graph error, and a final
 .B moved\~N, failed\~N, left\~N
 line follows.
-Default:\~\fBfalse\fR (dry run).
+Default:\~\fBfalse\fR (the mail is moved).
+.TP
+.B \-\-for\-real
+Deprecated and ignored: moving is the default. Accepted so an old unit file or
+note still works; combined with
+.B \-\-dry\-run
+it is refused.
 .TP
 .BI \-\-json " FILE"
 Also write the plan to
@@ -146,9 +157,8 @@ mode 0600, as JSON:
 .BR mailbox ,
 .BR at ,
 .B applied
-(whether
-.B \-\-for\-real
-was given),
+(false for a
+.BR \-\-dry\-run ),
 .BR moved ,
 .BR failed ,
 .B counts
@@ -309,10 +319,12 @@ The same through the runner, which also posts the summary to the board:
 sudo cti\-agent run\-mailbox\-cleanup
 .EE
 .PP
-Apply it, keeping the plan:
+Rehearse it first, keeping the plan; drop
+.B \-\-dry\-run
+to apply:
 .PP
 .EX
-sudo cti\-agent cti\-mailbox \-\-for\-real \e
+sudo cti\-agent cti\-mailbox \-\-dry\-run \e
   \-\-json /var/lib/cti\-agent/state/mailbox\-cleanup\-$(date +%F).json
 .EE
 .PP

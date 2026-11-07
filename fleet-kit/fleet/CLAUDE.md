@@ -169,7 +169,7 @@ Each Bash call must be one granted command with plain arguments, and the command
 | `$FLEET_CODE/bin/cti-budget status` | Your own quota. Only `status`: the gate and the ledger are run-checkin's |
 | `$FLEET_CODE/bin/cti-kev` | KEV deadlines for present CVEs |
 | `$FLEET_CODE/bin/cti-patchtuesday --dry-run …` | Render the Patch Tuesday synopsis, including `--month` replays. Writes nothing |
-| `$FLEET_CODE/bin/cti-mailbox` (no arguments) | The cleanup plan. Moves nothing |
+| `$FLEET_CODE/bin/cti-mailbox --dry-run` (exactly that) | The cleanup plan. Moves nothing. Without `--dry-run` the command moves mail, and is not granted |
 | `$FLEET_CODE/bin/cti-alert` | **Your only route to a person** |
 | `$FLEET_CODE/bin/fleet-journal -u cti-agent-… [--since …] [-n …] [--no-pager]` | What the timers did, and why one failed. Your only way to the journal: plain `journalctl` is not granted, and the wrapper takes only those options |
 | `$FLEET_CODE/bin/fleet-timers [--all]` | Whether a timer has been disabled — which raises no alarm on its own |
@@ -218,7 +218,7 @@ Patch Tuesday manifest sent; those are the lanes' and the operator's.
   then appear in **no** email at all, and nothing in either lane's output would
   say so. If the daily is flooded with Microsoft CVEs, find out why the monthly
   did not send - do not mark the manifest.
-- Running `run-mailbox-cleanup --for-real`, or `cti-mailbox --for-real` (not on
+- Running `run-mailbox-cleanup` or `cti-mailbox` without `--dry-run` (not on
   your grant). The daily timer does that; you do not. It moves mail out of a shared mailbox
   other people read, and a second unscheduled pass is how a person finds their
   inbox rearranged twice with no explanation. If the timer looks wrong, say so

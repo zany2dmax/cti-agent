@@ -705,9 +705,13 @@ Deliberately absent from the grant:
   address nobody approved, and `cti-alert` cannot be pointed at an address at
   all. It remains worth closing, because a future `--to` would silently turn a
   safe grant into an unsafe one.
-- **`cti-mailbox --for-real`.** Granted without `:*`, so only the bare command
-  matches — the dry run. Moving mail is a scheduled decision, not a beat-time
-  one.
+- **`cti-mailbox` without `--dry-run`.** It moves mail, so the grant is the
+  exact command `cti-mailbox --dry-run`, without `:*`: nothing can be appended
+  to it and the bare command is not matched. Until 1.6 the polarity was the
+  other way (bare = dry run, `--for-real` moved); when it flipped, the grant
+  was changed with it, and a test (`test_lanes.py`) fails if the bare command
+  or `--for-real` is ever granted. Moving mail is a scheduled decision, not a
+  beat-time one.
 - **`run-domains` and `cti-domains`.** Not granted. The first sends to the
   security team; the second probes every domain we own and advances last
   week's baseline, so an extra run would swallow a week's changes. The

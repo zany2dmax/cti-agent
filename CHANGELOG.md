@@ -35,6 +35,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **The mailbox lane now moves mail unless you say `--dry-run`, like every other
+  lane.** `cti-mailbox` and `run-mailbox-cleanup` were the exception: a dry run
+  by default and `--for-real` to act, so the command an operator types for any
+  other lane (`run-digest`, `run-appscan`, `run-domains`, `cti-alert`... all
+  send unless `--dry-run`) rehearsed here and looked as if the mailbox had been
+  tidied. Both now accept `--dry-run`, and without it they move mail. The old
+  `--for-real` is still accepted and ignored (combined with `--dry-run` it is
+  refused), so an old unit file or note keeps working. The systemd unit no
+  longer passes it, `task mailbox` passes `--dry-run`, and the orchestrator's
+  tool grant is now the exact command `cti-mailbox --dry-run` (the bare command
+  would otherwise have become a grant to move mail; a test pins it).
+  **Upgrade:** re-run the installer. **From then on `sudo cti-agent
+  cti-mailbox` and `run-mailbox-cleanup` with no arguments MOVE MAIL**, so use
+  `--dry-run` to look, including for `--lookback` sweeps.
+
 ## 1.5.2 — 2026-11-07
 
 **Upgrade:** pull and re-run the installer. Nothing else is required.
