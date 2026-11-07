@@ -2,6 +2,7 @@ package netmap
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"sort"
 	"strings"
@@ -19,8 +20,10 @@ func addrU32(a netip.Addr) uint32 {
 func PrefixRange(p netip.Prefix) Range {
 	p = p.Masked()
 	lo := addrU32(p.Addr())
-	size := uint64(1) << (32 - p.Bits())
-	return Range{lo, uint32(uint64(lo) + size - 1)}
+	// The host bits all set. A shift of 32 on a uint32 is 0 in Go, so a /32
+	// gives hi == lo and a /0 gives the whole space, with no widening to 64
+	// bits and back.
+	return Range{lo, lo | (math.MaxUint32 >> uint(p.Bits()))}
 }
 
 // ParseRange reads one Qualys IP-set entry: an address or "a.b.c.d-e.f.g.h".

@@ -306,3 +306,22 @@ func TestParsesQualysAssetGroupsAndRefusesATruncatedList(t *testing.T) {
 		t.Error("an error response was accepted as an empty list")
 	}
 }
+
+func TestPrefixRangeEdges(t *testing.T) {
+	for _, c := range []struct {
+		cidr   string
+		lo, hi uint32
+	}{
+		{"10.1.30.0/24", 0x0A011E00, 0x0A011EFF},
+		{"10.1.30.7/32", 0x0A011E07, 0x0A011E07},
+		{"0.0.0.0/0", 0, 0xFFFFFFFF},
+		{"255.255.255.255/32", 0xFFFFFFFF, 0xFFFFFFFF},
+		{"192.168.0.0/16", 0xC0A80000, 0xC0A8FFFF},
+		{"10.1.30.130/25", 0x0A011E80, 0x0A011EFF}, // a host address is masked first
+	} {
+		r := PrefixRange(netip.MustParsePrefix(c.cidr))
+		if r.Lo != c.lo || r.Hi != c.hi {
+			t.Errorf("%s = %08x-%08x, want %08x-%08x", c.cidr, r.Lo, r.Hi, c.lo, c.hi)
+		}
+	}
+}

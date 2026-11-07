@@ -188,7 +188,7 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	if rulesPath == "" {
 		rulesPath = "/etc/cti-agent/netrules.txt"
 	}
-	// #nosec G304 -- the operator's own rules file, root-owned.
+	// #nosec G304 G703 -- the operator's own rules file, root-owned, named in fleet.env.
 	if b, err := os.ReadFile(rulesPath); err == nil {
 		var problems []string
 		rules, problems = netmap.ParseRules(string(b))
