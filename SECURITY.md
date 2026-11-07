@@ -391,19 +391,31 @@ gitignored.
 
 ## Microsoft Graph permissions
 
-Three application permissions, each optional except the first:
+Application permissions, each optional except the first. The first three are mail; the fourth is for one lane only:
 
 | Permission | Needed by | Notes |
 |---|---|---|
 | `Mail.Read` | reading the CTI mailbox | not needed if you grant `Mail.ReadWrite`, which supersedes it |
 | `Mail.Send` | sending digests and alerts | required by `mailer.py --check`; omit only if you want markdown reports and nothing else |
 | `Mail.ReadWrite` | mailbox cleanup only | omit if you are not running that lane |
+| `Sites.Selected` | the VM scan report's coverage check only | read access to ONE file (the network spreadsheet) through a per-site grant; omit and the check reports that it did not run. `Files.Read.All` or `Sites.Read.All` also work and are tenant-wide, so prefer the narrow one |
 
 **Application permissions are tenant-wide by default.** `Mail.Send` means the
 app can send as any mailbox in the tenant; `Mail.ReadWrite` means it can read
 and move mail in any of them. Confine the app with an Exchange Application
 Access Policy — or RBAC for Applications — **before** granting, not after.
 The policy is scoped to the app, so it covers permissions added later.
+
+**The VM scan coverage check reads one file and writes nothing.**
+`graph.Client.DriveItemContent` downloads a single SharePoint file by its drive
+and item ids, with a size cap, and reports a refusal as which permission to add.
+Nothing in the fleet writes to SharePoint or to Qualys for this lane: the Asset
+Group list is a read, and a Qualys account that cannot list groups only makes the
+check say so. The spreadsheet is the network team's, so its cell text is treated
+as untrusted data: it is HTML-escaped in the email, and in the CSV worksheet any
+cell that starts with `=`, `+`, `-` or `@` is made inert so it cannot run as a
+formula when the teams open it. The drive and item ids are tenant-specific and
+live in `fleet.env`, never in the repository.
 
 **Nothing in this codebase can permanently delete mail.** `internal/graph`
 implements move-to-folder and nothing else; Graph's `DELETE /messages/{id}`

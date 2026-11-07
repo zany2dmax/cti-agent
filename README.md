@@ -3,7 +3,8 @@
 **An always-on junior analyst for a security team.** Every morning it reads the
 advisories, asks your scanner which of those CVEs are *actually on your
 machines*, and chases the open tickets. Every week it checks your web
-applications and your domains. Every month it measures Patch Tuesday against
+applications and your domains, and confirms the vulnerability scans ran and
+reach every network on the network team's spreadsheet. Every month it measures Patch Tuesday against
 your estate. It has no sick days, no vacation and no Friday afternoon, and it
 never says "all clear" about something it did not check.
 
@@ -30,7 +31,7 @@ people make the calls.
 **Built to be reused.** Each chore is a *lane*: a small program on a systemd
 timer that gathers facts, decides what matters and writes it up for the right
 people. Today's lanes are threat intel, Jira follow-through, Patch Tuesday,
-application security, domains, and housekeeping. Adding a lane for the next
+application security, vulnerability-scan coverage, domains, and housekeeping. Adding a lane for the next
 tedious thing is the point: [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md) is
 the recipe. It works with Qualys, Jira, Microsoft 365 and GoDaddy today, and
 the scanner, registrar and ticketing tool sit behind swappable Go interfaces:
@@ -108,6 +109,20 @@ that stops working alerts the operator rather than the developers. Each
 application's Jira ticket can also carry the scanner's own report as an
 attachment (off by default, `WAS_ATTACH_REPORT=1`), and lists the scanner's
 unconfirmed Critical and Urgent findings in a separate "please verify" section.
+
+**A weekly vulnerability-scan report.** Mondays, to the vulnerability-management
+audience (and the network and M&A teams if you add them). It combines the week's
+two scheduled Qualys VM scans into one email from the scanner's own "Scan
+Results" notices: that each ran, when and for how long, how many addresses it
+scanned and how many were alive, and the locations it covered. It carries no
+severity counts, on purpose. Then it checks the network team's spreadsheet of
+subnets against the Qualys Asset Groups the scans cover, by address, and lists
+the corporate networks no scan reaches (the lane records only that, and asks the
+network and M&A teams to say why), the spreadsheet rows the network team has to
+fix, by row, and anything odd in Qualys. The findings also come as a CSV
+worksheet. It reads the spreadsheet through Microsoft Graph and the Asset Groups
+through the Qualys API, both read-only. A scheduled scan with no result leads
+the email.
 
 **A weekly domains check.** Tuesdays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this

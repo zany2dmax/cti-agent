@@ -33,8 +33,9 @@ where.
 |---|---|---|---|---|---|
 | `LookupProvider` | `internal/vulnlookup` | "Is this CVE present in our estate?" (VM / EDR) | Qualys, CrowdStrike (**placeholder**), no-op | `LOOKUP_PROVIDER` in `cmd/cti-agent` | **Partial**: the digest uses it; ticketing and Patch Tuesday do not ([2.1](#21-vulnlookuplookupprovider-is-bypassed-by-two-commands)) |
 | `Provider` | `internal/appscan` | Recognising and parsing a DAST scan-completion email | Qualys WAS | the `providers` slice in `cmd/cti-appscan` | **Full** for the email path |
-| `DetailFetcher`, `RemedyFetcher` | `internal/appscan` | Per-finding detail and the fix text, from a scanner API | Qualys WAS | type assertion in `cmd/cti-appscan` | **Partial**: only `RemedyFetcher` is used as an interface ([2.2](#22-the-appsec-lane-calls-the-qualys-api-type-directly)) |
+| `Scanner` and its capabilities: `Reconciler`, `AppLister`, `OpenFetcher`, `DetailFetcher`, `RemedyFetcher`, `ReferenceChecker`, `PortalHoster` | `internal/appscan` | What a scanner's API can do for the AppSec lane, each capability optional | Qualys WAS | type assertion in `cmd/cti-appscan`; the one vendor-naming file is `wiring.go` | **Full**: `TestOnlyWiringNamesAVendor` fails the build if a vendor is named anywhere else ([1.3](#13-appscandetailfetcher-remedyfetcher-reportfetcher)) |
 | `ReportFetcher`, `RateReporter` | `internal/appscan` | The scanner's own per-application report; API budget status | Qualys WAS | `APPSCAN_REPORT_PROVIDER` in `cmd/cti-appreport` | **Full** |
+| *(none yet)* | `internal/vmscan`, `internal/netmap` | The VM scan report's two sources: the network spreadsheet (read through Graph) and the Qualys Asset Groups | Qualys VM notices; SharePoint workbook; Qualys asset group API | concrete types in `cmd/cti-vmscan` | **None**: see [2.5](#25-the-vm-scan-lane-has-concrete-sources) |
 | `Registrar` | `internal/domains` | "Which domains does this account hold?" | GoDaddy | `registrarFor` in `cmd/cti-domains` (fixed to GoDaddy, no setting) | **Full** in use; **no switch** yet |
 | `Resolver` | `internal/domains` | DNS lookups | `net.DefaultResolver`, test maps | `cmd/cti-domains` | Full, but a **test seam**, not a product seam |
 
@@ -134,12 +135,24 @@ found".
 
 | Interface | Gives | Used as an interface today? |
 |---|---|---|
-| `DetailFetcher` | Findings for an application, since a date | No: `cmd/cti-appscan` holds the concrete `*qualys.API` |
+| `Scanner` | The scanner's name, which equals its `Provider`'s | **Yes**: the lane asks `newScanner` (in `wiring.go`) for one and nothing else |
+| `Reconciler` | Joins the notifications to the scanner's own scan list (adds scans whose mail never arrived, supplies the application's stable id) | **Yes**: `reconcile` asserts it |
+| `AppLister` | Every application the scanner defines, not only this week's | **Yes** |
+| `OpenFetcher` | Every finding still open for an application, for the tickets | **Yes** |
+| `DetailFetcher` | Findings for an application, since a date | **Yes**: `attachDetail` asserts it, and only asks for scans this scanner produced |
 | `RemedyFetcher` | Fix text for finding IDs (Qualys KnowledgeBase) | **Yes**: `attachRemedies` takes the interface |
 | `ReportFetcher` | The scanner's own zipped report for one application; deletes what it created | **Yes**: `cmd/cti-appreport` only ever sees the interface |
 | `RateReporter` | A one-line API-budget status for the log | **Yes** |
 
-`ReportFetcher` is the model to copy. `cmd/cti-appreport` has one function,
+Since 1.6 `cmd/cti-appscan` no longer imports a vendor package except in
+`wiring.go`, which holds the `providers` slice and `newScanner`. A scanner
+with only some of the capabilities is used for those and skipped for the rest
+(`TestLaneUsesWhateverTheScannerCanDo` runs the lane against a fake). The
+neutral types live in `internal/appscan/scanner.go`; `ReferenceChecker` and
+`PortalHoster` let a provider say what a well-formed scan reference is and which
+hosts its report links may point at, so neither is hard-coded in the lane.
+
+`ReportFetcher` is the other model to copy. `cmd/cti-appreport` has one function,
 `reportProvider`, that picks an implementation from `APPSCAN_REPORT_PROVIDER`,
 and nothing else in the command, in `cti-jira` or in the runner names a
 vendor. The reports reach Jira through `reports.json` and a zip file, which
@@ -220,14 +233,14 @@ claiming a second provider "just plugs in".
 (`hostFiller`) that matches `LookupCVE`, so the fix is to share
 `buildLookupProvider` instead of constructing Qualys by hand.
 
-### 2.2 The AppSec lane calls the Qualys API type directly
+### 2.2 The AppSec lane's API half (resolved in 1.6)
 
-`cmd/cti-appscan`'s `wasAPI` returns `*qualys.API`, and the lane also calls
-`Scans`, `WebApps`, `OpenFindings` and `Reconcile`. None of those is on any
-interface. The email-parsing half is vendor-neutral; the API half is Qualys.
-A second scanner's detail would go through `DetailFetcher` the same way, and
-scan-list reconciliation is an optional extra a provider with such an API can
-add. This is already on the [backlog](BACKLOG.md).
+This used to read "the AppSec lane calls the Qualys API type directly":
+`wasAPI` returned `*qualys.API` and the lane called `Scans`, `WebApps`,
+`OpenFindings` and `Reconcile` on it. All of that now goes through the
+capability interfaces in [1.3](#13-appscandetailfetcher-remedyfetcher-reportfetcher),
+and `cmd/cti-appscan/wiring.go` is the only file that names Qualys. Kept as a
+heading so links to it still land somewhere.
 
 ### 2.3 Domains has two single-vendor pieces with no interface
 
@@ -242,6 +255,26 @@ See [3.1](#31-mail-transport-microsoft-graph) and
 [3.2](#32-ticketing-jira). They are the two biggest vendor dependencies in the
 fleet, and neither has an interface.
 
+### 2.5 The VM scan lane has concrete sources
+
+`cmd/cti-vmscan` has no interfaces behind it yet, and one vendor on each side:
+
+- **The notices** are parsed by `vmscan.Provider`, which recognises Qualys VM's
+  "Scan Results" email. It is a parser, not an interface; a second scanner's
+  notices would need the same recognise-and-parse split `appscan.Provider` has.
+- **The network spreadsheet** is read with `graph.Client.DriveItemContent`
+  (application permission, read-only) and parsed by `netmap.ReadSheetRows` and
+  `netmap.ParseSiteRows`, which know this workbook's layout. A different source
+  of networks (a CMDB, an IPAM) would be a second implementation of "give me each
+  location's corp networks"; today that is `netmap.SelectCorp` over parsed rows.
+- **The Asset Groups** come from `netmap.FetchGroups`, the Qualys VM asset group
+  list. A second scanner would supply the same `[]netmap.Group` (a title and its
+  address ranges), which is all `netmap.Check` needs.
+
+Everything between those two ends (`netmap.Check`, the report) is vendor-neutral
+and tested without a network. Cutting the seams is cheap when a second source is
+real, and not before.
+
 ---
 
 ## 3. Where new interfaces could go
@@ -254,7 +287,7 @@ relative. **Do not build these speculatively**: see the rule in
 |---|---|---|---|---|---|
 | 3.1 | Mail transport | Microsoft Graph, five commands | `mail.Reader`, `mail.Sender`, `mail.Mover` | Highest | High |
 | 3.2 | Ticketing | Jira, one command | `tickets.Tracker` | High | Medium-high |
-| 3.3 | AppSec scanner API | Qualys API type | finish the `appscan` capability interfaces | High | Medium |
+| 3.3 | AppSec scanner API | Qualys API type | **done in 1.6**: the `appscan` capability interfaces | - | - |
 | 3.4 | CVE to detection mapping | Qualys KnowledgeBase | `vulnlookup.DetectionMapper` | Medium | Medium |
 | 3.5 | Notification channel | board plus Graph mail | `alert.Notifier` | Medium | Low |
 | 3.6 | Ownership source | `app-owners.txt` | `appscan.OwnerSource` | Medium | Low |
@@ -300,13 +333,14 @@ Two things make this harder than it looks, and a design must answer both:
 The write gates (`--for-real`, `JIRA_ALLOW_CREATE`, and `JIRA_ALLOW_CLOSE` for closing) are in `cti-jira` and must
 stay there, above the interface.
 
-### 3.3 AppSec scanner API: finish the job
+### 3.3 AppSec scanner API: finish the job (done in 1.6)
 
-Add the missing capability interfaces so `cmd/cti-appscan` never names
-`*qualys.API`: a scan lister, a web-app lister and an open-findings fetcher,
-each optional, plus `Reconcile` as an optional capability. This is the README's
-"AppSec lane fully provider-neutral" item. It is the cheapest way to make
-Invicti or Wiz a real second provider rather than a parser alone.
+The capability interfaces this section asked for exist: a scan reconciler, a
+web-app lister and an open-findings fetcher, each optional, with
+`cmd/cti-appscan` never naming `*qualys.API` outside `wiring.go`. What is left is
+the second scanner itself: Invicti or Wiz is now a package that implements
+`Provider` and the capabilities it has, plus one line in each of the two places
+in `wiring.go`.
 
 ### 3.4 CVE to detection mapping for Patch Tuesday
 
@@ -427,12 +461,14 @@ gap is closed.
 1. Create `internal/appscan/<provider>` and implement `Provider` against the
    vendor's completion email: `Recognises` from sender and subject, `Parse`
    returning a normalised `ScanResult` with `Provider` set to its key.
-2. Add it to the `providers` list in `cmd/cti-appscan/main.go`. The email path
+2. Add it to the `providers` list in `cmd/cti-appscan/wiring.go`. The email path
    is complete at this point: counts, authentication state, attention.
-3. If the vendor has an API, implement `DetailFetcher` for per-finding detail.
-   `attachDetail` in `cmd/cti-appscan` takes the Qualys type today
-   ([2.2](#22-the-appsec-lane-calls-the-qualys-api-type-directly)), so a
-   second scanner's detail is the moment to finish that interface work.
+3. If the vendor has an API, implement `appscan.Scanner` (its name) and whichever
+   of `Reconciler`, `AppLister`, `OpenFetcher`, `DetailFetcher` and
+   `RemedyFetcher` it can, and return it from `newScanner` in the same file. The
+   lane asserts each capability and skips the ones it lacks. If it builds report
+   links, add `PortalHoster`; if its scan references have a shape, add
+   `ReferenceChecker`.
 4. For the scanner's own report on each ticket, implement `ReportFetcher` and
    add one case to `reportProvider` in `cmd/cti-appreport`. Nothing in
    `cti-jira` or the runner changes.
