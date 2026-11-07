@@ -69,9 +69,6 @@ func run() int {
 	csvOut := flag.String("csv-out", "",
 		"write the coverage findings as a worksheet (CSV) here, for the runner to attach: "+
 			"one row per thing to add to Qualys or fix in the spreadsheet, with its sheet row")
-	questionsOut := flag.String("questions-out", "",
-		"write the locations the coverage check could not decide, one per line, for the runner "+
-			"to put to the operator")
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	flag.Parse()
@@ -142,17 +139,6 @@ func run() int {
 			}
 		}
 	}
-	if *questionsOut != "" && week.Coverage != nil {
-		var q strings.Builder
-		for _, x := range week.Coverage.Questions {
-			q.WriteString(strings.NewReplacer("\t", " ", "\n", " ").Replace(x.Location) + "\t" +
-				strings.NewReplacer("\t", " ", "\n", " ").Replace(x.Why) + "\n")
-		}
-		if err := os.WriteFile(*questionsOut, []byte(q.String()), 0o600); err != nil {
-			logf("warn   : could not write %s: %s", safelog.Line(*questionsOut), safelog.Line(err.Error()))
-		}
-	}
-
 	if *seenOut != "" {
 		if err := writeSeen(*seenOut, seen); err != nil {
 			logf("warn   : could not write %s: %s - these notices will not be archived this week",

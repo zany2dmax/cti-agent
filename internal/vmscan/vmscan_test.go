@@ -264,10 +264,10 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 		"Alpha Site (sheet row 12): 10.1.30.0/24 is in no Qualys Asset Group.",
 		"Create a Qualys Asset Group for this network and add it to a scheduled scan.",
 		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which neither weekly scan covers.",
-		"FIX OR CLARIFY IN THE SPREADSHEET (3)",
-		"Delta Site (sheet row 41)", "Fill in this location's corp network in the spreadsheet.",
+		"FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "The security team only reads this spreadsheet",
+		"Delta Site (sheet row 41)", "Network team: fill in this location's corp network.",
 		"Zeta Site (sheet row 50)", "not a valid CIDR",
-		"Gamma Site (sheet row 30)", "Add a row labelled corp",
+		"Gamma Site (sheet row 30)", "Network team: label the location's corporate network row corp",
 		"CHECK IN QUALYS (1)", "Mystery",
 		"HOW THE SPREADSHEET IS READ", "DECOMMISSIONED",
 	} {
@@ -275,7 +275,7 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 			t.Errorf("text lacks %q:\n%s", want, b.Text)
 		}
 	}
-	for _, want := range []string{"ADD TO QUALYS (2)", "FIX OR CLARIFY IN THE SPREADSHEET (3)", "How the spreadsheet is read", "sheet row 41"} {
+	for _, want := range []string{"ADD TO QUALYS (2)", "FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "How the spreadsheet is read", "sheet row 41"} {
 		if !strings.Contains(b.HTML, want) {
 			t.Errorf("html lacks %q", want)
 		}
@@ -301,7 +301,7 @@ func TestTheFindingsComeAsAWorksheet(t *testing.T) {
 	}
 	var fix int
 	for _, r := range rows[1:] {
-		if r[0] == "fix in the spreadsheet" {
+		if r[0] == "network team: fix in the spreadsheet" {
 			fix++
 			if r[2] == "" {
 				t.Errorf("a spreadsheet fix with no row: %v", r)

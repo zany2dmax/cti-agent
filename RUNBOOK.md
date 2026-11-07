@@ -1147,11 +1147,14 @@ whose addresses are nowhere in the sheet, a group with no IP ranges, a Target
 Group Qualys does not list). The same findings are attached as a CSV worksheet,
 and the email ends with a note on how the spreadsheet has to be laid out.
 
-It only reads. It never guesses which row is a location's corp network: a
-location with no `corp` row (HQ and the datacenter are like that), a corp network
-that is not a valid CIDR, or one overlapping another's is left out and put to
-you as a board question, which the heartbeat emails. Answer by adding a line to
-`/etc/cti-agent/netrules.txt` (root-owned):
+It only reads, and it never guesses which row is a location's corp network. The
+spreadsheet belongs to the network team and the security team is only a consumer
+of it, so when it is wrong or unclear (a location with no `corp` row, a corp
+network that is not a valid CIDR, one outside its location's block, an overlap)
+the email lists it for the network team to correct, by row, and does not check
+that location until they do. Nothing is escalated to the operator. If the
+security team decides to treat a location differently in the meantime it can
+record that in `/etc/cti-agent/netrules.txt` (root-owned, optional):
 
 ```text
 # location (the start of its header in the sheet) | what to do

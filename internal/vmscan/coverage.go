@@ -87,18 +87,21 @@ func gapAction(k netmap.Kind) string {
 	}
 }
 
+// questionAction is what the network team is asked to do. The security team only
+// reads the spreadsheet; where it is wrong or unclear the fix is the network
+// team's, so none of these asks the security team to work around it.
 func questionAction(k netmap.QuestionKind) string {
 	switch k {
 	case netmap.QBlank:
-		return "Fill in this location's corp network in the spreadsheet."
+		return "Network team: fill in this location's corp network."
 	case netmap.QInvalid:
-		return "Correct the network in the spreadsheet: it is not a valid CIDR (for example 10.4.30.0/24)."
+		return "Network team: correct the network. It is not a valid CIDR (for example 10.4.30.0/24)."
 	case netmap.QOutside:
-		return "Check the corp network against the location's own block: fix the typo in the sheet, or tell the security team it is meant."
+		return "Network team: this corp network is outside the location's own block, so one of the two has a typo. Correct it."
 	case netmap.QOverlap:
-		return "Two locations claim overlapping networks: correct the spreadsheet."
+		return "Network team: two locations claim overlapping networks. Correct one of them."
 	default:
-		return "Add a row labelled corp for this location, or tell the security team which rows count as its corp network."
+		return "Network team: label the location's corporate network row corp, so it can be checked. If the location has no corporate network (cloud only, for example), say so."
 	}
 }
 
@@ -152,7 +155,7 @@ var layoutGuide = []string{
 	"Under it, a row labelled corp with the corporate network as a CIDR, for example 10.4.30.0/24. Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check.",
 	"Do not leave the network cell blank or write it without a mask length: \"10.29.30\" cannot be read.",
 	"A location that has been retired: put DECOMMISSIONED in its header. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
-	"A location whose corporate network is laid out differently (headquarters, the datacenter) is not a mistake: the security team records which rows count as its corp network and the check follows that.",
+	"Every location needs one, including headquarters and the datacenter: a location with no row labelled corp cannot be checked, and is listed for the network team to correct.",
 }
 
 // text is the coverage section of the plain-text report.
@@ -176,7 +179,8 @@ func (c *Coverage) text() string {
 		}
 	}
 	if len(c.Questions) > 0 {
-		fmt.Fprintf(&b, "\nFIX OR CLARIFY IN THE SPREADSHEET (%d) - not checked until this is done\n%s\n", len(c.Questions), strings.Repeat("-", 72))
+		fmt.Fprintf(&b, "\nFOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (%d)\n%s\n", len(c.Questions), strings.Repeat("-", 72))
+		b.WriteString("  The security team only reads this spreadsheet. These rows cannot be read as written,\n  so these locations are not checked until the network team corrects them.\n")
 		for _, k := range questionOrder {
 			for _, q := range c.questionsOf(k) {
 				fmt.Fprintf(&b, "  - %s%s: %s\n      -> %s\n", q.Location, rowRef(q.Row), q.Why, questionAction(k))
@@ -234,8 +238,9 @@ func (c *Coverage) html(b *strings.Builder) {
 			}
 			fmt.Fprintf(&l, "<span style=\"color:%s\">&rarr; %s</span><br><br>", emailkit.Muted, e(questionAction(k)))
 		}
-		emailkit.Card(b, emailkit.Yellow, fmt.Sprintf("FIX OR CLARIFY IN THE SPREADSHEET (%d)", len(c.Questions)),
-			"These locations are not checked until this is done.<br><br>"+l.String())
+		emailkit.Card(b, emailkit.Yellow, fmt.Sprintf("FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (%d)", len(c.Questions)),
+			"The security team only reads this spreadsheet. These rows cannot be read as written, "+
+				"so these locations are not checked until the network team corrects them.<br><br>"+l.String())
 	}
 	if o := c.Oddities(); len(o) > 0 {
 		var l strings.Builder
@@ -279,7 +284,7 @@ func (c *Coverage) CSV() string {
 	}
 	for _, k := range questionOrder {
 		for _, q := range c.questionsOf(k) {
-			_ = w.Write([]string{"fix in the spreadsheet", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
+			_ = w.Write([]string{"network team: fix in the spreadsheet", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k)})
 		}
 	}
 	for _, f := range c.Oddities() {

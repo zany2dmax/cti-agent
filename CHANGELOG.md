@@ -60,11 +60,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   reaches (in no Asset Group, in a group no scan covers, or only partly
   covered), which scanned groups hold addresses the spreadsheet does not, and
   which locations it could not decide. It only reads; it never guesses a
-  location's corp network. A corp network outside its location's own block (a
-  typo in the sheet, or HQ-style addressing) is asked about too. A location with
-  no clear one (HQ and the datacenter)
-  becomes a board question the heartbeat emails, answered with a line in
-  `/etc/cti-agent/netrules.txt`. The email is written for the network and
+  location's corp network. The spreadsheet is the network team's: where it is
+  wrong or unclear (no corp row, a blank or invalid network, one outside its
+  location's own block, an overlap) the email lists it for them to correct, by
+  row, and that location is not checked until they do. Nothing is escalated to
+  the operator. An optional `/etc/cti-agent/netrules.txt` lets the security team
+  record how to treat a location meanwhile. The email is written for the network and
   acquisitions teams as well as security: each line names the location, the
   spreadsheet row and what to do (add to Qualys, fix or clarify in the
   spreadsheet, check in Qualys), the findings are attached as a CSV worksheet,

@@ -20,8 +20,6 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .IR FILE ]
 .RB [ \-\-csv\-out
 .IR FILE ]
-.RB [ \-\-questions\-out
-.IR FILE ]
 .PP
 .B cti-vmscan \-\-commit\-seen
 .I FILE
@@ -61,7 +59,8 @@ A location the check could not use: a corp row with no network written in it, a
 corp network that is not a valid CIDR, one outside the location's own block (a
 likely typo), one that overlaps another location's, or no row that clearly counts
 as the corp network. The location is not checked until this is fixed, or an
-operator rule says which rows count (see FILES). The lane never guesses.
+rule in FILES says which rows count. The lane never guesses, and the fix is the
+network team's: the security team only reads the spreadsheet.
 .TP
 .B CHECK IN QUALYS
 A scanned Asset Group whose addresses appear nowhere in the spreadsheet, a group
@@ -140,12 +139,6 @@ Write the coverage findings as a worksheet (CSV) here: category, location, sheet
 row, network, asset group and what to do. Written only when there is something to
 work through. Cells that would open as a formula are made inert.
 .TP
-.BI \-\-questions\-out " FILE"
-Write the locations the check could not decide, one per line as
-location, a tab, and why, for
-.B run\-vmscan
-to put to the operator.
-.TP
 .BI \-\-commit\-seen " FILE"
 Record a
 .B \-\-seen\-out
@@ -172,7 +165,7 @@ The worksheet to read. Default
 .BR Sites .
 .TP
 .B NETRULES_FILE
-The operator's rules for locations the check cannot decide. Default
+Optional security-team rules for locations the spreadsheet does not make clear. Default
 .IR /etc/cti\-agent/netrules.txt .
 .TP
 .B QUALYS_BASE_URL
@@ -193,7 +186,7 @@ The Graph settings are those of the other lanes
 .SH FILES
 .TP
 .I /etc/cti\-agent/netrules.txt
-The operator's answers, one per line, root-owned. A line is
+Optional, root-owned: the security team's own record about a location, one per line. The normal fix for a location the spreadsheet does not make clear is for the network team to correct the spreadsheet; this is only for what the security team decides to do meanwhile. A line is
 .B location | use ROLE,ROLE
 (these row labels count as its corp network) or
 .B location | ignore
