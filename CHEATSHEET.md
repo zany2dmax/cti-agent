@@ -100,6 +100,7 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Weekly digest | `cti-agent-weekly` | Mondays 07:00 | digest audience |
 | Mailbox cleanup | `cti-agent-mailbox` | every day 07:00 | nobody (moves mail) |
 | AppSec weekly | `cti-agent-appscan` | Fridays 07:30 | App Dev audience |
+| Application owner reports | `cti-agent-appowners` (off until armed) | every day 07:15 | each application's owner and watchers |
 | Domains weekly | `cti-agent-domains` | Tuesdays 08:00 | domains audience |
 | VM scan weekly | `cti-agent-vmscan` | Mondays 08:00 | VM audience (`VMSCAN_TO`) |
 | Patch Tuesday (by hand for now, section 7a) | `cti-agent-patchtuesday` (disabled) | Wednesday after the 2nd Tuesday, 07:30 | digest audience |

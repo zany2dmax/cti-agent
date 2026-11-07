@@ -110,6 +110,15 @@ application's Jira ticket can also carry the scanner's own report as an
 attachment (off by default, `WAS_ATTACH_REPORT=1`), and lists the scanner's
 unconfirmed Critical and Urgent findings in a separate "please verify" section.
 
+**Daily application-owner reports.** Each morning, for every web-application scan
+that finished since the last run, the application's owner (and watchers) get the
+scanner's own report of what is open on it, by email, with the scan account's
+session removed. Many owners are outside the company and have no Jira login, so
+this is email and not a ticket. A scan that did not finish, whose login failed or
+that reached no host is held back and the operator is told. Off until an
+allowed-domain list is set; who may receive it is decided in the mailer, not in
+the runner.
+
 **A weekly vulnerability-scan report.** Mondays, to the vulnerability-management
 audience (and the network and M&A teams if you add them). It combines the week's
 two scheduled Qualys VM scans into one email from the scanner's own "Scan
