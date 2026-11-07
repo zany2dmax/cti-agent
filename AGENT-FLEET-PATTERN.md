@@ -243,6 +243,17 @@ scan that only saw the public pages is a different number; but only a
 credential that *was* configured and *failed* is a fault, and that goes to the
 operator rather than to the developers, who cannot fix it.
 
+A second lane grew from the same input. Many application owners are outside the
+company and have no Jira login, so a ticket would track work nobody could
+update. `run-appowners` therefore emails each application's owner (and
+watchers) the scanner's own report of what is open on their application, daily,
+with the scan account's session removed from it. What it will not send is as
+much of the design as what it will: a scan that did not finish, whose login
+failed or that reached no host is held back and the operator is told, and an
+application with nobody on file is a hold, not a guess. Who may receive it is
+decided in the mailer from the owners list and an allowed-domain list, so
+nothing the runner passes can add a recipient.
+
 ### Axis 10 — the name itself: *can somebody be us?*
 
 `cti-domains` — weekly, no model. Every other axis asks about software; this
@@ -264,6 +275,42 @@ checked*, never *missing*: a resolver timeout must not become a High finding
 about a domain that is fine. And the week-over-week diff skips what churns
 (address records behind a CDN) so the section that reports a nameserver swap
 is still being read when one happens.
+
+### Axis 11 — the scanner's own reach: *are the scans looking everywhere?*
+
+`cti-vmscan` — weekly, no model. Every other lane takes the scanner's coverage
+as given: a CVE the scanner does not report is read as "not here". That is only
+true for the networks the scanner is told to scan. This lane asks the question
+the others assume away. It combines the week's scheduled vulnerability scans
+into one notice that they ran and what each covered, then compares the network
+team's spreadsheet of subnets with the Qualys Asset Groups the scans cover and
+lists the networks no scan reaches.
+
+Four decisions are worth copying.
+
+- **Compare by address, not by name.** The scans call a place "REDACTED-SUB Jax
+  (Anyoldstone)" and the spreadsheet calls it "REDACTED-SUB Jacksonville - FL". Names were
+  never going to match, so the check merges address ranges and asks whether each
+  corporate network is inside the scanned ones. Names are only for display.
+- **Say "not scanned" and nothing more.** Why a network is unscanned differs from
+  place to place (not set up, not reachable, no architecture yet) and the lane
+  has no way to check, so it records the fact, keeps repeating it, and gives the
+  teams a blank column to say why. A recorded reason that cannot be verified
+  would only make the list quieter, not truer.
+- **Be a consumer of someone else's data, out loud.** The spreadsheet belongs to
+  the network team. Where it is wrong or unclear (a blank network, one that is
+  not a valid CIDR, one outside its location's own block, an overlap, no
+  corporate-network row) the report lists it for them by sheet row and does not
+  check that location until they fix it. The lane never guesses which row is a
+  location's corporate network, and nothing is escalated to the operator, who is
+  not the one to fix it.
+- **A check that did not run says so.** If the spreadsheet or the Asset Groups
+  cannot be read, the report states that, and a truncated list of groups is
+  refused rather than used, because a partial list would report locations as
+  missing that merely were not returned.
+
+It also carries no vulnerability counts. Its audience does not act on severities
+from this email, and the two scans overlap, so summing them would mislead.
 
 ### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
 
@@ -372,6 +419,8 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | Monitor the threat-intel inbox and vendor advisories daily | `@ingest` + `@scout`, every day and every four hours |
 | Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, from Microsoft's own release data, with our own exposure and the scanner query (run by hand for now) |
 | Report web application scan results to the developers who own the code | `cti-appscan`, weekly, on its own recipient list, with a broken scanner login escalated to us rather than to them |
+| Send each application's owner their own scan results | `run-appowners`, daily, by email because most owners have no Jira login, with the scan account's session removed and a failed scan held back |
+| Confirm the vulnerability scans actually cover every network we have | `cti-vmscan`, weekly: the scheduled scans combined, and the network team's subnet spreadsheet checked against the Qualys Asset Groups by address, so a location nobody scans shows up |
 | Keep the domain portfolio registered, un-hijackable and un-spoofable | `cti-domains`, weekly: registrar state, websites, DNS, certificates and mail records by role, with changes since last week and one Jira ticket of DNS changes for IT |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
