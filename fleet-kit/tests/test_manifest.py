@@ -42,13 +42,16 @@ def parse():
             if val in cmds:
                 raise AssertionError(f"line {n}: {val} listed twice")
             cur = cmds[val] = {"about": "", "runs": "", "modes": [], "exempt": [],
-                               "flags": {}, "subs": {}}
+                               "risk": {}, "flags": {}, "subs": {}}
         elif cur is None:
             raise AssertionError(f"line {n}: {key!r} before any command")
         elif key in ("about", "runs"):
             cur[key] = val
         elif key in ("modes", "exempt"):
             cur[key] = val.split()
+        elif key == "risk":
+            name, _, level = val.partition(" ")
+            cur["risk"][name] = level.strip()
         elif key in ("flag", "sub"):
             spec, sep, desc = val.partition(" | ")
             if not sep or not desc.strip():
@@ -72,6 +75,9 @@ class TestCommandManifest(unittest.TestCase):
                 self.assertIn(c["runs"], ("read", "local", "effect"))
                 for f in c["flags"]:
                     self.assertTrue(f.startswith("-"), f"flag {f!r} has no dash")
+                for f, level in c["risk"].items():
+                    self.assertIn(f, c["flags"], f"risk line for unknown flag {f}")
+                    self.assertIn(level, ("safe", "writes", "changes"), f"{f}: {level}")
 
     def test_every_command_in_the_tree_is_listed_and_nothing_else(self):
         real = {d.name for d in (ROOT / "cmd").iterdir() if d.is_dir()}
@@ -257,6 +263,103 @@ class TestCompletionAnswers(unittest.TestCase):
                 r = subprocess.run([shell, "-n", str(ROOT / "fleet-kit" / "fleet" / "share" / name)],
                                    check=False, capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class TestCompletionDisplay(unittest.TestCase):
+    """What the completions show beside each candidate: how risky it is, and
+    whether it is required."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cmds = parse()
+
+    def rows(self, *args):
+        r = subprocess.run(
+            [str(USAGE), "complete", *args], check=False, capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin", "CTI_AGENT_MANIFEST": str(MANIFEST)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = [ln.split("\t") for ln in r.stdout.splitlines()]
+        for row in out:
+            self.assertEqual(len(row), 6, row)
+        return out
+
+    def test_a_command_is_risky_as_its_class_says(self):
+        want = {"read": "safe", "local": "writes", "effect": "changes"}
+        for word, group, risk, *_ in self.rows():
+            self.assertEqual(group, "command")
+            self.assertEqual(risk, want[self.cmds[word]["runs"]], word)
+
+    def test_the_mode_flags_are_required_and_classed(self):
+        by = {r[0]: r for r in self.rows("cti-mailbox", "2")}
+        self.assertEqual((by["--dry-run"][1], by["--dry-run"][2]), ("required", "safe"))
+        self.assertEqual((by["--for-real"][1], by["--for-real"][2]), ("required", "changes"))
+        self.assertEqual(by["--lookback"][1], "optional")
+        by = {r[0]: r for r in self.rows("run-digest", "2")}
+        self.assertEqual((by["--to-dev"][1], by["--to-dev"][2]), ("required", "writes"))
+
+    def test_exempt_and_read_only_flags_are_safe(self):
+        by = {r[0]: r for r in self.rows("cti-jira", "2")}
+        self.assertEqual(by["--check"][2], "safe")
+        for r in self.rows("cti-kev", "2"):
+            self.assertEqual(r[2], "safe", r)
+
+    def test_a_flag_with_a_risk_line_carries_it(self):
+        by = {r[0]: r for r in self.rows("cti-patchtuesday", "2")}
+        self.assertEqual(by["--mark-sent"][2], "writes")
+
+    def test_subcommands_are_listed_only_as_the_first_word(self):
+        self.assertTrue(any(r[1] == "sub" for r in self.rows("fleet-db", "2")))
+        self.assertFalse(any(r[1] == "sub" for r in self.rows("fleet-db", "3")))
+
+    def test_bash_lists_descriptions_and_risk_when_several_match(self):
+        try:
+            import pty
+            import select
+        except ImportError:
+            self.skipTest("no pty here")
+        bash = shutil.which("bash")
+        if bash is None or not hasattr(pty, "fork"):
+            self.skipTest("no bash or pty here")
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = pathlib.Path(tmp) / "rc"
+            comp = (ROOT / "fleet-kit" / "fleet" / "share" / "cti-agent.bash").read_text(
+                encoding="utf-8").replace("@CODE_DIR@", str(ROOT / "fleet-kit" / "fleet"))
+            rc.write_text(f"export CTI_AGENT_MANIFEST={MANIFEST}\n{comp}\n", encoding="utf-8")
+            pid, fd = pty.fork()
+            if pid == 0:  # pragma: no cover - the child
+                os.environ.update(PS1="$ ", TERM="xterm", HOME=tmp)
+                os.execvp(bash, [bash, "--norc", "--noprofile", "-i"])
+
+            def read(t=0.8):
+                out = b""
+                while select.select([fd], [], [], t)[0]:
+                    try:
+                        d = os.read(fd, 4096)
+                    except OSError:
+                        break
+                    if not d:
+                        break
+                    out += d
+                return out.decode("utf8", "replace")
+
+            read(1.0)
+            os.write(fd, f". {rc}\n".encode())
+            read(0.5)
+            os.write(fd, b"cti-agent cti-mailbox --")
+            read(0.5)
+            os.write(fd, b"\t")
+            read(0.5)
+            os.write(fd, b"\t")
+            shown = read(1.0)
+            os.write(fd, b"\x03exit\n")
+            os.close(fd)
+            os.waitpid(pid, 0)
+        self.assertIn("REQUIRED, one of; safe", shown)
+        self.assertIn("REQUIRED, one of; CHANGES", shown)
+        self.assertIn("show the plan and move nothing", shown)
+        self.assertIn("--lookback DURATION", shown)
 
 
 if __name__ == "__main__":

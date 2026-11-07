@@ -20,6 +20,11 @@
 #   modes:   (effect commands only) the flags that say how to run it; exactly one is
 #            required, and with none the command prints usage and exits 2. --to-dev
 #            may also go with --dry-run.
+#   risk:    FLAG safe|writes|changes - how the completions colour a flag: safe is
+#            read-only or a rehearsal, writes touches only the fleet's own files
+#            or a test send, changes alters something outside. The mode flags
+#            (--dry-run safe, --to-dev writes, --for-real changes), --check, and
+#            every flag of a read command are classed already; list the rest here.
 #   exempt:  flags that make an effect command read-only, so no mode is needed
 #            (cti-jira --check, cti-mailer --check, mailer.py --check)
 
@@ -66,6 +71,9 @@ flag: --timeout DURATION | give up on one report after this long (default 10m0s)
 command: cti-appscan
 about: Read the scan notices and render the AppSec weekly
 runs: local
+risk: --commit-delivered writes
+risk: --commit-seen writes
+risk: --stamp-tickets writes
 flag: --auth-fail-out STRING | write one line per scan whose configured credential failed to authenticate; the runner alerts the operator when this file is non-empty. Absent or empty means every credential worked.
 flag: --commit-delivered STRING | record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit
 flag: --commit-seen STRING | record a --seen-out file in the processed log the mailbox cleanup reads, so those notifications can be archived; then exit
@@ -93,6 +101,8 @@ sub: status | what it would do and why
 command: cti-domains
 about: Probe the domain inventory and render the weekly report
 runs: local
+risk: --no-state-write safe
+risk: --stamp-ticket writes
 flag: --actions-out STRING | write the DNS changes each domain needs as JSON, for cti-jira --domains-actions
 flag: --concurrency INT | domains probed at once (default 8)
 flag: --csv-out STRING | write every probed host as CSV (sitecheck.go's columns first)
@@ -180,6 +190,7 @@ flag: --for-real | send the message
 command: cti-patchtuesday
 about: Build, save and mark the monthly Patch Tuesday synopsis
 runs: local
+risk: --mark-sent writes
 flag: --drop-dir STRING | folder holding saved copies of the two articles (a file named *qualys* and one named *bleeping*, .html or .txt), used instead of fetching; default $FLEET_HOME/inbox/patchtuesday/YYYY-MM
 flag: --dry-run | print the text version to stdout, write nothing
 flag: --explain STRING | print every place a CVE was found on the source pages, and whether anything ties it to a Microsoft product, then exit

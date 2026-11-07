@@ -428,7 +428,18 @@ or
 TAB lists the commands; after a command it lists that command's flags, and for
 tools with subcommands such as
 .B fleet\-db
-the subcommands first. Both call
+the subcommands first. With more than one match, each is shown with a
+description and a tag for how risky it is:
+.B read\-only
+changes nothing,
+.B writes own files
+touches only the fleet's own files,
+.B CHANGES THINGS
+sends, moves or files something. For a command's flags the
+.B REQUIRED
+ones, exactly one of which says how to run it, come first and the optional ones
+after. zsh groups them under green, yellow and red headings; bash cannot colour
+a completion list, so it writes the tag out. Both call
 .IR /opt/cti\-agent/share/cti\-agent\-usage ,
 which reads the manifest at each TAB, so the completions cannot go stale. Open
 a new shell after an install to pick them up.

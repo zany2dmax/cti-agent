@@ -1,18 +1,60 @@
 #compdef cti-agent
-# zsh completion for cti-agent: commands with their one-line purpose, then each
-# command's flags and subcommands with what they do. Installed by
-# install-fedora.sh with @CODE_DIR@ filled in; reads the command manifest
-# through cti-agent-usage. Works under sudo too.
+# zsh completion for cti-agent. Installed by install-fedora.sh with @CODE_DIR@
+# filled in; reads the command manifest through cti-agent-usage, so it cannot go
+# stale. Works under sudo too.
+#
+# Candidates come in groups with a coloured heading, so a glance says how risky
+# each is:
+#   green   read-only, or a rehearsal - changes nothing
+#   yellow  writes only the fleet's own files, or a test send to you only
+#   red     CHANGES THINGS - sends, moves or files something
+# and flags are split into REQUIRED (say how to run it: exactly one of) and
+# optional, so "what must I give it?" is answered before "what else can I?".
 _cti-agent() {
   local usage=@CODE_DIR@/share/cti-agent-usage
   [[ -x $usage ]] || return 0
-  local -a items
+  local rows
   if (( CURRENT == 2 )); then
-    items=("${(@f)$($usage describe 2>/dev/null)}")
-    _describe -t commands 'fleet command' items
+    rows=$($usage complete 2>/dev/null)
   else
-    items=("${(@f)$($usage describe ${words[2]} $CURRENT 2>/dev/null)}")
-    (( ${#items} )) && _describe -t options "${words[2]} option" items
+    rows=$($usage complete ${words[2]} $CURRENT 2>/dev/null)
   fi
+  [[ -n $rows ]] || return 0
+
+  local -a lines=("${(@f)rows}")
+  local line word group risk label desc spec
+  # group key -> parallel arrays of candidates and their display strings
+  local -A cand disp
+  local key
+  for line in "${lines[@]}"; do
+    word="${${(ps:\t:)line}[1]}"; group="${${(ps:\t:)line}[2]}"; risk="${${(ps:\t:)line}[3]}"
+    desc="${${(ps:\t:)line}[5]}"; spec="${${(ps:\t:)line}[6]}"
+    key="$group/$risk"
+    cand[$key]+="${word}"$'\n'
+    (( ${#desc} > 72 )) && desc="${desc[1,71]}..."
+    disp[$key]+="${(r:26:)spec} -- ${desc}"$'\n'
+  done
+
+  # Heading and colour per group, in the order they should appear.
+  local -a order=(
+    "sub/none|%B%F{blue}one of these%f%b"
+    "required/safe|%B%F{green}REQUIRED, one of - SAFE: rehearse, changes nothing%f%b"
+    "required/writes|%B%F{yellow}REQUIRED, one of - TEST SEND: to you only%f%b"
+    "required/changes|%B%F{red}REQUIRED, one of - CHANGES THINGS: sends, moves or files%f%b"
+    "command/safe|%B%F{green}one of - READ-ONLY: changes nothing%f%b"
+    "command/writes|%B%F{yellow}one of - WRITES ITS OWN FILES only%f%b"
+    "command/changes|%B%F{red}one of - CHANGES THINGS: sends, moves or files (needs --dry-run or --for-real)%f%b"
+    "optional/safe|%B%F{green}optional - read-only%f%b"
+    "optional/writes|%B%F{yellow}optional - writes its own files%f%b"
+    "optional/changes|%B%F{red}optional - CHANGES THINGS%f%b"
+    "optional/none|%Boptional%b"
+  )
+  local entry head
+  for entry in "${order[@]}"; do
+    key="${entry%%|*}"; head="${entry#*|}"
+    [[ -n ${cand[$key]:-} ]] || continue
+    local -a m=("${(@f)${cand[$key]%$'\n'}}") d=("${(@f)${disp[$key]%$'\n'}}")
+    compadd -V "$key" -X "$head" -d d -- "${m[@]}"
+  done
 }
 _cti-agent "$@"

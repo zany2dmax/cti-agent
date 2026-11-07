@@ -23,6 +23,12 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
   command's flags. In a new shell, press **TAB** after `cti-agent` (or
   `sudo cti-agent`) for the commands, and after a command for its flags; bash
   and zsh both work. All three read one list, `/opt/cti-agent/commands.manifest`.
+  With several matches the list shows a description and how risky each is:
+  *read-only* changes nothing, *writes own files* touches only the fleet's own
+  files, **CHANGES THINGS** sends, moves or files something. For flags, the
+  REQUIRED ones (say how to run it: exactly one of `--dry-run`/`--for-real`) come
+  first, then the optional ones. zsh colours the groups green, yellow and red;
+  bash cannot colour a completion list, so it spells the risk out in words.
 - **Say how to run it.** Every command that changes something (`effect` in the
   list) needs exactly one of `--dry-run` or `--for-real` (some also `--to-dev`).
   There is no default: with none it prints usage and exits 2, so nothing
