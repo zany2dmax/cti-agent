@@ -733,6 +733,7 @@ ok "daemon-reload"
 # looked correct and silently did nothing.
 TZFAIL=0
 FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"; MAILBOX_AT="07:00:00"
+APPOWNERS_AT="07:15:00"; APPSCAN_AT="07:30:00"; DOMAINS_AT="08:00:00"
 if [ -r "$CONF_DIR/fleet.env" ]; then
   # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
   # version did to a real install. An absent key must read as empty here: every
@@ -742,6 +743,9 @@ if [ -r "$CONF_DIR/fleet.env" ]; then
   DIGEST_AT="$(cfgval FLEET_DIGEST_TIME)";         DIGEST_AT="${DIGEST_AT:-06:00:00}"
   WEEKLY_AT="$(cfgval FLEET_WEEKLY_TIME)";         WEEKLY_AT="${WEEKLY_AT:-07:00:00}"
   MAILBOX_AT="$(cfgval FLEET_MAILBOX_TIME)";       MAILBOX_AT="${MAILBOX_AT:-07:00:00}"
+  APPOWNERS_AT="$(cfgval FLEET_APPOWNERS_TIME)";   APPOWNERS_AT="${APPOWNERS_AT:-07:15:00}"
+  APPSCAN_AT="$(cfgval FLEET_APPSCAN_TIME)";       APPSCAN_AT="${APPSCAN_AT:-07:30:00}"
+  DOMAINS_AT="$(cfgval FLEET_DOMAINS_TIME)";       DOMAINS_AT="${DOMAINS_AT:-08:00:00}"
 fi
 
 if [ -n "$FLEET_TZ" ]; then
@@ -756,8 +760,18 @@ if [ -n "$FLEET_TZ" ]; then
     for pair in "cti-agent-digest.timer:*-*-* $DIGEST_AT" \
                 "cti-agent-mailbox.timer:*-*-* $MAILBOX_AT" \
                 "cti-agent-weekly.timer:Mon *-*-* $WEEKLY_AT" \
+                "cti-agent-appowners.timer:*-*-* $APPOWNERS_AT" \
+                "cti-agent-appscan.timer:Fri *-*-* $APPSCAN_AT" \
+                "cti-agent-domains.timer:Tue *-*-* $DOMAINS_AT" \
                 "cti-agent-patchtuesday.timer:Wed *-*-09..15 $PATCHTUE_AT"; do
       unit="${pair%%:*}"; cal="${pair#*:}"
+      # Parse every schedule before writing it: a typo in one time must fail
+      # the install now, not leave a timer that never fires.
+      if ! systemd-analyze calendar "$cal $FLEET_TZ" >/dev/null 2>&1; then
+        bad "$unit: \"$cal $FLEET_TZ\" is not a valid schedule (check its FLEET_*_TIME)"
+        TZFAIL=1
+        continue
+      fi
       if [ "$MODE" != dryrun ]; then
         install -d -m 0755 "$UNIT_DIR/$unit.d"
         cat > "$UNIT_DIR/$unit.d/timezone.conf" <<DROPIN

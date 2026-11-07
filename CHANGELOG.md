@@ -141,6 +141,18 @@ basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and
 --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names
 /root/apps.txt`, then `sudo cti-agent fleet-owners list`.
 
+### Fixed
+
+- **The AppSec and domains timers ran on the server's clock.** The owner
+  report, the Friday AppSec weekly and the Tuesday domains check were left out
+  when the other timers were moved onto `FLEET_TIMEZONE`, so on a UTC server
+  they fired four or five hours earlier than the unit files say. They are now
+  pinned at `FLEET_APPOWNERS_TIME` (07:15), `FLEET_APPSCAN_TIME` (07:30) and
+  `FLEET_DOMAINS_TIME` (08:00). The installer also checks every schedule parses
+  and fails the install if one does not. The scout (every 4 hours) and the
+  heartbeat are left alone: the hour they run at does not matter. **Upgrade:**
+  re-run the installer.
+
 ## 1.5 — 2026-11-03
 
 ### Added
