@@ -46,6 +46,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   flags and subcommands without running it. The installer adds bash and zsh
   completion, so TAB after `cti-agent` lists the commands and TAB after a
   command lists its flags (and `fleet-db`'s or `fleet-board`'s subcommands).
+  With several matches each is shown with a description and how risky it is
+  (read-only, writes its own files, CHANGES THINGS), and a command's flags are
+  split into REQUIRED (say how to run it) and optional; zsh colours the groups
+  green, yellow and red, and bash, which cannot colour a completion list, writes
+  the tag out in words. A flag's risk comes from the manifest's `risk:` lines.
   All of it reads one file, `fleet-kit/fleet/commands.manifest`, installed as
   `/opt/cti-agent/commands.manifest`, so it cannot go stale: a test fails the
   build when a command or a flag exists in the code and not in the manifest, or
