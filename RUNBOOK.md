@@ -1134,6 +1134,38 @@ Address to `qualys@qualys.net`: a notice that looks as if it came from
 `cybersecurity@` is treated as the fleet's own mail, and the lane logs it and
 reads nothing.
 
+**The coverage check.** The same email checks the network spreadsheet against the
+Qualys Asset Groups the scans cover, by address (the scans' group names and the
+spreadsheet's location names do not match, so names are only for display). It
+reports three things: networks not scanned (in no Asset Group, in a group no
+scan covers, or only partly covered), things to look at (a scanned group whose
+addresses are nowhere in the spreadsheet, a group with no IP ranges, a Target
+Group Qualys does not list), and locations it could not decide.
+
+It only reads. It never guesses which row is a location's corp network: a
+location with no `corp` row (HQ and the datacenter are like that), a corp network
+that is not a valid CIDR, or one overlapping another's is left out and put to
+you as a board question, which the heartbeat emails. Answer by adding a line to
+`/etc/cti-agent/netrules.txt` (root-owned):
+
+```text
+# location (the start of its header in the sheet) | what to do
+HQ - Example Site - GA | use inside,corp
+Datacenter - Example - GA | use Servers,VMs
+Azure - 172.16.0.0/16 | ignore
+```
+
+To turn it on, set `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` in `fleet.env` (the
+drive and item of the spreadsheet) and give the Graph app registration an
+application permission that reaches the file: `Sites.Selected` with a read grant
+on the site (preferred), or `Files.Read.All`. Without them the report says the
+check did not run. Listing Asset Groups uses the same Qualys account as the other
+lanes and is read-only. Try it by hand with a downloaded copy first:
+
+```bash
+sudo cti-agent cti-vmscan --subnets-file /tmp/subnets.xlsx --out /tmp/vm.html --text-out /tmp/vm.txt
+```
+
 The notices it uses are archived by the mailbox cleanup 48 hours after a real
 send. The other Qualys notices for the same scan (Scan Completed, the
 owner-only notice, scan scheduled to start) are left in the inbox for a person.

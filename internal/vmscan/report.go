@@ -25,6 +25,9 @@ type Week struct {
 	// Other are results for scans that were not expected, newest first. They
 	// are listed, not reported on.
 	Other []Scan
+	// Coverage is the check of the scans' locations against the network
+	// spreadsheet; nil when it was not asked for.
+	Coverage *Coverage
 }
 
 func norm(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
@@ -115,6 +118,10 @@ func (w Week) Subject(org string, weekEnding time.Time) string {
 	case len(w.incomplete()) > 0:
 		return fmt.Sprintf("[INCOMPLETE] %s: %d scan(s) did not finish", label, len(w.incomplete()))
 	}
+	if n := len(w.Coverage.Gaps()); n > 0 {
+		return fmt.Sprintf("%s: %d scheduled scans ran, %d locations covered, %d network(s) NOT SCANNED",
+			label, len(w.Scans), w.groups(), n)
+	}
 	return fmt.Sprintf("%s: %d scheduled scans ran, %d locations covered", label, len(w.Scans), w.groups())
 }
 
@@ -137,9 +144,13 @@ func (w Week) leadLine() string {
 		hosts += s.HostsScanned
 		active += s.ActiveHosts
 	}
-	return fmt.Sprintf("Both scheduled scans ran and finished. Together they covered %d locations "+
+	lead := fmt.Sprintf("Both scheduled scans ran and finished. Together they covered %d locations "+
 		"(%d addresses scanned, %d alive). Each scan is listed separately below.",
 		w.groups(), hosts, active)
+	if n := len(w.Coverage.Gaps()); n > 0 {
+		lead += fmt.Sprintf(" The coverage check found %d network(s) in the network spreadsheet that the scans do not reach.", n)
+	}
+	return lead
 }
 
 // Text is the plain-text report.
@@ -158,6 +169,7 @@ func (w Week) Text(org string, weekEnding time.Time) string {
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(w.Coverage.text())
 	if len(w.Other) > 0 {
 		var t []string
 		for _, s := range w.Other {
@@ -179,6 +191,8 @@ func (w Week) HTML(org string, weekEnding time.Time) string {
 	lead := emailkit.Green
 	if len(w.Missing) > 0 || len(w.incomplete()) > 0 {
 		lead = emailkit.Red
+	} else if len(w.Coverage.Gaps()) > 0 {
+		lead = emailkit.Amber
 	}
 	emailkit.Lead(&b, lead, e(w.leadLine()))
 
@@ -206,6 +220,7 @@ func (w Week) HTML(org string, weekEnding time.Time) string {
 		}
 		emailkit.Card(&b, tone, s.Title, l.String())
 	}
+	w.Coverage.html(&b)
 	emailkit.BodyClose(&b)
 
 	if len(w.Other) > 0 {

@@ -33,6 +33,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
+	"github.com/zany2dmax/cti-agent/internal/netmap"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/vmscan"
 )
@@ -61,6 +62,13 @@ func run() int {
 	subjectOut := flag.String("subject-out", "", "write the subject line here")
 	seenOut := flag.String("seen-out", "",
 		"write the notices this report covered here, for --commit-seen after the send")
+	noCoverage := flag.Bool("no-coverage", false,
+		"skip the check of the network spreadsheet against the Asset Groups the scans cover")
+	subnetsFile := flag.String("subnets-file", "",
+		"read the network spreadsheet (.xlsx) from this file instead of SharePoint, for testing")
+	questionsOut := flag.String("questions-out", "",
+		"write the locations the coverage check could not decide, one per line, for the runner "+
+			"to put to the operator")
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	flag.Parse()
@@ -90,6 +98,15 @@ func run() int {
 		logf("warn   : %s", safelog.Line(p))
 	}
 	week := vmscan.Combine(scans, expected)
+	if !*noCoverage {
+		week.Coverage = coverage(ctx, cfg, g, week, *subnetsFile)
+		if c := week.Coverage; c.Unavailable != "" {
+			logf("warn   : coverage check not run: %s", safelog.Line(c.Unavailable))
+		} else {
+			logf("cover  : %d corp network(s) checked, %d covered, %d gap(s), %d to look at, %d need a decision",
+				c.Checked, c.Covered, len(c.Gaps()), len(c.Oddities()), len(c.Questions))
+		}
+	}
 	for _, m := range week.Missing {
 		logf("warn   : no result for %q in the last %s", safelog.Line(m), *since)
 	}
@@ -113,6 +130,17 @@ func run() int {
 	}
 	fmt.Println(block.Subject)
 
+	if *questionsOut != "" && week.Coverage != nil {
+		var q strings.Builder
+		for _, x := range week.Coverage.Questions {
+			q.WriteString(strings.NewReplacer("\t", " ", "\n", " ").Replace(x.Location) + "\t" +
+				strings.NewReplacer("\t", " ", "\n", " ").Replace(x.Why) + "\n")
+		}
+		if err := os.WriteFile(*questionsOut, []byte(q.String()), 0o600); err != nil {
+			logf("warn   : could not write %s: %s", safelog.Line(*questionsOut), safelog.Line(err.Error()))
+		}
+	}
+
 	if *seenOut != "" {
 		if err := writeSeen(*seenOut, seen); err != nil {
 			logf("warn   : could not write %s: %s - these notices will not be archived this week",
@@ -120,6 +148,75 @@ func run() int {
 		}
 	}
 	return exitOK
+}
+
+// coverage compares the network spreadsheet with the Asset Groups the scans
+// cover. Anything that stops it running becomes Unavailable with the reason, so
+// the report says so and the weekly still goes out.
+func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmscan.Week, file string) *vmscan.Coverage {
+	unavailable := func(format string, a ...any) *vmscan.Coverage {
+		return &vmscan.Coverage{Unavailable: fmt.Sprintf(format, a...)}
+	}
+	sheetName := strings.TrimSpace(os.Getenv("SUBNETS_SHEET"))
+	if sheetName == "" {
+		sheetName = "Sites"
+	}
+
+	var data []byte
+	var err error
+	switch {
+	case file != "":
+		// #nosec G304 -- an operator-supplied path for a manual test.
+		data, err = os.ReadFile(file)
+	case strings.TrimSpace(os.Getenv("SUBNETS_DRIVE_ID")) != "" && strings.TrimSpace(os.Getenv("SUBNETS_ITEM_ID")) != "":
+		data, err = g.DriveItemContent(ctx, strings.TrimSpace(os.Getenv("SUBNETS_DRIVE_ID")),
+			strings.TrimSpace(os.Getenv("SUBNETS_ITEM_ID")), 32<<20)
+	default:
+		return unavailable("SUBNETS_DRIVE_ID and SUBNETS_ITEM_ID are not set, so the spreadsheet is not located")
+	}
+	if err != nil {
+		return unavailable("the network spreadsheet could not be read: %s", safelog.Line(err.Error()))
+	}
+	rows, err := netmap.ReadSheet(data, sheetName)
+	if err != nil {
+		return unavailable("the network spreadsheet could not be parsed: %s", safelog.Line(err.Error()))
+	}
+	all := netmap.ParseSites(rows)
+
+	rules := netmap.Rules{}
+	rulesPath := strings.TrimSpace(os.Getenv("NETRULES_FILE"))
+	if rulesPath == "" {
+		rulesPath = "/etc/cti-agent/netrules.txt"
+	}
+	// #nosec G304 -- the operator's own rules file, root-owned.
+	if b, err := os.ReadFile(rulesPath); err == nil {
+		var problems []string
+		rules, problems = netmap.ParseRules(string(b))
+		for _, p := range problems {
+			logf("warn   : %s: %s", safelog.Line(rulesPath), safelog.Line(p))
+		}
+	}
+	corp, questions := netmap.SelectCorp(all, rules)
+
+	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
+		return unavailable("QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD are not set, so the Asset Groups cannot be listed")
+	}
+	groups, err := netmap.FetchGroups(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
+	if err != nil {
+		return unavailable("the Qualys Asset Groups could not be listed: %s", safelog.Line(err.Error()))
+	}
+	seen := map[string]bool{}
+	var scanned []string
+	for _, s := range week.Scans {
+		for _, t := range s.TargetGroups {
+			if !seen[t] {
+				seen[t] = true
+				scanned = append(scanned, t)
+			}
+		}
+	}
+	res := netmap.Check(corp, all, groups, scanned)
+	return &vmscan.Coverage{Checked: res.Checked, Covered: res.Covered, Findings: res.Findings, Questions: questions}
 }
 
 // expectedScans is the scan titles to combine: the flag, else VMSCAN_SCANS,

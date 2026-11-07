@@ -54,7 +54,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   The notices it used are recorded after a real send, so the mailbox cleanup
   archives them 48 hours later; the other Qualys notices for the same scan are
   left alone. `VMSCAN_SCANS` changes which scans are combined. New commands
-  `cti-vmscan` and `run-vmscan`, with man pages. **Upgrade:** re-run the
+  `cti-vmscan` and `run-vmscan`, with man pages.
+  The report also **checks the network spreadsheet against the Qualys Asset
+  Groups the scans cover**, by address, and says which corp networks no scan
+  reaches (in no Asset Group, in a group no scan covers, or only partly
+  covered), which scanned groups hold addresses the spreadsheet does not, and
+  which locations it could not decide. It only reads; it never guesses a
+  location's corp network. A location with no clear one (HQ and the datacenter)
+  becomes a board question the heartbeat emails, answered with a line in
+  `/etc/cti-agent/netrules.txt`. It needs `SUBNETS_DRIVE_ID` and
+  `SUBNETS_ITEM_ID` and a Graph application permission that reaches the file
+  (`Sites.Selected` on the site, or `Files.Read.All`); without them the report
+  says the check did not run. New: `internal/netmap`, `Client.DriveItemContent`.
+  **Upgrade:** re-run the
   installer and set `VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO` in
   `fleet.env`, then enable
   `cti-agent-vmscan.timer`. For the REDACTED-SUB/REDACTED-SUB scan's notices to reach the mailbox,

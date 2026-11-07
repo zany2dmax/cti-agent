@@ -71,12 +71,15 @@ HTML="$STATE/vmscan-$STAMP.html"
 TXT="$STATE/vmscan-$STAMP.txt"
 SUBJFILE="$STATE/vmscan-subject-$STAMP.txt"
 SEEN="$STATE/vmscan-seen-$STAMP.json"
+QUESTIONS="$STATE/vmscan-questions-$STAMP.tsv"
+BOARD="$FLEET_CODE/bin/fleet-board"
 # Mode set before anything is written: the report names which scans found what.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
-rm -f "$SUBJFILE" "$SEEN"
+rm -f "$SUBJFILE" "$SEEN" "$QUESTIONS"
 
 "$VMSCAN" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJFILE" --seen-out "$SEEN" \
+  --questions-out "$QUESTIONS" \
   || fail "cti-vmscan exited non-zero (check outbound 443 to Graph)"
 [ -s "$SUBJFILE" ] || fail "cti-vmscan wrote no subject line"
 SUBJECT="$(head -n 1 "$SUBJFILE")"
@@ -101,6 +104,20 @@ else
   fi
 fi
 rm -f "$SEEN"
+
+# Locations the coverage check could not decide (no clear corp network in the
+# spreadsheet, or one that overlaps another's) go to the operator as a board
+# question, which the heartbeat emails. Only on a real run: a rehearsal must not
+# ask anybody anything. One line, so a long list is not a flood.
+if [ -n "$REAL" ] && [ -s "$QUESTIONS" ] && [ -x "$BOARD" ]; then
+  n="$(wc -l < "$QUESTIONS" | tr -d ' ')"
+  list="$(head -n 5 "$QUESTIONS" | awk -F'\t' '{printf "%s%s (%s)", sep, $1, $2; sep="; "}')"
+  [ "$n" -gt 5 ] && list="$list; and $((n - 5)) more"
+  "$BOARD" post @vmscan @operator Q \
+    "VM scan coverage: $n location(s) in the network spreadsheet need a decision before they can be checked: $list. Answer by adding a line to ${NETRULES_FILE:-/etc/cti-agent/netrules.txt}: 'LOCATION | use ROLE,ROLE' (which rows are its corp network) or 'LOCATION | ignore'." \
+    2>/dev/null || log "warn: could not post the coverage questions to the board"
+fi
+rm -f "$QUESTIONS"
 
 if [ -n "$DRY" ]; then
   log "dry run - nothing was sent. The rendered report is at $HTML"

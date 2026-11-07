@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/netmap"
 )
 
 func fixture(t *testing.T, name string) string {
@@ -231,5 +233,62 @@ func TestLocationsAreCountedOnceAcrossScans(t *testing.T) {
 	w := Combine(s, DefaultScans)
 	if got := w.groups(); got != 24+21 {
 		t.Errorf("distinct groups = %d, want %d", got, 24+21)
+	}
+}
+
+func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	w.Coverage = &Coverage{Checked: 3, Covered: 1,
+		Findings: []netmap.Finding{
+			{Kind: netmap.NotInAnyGroup, Location: "Alpha Site", Subnet: "10.1.30.0/24"},
+			{Kind: netmap.GroupNotScanned, Location: "Beta Site", Subnet: "10.2.30.0/24", Group: "Beta"},
+			{Kind: netmap.ScannedNotInSheet, Group: "Mystery", Detail: "none of this scanned group's addresses appear in the spreadsheet"},
+		},
+		Questions: []netmap.Question{{Location: "Gamma Site", Why: "no row counts as its corp network"}},
+	}
+	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
+	if !strings.Contains(b.Subject, "2 network(s) NOT SCANNED") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+	for _, want := range []string{"NOT SCANNED (2)", "Alpha Site: 10.1.30.0/24 is in no Qualys Asset Group",
+		"Beta Site: 10.2.30.0/24 is in the Asset Group \"Beta\"", "CHECK THESE (1)", "Mystery", "NEEDS A DECISION (1)", "Gamma Site"} {
+		if !strings.Contains(b.Text, want) {
+			t.Errorf("text lacks %q:\n%s", want, b.Text)
+		}
+	}
+	if !strings.Contains(b.HTML, "NOT SCANNED (2)") || !strings.Contains(b.HTML, "Gamma Site") {
+		t.Error("html lacks the coverage section")
+	}
+}
+
+func TestACoverageCheckThatCouldNotRunSaysSoAndIsNotACleanResult(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	w.Coverage = &Coverage{Unavailable: "the spreadsheet could not be read"}
+	b := Render(w, "Acme", time.Now())
+	if !strings.Contains(b.Text, "Not run this week: the spreadsheet could not be read") {
+		t.Error("an unavailable check is not stated")
+	}
+	if strings.Contains(b.Text, "Nothing missing") || strings.Contains(b.Subject, "NOT SCANNED") {
+		t.Errorf("an unavailable check reads as a result: %q", b.Subject)
+	}
+}
+
+func TestACleanCoverageCheckSaysNothingIsMissing(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	w.Coverage = &Coverage{Checked: 40, Covered: 40}
+	b := Render(w, "Acme", time.Now())
+	if !strings.Contains(b.Text, "40 corporate networks checked, 40 fully inside") || !strings.Contains(b.Text, "Nothing missing") {
+		t.Errorf("text:\n%s", b.Text)
+	}
+	if strings.Contains(b.Subject, "NOT SCANNED") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+}
+
+func TestNoCoverageCheckLeavesTheReportAsItWas(t *testing.T) {
+	w := Combine(both(t), DefaultScans)
+	b := Render(w, "Acme", time.Now())
+	if strings.Contains(b.Text, "COVERAGE CHECK") || strings.Contains(b.HTML, "Coverage check") {
+		t.Error("a coverage section appeared with no check asked for")
 	}
 }

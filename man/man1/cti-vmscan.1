@@ -15,6 +15,11 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .IR FILE ]
 .RB [ \-\-seen\-out
 .IR FILE ]
+.RB [ \-\-no\-coverage ]
+.RB [ \-\-subnets\-file
+.IR FILE ]
+.RB [ \-\-questions\-out
+.IR FILE ]
 .PP
 .B cti-vmscan \-\-commit\-seen
 .I FILE
@@ -35,6 +40,35 @@ It carries no vulnerability counts or severities, on purpose. The report goes
 to people who do not act on them from here, and the two scans overlap, so the
 counts would confuse more than they tell. The notice parser still reads them;
 the report does not show them.
+.SS The coverage check
+It also checks the network spreadsheet (the source of authority for what
+networks exist) against the Qualys Asset Groups the scans cover, by ADDRESS, not
+by name, because the scans' Target Group names and the spreadsheet's location
+names do not match. For each active location it takes the networks that count as
+its corporate network (the rows labelled
+.BR corp ,
+or whichever rows an operator rule names) and reports:
+.TP
+.B NOT SCANNED
+A corp network in no Asset Group, one held by a group no scan covers, or one
+only partly inside the scanned groups. This is how a missed location shows up.
+.TP
+.B CHECK THESE
+A scanned Asset Group whose addresses appear nowhere in the spreadsheet, a group
+with no IP ranges (so it cannot be checked), or a Target Group the scan names
+that Qualys has no Asset Group for.
+.TP
+.B NOT CHECKED, NEEDS A DECISION
+A location with no row that clearly counts as its corp network, a corp network
+that is not a valid CIDR, or one that overlaps another location's. The lane
+never guesses: such a location is left out and put to the operator
+.RB ( \-\-questions\-out ),
+who answers with a rule (see FILES).
+.PP
+Decommissioned, free and open-to-use locations are skipped. If the check cannot
+run (the spreadsheet or the Asset Groups cannot be read) the report says so; it
+is never shown as a clean result. The check only reads: it changes nothing in
+Qualys or in the spreadsheet.
 .PP
 It sends nothing. It is run by
 .BR run\-vmscan (1),
@@ -82,6 +116,19 @@ Write the subject line here, so the runner need not run a second time.
 Write the notices this report covered here, as JSON, for
 .BR \-\-commit\-seen .
 .TP
+.B \-\-no\-coverage
+Skip the coverage check.
+.TP
+.BI \-\-subnets\-file " FILE"
+Read the network spreadsheet (an .xlsx) from this file instead of SharePoint,
+for a manual test.
+.TP
+.BI \-\-questions\-out " FILE"
+Write the locations the check could not decide, one per line as
+location, a tab, and why, for
+.B run\-vmscan
+to put to the operator.
+.TP
 .BI \-\-commit\-seen " FILE"
 Record a
 .B \-\-seen\-out
@@ -94,6 +141,30 @@ does this only after a real send.
 .B VMSCAN_SCANS
 The scans to combine, by title, comma separated.
 .TP
+.B SUBNETS_DRIVE_ID
+.TQ
+.B SUBNETS_ITEM_ID
+Where the network spreadsheet lives in SharePoint (the drive and the file). The
+Graph app registration needs permission to read that file as an application:
+.B Sites.Selected
+with a read grant on the site, or
+.BR Files.Read.All .
+.TP
+.B SUBNETS_SHEET
+The worksheet to read. Default
+.BR Sites .
+.TP
+.B NETRULES_FILE
+The operator's rules for locations the check cannot decide. Default
+.IR /etc/cti\-agent/netrules.txt .
+.TP
+.B QUALYS_BASE_URL
+.TQ
+.B QUALYS_USERNAME
+.TQ
+.B QUALYS_PASSWORD
+The Qualys API account, to list the Asset Groups (read-only).
+.TP
 .B FLEET_ORG
 The organisation name in the report header.
 .PP
@@ -103,6 +174,14 @@ The Graph settings are those of the other lanes
 .BR CLIENT_SECRET ,
 .BR GRAPH_MAILBOX ).
 .SH FILES
+.TP
+.I /etc/cti\-agent/netrules.txt
+The operator's answers, one per line, root-owned. A line is
+.B location | use ROLE,ROLE
+(these row labels count as its corp network) or
+.B location | ignore
+(leave it out of the check). The location is the start of its header in the
+spreadsheet. Lines starting with # are comments.
 .TP
 .I $FLEET_HOME/state/processed\-vmscan.json
 The notices this lane has used, written by

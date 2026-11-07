@@ -418,6 +418,8 @@ internal/appscan/              DAST boundary: scan results, auth state, the repo
 internal/appscan/qualys/       Qualys WAS: notification parser, Findings API, report download
 internal/qualysrl/             header-driven Qualys API rate limiter (WAS client)
 internal/domains/              inventory, probes, findings by role, week-over-week diff
+internal/vmscan/               Qualys VM scan-result notices: parser, the two weeklies combined, the report
+internal/netmap/               network spreadsheet (.xlsx) against Qualys Asset Groups, by address; operator rules
 internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
