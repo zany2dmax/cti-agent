@@ -49,8 +49,24 @@ so a relative path in
 .I fleet.env
 resolves to the same file for a hand run and a timer run.
 .IP 3. 4
-Takes the first argument as the command name (exiting with a usage message
-if there is none) and passes the rest through unchanged.
+Takes the first argument as the command name and passes the rest through
+unchanged. With no argument it prints the list of commands and exits 2; with
+.BR \-h ,
+.B \-\-help
+or
+.B help
+it prints the list and exits 0; and
+.I command
+.B \-\-help
+(or
+.BR \-h ,
+.BR help )
+as the only argument prints that command's usage from the manifest without
+running it. The list comes from
+.IR /opt/cti\-agent/commands.manifest ,
+which also drives the shell completions (below): each command with whether it
+only reads (\fBread\fR), writes only its own files (\fBlocal\fR) or changes
+something outside (\fBeffect\fR), its flags and its subcommands.
 .IP 4. 4
 Replaces itself
 .RB ( exec )
@@ -399,6 +415,24 @@ Read by
 not by the binary: the directory holding the source clone and the compiled
 .BR cti\-agent .
 Section 3.
+.SH TAB COMPLETION
+.B install\-fedora.sh
+installs completions for bash
+.RI ( /usr/share/bash\-completion/completions/cti\-agent )
+and zsh
+.RI ( /usr/share/zsh/site\-functions/_cti\-agent ).
+After
+.B cti\-agent
+or
+.BR "sudo cti\-agent" ,
+TAB lists the commands; after a command it lists that command's flags, and for
+tools with subcommands such as
+.B fleet\-db
+the subcommands first. Both call
+.IR /opt/cti\-agent/share/cti\-agent\-usage ,
+which reads the manifest at each TAB, so the completions cannot go stale. Open
+a new shell after an install to pick them up.
+
 .SH FILES
 .TP
 .I /usr/local/bin/cti\-agent

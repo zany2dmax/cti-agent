@@ -173,6 +173,8 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
+  bold "Removing tab completion"
+  rm -f /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent
   bold "Removing man pages"
   for page in "$SRC/../man/man1"/*.1; do
     if [ -f "$page" ]; then rm -f "/usr/local/share/man/man1/$(basename "$page")"; fi
@@ -282,7 +284,7 @@ fi
 
 # ───────────────────────────────────────────────────────────── layout ────────
 bold "Layout"
-run install -d -m 0755 -o root -g root "$CODE_DIR" "$CODE_DIR/bin" "$CODE_DIR/lanes"
+run install -d -m 0755 -o root -g root "$CODE_DIR" "$CODE_DIR/bin" "$CODE_DIR/lanes" "$CODE_DIR/share"
 run install -d -m 0750 -o root -g "$FLEET_GROUP" "$CONF_DIR"
 run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" \
     "$STATE_DIR" "$STATE_DIR/state" "$STATE_DIR/reports" "$STATE_DIR/archive"
@@ -315,6 +317,26 @@ done
 # copy of the same values.
 run install -m 0644 -o root -g root "$SRC/fleet/lanes/email-tokens.json" "$CODE_DIR/lanes/email-tokens.json"
 info "lanes/email-tokens.json"
+# The list of fleet commands and what each takes, and what answers questions
+# about it: `cti-agent` with no arguments, `cti-agent CMD --help`, and the TAB
+# completions all read this one file.
+run install -m 0644 -o root -g root "$SRC/fleet/commands.manifest" "$CODE_DIR/commands.manifest"
+run install -m 0755 -o root -g root "$SRC/fleet/share/cti-agent-usage" "$CODE_DIR/share/cti-agent-usage"
+info "commands.manifest, share/cti-agent-usage"
+# Shell completion: bash-completion's directory and zsh's site-functions. The
+# CODE_DIR in each is filled in, so a relocated install still completes.
+if [ "$MODE" != dryrun ]; then
+  install -d -m 0755 /usr/share/bash-completion/completions /usr/share/zsh/site-functions
+  sed "s#@CODE_DIR@#$CODE_DIR#g" "$SRC/fleet/share/cti-agent.bash" > /usr/share/bash-completion/completions/cti-agent
+  sed "s#@CODE_DIR@#$CODE_DIR#g" "$SRC/fleet/share/_cti-agent" > /usr/share/zsh/site-functions/_cti-agent
+  chmod 0644 /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent
+  if command -v restorecon >/dev/null; then
+    restorecon -F /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent 2>/dev/null || true
+  fi
+  ok "tab completion for bash and zsh (open a new shell to pick it up)"
+else
+  info "would install bash and zsh tab completion"
+fi
 if [ -f "$CONF_DIR/feeds.txt" ]; then
   ok "feeds.txt exists in $CONF_DIR, not overwriting your edits"
 else
@@ -900,8 +922,20 @@ export HOME=$STATE_DIR
 # typed the command in, so a hand run and the timer read different files and
 # the hand run failed where the timer did not.
 cd "$STATE_DIR"
-cmd="\${1:?usage: cti-agent <run-digest|run-checkin|run-patchtuesday|run-domains|run-appscan|run-appowners|run-mailbox-cleanup|cti-alert|cti-budget|cti-kev|cti-podprobe|cti-patchtuesday|cti-domains|cti-appscan|cti-appreport|cti-mailbox|cti-mailer|cti-jira|fleet-db|fleet-owners|fleet-board|mailer.py|enrich.py|scout.py|brief.py> [args]}"
+# No command, or a request for help: say what can be run, from the manifest the
+# completions use, rather than a hand-kept list that drifts. Nothing is run.
+USAGE=$CODE_DIR/share/cti-agent-usage
+case "\${1:-}" in
+  '') echo "usage: cti-agent <command> [flags]   (press TAB after cti-agent for the list)" >&2
+      "\$USAGE" list >&2; exit 2 ;;
+  -h|--help|help) echo "usage: cti-agent <command> [flags]"; "\$USAGE" list; exit 0 ;;
+esac
+cmd="\$1"
 shift
+# \`cti-agent CMD --help\` shows that command's flags and what it needs.
+if [ \$# -eq 1 ]; then
+  case "\$1" in -h|--help|help) exec "\$USAGE" show "\$cmd" ;; esac
+fi
 # A fleet command by NAME, nothing else. \$cmd used to be joined onto bin/
 # as given, so "cti-agent ../../../usr/bin/env" ran env as the service
 # account with fleet.env loaded - every secret printed - and ../../bin/bash
