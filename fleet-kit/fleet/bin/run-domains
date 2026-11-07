@@ -11,8 +11,8 @@
 # No model is involved. Every line in the report is a DNS answer, an HTTP
 # response, a certificate, or a field from the registrar's API.
 #
-# USAGE
-#   run-domains              probe, render, send, advance last week's baseline
+# USAGE (one of the three is required; with none it prints usage and exits 2)
+#   run-domains --for-real   probe, render, send, advance last week's baseline
 #   run-domains --dry-run    probe, render, print the subject; send nothing,
 #                            leave the baseline alone, and only PREVIEW the
 #                            Jira lock-down ticket
@@ -44,17 +44,22 @@ STATE="$FLEET_HOME/state"
 fail() { echo "[run-domains] error: $*" >&2; exit 1; }
 log()  { echo "[run-domains] $*" >&2; }
 
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 DRY=""
 SEND_DRY=""
+REAL=""
 TODEV=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY="--dry-run"; SEND_DRY="--dry-run" ;;
+    --for-real) REAL=1 ;;
     --to-dev)   TODEV=1 ;;
-    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+    *)          fail "unknown argument: $1 (only --dry-run, --for-real and --to-dev are accepted)" ;;
   esac
   shift
 done
+fleet_require_mode run-domains "$SEND_DRY" "$REAL" "$TODEV" allow-dev
 if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
 fi
@@ -113,7 +118,7 @@ elif [ ! -s "$ACTIONS" ]; then
   log "no actions file written - no lock-down ticket"
 elif [ -n "$DRY" ]; then
   log "ticket: dry run, previewing the lock-down ticket only"
-  "$JIRA" --domains-actions "$ACTIONS" --ref-out "$TICKET" \
+  "$JIRA" --domains-actions "$ACTIONS" --dry-run --ref-out "$TICKET" \
     || log "WARNING: lock-down ticket preview failed"
 else
   "$JIRA" --domains-actions "$ACTIONS" --for-real --ref-out "$TICKET" \
@@ -141,7 +146,7 @@ if [ -n "$TODEV" ]; then
     || fail "test send failed"
 else
   # shellcheck disable=SC2086
-  "$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" $DRY \
+  "$MAILER" --lane dom --html "$HTML" --text "$TXT" --subject "$SUBJECT" --attach "$CSV" "${DRY:---for-real}" \
     || fail "send failed - if DOM_TO or DOM_ALLOW_TO is unset the mailer refuses by design"
 fi
 

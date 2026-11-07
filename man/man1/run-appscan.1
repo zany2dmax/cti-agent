@@ -3,12 +3,10 @@
 run-appscan \- weekly application-security report to the App Dev audience, and scanner-login faults to the operator
 .SH SYNOPSIS
 .B run\-appscan
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .PP
 .B sudo cti\-agent run\-appscan
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .SH DESCRIPTION
 .B run-appscan
 renders the week's Qualys WAS scan results with
@@ -124,8 +122,20 @@ A dry run still reads the mailbox and the scanner API and overwrites
 today's report files. It sends nothing through
 .BR cti\-mailer ,
 and it logs, but does not alert on, authentication failures.
+.SH HOW TO RUN
+\fBrun-appscan\fR mails the weekly report and, with WAS_TICKETS=1, files tickets, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (render and print, send and file nothing), \fB\-\-for\-real\fR (send the report and file or update the tickets),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
 Shell arguments, in any order.
+.TP
+.B \-\-for\-real
+Send the report. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required.
 .TP
 .B \-\-dry\-run
 Render, print the subject, and pass

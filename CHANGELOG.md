@@ -49,73 +49,39 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   All of it reads one file, `fleet-kit/fleet/commands.manifest`, installed as
   `/opt/cti-agent/commands.manifest`, so it cannot go stale: a test fails the
   build when a command or a flag exists in the code and not in the manifest, or
-  the reverse. This is the first of two steps: a later release makes every
-  `effect` command refuse to run without an explicit `--dry-run` or
-  `--for-real`. **Upgrade:** re-run the installer, then open a new shell.
+  the reverse. **Upgrade:** re-run the installer, then open a new shell.
 
 ### Changed
 
-- **The mailbox lane now moves mail unless you say `--dry-run`, like every other
-  lane.** `cti-mailbox` and `run-mailbox-cleanup` were the exception: a dry run
-  by default and `--for-real` to act, so the command an operator types for any
-  other lane (`run-digest`, `run-appscan`, `run-domains`, `cti-alert`... all
-  send unless `--dry-run`) rehearsed here and looked as if the mailbox had been
-  tidied. Both now accept `--dry-run`, and without it they move mail. The old
-  `--for-real` is still accepted and ignored (combined with `--dry-run` it is
-  refused), so an old unit file or note keeps working. The systemd unit no
-  longer passes it, `task mailbox` passes `--dry-run`, and the orchestrator's
-  tool grant is now the exact command `cti-mailbox --dry-run` (the bare command
-  would otherwise have become a grant to move mail; a test pins it).
-  **Upgrade:** re-run the installer. **From then on `sudo cti-agent
-  cti-mailbox` and `run-mailbox-cleanup` with no arguments MOVE MAIL**, so use
-  `--dry-run` to look, including for `--lookback` sweeps.
-
-## 1.5.2 — 2026-11-07
-
-**Upgrade:** pull and re-run the installer. Nothing else is required.
-
-### Fixed
-
-- **The lock-down ticket stopped updating once its list got long.** Jira
-  refuses a comment or description over 32767 characters, all or nothing, and
-  the weekly list of 206 DNS changes plus 7 to review went over it
-  (`INF-590 ... exceeds the allowed limit of 32767 characters (HTTP 400)`), so
-  the ticket was not updated and the lane only said so in the journal. Text over
-  30000 characters is now posted as several comments at line breaks, each saying
-  "part n of m"; a description that long becomes the first part with the rest
-  added as comments. This covers every Jira write, not only the domains ticket.
-  The report email was never affected. **Upgrade:** nothing; the next domains
-  run updates the ticket.
-
-- **The AppSec weekly no longer says "nothing urgent open" about scans it has
-  no counts for.** A week with one counted scan and twelve whose completion
-  notices never arrived (the scanner account's notices were being sent from the
-  team mailbox and, correctly, not read) was subject-lined as an all-clear. The
-  subject and the opening paragraph now say how many scans have counts and how
-  many do not: "nothing urgent in the 1 scan(s) with counts; 12 scan(s) have
-  none", or "no counts for 12 scan(s)" when there are none at all. A week where
-  every scan has counts reads as before. **Upgrade:** nothing.
-
-## 1.5.1 — 2026-11-07
-
-**Upgrade:** pull, then re-run the installer (it pins three more timers to
-`FLEET_TIMEZONE`, installs `email-tokens.json` and the `FLEET_MAILBOX_TIME`
-drop-in). Set `PROOFPOINT_POD_IPS` (comma separated) if the mail admin lists
-PoD addresses in SPF. Nothing else is required.
-
-### Added
-
-- **`fleet-owners list` shows each application's name.** An id says which
-  application; the name says which one to a person, so you no longer look it up
-  in Qualys. Names are kept beside each entry (a new `app_names` table, created
-  on first use in an existing `owners.db`, no schema change), shown by `list`
-  and `show`, and never written to `owners.json`, so no lane reads them and
-  they decide nothing. `fleet-owners names FILE` fills or refreshes them from a
-  `cti-appscan --list-apps` listing; `import` takes them from the file it
-  loads. Names come from the scanner, so they are stripped of control
-  characters and capped before they reach your terminal.
-
-### Changed
+- **Every command that changes something has to be told how to run.** Each
+  one now takes exactly one of `--dry-run` (do everything but the change and
+  show what it would do) or `--for-real` (do it), and the ones that have a test
+  send also `--to-dev` (which may go with `--dry-run`). With none, the command
+  prints usage and exits 2 without touching anything. There is no default,
+  because a default is a choice made for you and remembered by nobody: the
+  mailbox lane used to rehearse unless told `--for-real` while every other lane
+  acted unless told `--dry-run`, so the command an operator typed from habit
+  did the opposite of what they meant. The same rule holds for a person, a
+  systemd unit and the heartbeat agent. Covered: `run-digest`, `run-appscan`,
+  `run-domains`, `run-appowners`, `run-patchtuesday`, `run-mailbox-cleanup`,
+  `run-checkin` (`--for-real` fires a beat, `--dry-run` is `--audit`),
+  `cti-alert`, `cti-mailer`, `mailer.py`, `cti-mailbox` and `cti-jira`
+  (`--check` only reads and needs none). `fleet-owners`, `fleet-db` and
+  `fleet-board` write only their own data and are not changed. Every systemd
+  unit now passes `--for-real`, so a unit that loses its flag fails loudly and
+  `cti-alert` emails you. A test fails the build if an effect command stops
+  refusing a missing mode, or a timer stops saying `--for-real`.
+  Two things moved because `--for-real` now means "send":
+  `run-patchtuesday`'s already-sent guard used to be skipped by `--for-real`, so
+  skipping it now takes `--resend` (`--for-real --resend`), and a past
+  `--month` is replayed with `--dry-run` (it used to be "rendered, not sent"
+  with no flag). The heartbeat's tool grant for the mailbox plan is the exact
+  command `cti-mailbox --dry-run`, and its `cti-alert` calls say `--for-real`.
+  **Upgrade: this one changes how you type commands.** Re-run the installer.
+  Afterwards `sudo cti-agent run-digest daily` (and every `run-*`, `cti-jira`,
+  `cti-mailer`, `cti-alert` and `cti-mailbox` without a mode) prints usage
+  instead of running; add `--dry-run` or `--for-real`. Notes and scripts of
+  yours that call these without a mode need the same.
 
 - **One place for what a fleet email looks like.** `internal/emailkit` holds the
   palette, the font and the 640px card, and the pieces every email is built

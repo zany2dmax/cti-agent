@@ -23,7 +23,7 @@ Environment=HOME=/var/lib/cti-agent
 Environment=FLEET_HOME=/var/lib/cti-agent
 Environment=FLEET_CODE=/opt/cti-agent
 Environment=FLEET_ENV=/etc/cti-agent/fleet.env
-ExecStart=/opt/cti-agent/bin/cti-alert --unit %i
+ExecStart=/opt/cti-agent/bin/cti-alert --for-real --unit %i
 TimeoutStartSec=120
 
 # cti-alert quotes the last 40 journal lines, which is the most useful part

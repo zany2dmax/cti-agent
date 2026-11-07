@@ -263,6 +263,16 @@ and either
 .PP
 .B \-\-check
 prints only standard-error lines.
+.SH HOW TO RUN
+\fBcti-mailer\fR sends mail through Graph, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (render and validate, send nothing), \fB\-\-for\-real\fR (send the message),
+or \fB\-\-to\-dev\fR (send ONLY to FLEET_DEV_EMAIL; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
+\fB\-\-check\fR only reads, so it needs none.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash
 .RB ( \-html ),
@@ -274,6 +284,9 @@ Exactly one of
 and
 .B \-\-message
 is required for a send.
+.TP
+.B \-\-for\-real
+Send the message. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required, except with \fB\-\-check\fR.
 .TP
 .BI \-\-html " FILE"
 The rendered digest to send as the HTML body. Must exist.

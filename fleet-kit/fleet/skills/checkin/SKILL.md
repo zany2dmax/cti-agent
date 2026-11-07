@@ -53,8 +53,8 @@ If this is the first beat ever, do the bootstrap from CLAUDE.md first.
 
 ## 2. Postmaster pass
 
-- Email any board line addressed to the operator with `cti-alert --kind
-  ESCALATION`, quoting the board id in `--reason`.
+- Email any board line addressed to the operator with `cti-alert --for-real
+  --kind ESCALATION`, quoting the board id in `--reason`.
 - Pick up the operator's answers from the board - `@operator` lines carrying
   `re:<id>`. You cannot read mail, so tell them in the escalation how to
   answer: `sudo cti-agent fleet-board post @operator @you A "re:<id> ..."`.
@@ -93,7 +93,7 @@ What you owe the schedule instead is **checking it happened**:
 **You cannot re-run the pipeline yourself** - no runner is on your grant,
 because every runner sends or moves mail. When a timer genuinely failed,
 escalate with the exact command for the operator: `sudo cti-agent run-digest
-daily`, which holds the already-sent guard, so running it after a partial
+daily --for-real`, which holds the already-sent guard, so running it after a partial
 failure cannot send twice. Say what failed and what the journal showed.
 
 ## 4. Decide — ask BOTH questions
@@ -105,7 +105,7 @@ approval to notify the distribution list, not notifying it. Everything else
 waits for the digest.
 
 ```
-$FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --kind ESCALATION \
+$FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION \
   --reason "Sev5: CVE-... present on N hosts. Approve notifying the DL? board id <id>"
 ```
 

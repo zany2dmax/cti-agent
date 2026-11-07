@@ -485,7 +485,7 @@ is a different day ten times in the next seventy-two months.
 
 ```bash
 sudo cti-agent run-patchtuesday --dry-run          # this month, sends nothing
-sudo cti-agent run-patchtuesday --month 2026-08    # replay a past release
+sudo cti-agent run-patchtuesday --month 2026-08 --dry-run   # replay a past release
 ```
 
 A `--month` replay never sends and never writes or changes the release
@@ -559,7 +559,7 @@ does not backfill itself. One run with a wider window does the job:
 
 ```bash
 sudo cti-agent run-digest daily --lookback 168h --dry-run   # read it first
-sudo cti-agent run-digest daily --lookback 168h             # one consolidated email
+sudo cti-agent run-digest daily --lookback 168h --for-real   # one consolidated email
 ```
 
 `--lookback` overrides `GRAPH_LOOKBACK_HOURS` **for that run only**. Three
@@ -743,7 +743,7 @@ JIRA_ISSUE_TYPE="Task" does not exist in this project; it offers:
 ### 2. The ticket itself - still creates nothing
 
 ```bash
-sudo cti-agent cti-jira --test-ticket
+sudo cti-agent cti-jira --test-ticket --dry-run
 ```
 
 Prints the summary, description, labels, duplicate-search JQL and the CSV as
@@ -853,11 +853,11 @@ lane at the enriched file the last run wrote:
 
 ```bash
 ls -1 /var/lib/cti-agent/state/enriched-*.json | tail -1     # today's
-sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json
+sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json --dry-run
 ```
 
-That is a dry run — it reports what it would file and writes nothing. Add
-`--for-real` once the list looks right.
+`--dry-run` reports what it would file and writes nothing. Use `--for-real`
+instead once the list looks right.
 
 **KEV and CVSS 9.0+ findings file automatically; a Sev5 that is neither is
 held.** The reason is that a KEV entry carries an external deadline and a
@@ -914,7 +914,7 @@ host(s)`, `WOULD COMMENT: no detections remain (was 12)`, `no change (220
 host(s)) - no comment`):
 
 ```bash
-sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json --follow-up
+sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date +%F).json --follow-up --dry-run
 ```
 
 What it says, and when:
@@ -1092,7 +1092,7 @@ through `cti-mailer --lane was`.
 
 ```bash
 sudo cti-agent run-appscan --dry-run   # render, print the subject, send nothing
-sudo cti-agent run-appscan             # render and send
+sudo cti-agent run-appscan --for-real  # render and send
 ```
 
 A dry run leaves the rendered report at
@@ -1112,7 +1112,7 @@ Jira, which is why this is email and not a ticket.
 ```bash
 sudo cti-agent run-appowners --dry-run   # plan, check every recipient; fetch and send nothing
 sudo cti-agent run-appowners --to-dev    # every email and report to FLEET_DEV_EMAIL only
-sudo cti-agent run-appowners             # fetch, redact, send, record
+sudo cti-agent run-appowners --for-real  # fetch, redact, send, record
 ```
 
 **Who receives it.** `cti-mailer --lane owner` reads the owners itself, from
@@ -1460,7 +1460,7 @@ send it yourself:
 ```bash
 S=/var/lib/cti-agent/state
 sudo cti-agent cti-appscan --since 336h --out $S/appscan-14d.html --text-out $S/appscan-14d.txt
-sudo cti-agent cti-mailer --lane was --to you@example.com \
+sudo cti-agent cti-mailer --lane was --to you@example.com --for-real \
   --html $S/appscan-14d.html --text $S/appscan-14d.txt --subject "[TEST 14d] AppSec"
 ```
 
@@ -1516,7 +1516,7 @@ ticket for a single application:
 sudo cti-agent run-appscan --dry-run     # leaves /var/lib/cti-agent/state/appscan-tickets-<date>.json
 sudo cti-agent cti-appreport --app-id 1234 --out-dir /tmp/report
 T=/var/lib/cti-agent/state/appscan-tickets-$(date -u +%F).json
-sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report              # preview
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report --dry-run    # preview
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report --for-real  # files it
 sudo rm -rf /tmp/report
 ```
@@ -1581,7 +1581,7 @@ run's own):
 
 ```bash
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --for-real   # files a [TEST] ticket, say CR-NNN
-sudo cti-agent cti-jira --appscan-close-test CR-NNN                           # preview
+sudo cti-agent cti-jira --appscan-close-test CR-NNN --dry-run                 # preview
 sudo cti-agent cti-jira --appscan-close-test CR-NNN --for-real                # closes it
 ```
 
@@ -1595,7 +1595,7 @@ ticket (it refuses any other, including the weekly run's own):
 
 ```bash
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --for-real            # files a [TEST] ticket, say CR-NNN
-sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-comment-probe CR-NNN             # preview
+sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-comment-probe CR-NNN --dry-run   # preview
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-comment-probe CR-NNN --for-real  # posts, bisects
 ```
 

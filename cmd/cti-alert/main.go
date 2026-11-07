@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/cli"
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
@@ -62,6 +63,7 @@ var fleetUnit = regexp.MustCompile(`^cti-agent-[A-Za-z0-9@._-]+$`)
 func main() {
 	unit := flag.String("unit", "", "the systemd unit that failed (required)")
 	dryRun := flag.Bool("dry-run", false, "print what would be sent, send nothing")
+	forReal := flag.Bool("for-real", false, "send the alert")
 	toDev := flag.Bool("to-dev", false,
 		"send to FLEET_DEV_EMAIL only, subject prefixed [DEV TEST], and post nothing to the board")
 	// A lane can be stopped on purpose - a budget hold, say - which is worth an
@@ -73,6 +75,12 @@ func main() {
 	reason := flag.String("reason", "",
 		"one-line explanation shown above the systemd detail")
 	flag.Parse()
+	// No default: a person, a unit and the heartbeat all say how.
+	if _, msg := cli.Resolve("cti-alert", *dryRun, *forReal, *toDev, true, cli.Words{
+		DryRun: "print what would be sent, send nothing", ForReal: "send the alert"}); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+		os.Exit(2)
+	}
 
 	// systemd passes the unit as a bare argument via `ExecStart=... %i`, so
 	// accept both forms rather than making the unit file fragile.

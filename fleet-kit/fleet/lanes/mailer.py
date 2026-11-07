@@ -12,13 +12,13 @@ Two modes:
   --message  a short escalation or question, to the operator
 
 Usage:
-  mailer.py --html digest.html                            # -> DIGEST_TO
-  mailer.py --html d.html --text d.txt --subject "..."    # explicit subject
+  mailer.py --html digest.html --for-real                 # -> DIGEST_TO
+  mailer.py --html d.html --text d.txt --subject "..." --for-real
   mailer.py --to-operator --subject "Approve off-cycle send?" \
             --message "CVE-2026-1234 is on KEV and present on 305 hosts." \
-            --board-id q17
-  mailer.py --html d.html --to someone@example.com --require-approval
-  mailer.py --html d.html --cc a@example.com,b@example.com
+            --board-id q17 --for-real
+  mailer.py --html d.html --to someone@example.com --require-approval --for-real
+  mailer.py --html d.html --cc a@example.com,b@example.com --for-real
   mailer.py --html d.html --dry-run                       # render + validate only
   mailer.py --check                                       # verify token + Mail.Send
 
@@ -373,7 +373,9 @@ def main():
                     help="file to attach (repeatable, keep under ~3MB total)")
     ap.add_argument("--board-id", help="board line id, so your reply can be "
                                        "matched back to the question")
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="build and validate, send nothing")
+    ap.add_argument("--for-real", action="store_true", help="send the message")
     ap.add_argument("--require-approval", action="store_true",
                     help="refuse unless --approve is also passed (off-cycle sends)")
     ap.add_argument("--approve", action="store_true",
@@ -381,6 +383,19 @@ def main():
     ap.add_argument("--save-to-sent", default="true")
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
+
+    # No default: anything but --check sends, so it is told how (the rule every
+    # fleet command that changes something follows; internal/cli/mode.go).
+    if not args.check and not (args.dry_run or args.for_real):
+        sys.stderr.write("mailer.py: say how to run it - one of:\n"
+                         "  --dry-run   build and validate, send nothing\n"
+                         "  --for-real  send the message\n"
+                         "see: cti-agent mailer.py --help\n")
+        return 2
+    if args.dry_run and args.for_real:
+        sys.stderr.write("mailer.py: --dry-run and --for-real contradict each other - "
+                         "say which one\n")
+        return 2
 
     if args.check:
         # Report every missing setting at once. Dying on the first one turns

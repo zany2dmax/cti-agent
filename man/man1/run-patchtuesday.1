@@ -6,7 +6,6 @@ run-patchtuesday \- the monthly Microsoft Patch Tuesday synopsis: build, send, m
 .RB [ \-\-dry\-run ]
 .RB [ \-\-month
 .IR YYYY\-MM ]
-.RB [ \-\-for\-real ]
 .RB [ \-\-to\-dev ]
 .PP
 .B sudo cti\-agent run\-patchtuesday
@@ -147,9 +146,21 @@ HTML, text and structured digest of step 3. It does not write or change the
 release manifest
 .RB ( \-\-no\-manifest ).
 It does not send, mark anything sent, or record the send.
+.SH HOW TO RUN
+\fBrun-patchtuesday\fR mails the monthly synopsis and marks the release sent, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (render and print, send and mark nothing), \fB\-\-for\-real\fR (send the synopsis and mark it sent),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
 Shell arguments, matched exactly, in any order. Any other argument is
 refused with a usage line and exit status 2.
+.TP
+.B \-\-resend
+With \fB\-\-for\-real\fR: send a release that was already sent. Without it a release already sent is a no-op, which keeps a second firing of the timer harmless. \fB\-\-for\-real\fR no longer skips that check, because every real run says it now.
 .TP
 .B \-\-dry\-run
 Build and pass

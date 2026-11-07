@@ -41,7 +41,7 @@ Environment=FLEET_CODE=/opt/cti-agent
 Environment=FLEET_ENV=/etc/cti-agent/fleet.env
 Environment=FLEET_FEEDS=/etc/cti-agent/feeds.txt
 
-ExecStart=/opt/cti-agent/bin/run-domains
+ExecStart=/opt/cti-agent/bin/run-domains --for-real
 TimeoutStartSec=3600
 Nice=10
 

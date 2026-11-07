@@ -24,7 +24,7 @@ you want a name, the operator signs their board replies.
 reach the operator with:
 
 ```
-$FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service \
+$FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --for-real \
   --kind ESCALATION --reason "<what you need and why, in one or two lines>"
 ```
 
@@ -141,7 +141,7 @@ Concretely, a quiet beat should pick up one of these:
   opposed to "not yet measurable" — that is a broken run, not a finding.
   Something stopped the lane reaching the scanner; the reason is in the line
   itself and in the journal. Post it to the board, and once the cause is fixed
-  escalate for a re-run - `sudo cti-agent run-patchtuesday` is the operator's.
+  escalate for a re-run - `sudo cti-agent run-patchtuesday --for-real` is the operator's.
   Do not summarise that email as though the estate were clean, and do not
   repeat any claim about the KnowledgeBase from a run that never reached it.
 - If the Friday AppSec report raised an **authentication failure**, a `HOLD`
@@ -178,7 +178,7 @@ Each Bash call must be one granted command with plain arguments, and the command
 `run-appscan`, `run-domains`, `cti-domains`, `run-mailbox-cleanup`, `cti-agent`, `enrich.py`, `scout.py`,
 `brief.py`, `mailer.py`, `cti-mailer`. Each of them either sends mail or moves
 it, and timers own them. When one needs re-running, escalate with the exact
-command for the operator to run — `sudo cti-agent run-digest daily`, say — and
+command for the operator to run — `sudo cti-agent run-digest daily --for-real`, say — and
 say why. Nor can you write findings (`fleet-db finding`), record a digest as
 sent (`fleet-db sent`), mark a finding as handled (`fleet-db note`), or mark a
 Patch Tuesday manifest sent; those are the lanes' and the operator's.
@@ -395,7 +395,7 @@ which you name in an escalation rather than run.
 | `$FLEET_CODE/bin/run-patchtuesday [--dry-run] [--month YYYY-MM]` | no | The monthly Microsoft Patch Tuesday synopsis. The operator runs it by hand for now (timer disabled); a `--dry-run` never writes the manifest; `--month` replays a past release, never sends, and never writes or changes the release manifest - so a replay cannot alter what the daily digest suppresses |
 | `$FLEET_CODE/bin/fleet-journal -u cti-agent-appscan.service` | yes | What the last AppSec run found: the subject it sent, the scan count, and an `AUTH FAILED on N scan(s): ...` line naming the applications whose scanner login broke. **`run-appscan` is not on your allowlist**, deliberately: without `--dry-run` it sends mail to another team. Read the journal instead |
 | `$FLEET_CODE/bin/fleet-journal -u cti-agent-domains.service` | yes | What the last domains check found: its subject (`N High - M Medium across K domains`, or `[REGISTRAR NOT CHECKED]`) and any `registrar unavailable` warning. A High there has already reached the security team in the email - track it on the board, do not re-send it. `[REGISTRAR NOT CHECKED]` two Tuesdays running is worth one escalation: the GoDaddy token has probably expired |
-| `$FLEET_CODE/bin/cti-alert --unit <u> --kind <k> --reason <r>` | yes | **Your escalation channel.** systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` shows the mail and the board line without sending or posting either |
+| `$FLEET_CODE/bin/cti-alert --unit <u> --for-real --kind <k> --reason <r>` | yes | **Your escalation channel.** `--for-real` is required (it says how to run; without it the command only prints usage). systemd also invokes it on unit failure. Fixed recipient, no `--to`; `--dry-run` instead of `--for-real` shows the mail and the board line without sending or posting either |
 | `$FLEET_CODE/bin/fleet-db` | yes, by subcommand | Memory: findings, digests sent, scout items, tasks. `findings --stale-days N` lists confirmed exposure nobody has picked up - a finding with a `remediation_note` is excluded, because it has been handed to someone |
 | `$FLEET_CODE/bin/fleet-board say` | yes | The append-only board: `say` (posts as `@you`), `read`, `tail`, `resolve <id>`, `expire <days>`. Not `post` or `prune`. Handles are `@name`, the kind is upper case |
 | `$FLEET_CODE/bin/fleet-timers --all` | yes | Every timer, including disabled ones. A disabled timer is silent forever - except `cti-agent-patchtuesday.timer`, which is off on purpose for now |

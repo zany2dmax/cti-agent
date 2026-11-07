@@ -759,9 +759,12 @@ exponential backoff — so an agent loop cannot consume a shared subscription.
 `cti-mailbox` is the only component that modifies the mailbox, and it runs on
 a timer with nobody watching. Four properties follow:
 
-1. **Dry run is the default.** Moving requires `--for-real`, which the unit
-   file passes explicitly. A flag that must be added to cause an effect cannot
-   be triggered by a misconfigured unit.
+1. **It has to be told how to run.** `--for-real` moves mail, `--dry-run` moves
+   nothing, and with neither it prints usage and exits 2: there is no default.
+   The unit passes `--for-real` explicitly, so a unit that loses its flag fails
+   loudly (and `cti-alert` tells the operator) instead of quietly doing
+   nothing, and a command typed from habit cannot do the opposite of what was
+   meant. The same rule holds for every fleet command that changes something.
 2. **It cannot permanently delete.** See the Graph section above.
 3. **It acts only on messages a completed run recorded as processed.** No
    record, no move — that log is its entire authority.

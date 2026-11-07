@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# run-digest [daily|weekly] [--dry-run] [--to-dev]
+# run-digest [daily|weekly] --dry-run | --for-real | --to-dev
 #
-# --to-dev is a test send: the real pipeline, mailed to FLEET_DEV_EMAIL only
-# and subject-prefixed [DEV TEST], with every side effect of a dry run - no
-# already-sent record, no Jira writes, no board INFO line. With --dry-run as
-# well, nothing is mailed at all.
+# Say how to run it: --for-real sends and records it, --dry-run does everything
+# but, and --to-dev is a test send: the real pipeline, mailed to FLEET_DEV_EMAIL
+# only and subject-prefixed [DEV TEST], with every side effect of a dry run - no
+# already-sent record, no Jira writes, no board INFO line. --to-dev with
+# --dry-run mails nothing at all. With none of them it prints usage and exits 2.
 #
 # The deterministic pipeline: ingest -> enrich -> brief -> send.
 # systemd calls this so delivery never depends on the orchestrator noticing the
 # clock. The orchestrator's /checkin does the judgment work; this does the
 # guaranteed work. Idempotent - it refuses to send twice for the same window.
 set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 
 # Parsed in a loop rather than positionally. The old form was
 #   KIND="${1:-daily}"; [ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
@@ -19,12 +22,14 @@ set -euo pipefail
 KIND=""
 DRY=""
 SEND_DRY=""
+REAL=""
 TODEV=""
 LOOKBACK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     daily|weekly)  KIND="$1"; shift ;;
     --dry-run)     DRY="--dry-run"; SEND_DRY="--dry-run"; shift ;;
+    --for-real)    REAL=1; shift ;;
     --to-dev)      TODEV=1; shift ;;
     # A catch-up window for the morning after the lane was off. Passed to the
     # ingest binary; it cannot go through the environment because the
@@ -33,11 +38,12 @@ while [ $# -gt 0 ]; do
     --lookback)    LOOKBACK="$2"; shift 2 ;;
     --lookback=*)  LOOKBACK="${1#*=}"; shift ;;
     *) echo "[run-digest] unknown argument: $1" >&2
-       echo "usage: run-digest [daily|weekly] [--dry-run] [--to-dev] [--lookback 168h]" >&2
+       echo "usage: run-digest [daily|weekly] --dry-run|--for-real|--to-dev [--lookback 168h]" >&2
        exit 2 ;;
   esac
 done
 KIND="${KIND:-daily}"
+fleet_require_mode run-digest "$SEND_DRY" "$REAL" "$TODEV" allow-dev
 # A test send changes WHO is mailed and nothing else is allowed to happen as
 # if it were real: from here on it is a dry run, except at the mailer.
 [ -n "$TODEV" ] && DRY="--dry-run"
@@ -197,7 +203,7 @@ elif [ -z "$DRY" ] && [ -x "$JIRA" ]; then
   "$JIRA" --from-enriched "$ENRICHED" --for-real --follow-up || true
 elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
   say "ticket: dry run, nothing will be filed or commented"
-  "$JIRA" --from-enriched "$ENRICHED" --follow-up || true
+  "$JIRA" --from-enriched "$ENRICHED" --dry-run --follow-up || true
 fi
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
@@ -220,7 +226,7 @@ if [ -n "$TODEV" ]; then
   exit 0
 fi
 RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
-           --subject "$SUBJECT" --attach "$RAW" $DRY) || fail "send failed"
+           --subject "$SUBJECT" --attach "$RAW" "${DRY:---for-real}") || fail "send failed"
 echo "$RESULT"
 
 # ── 5. log ───────────────────────────────────────────────────────────────────

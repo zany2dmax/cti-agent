@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# run-mailbox-cleanup [--dry-run]
+# run-mailbox-cleanup --dry-run | --for-real
 #
 # Tidies the shared CTI mailbox once a day: processed advisories to Archive,
 # header-confirmed out-of-office replies to Deleted Items, everything the agent
 # has no record of reading left exactly where it is.
 #
-# MOVES MAIL UNLESS --dry-run, as every other lane sends unless --dry-run. This
-# one used to be the exception (a dry run unless --for-real), so the command an
-# operator types for any other lane rehearsed here, and "I ran the cleanup"
-# did not mean the mailbox had been tidied. --for-real is still accepted and
-# does nothing, so an old unit file or note keeps working. Rehearse with
-# --dry-run first; it prints the plan and the reason for every message.
+# SAY HOW TO RUN IT. --for-real moves the mail, --dry-run prints the plan and
+# the reason for every message and moves nothing, and with neither this prints
+# usage and exits 2. There is no default: this lane used to rehearse unless
+# told --for-real while every other lane acted unless told --dry-run, and a
+# command typed from habit did the opposite of what was meant. The systemd unit
+# passes --for-real, so a unit that loses it fails loudly instead of quietly
+# doing nothing.
 #
 # It exits 0 when it decides to do nothing - no CTI email processed today, for
 # instance. A working refusal is not a failed unit: a non-zero exit would have
@@ -18,14 +19,18 @@
 # correctly.
 set -euo pipefail
 
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 DRY=""
+REAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY="--dry-run"; shift ;;
-    --for-real) shift ;;   # the old spelling of the default; ignored
-    *) echo "usage: run-mailbox-cleanup [--dry-run]" >&2; exit 2 ;;
+    --for-real) REAL="--for-real"; shift ;;
+    *) echo "usage: run-mailbox-cleanup --dry-run|--for-real" >&2; exit 2 ;;
   esac
 done
+fleet_require_mode run-mailbox-cleanup "$DRY" "$REAL" ""
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
@@ -69,7 +74,7 @@ fi
 
 # Capture the output: it is the audit trail for a lane that moves other
 # people's mail, and it goes to the board so the orchestrator sees it too.
-OUT="$("$CLEAN" $DRY ${THRESH[@]+"${THRESH[@]}"} --json "$PLAN" 2>&1)" || {
+OUT="$("$CLEAN" $DRY $REAL ${THRESH[@]+"${THRESH[@]}"} --json "$PLAN" 2>&1)" || {
   echo "$OUT"
   fail "cti-mailbox exited non-zero (a failed move usually means the app registration is missing Mail.ReadWrite with admin consent)"
 }
@@ -78,7 +83,7 @@ echo "$OUT"
 SUMMARY="$(printf '%s' "$OUT" | grep -E '^ +archive [0-9]+' | tr -s ' ' || true)"
 [ -n "$SUMMARY" ] || SUMMARY="nothing to do"
 
-if [ -z "$DRY" ]; then
+if [ -n "$REAL" ]; then
   "$BOARD" post @mailbox @you INFO \
     "mailbox cleanup:$SUMMARY (plan: $PLAN)" 2>/dev/null || true
 else

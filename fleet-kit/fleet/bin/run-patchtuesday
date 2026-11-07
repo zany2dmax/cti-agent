@@ -1,37 +1,45 @@
 #!/usr/bin/env bash
-# run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real] [--to-dev]
+# run-patchtuesday --dry-run | --for-real | --to-dev  [--month YYYY-MM]
 #
-# --to-dev is a test send to FLEET_DEV_EMAIL only, subject prefixed
-# [DEV TEST], with every side effect of a dry run: no manifest, no mark-sent,
-# no already-sent record. It works with --month and needs no --for-real -
-# replaying a past release to yourself is the test the guards below protect
-# the distribution list from.
+# Say how to run it: --for-real sends the synopsis and marks it sent, --dry-run
+# renders it and sends nothing, --to-dev is a test send to FLEET_DEV_EMAIL only,
+# subject prefixed [DEV TEST], with every side effect of a dry run: no manifest,
+# no mark-sent, no already-sent record. With none of them it prints usage and
+# exits 2. --to-dev works with --month - replaying a past release to yourself is
+# the test the guards below protect the distribution list from.
 #
 # The monthly Microsoft Patch Tuesday synopsis: read the two public wrap-ups,
 # correlate against Qualys, render, send. Deterministic shell, same as
 # run-digest - the orchestrator does not run this and delivery does not depend
 # on a model being available.
 #
+# --resend sends a release that was already sent (see the guard below).
 # --month replays a past release, which is how you check the lane against an
-# email you already sent by hand. A replay never sends unless you also pass
-# --for-real, because re-mailing August's Patch Tuesday in September to the
-# whole distribution list is not a test, it is an incident.
+# email you already sent by hand: --month 2026-08 --dry-run. Mailing a past
+# month needs --for-real AND a confirmation (below), because re-mailing
+# August's Patch Tuesday in September to the whole distribution list is not a
+# test, it is an incident.
 set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 
 DRY=""
 SEND_DRY=""
 TODEV=""
 MONTH=""
 FOR_REAL=""
+RESEND=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY="--dry-run"; SEND_DRY="--dry-run"; shift ;;
     --to-dev)   TODEV=1; shift ;;
     --month)    MONTH="$2"; shift 2 ;;
     --for-real) FOR_REAL=1; shift ;;
-    *) echo "usage: run-patchtuesday [--dry-run] [--month YYYY-MM] [--for-real] [--to-dev]" >&2; exit 2 ;;
+    --resend)   RESEND=1; shift ;;
+    *) echo "usage: run-patchtuesday --dry-run|--for-real|--to-dev [--month YYYY-MM] [--resend]" >&2; exit 2 ;;
   esac
 done
+fleet_require_mode run-patchtuesday "$SEND_DRY" "$FOR_REAL" "$TODEV" allow-dev
 # A test send is a dry run everywhere except at the mailer.
 [ -n "$TODEV" ] && DRY="--dry-run"
 
@@ -86,9 +94,14 @@ JSON="$FLEET_HOME/reports/patchtuesday-$TAG.json"
 # Do not send twice for the same release. The guard is keyed on the month, so a
 # rerun after a failure is safe and a second timer firing is a no-op.
 KIND="patchtuesday"
-if [ -z "$DRY" ] && [ -z "$FOR_REAL" ] \
+#
+# --for-real used to be what skipped this guard, back when running with no flags
+# was the real send. Now every real run says --for-real, the timer included, so
+# skipping the guard needs its own flag: --resend, for a release whose first
+# send went wrong. Without it a second firing of the timer is still a no-op.
+if [ -z "$DRY" ] && [ -z "$RESEND" ] \
    && [ "$("$DB" was-sent "$TAG" "$KIND" 2>/dev/null || echo no)" = "yes" ]; then
-  say "$TAG synopsis already sent - nothing to do"
+  say "$TAG synopsis already sent - nothing to do (to send it again: --for-real --resend)"
   exit 0
 fi
 
@@ -107,16 +120,6 @@ NOMANIFEST=()
 
 SUBJECT="$("$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} --subject-only)"
 say "subject: $SUBJECT"
-
-# A replayed month is a test. Sending it to the distribution list would be a
-# mis-send, so it needs --for-real on top of --month.
-if [ -n "$MONTH" ] && [ -z "$FOR_REAL" ] && [ -z "$DRY" ]; then
-  say "replay of $MONTH - rendered but NOT sent. Review $HTML, then add"
-  say "--for-real if you actually want this mailed."
-  "$BOARD" post @patchtuesday @you INFO \
-    "replayed $MONTH Patch Tuesday synopsis to $HTML (not sent)" 2>/dev/null || true
-  exit 0
-fi
 
 # --for-real is not enough on its own for a month that is not the current one.
 #
@@ -147,7 +150,7 @@ if [ -n "$MONTH" ] && [ -n "$FOR_REAL" ] && [ -z "$DRY" ]; then
       say "    sudo FLEET_CONFIRM_RESEND=$MONTH cti-agent run-patchtuesday \\"
       say "      --for-real --month $MONTH"
       say ""
-      say "  To review it without sending, drop --for-real."
+      say "  To review it without sending, use --dry-run instead of --for-real."
       "$BOARD" post @patchtuesday @you WARN \
         "refused to send back-dated $MONTH synopsis (current is $CURRENT)" \
         2>/dev/null || true
@@ -170,7 +173,7 @@ if [ -n "$TODEV" ]; then
   exit 0
 fi
 RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
-           --subject "$SUBJECT" $DRY) || fail "send failed"
+           --subject "$SUBJECT" "${DRY:---for-real}") || fail "send failed"
 echo "$RESULT"
 
 if [ -z "$DRY" ]; then

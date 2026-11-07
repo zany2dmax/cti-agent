@@ -4,8 +4,7 @@ run-digest \- the deterministic daily digest and Monday rollup: ingest, enrich, 
 .SH SYNOPSIS
 .B run\-digest
 .RB [ daily | weekly ]
-.RB [ \-\-dry\-run ]
-.RB [ \-\-to\-dev ]
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
 .RB [ \-\-lookback
 .IR DURATION ]
 .PP
@@ -167,9 +166,21 @@ never sends twice for the same day and kind, never reads the mailbox for the
 weekly, and never runs
 .B cti\-jira
 for the weekly.
+.SH HOW TO RUN
+\fBrun-digest\fR sends the digest and records it, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (do everything but send and record), \fB\-\-for\-real\fR (send and record it),
+or \fB\-\-to\-dev\fR (a test send to FLEET_DEV_EMAIL only; it may be combined with \fB\-\-dry\-run\fR to rehearse the test send).
+With none it prints a usage message and exits 2 without doing anything, and
+two that contradict each other are refused the same way. This is the rule for
+every fleet command that changes something, whether a person, a systemd unit
+or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
+quietly doing nothing.
 .SH OPTIONS
 These are shell arguments, matched exactly and accepted in any order. Any
 other argument is refused with a usage line and exit status 2.
+.TP
+.B \-\-for\-real
+Send the digest and record it. One of this, \fB\-\-dry\-run\fR or \fB\-\-to\-dev\fR is required.
 .TP
 .BR daily ", " weekly
 Which digest. Given more than once, the last wins.

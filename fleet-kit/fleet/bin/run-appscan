@@ -16,8 +16,8 @@
 #   WAS_TO against WAS_ALLOW_TO and REFUSES if either is unset. It does not
 #   fall back to the digest audience.
 #
-# USAGE
-#   run-appscan              render, send (and, with WAS_TICKETS=1, file/update one
+# USAGE (one of the three is required; with none it prints usage and exits 2)
+#   run-appscan --for-real   render, send (and, with WAS_TICKETS=1, file/update one
 #                            Jira ticket per application)
 #   run-appscan --dry-run    render, print the subject, send nothing
 #   run-appscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST]
@@ -64,16 +64,23 @@ log()  { echo "[run-appscan] $*" >&2; }
 # arrived with a stray "weekly" argument on its ExecStart. A runner that
 # shrugs at that runs in the wrong mode and reports success - and the service
 # file looks correct to anyone reading it.
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
 DRY=""
+REAL=""
 TODEV=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY="--dry-run" ;;
+    --for-real) REAL=1 ;;
     --to-dev)   TODEV=1 ;;
-    *)          fail "unknown argument: $1 (only --dry-run and --to-dev are accepted)" ;;
+    *)          fail "unknown argument: $1 (only --dry-run, --for-real and --to-dev are accepted)" ;;
   esac
   shift
 done
+fleet_require_mode run-appscan "$DRY" "$REAL" "$TODEV" allow-dev
+# What the alert is told: a test send alerts you, a real run alerts the operator.
+ALERTMODE="--for-real"; [ -n "$TODEV" ] && ALERTMODE="--to-dev"
 if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
 fi
@@ -179,7 +186,7 @@ if [ "${WAS_TICKETS:-0}" = 1 ] && [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
     # creates reports in the scanner, and a dry run creates nothing.
     if [ -n "$TODEV" ] && [ -z "$DRY" ] && [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
       if [ -x "$APPREPORT" ]; then
-        if "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$PLAN" > /dev/null \
+        if "$JIRA" --appscan-tickets "$TICKETS" --dry-run --ref-out "$PLAN" > /dev/null \
            && "$APPREPORT" --tickets "$TICKETS" --only-ref "$PLAN" --out-dir "$REPORTS"; then
           REPORTARGS=(--appscan-reports "$REPORTS")
         else
@@ -191,7 +198,7 @@ if [ "${WAS_TICKETS:-0}" = 1 ] && [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
     elif [ -n "$DRY" ] && [ "${WAS_ATTACH_REPORT:-0}" = 1 ]; then
       log "tickets: scanner reports are not fetched on --dry-run; --to-dev rehearses the attachments"
     fi
-    "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$TICKETREF" \
+    "$JIRA" --appscan-tickets "$TICKETS" --dry-run --ref-out "$TICKETREF" \
       ${REPORTARGS[@]+"${REPORTARGS[@]}"} > "$PREVIEW" \
       || log "WARNING: application ticket preview failed"
     rm -rf "$PLAN" "$REPORTS"
@@ -200,7 +207,7 @@ if [ "${WAS_TICKETS:-0}" = 1 ] && [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
       if [ -x "$APPREPORT" ]; then
         # Never fatal: without the report each ticket still carries every
         # finding. The preview's would-be text is not wanted here.
-        if "$JIRA" --appscan-tickets "$TICKETS" --ref-out "$PLAN" > /dev/null \
+        if "$JIRA" --appscan-tickets "$TICKETS" --dry-run --ref-out "$PLAN" > /dev/null \
            && "$APPREPORT" --tickets "$TICKETS" --only-ref "$PLAN" --out-dir "$REPORTS"; then
           REPORTARGS=(--appscan-reports "$REPORTS")
         else
@@ -238,7 +245,7 @@ if [ -n "$TODEV" ]; then
     || fail "test send failed"
 else
   # shellcheck disable=SC2086
-  "$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" $DRY \
+  "$MAILER" --lane was --html "$HTML" --text "$TXT" --subject "$SUBJECT" "${DRY:---for-real}" \
     || fail "send failed - if WAS_TO or WAS_ALLOW_TO is unset the mailer refuses by design"
   # Sent: the owning lane has now seen these notices. Non-fatal - the report
   # is out, and an unrecorded notice is only left in the inbox.
@@ -285,7 +292,7 @@ elif [ -s "$AUTHFAIL" ]; then
     log "dry run - would alert the operator about $n authentication failure(s)"
   elif [ -x "$ALERT" ]; then
     # --to-dev on a test send: the alert goes to you too, not the operator.
-    "$ALERT" --unit cti-agent-appscan.service --kind HOLD ${TODEV:+--to-dev} \
+    "$ALERT" --unit cti-agent-appscan.service --kind HOLD "$ALERTMODE" \
       --reason "Qualys WAS authentication failed on $n application(s): $apps. The scan covered only the public surface, so this week's counts are not comparable with last week's. Check the authentication record in Qualys WAS; details in $AUTHFAIL on $(hostname -s)." \
       || log "warn: cti-alert failed - the failure is still recorded in $AUTHFAIL"
   else

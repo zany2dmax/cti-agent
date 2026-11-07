@@ -15,14 +15,24 @@
 # paths - see find_claude.
 set -euo pipefail
 
-# --audit: run the integrity and steering-file checks below, report, and exit
-# without starting a beat. install-fedora.sh runs it as the service account.
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+
+# Say how to run it, as every command that changes something must:
+#   --for-real           fire one beat
+#   --dry-run | --audit  run the integrity and steering-file checks below, report,
+#                        and exit without starting a beat (--audit is the older
+#                        name; install-fedora.sh runs it as the service account)
 AUDIT_ONLY=0
-case "${1:-}" in
-  --audit) AUDIT_ONLY=1 ;;
-  "") ;;
-  *) echo "usage: run-checkin [--audit]" >&2; exit 2 ;;
-esac
+REAL=""
+for _arg in "$@"; do
+  case "$_arg" in
+    --audit|--dry-run) AUDIT_ONLY=1 ;;
+    --for-real)        REAL=1 ;;
+    *) echo "usage: run-checkin --dry-run|--for-real   (--audit = --dry-run)" >&2; exit 2 ;;
+  esac
+done
+fleet_require_mode run-checkin "$([ "$AUDIT_ONLY" = 1 ] && echo 1)" "$REAL" ""
 
 FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
 # See run-digest: config may live outside FLEET_HOME on FHS layouts.
@@ -420,7 +430,7 @@ if [ -x "$BUDGET" ]; then
     # so a six-hour backoff does not send the same email three times.
     if echo "$budget_out" | tail -1 | grep -qx alert && [ -x "$FLEET_CODE/bin/cti-alert" ]; then
       "$FLEET_CODE/bin/cti-alert" --unit cti-agent-checkin.service \
-        --kind HOLD --reason "$reason" || true
+        --for-real --kind HOLD --reason "$reason" || true
     fi
     # Exit 0: a working brake is not a failed unit. Non-zero would trip
     # OnFailure= and email a second time about the fleet behaving correctly.
@@ -604,7 +614,7 @@ if [ -x "$BUDGET" ]; then
       "heartbeat held - $reason" 2>/dev/null || true
     if [ -x "$FLEET_CODE/bin/cti-alert" ]; then
       "$FLEET_CODE/bin/cti-alert" --unit cti-agent-checkin.service \
-        --kind HOLD --reason "$reason" || true
+        --for-real --kind HOLD --reason "$reason" || true
     fi
     exit 0
   fi

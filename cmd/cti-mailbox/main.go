@@ -5,8 +5,8 @@
 // reported on. Automatic replies go to Deleted Items, read or not. Anything
 // else is left exactly where it is, and counted.
 //
-//	cti-mailbox                 tidy the mailbox
 //	cti-mailbox --dry-run       show what would happen, move nothing
+//	cti-mailbox --for-real      move the mail the plan lists
 //	cti-mailbox --json out.json record the plan for later inspection
 //
 // # THIS IS THE ONLY THING IN THE FLEET THAT MODIFIES THE MAILBOX
@@ -16,13 +16,12 @@
 // do quiet damage. Three properties follow from that, and none of them is
 // optional:
 //
-// IT ACTS UNLESS TOLD NOT TO, LIKE EVERY OTHER COMMAND IN THE FLEET. --dry-run
-// is how any lane is rehearsed (run-digest, run-appscan, run-domains,
-// cti-alert...), and this one used to be the odd one out: dry run by default,
-// --for-real to act. An operator who types the command they would type for any
-// other lane got a rehearsal and believed the mailbox had been tidied. Run
-// the plan with --dry-run first, as for the rest. The old --for-real is still
-// accepted and means nothing, so a unit file or note that has it keeps working.
+// IT HAS TO BE TOLD HOW TO RUN, LIKE EVERY COMMAND THAT CHANGES SOMETHING.
+// --dry-run shows the plan and moves nothing; --for-real moves the mail; with
+// neither it prints usage and exits 2 (internal/cli). There is no default: it
+// used to rehearse unless told --for-real while every other lane acted unless
+// told --dry-run, and the command an operator typed from habit did the
+// opposite of what they meant.
 //
 // NOTHING HERE CAN PERMANENTLY DELETE. internal/graph offers move-to-folder
 // and nothing else; Graph's DELETE and purge endpoints are not implemented.
@@ -45,6 +44,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/cli"
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
@@ -62,8 +62,8 @@ func main() { os.Exit(run()) }
 func run() int {
 	dryRun := flag.Bool("dry-run", false,
 		"show what would be moved and move nothing")
-	oldForReal := flag.Bool("for-real", false,
-		"deprecated and ignored: moving is now the default; use --dry-run to rehearse")
+	realRun := flag.Bool("for-real", false,
+		"move the messages the plan lists")
 	jsonOut := flag.String("json", "",
 		"write the plan here, so what happened can be checked afterwards")
 	backlog := flag.Int("backlog-threshold", 25,
@@ -76,13 +76,14 @@ func run() int {
 			"auto-replies; 0 means MAILBOX_LOOKBACK_HOURS. Archiving still needs "+
 			"a processing record, and records expire after 14 days")
 	flag.Parse()
-	if *dryRun && *oldForReal {
-		fmt.Fprintln(os.Stderr, "cti-mailbox: --dry-run and --for-real contradict each other "+
-			"(--for-real is ignored now; drop it)")
-		return exitFailure
+	// No default: it moves other people's mail, so it is told how.
+	mode, msg := cli.Resolve("cti-mailbox", *dryRun, *realRun, false, false, cli.Words{
+		DryRun: "show the plan and move nothing", ForReal: "move the mail the plan lists"})
+	if msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+		return 2
 	}
-	// Acts unless --dry-run. Named for what the rest of the function means.
-	forReal := !*dryRun
+	forReal := mode.ForReal
 
 	// fleet.env, for a run by hand. The cti-agent wrapper exports only the
 	// FLEET_* layout, so without this every credential reads as missing even

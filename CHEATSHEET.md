@@ -2,7 +2,7 @@
 
 For anyone who needs to SSH to the fleet box and answer: is it up, is it working,
 when does it run next, and what would it send? Everything here is read-only or a
-dry run unless it is marked **SENDS MAIL** or **WRITES**.
+`--dry-run` unless it is marked **SENDS MAIL** or **WRITES**.
 
 **This copy is for release 1.5.2 (2026-11-07).** Compare it with the installed
 version (section 3). If the box reports a newer release, this sheet is out of
@@ -23,8 +23,11 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
   command's flags. In a new shell, press **TAB** after `cti-agent` (or
   `sudo cti-agent`) for the commands, and after a command for its flags; bash
   and zsh both work. All three read one list, `/opt/cti-agent/commands.manifest`.
-- **Dry runs are safe.** `--dry-run` builds the whole report and sends nothing.
-  A command without it may send mail or write to Jira.
+- **Say how to run it.** Every command that changes something (`effect` in the
+  list) needs exactly one of `--dry-run` or `--for-real` (some also `--to-dev`).
+  There is no default: with none it prints usage and exits 2, so nothing
+  happens by accident. `--dry-run` builds the whole report and sends nothing;
+  `--for-real` sends, moves or files.
 - **Do not edit the state files by hand** (anything under `/var/lib/cti-agent`)
   unless this sheet or the runbook says to.
 
@@ -125,7 +128,7 @@ sudo cti-agent run-digest weekly --dry-run
 sudo cti-agent run-appscan --dry-run
 sudo cti-agent run-domains --dry-run
 sudo cti-agent run-patchtuesday --dry-run
-sudo cti-agent run-patchtuesday --month 2026-09        # replay a past month, never sends
+sudo cti-agent run-patchtuesday --month 2026-09 --dry-run   # replay a past month, never sends
 sudo cti-agent run-mailbox-cleanup --dry-run           # plan only; moves nothing
 sudo cti-agent cti-alert --unit cti-agent-digest.service --dry-run
 ```
@@ -186,8 +189,8 @@ Normally the timers do this. Run by hand only to re-send after a failure.
 ```bash
 sudo systemctl start cti-agent-domains.service     # exactly as the timer would
 journalctl -u cti-agent-domains.service -n 50 --no-pager
-sudo cti-agent run-domains                         # same, in your terminal
-sudo cti-agent run-digest daily                    # refuses if today's already went
+sudo cti-agent run-domains --for-real              # same, in your terminal
+sudo cti-agent run-digest daily --for-real         # refuses if today's already went
 ```
 
 - The daily, weekly and Patch Tuesday lanes record each send and will not send
@@ -196,10 +199,9 @@ sudo cti-agent run-digest daily                    # refuses if today's already 
   since last week" compares with today.
 - **Never re-run a digest that exited 3.** It was sent but not recorded; the
   journal prints the exact `fleet-db sent ...` command to record it instead.
-- `run-mailbox-cleanup` **WRITES**: without `--dry-run` it moves mail in the mailbox,
-  like every other lane acts unless told `--dry-run`.
-- One-off sweep of old auto-replies (add `--dry-run` first; without it this moves mail):
-  `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m`
+- `run-mailbox-cleanup --for-real` **WRITES**: it moves mail in the mailbox.
+- One-off sweep of old auto-replies (`--dry-run` first, then `--for-real`):
+  `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m --dry-run`
 
 ## 7a. Patch Tuesday, run by hand (monthly)
 
@@ -259,13 +261,13 @@ sudo cti-agent run-patchtuesday --to-dev
 second run does nothing):
 
 ```bash
-sudo cti-agent run-patchtuesday
+sudo cti-agent run-patchtuesday --for-real
 sudo cti-agent fleet-board tail 5        # "sent" line, or the reason it was not
 ```
 
 Without the saved pages the synopsis still goes out from Microsoft's data and
 the scanner, and its sources line says where to save them. To replay a past
-month (never sends): `sudo cti-agent run-patchtuesday --month 2026-10`.
+month (never sends): `sudo cti-agent run-patchtuesday --month 2026-10 --dry-run`.
 
 ## 8. Is a send recorded?
 
@@ -280,7 +282,7 @@ sudo cti-agent fleet-db was-sent 2026-October patchtuesday   # the month as the 
 ```bash
 sudo cti-agent cti-jira --check                         # account, project, write gate, permissions ok/MISSING
 E=/var/lib/cti-agent/state/enriched-$(date +%F).json
-sudo cti-agent cti-jira --from-enriched "$E" --follow-up           # preview, changes nothing
+sudo cti-agent cti-jira --from-enriched "$E" --follow-up --dry-run   # preview, changes nothing
 sudo python3 -m json.tool "${E%.json}-tickets.json" | less   # today's ticket list (no jq here)
 ```
 
@@ -289,7 +291,7 @@ on the open one when the list changed):
 
 ```bash
 A=/var/lib/cti-agent/state/domains-$(date -u +%F)-actions.json
-sudo cti-agent cti-jira --domains-actions "$A"        # preview the ticket, changes nothing
+sudo cti-agent cti-jira --domains-actions "$A" --dry-run   # preview the ticket, changes nothing
 ```
 
 `WRITE GATE CLOSED` in the output means `JIRA_ALLOW_CREATE` does not list the

@@ -264,8 +264,8 @@ Via the `cti-agent` wrapper the installer writes:
 |---|---|
 | `sudo cti-agent run-digest daily --dry-run` | Full pipeline, sends nothing |
 | `sudo cti-agent run-digest daily --lookback 168h --dry-run` | Catch-up after the lane was off. Overrides `GRAPH_LOOKBACK_HOURS` for one run; max 90 days. Cannot be done through the environment - the wrapper's `--preserve-env` list strips it |
-| `sudo cti-agent run-digest daily` | Full pipeline, **sends** |
-| `sudo cti-agent run-checkin` | One orchestrator heartbeat |
+| `sudo cti-agent run-digest daily --for-real` | Full pipeline, **sends** |
+| `sudo cti-agent run-checkin --for-real` | One orchestrator heartbeat |
 | `sudo cti-agent run-appscan --dry-run` | The weekly AppSec report, rendered to `state/`, sent nowhere |
 | `sudo cti-agent cti-appscan --since 336h --out FILE` | The report over any window, by hand. Sends nothing; chain it to `cti-mailer --lane was` |
 | `sudo cti-agent run-domains --dry-run` | The weekly domains check, rendered to `state/`, sent nowhere, baseline not advanced, Jira lock-down ticket only previewed |
@@ -749,8 +749,8 @@ variables, so the installer writes a wrapper:
 ```bash
 sudo cti-agent mailer.py --check
 sudo cti-agent run-digest daily --dry-run
-sudo cti-agent run-digest daily
-sudo cti-agent run-checkin
+sudo cti-agent run-digest daily --for-real
+sudo cti-agent run-checkin --for-real
 sudo cti-agent fleet-db recent
 sudo cti-agent fleet-board tail 30
 ```
@@ -1044,9 +1044,10 @@ does not count either. Since 1.3.2 the auto-replies themselves are still
 deleted that day: skipping whole days is how they piled up, and deleting one
 needs no fleet health.
 
-**Dry run unless `--for-real`.** The systemd unit passes that flag explicitly,
-so the decision to modify mail is visible in the unit file rather than buried
-in a default. `task mailbox` and the runner without the flag both move nothing.
+**Say how to run it.** `--for-real` moves mail and `--dry-run` moves nothing;
+with neither the command prints usage and exits 2. The systemd unit passes
+`--for-real` explicitly, so the decision to modify mail is visible in the unit
+file rather than buried in a default. `task mailbox` passes `--dry-run`.
 
 #### Precedence (1.3.2)
 
@@ -1611,7 +1612,7 @@ out.
 ```bash
 S=/var/lib/cti-agent/state
 sudo cti-agent cti-appscan --since 336h --out $S/a.html --text-out $S/a.txt
-sudo cti-agent cti-mailer --lane was --to you@example.com \
+sudo cti-agent cti-mailer --lane was --to you@example.com --for-real \
   --html $S/a.html --text $S/a.txt --subject "[TEST 14d] AppSec"
 ```
 

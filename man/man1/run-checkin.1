@@ -3,10 +3,10 @@
 run-checkin \- fire one orchestrator heartbeat: Claude Code runs /checkin under a fixed tool allowlist
 .SH SYNOPSIS
 .B run\-checkin
-.RB [ \-\-audit ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .PP
 .B sudo cti\-agent run\-checkin
-.RB [ \-\-audit ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .SH DESCRIPTION
 .B run-checkin
 runs one beat of the orchestrator: Claude Code, non-interactively, with the
@@ -25,10 +25,14 @@ beat starts in
 instead. The orchestrator does the judgment work (reading the board, noticing
 a disabled timer, escalating); the timers do the guaranteed work.
 .PP
-With no argument it runs a beat. The one option,
-.BR \-\-audit ,
-runs the integrity and steering checks and stops. Any other argument is
-refused (exit 2).
+It has no default: it has to be told how to run.
+.B \-\-for\-real
+runs a beat;
+.B \-\-dry\-run
+(older name
+.BR \-\-audit )
+runs the integrity and steering checks and stops. With neither it prints
+usage and exits 2, as does any other argument.
 .PP
 It is run by
 .B cti\-agent\-checkin.service
@@ -492,6 +496,15 @@ and no general shell.
 .B systemctl
 is matched by bare name, not by path.
 .SH OPTIONS
+.TP
+.B \-\-for\-real
+Run one beat. One of this or
+.B \-\-dry\-run
+is required; the systemd unit passes it.
+.TP
+.B \-\-dry\-run
+The same as
+.BR \-\-audit .
 .TP
 .B \-\-audit
 Run the integrity check (step 0) and the steering audit (step 0a), print the

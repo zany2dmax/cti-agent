@@ -17,6 +17,11 @@
 #   flag:    --NAME [ARG] | what it does       (ARG is a placeholder, not a value)
 #   sub:     NAME | what it does                (first word after the command)
 #
+#   modes:   (effect commands only) the flags that say how to run it; exactly one is
+#            required, and with none the command prints usage and exits 2. --to-dev
+#            may also go with --dry-run.
+#   exempt:  flags that make an effect command read-only, so no mode is needed
+#            (cti-jira --check, cti-mailer --check, mailer.py --check)
 
 command: brief.py
 about: Render the CTI digest from an enriched file
@@ -31,11 +36,13 @@ flag: --text-out FILE | plain-text output path
 command: cti-alert
 about: Tell the operator a unit failed or the heartbeat needs a person
 runs: effect
-flag: --dry-run | print what would be sent, send nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | print what would be sent, send and post nothing
 flag: --kind STRING | headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator needs a human and nothing is broken. TEST is inferred when the named unit is healthy (default "FAILED")
 flag: --reason STRING | one-line explanation shown above the systemd detail
 flag: --to-dev | send to FLEET_DEV_EMAIL only, subject prefixed [DEV TEST], and post nothing to the board
 flag: --unit STRING | the systemd unit that failed (required)
+flag: --for-real | send the alert and post to the board
 
 command: cti-appreport
 about: Fetch each application's own scanner report for the owner emails
@@ -105,6 +112,8 @@ flag: --websites-out STRING | write the domains with a live website of their own
 command: cti-jira
 about: File and update the fleet's Jira tickets
 runs: effect
+modes: --dry-run --for-real
+exempt: --check
 flag: --approve | also file the findings that would otherwise wait for a human: Sev5 findings that are not on CISA KEV
 flag: --appscan-close-test STRING | preview, or with --for-real close, ONE ticket filed by --appscan-test (label cti-agent-test): the single labelled real test of how the weekly run closes the ticket of a retired application. Needs JIRA_ALLOW_CLOSE; refuses any other ticket
 flag: --appscan-comment-probe STRING | with --appscan-tickets and --appscan-test: post the weekly comment for that application onto this TEST ticket (filed by --appscan-test) and, if the gateway refuses it, bisect it by line to name the refused text. Preview unless --for-real
@@ -114,10 +123,11 @@ flag: --appscan-tickets STRING | file or update ONE ticket per application from 
 flag: --check | read-only: verify credentials, project, issue type and required fields
 flag: --domains-actions STRING | file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down ticket, or comment on the one already open when the list has changed
 flag: --follow-up | with --from-enriched: also re-check every open fleet ticket against the scanner, whether or not its CVE is in today's mail, and comment on spread, on reaching zero, or once on closed-but-still-detected
-flag: --for-real | actually create it; without this, nothing is written
+flag: --for-real | write to Jira: create, comment, close
 flag: --from-enriched STRING | file tickets for the present KEV, Sev5 and CVSS 9.0+ findings in this enriched JSON
 flag: --ref-out STRING | with --domains-actions: write what happened to the lock-down ticket (key, status, action) here as JSON, for cti-domains --stamp-ticket; with --appscan-tickets, one entry per application for cti-appscan --stamp-tickets
 flag: --test-ticket | build a clearly-labelled test ticket
+flag: --dry-run | show what would be written to Jira, write nothing
 
 command: cti-kev
 about: CISA KEV remediation deadlines for CVEs present in the estate
@@ -132,9 +142,10 @@ flag: --quiet | print nothing when nothing is overdue or due within the horizon
 command: cti-mailbox
 about: Tidy the shared CTI mailbox: archive, delete auto-replies, leave the rest
 runs: effect
+modes: --dry-run --for-real
 flag: --backlog-threshold INT | report when this many inbox messages have no processing record. A growing backlog is what 'the agent stopped reading the mailbox' looks like from outside (default 25)
-flag: --dry-run | show what would be moved and move nothing
-flag: --for-real | deprecated and ignored: moving is now the default; use --dry-run to rehearse
+flag: --dry-run | show the plan and move nothing
+flag: --for-real | move the mail the plan lists
 flag: --json STRING | write the plan here, so what happened can be checked afterwards
 flag: --lookback DURATION | how far back to look this run, e.g. 720h for a one-off sweep of old auto-replies; 0 means MAILBOX_LOOKBACK_HOURS. Archiving still needs a processing record, and records expire after 14 days
 flag: --timeout DURATION | overall Graph timeout (default 2m0s)
@@ -142,6 +153,8 @@ flag: --timeout DURATION | overall Graph timeout (default 2m0s)
 command: cti-mailer
 about: Send mail through Graph, or check the sender's credentials
 runs: effect
+modes: --dry-run --for-real --to-dev
+exempt: --check
 flag: --app-id STRING | with --lane owner: the scanner's web app id whose app-owners.txt line names the recipients
 flag: --app-name STRING | with --lane owner: the application's name, for an app-owners.txt line keyed by name
 flag: --approve | the operator approved this specific off-cycle send
@@ -162,6 +175,7 @@ flag: --text STRING | plain-text alternative. Accepted and logged; Graph sends o
 flag: --to STRING | comma-separated; defaults to DIGEST_TO
 flag: --to-dev | send ONLY to FLEET_DEV_EMAIL, never CC'd, subject prefixed [DEV TEST]: for previewing a report in a real mail client during development
 flag: --to-operator | send to FLEET_OPERATOR_EMAIL. Pre-approved: telling the operator something is not an outward-facing send.
+flag: --for-real | send the message
 
 command: cti-patchtuesday
 about: Build, save and mark the monthly Patch Tuesday synopsis
@@ -243,7 +257,7 @@ flag: --no-pager | do not page
 
 command: fleet-owners
 about: Who owns each web application, kept in SQLite (runs as root)
-runs: effect
+runs: local
 sub: init | create the database
 sub: import | load an owners file
 sub: list | every application
@@ -270,6 +284,8 @@ flag: --all | every cti-agent timer, not just the scheduled ones
 command: mailer.py
 about: Send the digest or an escalation through Graph
 runs: effect
+modes: --dry-run --for-real
+exempt: --check
 flag: --html FILE | HTML body
 flag: --message TEXT | short plain-text body for escalations
 flag: --text FILE | plain-text alternative (logged only)
@@ -285,52 +301,67 @@ flag: --require-approval | refuse unless --approve is also given
 flag: --approve | the operator approved this off-cycle send
 flag: --save-to-sent MODE | keep a copy in Sent Items
 flag: --check | verify credentials and granted roles
+flag: --for-real | send the message
 
 command: run-appowners
 about: Daily application scan reports to their owners
 runs: effect
-flag: --dry-run | plan and check every recipient, fetch and send nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print, send and change nothing
 flag: --to-dev | every email to FLEET_DEV_EMAIL only
+flag: --for-real | send each owner their report and record it
 
 command: run-appscan
 about: Weekly application-security report
 runs: effect
-flag: --dry-run | render and print the subject, send nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print, send and change nothing
 flag: --to-dev | test send to FLEET_DEV_EMAIL only
+flag: --for-real | send the report and file or update the tickets
 
 command: run-checkin
 about: The heartbeat: a short orchestrator beat that watches the fleet and escalates
 runs: effect
-flag: --audit | integrity and steering checks only, no beat
+modes: --dry-run --for-real
+flag: --audit | checks only, no beat (the older name for --dry-run)
+flag: --for-real | fire one beat
+flag: --dry-run | checks only, no beat (the same as --audit)
 
 command: run-digest
 about: Daily or weekly CTI digest: read the mailbox, enrich, render and send
 runs: effect
-flag: --dry-run | render and print the subject, send nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print, send and change nothing
 flag: --to-dev | test send to FLEET_DEV_EMAIL only
 flag: --lookback DURATION | how far back to read the mailbox
+flag: --for-real | send the digest and record it
 sub: daily | the morning digest
 sub: weekly | the Monday weekly
 
 command: run-domains
 about: Weekly domains check: probe, render, file the lock-down ticket, send
 runs: effect
-flag: --dry-run | probe and render, send nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print, send and change nothing
 flag: --to-dev | test send to FLEET_DEV_EMAIL only
+flag: --for-real | send the report, file the lock-down ticket, advance the baseline
 
 command: run-mailbox-cleanup
 about: Daily tidy of the shared CTI mailbox
 runs: effect
-flag: --dry-run | print the plan, move nothing
-flag: --for-real | the old spelling of the default, ignored
+modes: --dry-run --for-real
+flag: --dry-run | print the plan and the reason for every message, move nothing
+flag: --for-real | move the mail the plan lists
 
 command: run-patchtuesday
 about: Monthly Patch Tuesday synopsis
 runs: effect
-flag: --dry-run | render and print, send nothing, mark nothing
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | render and print, send and change nothing
 flag: --to-dev | test send to FLEET_DEV_EMAIL only
-flag: --month YYYY-MM | replay a past month, never sends
-flag: --for-real | allow a past month to be mailed
+flag: --month YYYY-MM | a past release: --dry-run replays it; --for-real needs FLEET_CONFIRM_RESEND=MONTH too
+flag: --for-real | send the synopsis and mark it sent
+flag: --resend | with --for-real: send a release that was already sent
 
 command: scout.py
 about: Poll the CTI feeds for new CVE IDs

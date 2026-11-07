@@ -3,7 +3,7 @@
 cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lane has read, delete auto-replies, leave the rest
 .SH SYNOPSIS
 .B cti-mailbox
-.RB [ \-\-dry\-run ]
+.RB ( \-\-dry\-run | \-\-for\-real )
 .RB [ \-\-json
 .IR FILE ]
 .RB [ \-\-backlog\-threshold
@@ -23,17 +23,19 @@ from
 .B cti\-agent\-mailbox.timer
 every day at 07:00, an hour after the digest.
 .PP
-It moves mail unless given
-.BR \-\-dry\-run ,
-the same flag every other lane uses to rehearse.
-.B With
+It has no default: it has to be told how to run. Give exactly one of
 .B \-\-dry\-run
-.B nothing is moved.
-The plan is computed and printed in full, and the output says
-.BR "DRY RUN" .
-Run it with
+(compute and print the plan, move nothing; the output says
+.BR "DRY RUN" )
+or
+.B \-\-for\-real
+(move the mail the plan lists). With neither it prints usage and exits 2
+without touching the mailbox, as does a contradictory pair. Every fleet
+command that changes something works this way, and the systemd unit passes
+.BR \-\-for\-real .
+Rehearse with
 .B \-\-dry\-run
-first when trying a new window or after a change.
+when trying a new window or after a change.
 .PP
 Before looking at the mailbox it loads the processed-message logs: the
 digest's, which it writes as it reads mail, and one per lane that owns mail of
@@ -132,8 +134,12 @@ and a value may follow
 or a space.
 .TP
 .B \-\-dry\-run
-Show what would be moved and move nothing. Without it the messages in the plan
-are moved: archive goes to the well-known
+Show what would be moved and move nothing. One of this or
+.B \-\-for\-real
+is required.
+.TP
+.B \-\-for\-real
+Actually move the messages in the plan. Archive goes to the well-known
 .B archive
 folder, delete to
 .BR deleteditems .
@@ -142,13 +148,6 @@ Each move prints the new message ID, or
 with the Graph error, and a final
 .B moved\~N, failed\~N, left\~N
 line follows.
-Default:\~\fBfalse\fR (the mail is moved).
-.TP
-.B \-\-for\-real
-Deprecated and ignored: moving is the default. Accepted so an old unit file or
-note still works; combined with
-.B \-\-dry\-run
-it is refused.
 .TP
 .BI \-\-json " FILE"
 Also write the plan to
@@ -319,9 +318,9 @@ The same through the runner, which also posts the summary to the board:
 sudo cti\-agent run\-mailbox\-cleanup
 .EE
 .PP
-Rehearse it first, keeping the plan; drop
-.B \-\-dry\-run
-to apply:
+Rehearse it first, keeping the plan; use
+.B \-\-for\-real
+instead to apply:
 .PP
 .EX
 sudo cti\-agent cti\-mailbox \-\-dry\-run \e
