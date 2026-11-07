@@ -22,6 +22,20 @@ type Subnet struct {
 	Inactive bool
 }
 
+// roleLabels are the labels a network row carries. A row that starts with one is
+// never a site header, even with its network cell blank: a header is a name and
+// nothing beside it, and "internet" with nothing beside it is a row someone has
+// not filled in, not a location.
+var roleLabels = map[string]bool{
+	"corp": true, "security": true, "netman": true, "guest": true, "voice": true,
+	"setup": true, "inside": true, "default": true, "event": true, "old-corp": true,
+}
+
+func isRoleLabel(label string) bool {
+	l := strings.ToLower(strings.TrimSpace(label))
+	return roleLabels[l] || strings.HasPrefix(l, "internet")
+}
+
 // roleSkip are row labels that are not internal networks.
 func roleSkip(label string) bool {
 	l := strings.ToLower(label)
@@ -106,8 +120,11 @@ func ParseSites(rows [][]string) []Subnet {
 		if _, err := netip.ParseAddr(a); err == nil {
 			continue // a device row: an address and its name
 		}
-		if b == "" && c == "" {
+		if b == "" && c == "" && !isRoleLabel(a) {
 			loc, locInactive = a, inactiveText(a)
+			continue
+		}
+		if roleSkip(a) {
 			continue
 		}
 		if loc == "" || roleSkip(a) {

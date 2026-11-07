@@ -152,7 +152,7 @@ func TestOnlyClearCorpNetworksAreSelectedAndTheRestBecomeQuestions(t *testing.T)
 	for _, c := range corp {
 		have = append(have, c.Location+"="+c.Subnet.Prefix.String())
 	}
-	if len(corp) != 1 || !strings.HasPrefix(have[0], "Alpha Site") {
+	if len(corp) != 2 || !strings.HasPrefix(have[0], "Alpha Site") || !strings.HasPrefix(have[1], "Beta Site") {
 		t.Errorf("corp = %v", have)
 	}
 	why := map[string]string{}
@@ -165,12 +165,62 @@ func TestOnlyClearCorpNetworksAreSelectedAndTheRestBecomeQuestions(t *testing.T)
 	if !strings.Contains(why["Delta Site - 10.4.0.0/16"], "no row counts") {
 		t.Errorf("delta: %q", why["Delta Site - 10.4.0.0/16"])
 	}
-	// Beta and Zeta claim the same network, so neither is acted on.
-	if !strings.Contains(why["Beta Site - ST - 10.2.0.0/16"], "overlaps") || !strings.Contains(why["Zeta Site - 10.6.0.0/16"], "overlaps") {
-		t.Errorf("overlap questions: %v", why)
+	// Zeta's header says 10.6.0.0/16 but its corp row is Beta's network: a typo
+	// in the sheet, found because the network is outside the location's block.
+	if !strings.Contains(why["Zeta Site - 10.6.0.0/16"], "outside the location's own block") {
+		t.Errorf("zeta: %q", why["Zeta Site - 10.6.0.0/16"])
 	}
 	if _, ok := why["DECOMMISSIONED Epsilon - 10.5.0.0/16"]; ok {
 		t.Error("a decommissioned location was asked about")
+	}
+}
+
+func TestTwoLocationsClaimingTheSameNetworkAreBothAskedAbout(t *testing.T) {
+	rows := [][]string{
+		{"Theta Site - 10.8.0.0/16"}, {"corp", "10.8.30.0/24", "vlan1"},
+		{"Iota Site - 10.8.0.0/16"}, {"corp", "10.8.30.0/24", "vlan1"},
+	}
+	corp, qs := SelectCorp(ParseSites(rows), Rules{})
+	if len(corp) != 0 || len(qs) != 2 {
+		t.Fatalf("corp %v, questions %v", corp, qs)
+	}
+	for _, q := range qs {
+		if !strings.Contains(q.Why, "overlaps") {
+			t.Errorf("question %+v", q)
+		}
+	}
+}
+
+// Seen in the real sheet: a role label with nothing beside it is a row somebody
+// has not filled in, not a new location.
+func TestAnEmptyRoleRowIsNotASiteHeader(t *testing.T) {
+	rows := [][]string{
+		{"Kappa Site - 10.9.0.0/16"}, {"internet"}, {"corp", "10.9.30.0/24", "vlan30"},
+	}
+	subs := ParseSites(rows)
+	if len(subs) != 1 || subs[0].Location != "Kappa Site - 10.9.0.0/16" {
+		t.Fatalf("subs = %+v", subs)
+	}
+}
+
+func TestACorpRowWithNoNetworkSaysSo(t *testing.T) {
+	rows := [][]string{{"Lambda Site - 10.10.0.0/16"}, {"corp", "", "vlan1"}, {"guest", "10.10.20.0/24", "vlan20"}}
+	_, qs := SelectCorp(ParseSites(rows), Rules{})
+	if len(qs) != 1 || !strings.Contains(qs[0].Why, "no network written") {
+		t.Errorf("questions = %+v", qs)
+	}
+}
+
+// A location whose corp network is outside its header's block is asked about
+// until an operator rule says it is meant (HQ-style addressing).
+func TestACorpNetworkOutsideItsBlockIsAskedAboutUntilARuleSaysItIsMeant(t *testing.T) {
+	rows := [][]string{{"Mu Site - 10.11.0.0/16"}, {"corp", "192.168.5.0/24", "vlan1"}}
+	if corp, qs := SelectCorp(ParseSites(rows), Rules{}); len(corp) != 0 || len(qs) != 1 || !strings.Contains(qs[0].Why, "outside") {
+		t.Errorf("without a rule: %v %v", corp, qs)
+	}
+	r, _ := ParseRules("Mu Site | use corp")
+	if corp, qs := SelectCorp(ParseSites(rows), r); len(corp) != 1 || len(qs) != 0 {
+		t.Errorf("with a rule: %v %v", corp, qs)
 	}
 }
 

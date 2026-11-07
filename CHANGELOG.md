@@ -60,7 +60,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   reaches (in no Asset Group, in a group no scan covers, or only partly
   covered), which scanned groups hold addresses the spreadsheet does not, and
   which locations it could not decide. It only reads; it never guesses a
-  location's corp network. A location with no clear one (HQ and the datacenter)
+  location's corp network. A corp network outside its location's own block (a
+  typo in the sheet, or HQ-style addressing) is asked about too. A location with
+  no clear one (HQ and the datacenter)
   becomes a board question the heartbeat emails, answered with a line in
   `/etc/cti-agent/netrules.txt`. It needs `SUBNETS_DRIVE_ID` and
   `SUBNETS_ITEM_ID` and a Graph application permission that reaches the file

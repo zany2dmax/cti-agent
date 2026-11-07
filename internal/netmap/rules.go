@@ -3,9 +3,34 @@ package netmap
 import (
 	"fmt"
 	"net/netip"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var cidrRE = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b`)
+
+// headerBlocks are the networks a location's header names for itself, such as
+// the /16 in "ARD Miami - FL - 10.4.0.0/16". A corp network outside all of them
+// is usually a typo in the sheet.
+func headerBlocks(header string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, m := range cidrRE.FindAllString(header, -1) {
+		if p, err := netip.ParsePrefix(m); err == nil && p.Addr().Is4() {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
+func within(blocks []netip.Prefix, p netip.Prefix) bool {
+	for _, b := range blocks {
+		if b.Bits() <= p.Bits() && b.Contains(p.Addr()) {
+			return true
+		}
+	}
+	return false
+}
 
 // Rules are the operator's answers about locations the spreadsheet does not
 // make clear. They are read from a root-owned file the operator edits, never
@@ -134,19 +159,42 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		}
 		var picked []Subnet
 		var seenRoles []string
-		bad := ""
+		bad, blank := "", false
 		for _, s := range rows {
 			seenRoles = append(seenRoles, s.Role)
 			if s.Inactive || !hasRole(roles, s.Role) {
 				continue
 			}
 			if !s.Valid {
-				bad = s.Raw
+				if strings.TrimSpace(s.Raw) == "" {
+					blank = true
+				} else {
+					bad = s.Raw
+				}
 				continue
 			}
 			picked = append(picked, s)
 		}
+		// A corp network outside the location's own block is probably a typo in
+		// the sheet. An operator rule for the location says it is meant, so it
+		// is not asked about again.
+		if blocks := headerBlocks(loc); key == "" && len(picked) > 0 && len(blocks) > 0 {
+			for _, s := range picked {
+				if !within(blocks, s.Prefix) {
+					bad = ""
+					qs = append(qs, Question{loc, fmt.Sprintf("its corp network %s is outside the location's own block (%s); "+
+						"either the sheet has a typo or say so with a rule", s.Prefix, headerBlockList(blocks))})
+					picked = nil
+					break
+				}
+			}
+			if picked == nil {
+				continue
+			}
+		}
 		switch {
+		case blank && len(picked) == 0 && bad == "":
+			qs = append(qs, Question{loc, "its corp row has no network written in it"})
 		case bad != "":
 			qs = append(qs, Question{loc, fmt.Sprintf("its corp network %q is not a valid network", bad)})
 		case len(picked) == 0:
@@ -187,6 +235,14 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		corp = kept
 	}
 	return corp, qs
+}
+
+func headerBlockList(blocks []netip.Prefix) string {
+	var s []string
+	for _, b := range blocks {
+		s = append(s, b.String())
+	}
+	return strings.Join(s, ", ")
 }
 
 func hasRole(roles []string, role string) bool {
