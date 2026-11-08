@@ -92,8 +92,14 @@ is real, not before. Finished work moves out of this file into
   AppSec owners; an unknown user leaves it unassigned with a warning, never a
   guess). Needs `CYBR` in `JIRA_ALLOW_CREATE`, a project-key setting for the
   lane (the way the domains lane has its own), and the service account's
-  permissions in CYBR. Still open: whether a digest line also lists the day's
-  requests, and Unsure-means-Yes wording on the item.
+  permissions in CYBR. **Digest decided (2026-11-08):** the lane also emails
+  the security team a digest listing the day's requests, so the person
+  assigned knows to go to the Kanban board. **Unsure wording decided
+  (2026-11-08):** only a certain Yes reads as a Yes. When the lane could not
+  determine a 100% Yes it says so on the item, in words along the lines of "we
+  could not determine a 100% Yes, so this is Unsure, and an Unsure gets a CYBR
+  Kanban to-do", so the person knows to check it by hand. Exact text is a
+  `fleet.env` template. Nothing about the lane's design is open now.
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a
