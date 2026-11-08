@@ -110,8 +110,16 @@ is real, not before. Finished work moves out of this file into
   and `supplier.ReadForms`, the only path from a message to attachment bytes:
   `.xlsx` only by default, refuses names with a whole word like w9, bank,
   routing, void, tax, irs or ach, caps size, and a test proves the W-9 and bank
-  files are never downloaded. Not built: the lane command and its `fleet.env`
-  settings, the judgement, the Jira item and the digest.
+  files are never downloaded. **Judgement built (code side):**
+  `supplier.Render` / `supplier.Judge` and the no-tools agent's instructions
+  (`fleet-kit/fleet/agents/supplier/CLAUDE.md`, status design: nothing invokes
+  it yet). Code only ever moves a verdict toward Unsure: a Yes or No needs a
+  quote copied from the request, a No is refused when the form was linked or
+  unreadable, when the name, subject or notes hold a technology word, or when
+  the request tried to steer the reader, and output code cannot use is Unsure.
+  Not built: running the model, the lane command and its `fleet.env` settings
+  (question and meaning wording, technology word list), the Jira item and the
+  digest.
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a
