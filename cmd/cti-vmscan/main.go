@@ -39,6 +39,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/netmap"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/vmscan"
+	"github.com/zany2dmax/cti-agent/internal/xlsx"
 )
 
 const (
@@ -178,7 +179,7 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	if err != nil {
 		return unavailable("the network spreadsheet could not be read: %s", safelog.Line(err.Error()))
 	}
-	rows, err := netmap.ReadSheetRows(data, sheetName)
+	rows, err := xlsx.ReadSheetRows(data, sheetName)
 	if err != nil {
 		return unavailable("the network spreadsheet could not be parsed: %s", safelog.Line(err.Error()))
 	}

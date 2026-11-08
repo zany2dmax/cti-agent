@@ -1,16 +1,10 @@
-// Package netmap checks the subnets in the network spreadsheet against the
-// Qualys Asset Groups the weekly scans cover, so a location nobody scans shows
-// up instead of going missing quietly.
-//
-// The spreadsheet is the source of authority for what networks exist. Qualys
-// Asset Groups are what the scans are told to cover. The check compares them by
-// ADDRESS, not by name: the scans' Target Group names ("REDACTED-SUB Jax (Anyoldstone)")
-// and the spreadsheet's location names ("REDACTED-SUB Jacksonville - FL") do not match
-// and were never meant to.
-//
-// Nothing here writes to Qualys or to the spreadsheet. See the lane that calls
-// it for what is done with a gap.
-package netmap
+// Package xlsx reads the cells of an .xlsx workbook with the standard library
+// only (archive/zip and encoding/xml): text, shared strings and inline strings,
+// by sheet name, each row with its row number. It reads values as the file
+// stores them. It does not evaluate formulas, format dates or numbers, or open
+// anything but the workbook's own XML parts, so a workbook cannot make it read
+// another file.
+package xlsx
 
 import (
 	"archive/zip"
@@ -86,6 +80,28 @@ func readPart(zr *zip.Reader, name string) ([]byte, error) {
 		return b, nil
 	}
 	return nil, fmt.Errorf("no %s in the workbook", name)
+}
+
+// SheetNames lists the worksheet names in workbook order, so a caller that does
+// not know what a form's sheet is called can ask instead of guessing.
+func SheetNames(data []byte) ([]string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("not an .xlsx workbook: %w", err)
+	}
+	wbB, err := readPart(zr, "xl/workbook.xml")
+	if err != nil {
+		return nil, err
+	}
+	var wb xmlWorkbook
+	if err := xml.Unmarshal(wbB, &wb); err != nil {
+		return nil, fmt.Errorf("workbook.xml: %w", err)
+	}
+	names := make([]string, len(wb.Sheets))
+	for i, sh := range wb.Sheets {
+		names[i] = sh.Name
+	}
+	return names, nil
 }
 
 // ReadSheet returns one worksheet's rows that have any cell, in order, each

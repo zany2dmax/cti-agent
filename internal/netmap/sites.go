@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/xlsx"
 )
 
 // Subnet is one network row from the spreadsheet.
@@ -111,15 +113,15 @@ func maskBits(m string) (int, bool) {
 // that layout and nothing cleverer; a row it cannot read as a network keeps
 // Valid false so the caller can say so rather than drop it.
 func ParseSites(rows [][]string) []Subnet {
-	numbered := make([]Row, len(rows))
+	numbered := make([]xlsx.Row, len(rows))
 	for i, r := range rows {
-		numbered[i] = Row{Num: i + 1, Cells: r}
+		numbered[i] = xlsx.Row{Num: i + 1, Cells: r}
 	}
 	return ParseSiteRows(numbered)
 }
 
 // ParseSiteRows is ParseSites for rows that carry their sheet row numbers.
-func ParseSiteRows(rows []Row) []Subnet {
+func ParseSiteRows(rows []xlsx.Row) []Subnet {
 	var out []Subnet
 	loc := ""
 	locRow := 0
