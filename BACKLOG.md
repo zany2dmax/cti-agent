@@ -26,6 +26,23 @@ is real, not before. Finished work moves out of this file into
     Teams, Slack, a pager. Smallest, a good first one
   - An ownership source interface (`appscan.OwnerSource`) so a CMDB or
     identity group can replace `app-owners.txt`
+  - A network-source interface (`netmap.NetworkSource`: `Subnets(ctx)` returning
+    the subnets, each with a location and an address range, plus any questions
+    about the data) so the VM scan coverage check can read an IPAM (NetBox,
+    phpIPAM, Infoblox) or a CSV/JSON export, not only the spreadsheet.
+    `netmap.Check` is already source-neutral; `coverage()` in `cmd/cti-vmscan`
+    picks the spreadsheet or Graph file directly, and the parser, the corp-row
+    guess and `netrules.txt` assume the sheet's shape. An IPAM gives structured
+    prefixes, sites and roles, so most of that guessing would not be needed.
+    Needs a source-neutral reference on a finding (today a spreadsheet row
+    number) and a configured role or tag in place of the corp-row guess. Select
+    with a `SUBNET_SOURCE` setting. The same pattern could cover the Asset
+    Group side for another scanner. About a day: define the interface, move the
+    xlsx path behind it with no behaviour change (the existing tests prove it),
+    then add a CSV source; write a real IPAM adapter only against a real one.
+    A candidate feature for 1.6. Do it after the coverage check has run once
+    against the real spreadsheet (waiting on the Graph permission), so the
+    behaviour being moved is known to be right
   - An advisory/exploit feed interface for new feeds (EPSS, vendor lists);
     whether the Python CISA KEV fetch moves under it is a separate decision
   - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
