@@ -105,8 +105,13 @@ is real, not before. Finished work moves out of this file into
   marks that request Unsure with the reason "form not readable: linked, not
   attached" and judges from the message text. **Built:** `internal/supplier`
   reads the form (fields found by label text, blanks kept, required-but-empty
-  fields listed) on the shared `internal/xlsx` reader. Not built: finding the
-  messages, the judgement, the Jira item and the digest.
+  fields listed) on the shared `internal/xlsx` reader. **Finder built:**
+  `graph.MessagesAddressedTo` (address in To or Cc, case-insensitive, read-only)
+  and `supplier.ReadForms`, the only path from a message to attachment bytes:
+  `.xlsx` only by default, refuses names with a whole word like w9, bank,
+  routing, void, tax, irs or ach, caps size, and a test proves the W-9 and bank
+  files are never downloaded. Not built: the lane command and its `fleet.env`
+  settings, the judgement, the Jira item and the digest.
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a
