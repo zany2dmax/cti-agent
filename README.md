@@ -14,6 +14,10 @@ never says "all clear" about something it did not check.
 - A weekly web-application report, with one Jira ticket per application,
   assigned to its owner and carrying the scanner's fix text (and, if you turn
   it on, the scanner's own report).
+- A daily report to each web application's owner: the scanner's own report of
+  what is open on it, by email, for owners with no Jira login.
+- A weekly vulnerability-scan report: that the two scheduled scans ran, what
+  they covered, and which of the network team's subnets no scan reaches.
 - The exact DNS changes IT needs to make, filed as a single ticket.
 - A monthly Patch Tuesday synopsis, built from Microsoft's own data.
 
@@ -117,7 +121,9 @@ session removed. Many owners are outside the company and have no Jira login, so
 this is email and not a ticket. A scan that did not finish, whose login failed or
 that reached no host is held back and the operator is told. Off until an
 allowed-domain list is set; who may receive it is decided in the mailer, not in
-the runner.
+the runner. The owners list stays in step with the scanner: `fleet-owners sync`
+asks Qualys for every web application, reports each one with no owner, and
+applies only the changes that follow from owners already on file.
 
 **A weekly vulnerability-scan report.** Mondays, to the vulnerability-management
 audience (and the network and M&A teams if you add them). It combines the week's
@@ -153,7 +159,13 @@ is noise.
 **A tidy mailbox.** Mail the lane that owns it has read goes to Archive (CTI
 advisories after the digest, Qualys WAS scan notices after the AppSec weekly),
 automatic replies to Deleted Items, and *everything else is left exactly where
-it is.*
+it is.* Qualys's companion notices (the "scheduled to start" mail before a
+web-application scan, the "Scan Completed" mail after a VM scan) go to Deleted
+Items once the lane that used the scan's results has sent its report. The mail
+filter's "End User Digest" goes to Deleted Items too, unless it lists held mail
+from a sender the fleet reads; then it stays for seven days and the operator is
+alerted (the fleet never follows a digest's Release link). Archiving no longer
+waits for a CVE: a quiet day archives like any other.
 
 **Noise when something breaks.** A failed unit emails the operator and posts to
 the message board, because the whole premise is that a quiet inbox means a
