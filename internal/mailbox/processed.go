@@ -60,6 +60,15 @@ type Processed struct {
 	// "appscan" for the Qualys WAS notifications its weekly covered. Empty
 	// on the digest's entries, whose ownership is HasCVE.
 	Owner string `json:"owner,omitempty"`
+
+	// Delete asks the cleanup to move an owned message to Deleted Items
+	// instead of Archive, once the owner's grace has passed. Only a lane's own
+	// log sets it, and only for a COMPANION notice: one the scanner sends
+	// alongside a results notice ("scan completed", "scheduled to start") that
+	// carries nothing once the lane has reported on that run. The operator's
+	// choice: those are noise, not records worth filing. Deleted Items is
+	// still recoverable; nothing here purges.
+	Delete bool `json:"delete,omitempty"`
 }
 
 // Log is the on-disk record.
@@ -158,7 +167,13 @@ func Merge(now time.Time, digest map[string]Processed, owned ...*Log) map[string
 				continue // claims nothing: no owner, or the record has expired
 			}
 			if cur, ok := out[e.ID]; ok {
+				// The digest reads everything, so a lane's message is nearly
+				// always here already. Everything the lane decides about it
+				// has to be carried across: copying only Owner once lost
+				// nothing, but would now silently archive what the lane said
+				// to delete.
 				cur.Owner = e.Owner
+				cur.Delete = e.Delete
 				out[e.ID] = cur
 				continue
 			}

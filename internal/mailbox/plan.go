@@ -75,7 +75,9 @@ type Decision struct {
 //  2. No record of a lane having read it -> leave.
 //  3. Read by the lane that OWNS it -> archive, after the grace. The digest
 //     owns what it took a CVE from; cti-appscan owns the Qualys WAS
-//     notifications its weekly reported on (Processed.Owner).
+//     notifications its weekly reported on (Processed.Owner). A companion
+//     notice the owner marked Processed.Delete goes to Deleted Items instead,
+//     under the same grace and the same hold.
 //  4. Anything else -> leave.
 //
 // # WHY AUTO-REPLIES MOVED ABOVE THE PROCESSED RULE (1.3.2)
@@ -221,6 +223,9 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 						"the team can still read it there",
 					ownedBy(owner), now.Sub(c.Received).Round(time.Minute), minAge),
 				Known: true})
+		case rec.Delete && rec.Owner != "":
+			out = append(out, Decision{Candidate: c, Action: ActionDelete,
+				Reason: companionOf(owner), Known: true})
 		default:
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: ownedBy(owner), Known: true})
@@ -233,6 +238,13 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 		return out[i].Received.Before(out[j].Received)
 	})
 	return out
+}
+
+// companionOf explains deleting a companion notice the owner lane claimed.
+func companionOf(owner string) string {
+	return "a companion notice (scheduled to start, or scan completed) for a scan the " +
+		owner + " lane reported on - it adds nothing to the results notice, so it goes " +
+		"to Deleted Items rather than Archive"
 }
 
 func ownedBy(owner string) string {

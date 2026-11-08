@@ -318,6 +318,82 @@ func splitGroups(v string) []string {
 	return out
 }
 
+// # COMPANION NOTICES
+//
+// For every scan Qualys also sends "Qualys: Scan Completed" (the summary
+// without the vulnerability tables) and "Qualys: Completed Vulnerability Scan
+// Notification" (the task-owner notice). Neither carries anything the report
+// uses, so once the lane has reported on the run they are claimed for the
+// mailbox cleanup to DELETE, not archive - the operator's call. They are
+// matched to the run, never claimed on subject alone: "Scan Completed" carries
+// the same report reference as the results notice; the task-owner notice only
+// a title and launch time, which must both equal the run's.
+
+const (
+	completedSubject = "qualys: scan completed"
+	taskDoneSubject  = "qualys: completed vulnerability scan notification"
+)
+
+// Companion identifies the run a companion notice is about.
+type Companion struct {
+	Title string
+	Start time.Time
+	Ref   string
+}
+
+// RecognisesCompanion is true for a companion notice from Qualys itself. A
+// prefix match on the subject, as for results, so a person's forward is not
+// one; and the sender's domain exactly, so a lookalike is never claimed.
+func (Provider) RecognisesCompanion(sender, subject string) bool {
+	if !qualysDomains[senderDomain(sender)] {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(subject))
+	return strings.HasPrefix(s, completedSubject) || strings.HasPrefix(s, taskDoneSubject)
+}
+
+// ParseCompanion reads the run's identity out of a companion notice:
+// "Scan Title"/"Start Date" in Scan Completed, "Title"/"Launch Time" in the
+// task-owner notice, and the report reference where there is one.
+func (Provider) ParseCompanion(body string) Companion {
+	var c Companion
+	if r := refRE.FindStringSubmatch(body); r != nil {
+		c.Ref = "scan/" + r[1]
+	}
+	for _, l := range text(body) {
+		m := fieldRE.FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		v := strings.TrimSpace(m[2])
+		switch strings.ToLower(strings.TrimSpace(m[1])) {
+		case "scan title", "title":
+			if c.Title == "" {
+				c.Title = v
+			}
+		case "start date", "launch time":
+			if c.Start.IsZero() {
+				c.Start = parseStart(v)
+			}
+		}
+	}
+	return c
+}
+
+// Matches reports whether the companion is about this run. The report
+// reference decides when both have one; otherwise the title and the start
+// time must both be present and equal. Nothing partial matches.
+func (c Companion) Matches(s Scan) bool {
+	if c.Ref != "" && s.Ref != "" {
+		return c.Ref == s.Ref
+	}
+	if c.Title == "" || c.Start.IsZero() || s.Start.IsZero() {
+		return false
+	}
+	return strings.EqualFold(spaceRE.ReplaceAllString(strings.TrimSpace(c.Title), " "),
+		spaceRE.ReplaceAllString(strings.TrimSpace(s.Title), " ")) && c.Start.Equal(s.Start)
+}
+
 // FormatDuration renders a duration the way the report shows it: "22h07m" or
 // "1d 00h02m".
 func FormatDuration(d time.Duration) string {

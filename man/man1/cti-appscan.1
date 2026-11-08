@@ -174,7 +174,10 @@ file in
 .IR $FLEET_HOME/state/processed\-appscan.json ,
 which
 .BR cti\-mailbox (1)
-reads to archive the notifications this lane owns, then exit. Nothing else
+reads to archive the notifications this lane owns, and to move to Deleted
+Items the Qualys "scheduled to start" notice of each run that completed
+(matched on its title and a launch time just before the run's start), then
+exit. Nothing else
 runs and no Graph credentials are needed.
 .BR run\-appscan (1)
 calls it only after a real send, never on a dry run or a

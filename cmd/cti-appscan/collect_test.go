@@ -34,3 +34,66 @@ func TestTheFleetsOwnSignedMailIsNotALookalike(t *testing.T) {
 		t.Errorf("problems = %v", problems)
 	}
 }
+
+const scheduledSubject = "Qualys: Scheduled Web Application Vulnerability Scan Notification"
+
+func wasNotice(status string) string {
+	return `<div>Scan Title : Example Shop Run #41</div>
+<div>Scan Reference : was/5555555555555.66666666</div>
+<div>Start Date : 11/08/2026 at 01:28:24 (GMT +0000)</div>
+<div>Scan Status : ` + status + ` </div>`
+}
+
+func scheduledNotice(title, launch string) string {
+	return `<p>Scheduled Task Information:<br /><br />Title: ` + title +
+		`<br />Next Launch: ` + launch + `<br /></p>`
+}
+
+func TestTheScheduledNoticeOfAReportedRunIsClaimedForDeletion(t *testing.T) {
+	msgs := []graph.Message{
+		{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject, BodyHTML: wasNotice("Finished : OK")},
+		{ID: "sched", From: "qualys@qualys.net", Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
+		{ID: "lastweek", From: "qualys@qualys.net", Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Shop", "11/01/2026 at 01:27:00 (GMT +0000)")},
+		{ID: "otherapp", From: "qualys@qualys.net", Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Portal", "11/08/2026 at 01:27:00 (GMT +0000)")},
+		{ID: "fake", From: "team@example.com", Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
+	}
+	_, seen, _ := collect(msgs)
+	got := map[string]bool{}
+	for _, s := range seen {
+		got[s.ID] = s.Delete
+	}
+	if d, ok := got["res"]; !ok || d {
+		t.Errorf("results notice: claimed=%v delete=%v - archived, not deleted", ok, d)
+	}
+	if d, ok := got["sched"]; !ok || !d {
+		t.Errorf("the run's scheduled notice: claimed=%v delete=%v, want a delete claim", ok, d)
+	}
+	for _, id := range []string{"lastweek", "otherapp", "fake"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("%s was claimed and would be deleted", id)
+		}
+	}
+}
+
+func TestAFaultyRunKeepsItsScheduledNotice(t *testing.T) {
+	msgs := []graph.Message{
+		{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject, BodyHTML: wasNotice("Time Limit Exceeded")},
+		{ID: "sched", From: "qualys@qualys.net", Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
+	}
+	_, seen, _ := collect(msgs)
+	claimedResults := false
+	for _, s := range seen {
+		claimedResults = claimedResults || s.ID == "res"
+		if s.ID == "sched" {
+			t.Error("the scheduled notice of an incomplete run was claimed; it stays for a person")
+		}
+	}
+	if !claimedResults {
+		t.Error("the results notice should still be claimed")
+	}
+}

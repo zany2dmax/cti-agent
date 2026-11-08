@@ -15,9 +15,12 @@
 // --seen-out lists the results notices of the expected scans this report
 // covered. run-vmscan commits that file only after a real send, so "the lane
 // has used it" means the report reached its audience, and the mailbox cleanup
-// archives those notices 48 hours later. The other Qualys notices for the same
-// scan ("Scan Completed", the owner-only notification, "scheduled to start")
-// carry nothing the report uses and are left where they are.
+// archives those notices 48 hours later. Of the other Qualys notices for the
+// same scan, "Scan Completed" and the task-owner "Completed Vulnerability Scan
+// Notification" carry nothing the report uses: for a run that FINISHED they
+// are claimed too, marked for the cleanup to delete rather than archive, and
+// only when each matches the run (vmscan.Companion.Matches). An unfinished
+// run's companions stay in the inbox with it.
 package main
 
 import (
@@ -243,6 +246,7 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 	var scans []vmscan.Scan
 	var seen []mailbox.Processed
 	var problems []string
+	var done []vmscan.Scan // claimed runs that finished; their companions go too
 	want := map[string]bool{}
 	for _, t := range expected {
 		want[strings.ToLower(strings.Join(strings.Fields(t), " "))] = true
@@ -279,6 +283,34 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 				ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 				AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerVMScan,
 			})
+			if s.Finished() {
+				done = append(done, s)
+			}
+		}
+	}
+
+	// The companions of the runs just claimed: "Scan Completed" and the
+	// task-owner notice, for the cleanup to delete. Only for a run that
+	// FINISHED - an incomplete run is flagged in the report, and its notices
+	// stay in the inbox with it for a person. Never on subject alone: each
+	// must match a claimed run (vmscan.Companion.Matches).
+	for _, m := range msgs {
+		if m.SelfSent || !p.RecognisesCompanion(m.From, m.Subject) {
+			continue
+		}
+		body := m.BodyHTML
+		if body == "" {
+			body = m.BodyText
+		}
+		c := p.ParseCompanion(body)
+		for _, s := range done {
+			if c.Matches(s) {
+				seen = append(seen, mailbox.Processed{
+					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
+					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerVMScan, Delete: true,
+				})
+				break
+			}
 		}
 	}
 	return scans, seen, problems

@@ -439,6 +439,8 @@ nobody watching. Treat the rollout accordingly.
 | An automatic reply - by its headers, or a subject starting `Automatic reply:`, `Out of Office:` and the like - read by a lane or not | **Deleted Items** (recoverable) |
 | The digest read it and took a CVE from it | **Archive**, after the grace |
 | A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
+| A Qualys VM "Scan Results" notice the VM scan weekly combined and sent | **Archive**, after the grace |
+| A companion notice of a run one of those weeklies reported as complete - WAS "Scheduled ... Scan Notification", VM "Scan Completed" and "Completed Vulnerability Scan Notification" - from Qualys and matched to that run | **Deleted Items**, after the grace |
 | Everything else | **Left alone** |
 
 On a day the digest read no mail (out-of-office replies do not count) nothing
@@ -1176,8 +1178,10 @@ sudo cti-agent cti-vmscan --subnets-file /tmp/subnets.xlsx --out /tmp/vm.html --
 ```
 
 The notices it uses are archived by the mailbox cleanup 48 hours after a real
-send. The other Qualys notices for the same scan (Scan Completed, the
-owner-only notice, scan scheduled to start) are left in the inbox for a person.
+send. For a scan that finished, its Scan Completed and Completed Vulnerability
+Scan Notification go to Deleted Items on the same timing; they are matched to
+the run (report reference, or title and launch time), never by subject alone.
+An unfinished scan's notices stay in the inbox for a person.
 
 ### Reports to application owners, by email
 

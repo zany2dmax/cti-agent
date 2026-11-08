@@ -108,10 +108,15 @@ Nothing else that no lane has a record of reading is ever moved.
 .TP
 .B 3. Read by the lane that owns it: archive
 The digest owns what it took a CVE from; the application-security lane owns
-the Qualys WAS notifications its weekly reported on. Archived once the
+the Qualys WAS notifications its weekly reported on, and the VM scan lane the
+results notices its weekly combined. Archived once the
 message has been in the mailbox for
 .BR MAILBOX_MIN_AGE_HOURS ;
-until then it is left, with the reason stated.
+until then it is left, with the reason stated. A
+.I companion
+notice the owning lane marked for deletion (a "scheduled to start" or "scan
+completed" notice of a run it reported as complete) goes to Deleted Items
+instead, on the same terms: after the grace, and not on a held day.
 .TP
 .B 4. Anything else: leave
 Read, but no lane owns it: a reported phish, a Defender alert, a colleague's

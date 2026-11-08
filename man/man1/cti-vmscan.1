@@ -100,9 +100,15 @@ A message with the results subject that did not come from Qualys is not read.
 It is logged with a pointer to the usual cause, a schedule whose notification
 From Address is set to this mailbox. Set it to qualys@qualys.net.
 .PP
-Only the results notices of the expected scans are recorded as used. The other
-Qualys notices for the same scan (Scan Completed, the owner-only notification,
-scan scheduled to start) carry nothing the report uses and are left alone.
+Only the results notices of the expected scans are recorded as used, for the
+mailbox cleanup to archive. For a scan that finished, its
+.B Scan Completed
+and
+.B Completed Vulnerability Scan Notification
+are recorded as well, for the cleanup to move to Deleted Items: they carry
+nothing the report uses. Each must come from Qualys and match the run, by its
+report reference or by an identical title and launch time; a scan that did not
+finish keeps them in the inbox.
 .SH OPTIONS
 .TP
 .BI \-\-since " DURATION"

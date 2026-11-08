@@ -893,3 +893,58 @@ func TestAStoredAutoReplyVerdictDoesNotDeleteMailTheLiveHeadersClear(t *testing.
 		t.Errorf("stale stored verdict deleted it: %s (%s)", plan[0].Action, plan[0].Reason)
 	}
 }
+
+// ------------------------------------------------------- companion deletions
+
+// A lane's companion notice (Processed.Delete) goes to Deleted Items, but
+// only on the same terms as an archive: after the grace, never on a held day,
+// and never without an owner.
+func TestACompanionNoticeIsDeletedOnlyOnAnArchivesTerms(t *testing.T) {
+	now := at(9)
+	old := now.Add(-72 * time.Hour)
+	log := &Log{Entries: []Processed{
+		{ID: "comp", Owner: OwnerVMScan, Delete: true, ReadAt: now},
+		{ID: "res", Owner: OwnerVMScan, ReadAt: now},
+		{ID: "young", Owner: OwnerVMScan, Delete: true, ReadAt: now},
+	}}
+	// The digest read all three too - it reads everything - so the lane's
+	// verdict has to survive Merge, not just its Owner.
+	digest := map[string]Processed{
+		"comp": {ID: "comp", ReadAt: now}, "res": {ID: "res", ReadAt: now},
+		"young":   {ID: "young", ReadAt: now},
+		"unowned": {ID: "unowned", Delete: true, ReadAt: now},
+	}
+	merged := Merge(now, digest, log)
+	if !merged["comp"].Delete || merged["comp"].Owner != OwnerVMScan {
+		t.Fatalf("Merge lost the lane's verdict: %+v", merged["comp"])
+	}
+	cands := []Candidate{{ID: "comp", Received: old}, {ID: "res", Received: old},
+		{ID: "young", Received: now.Add(-time.Hour)}, {ID: "unowned", Received: old}}
+
+	by := func(plan []Decision) map[string]Decision {
+		m := map[string]Decision{}
+		for _, d := range plan {
+			m[d.ID] = d
+		}
+		return m
+	}
+	d := by(PlanWith(cands, merged, Options{Now: now, MinAge: 48 * time.Hour}))
+	if d["comp"].Action != ActionDelete || !strings.Contains(d["comp"].Reason, "companion") {
+		t.Errorf("companion: %s %q", d["comp"].Action, d["comp"].Reason)
+	}
+	if d["res"].Action != ActionArchive {
+		t.Errorf("the results notice is archived, not deleted: %s", d["res"].Action)
+	}
+	if d["young"].Action != ActionLeave {
+		t.Errorf("inside the grace a companion stays: %s", d["young"].Action)
+	}
+	if d["unowned"].Action != ActionLeave {
+		t.Errorf("Delete without an owner moves nothing: %s", d["unowned"].Action)
+	}
+
+	held := by(PlanWith(cands, merged, Options{Now: now, MinAge: 48 * time.Hour,
+		HoldArchive: "the digest has read no mail today"}))
+	if held["comp"].Action != ActionLeave {
+		t.Errorf("on a held day a companion stays: %s", held["comp"].Action)
+	}
+}

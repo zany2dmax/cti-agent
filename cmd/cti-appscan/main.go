@@ -446,6 +446,7 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 	var scans []appscan.ScanResult
 	var seenMsgs []mailbox.Processed
 	var problems []string
+	var done []appscan.ScanResult // claimed runs that completed; their notices go too
 	seen := map[string]bool{}
 
 	for _, m := range msgs {
@@ -483,6 +484,9 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
 				})
+				if s.Complete {
+					done = append(done, s)
+				}
 			}
 			for _, pr := range probs {
 				problems = append(problems,
@@ -502,6 +506,38 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 				s.Finished = m.ReceivedDateTime
 			}
 			scans = append(scans, s)
+			break
+		}
+	}
+
+	// The "scheduled to start" notices of the runs just claimed, for the
+	// cleanup to delete. Only for a run that completed - a faulty run is
+	// flagged in the report and its notices stay with it for a person - and
+	// only when the notice matches the run (appscan.ScheduledFor), never on
+	// its subject alone.
+	for _, m := range msgs {
+		if m.SelfSent {
+			continue
+		}
+		for _, p := range providers {
+			r, ok := p.(appscan.ScheduledNoticeReader)
+			if !ok || !r.RecognisesScheduled(m.From, m.Subject) {
+				continue
+			}
+			body := m.BodyHTML
+			if body == "" {
+				body = m.BodyText
+			}
+			title, launch := r.ParseScheduled(body)
+			for _, s := range done {
+				if appscan.ScheduledFor(title, launch, s) {
+					seenMsgs = append(seenMsgs, mailbox.Processed{
+						ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
+						AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan, Delete: true,
+					})
+					break
+				}
+			}
 			break
 		}
 	}

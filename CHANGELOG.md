@@ -131,6 +131,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
+- **The scan lanes now clear the other Qualys notices of a scan they reported
+  on.** Qualys sends more than the results for each scan: a "scheduled to
+  start" notice before a WAS run, and "Scan Completed" plus the task-owner
+  "Completed Vulnerability Scan Notification" after a VM scan. None carries
+  anything the weeklies use, and nothing claimed them, so they stayed in the
+  shared inbox for good (about 14 in the last month). Now, after a real send,
+  `cti-appscan` claims the scheduled notice of each WAS run that completed,
+  and `cti-vmscan` claims the two companions of each VM scan that finished,
+  and the mailbox cleanup moves them to **Deleted Items** (recoverable)
+  instead of Archive, after the same grace and not on a held day. Each must
+  come from Qualys and match its run: the WAS notice by title and a launch time
+  just before the run started, "Scan Completed" by the run's report reference,
+  the task-owner notice by an identical title and launch time. A run that did
+  not complete keeps its notices in the inbox for a person. New:
+  `mailbox.Processed.Delete`, carried through `Merge` from the lane's log.
+  **Upgrade:** re-run the installer; it takes effect from the next weekly run of
+  each lane.
+
 - **Every command that changes something has to be told how to run.** Each
   one now takes exactly one of `--dry-run` (do everything but the change and
   show what it would do) or `--for-real` (do it), and the ones that have a test

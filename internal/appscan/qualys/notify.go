@@ -60,6 +60,36 @@ func (Provider) Lookalike(sender, subject string) bool {
 	return strings.HasPrefix(s, noticeSubject) && !qualysDomain(senderDomain(sender))
 }
 
+// scheduledSubject is how Qualys's "scan starts soon" notice's subject starts.
+const scheduledSubject = "qualys: scheduled web application vulnerability scan notification"
+
+var (
+	schedTitleRE  = regexp.MustCompile(`(?i)^title\s*:\s*(.+)$`)
+	schedLaunchRE = regexp.MustCompile(`(?i)^next launch\s*:\s*(.+)$`)
+)
+
+// RecognisesScheduled is true for Qualys's own "scheduled to start" notice:
+// the sender's domain exactly, the subject as a prefix (a forward is not one).
+func (Provider) RecognisesScheduled(sender, subject string) bool {
+	return qualysDomain(senderDomain(sender)) &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(subject)), scheduledSubject)
+}
+
+// ParseScheduled reads "Title: <scan>" and "Next Launch: 11/08/2026 at
+// 01:27:00 (GMT +0000)" from the notice's Scheduled Task Information.
+func (Provider) ParseScheduled(body string) (string, time.Time) {
+	var title string
+	var launch time.Time
+	for _, l := range textLines(body) {
+		if m := schedTitleRE.FindStringSubmatch(l); m != nil && title == "" {
+			title = strings.TrimSpace(m[1])
+		} else if m := schedLaunchRE.FindStringSubmatch(l); m != nil && launch.IsZero() {
+			launch = parseQualysTime(m[1])
+		}
+	}
+	return title, launch
+}
+
 // senderDomain is the domain of the address in "Name <addr>" or a bare addr.
 func senderDomain(sender string) string {
 	s := strings.TrimSpace(sender)
