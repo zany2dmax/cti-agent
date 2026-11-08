@@ -1832,7 +1832,8 @@ class TestFileShape(unittest.TestCase):
             mode = meta.split()[0]
             f = root / path
             try:
-                shebang = f.open("rb").read(2) == b"#!"
+                with f.open("rb") as fh:
+                    shebang = fh.read(2) == b"#!"
             except OSError:
                 continue
             if shebang and mode != "100755":
