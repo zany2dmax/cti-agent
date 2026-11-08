@@ -3,6 +3,7 @@ hands over to the installer from the UPDATED kit, and says how to run like every
 other command that changes something."""
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -136,6 +137,60 @@ class UpdateFedora(unittest.TestCase):
         self.assertIn('exec "$SRC/update-fedora.sh"', inst)
         # And uninstall takes it away again.
         self.assertIn("rm -f /usr/local/sbin/cti-agent-update", inst)
+
+
+class UpdateDocsAndCompletion(unittest.TestCase):
+    """cti-agent-update is not in the command manifest (the cti-agent wrapper
+    does not run it), so nothing generated keeps its man page and completions
+    in step with it. This does: the flags update-fedora.sh takes are exactly
+    the ones the page and both completions offer."""
+
+    SHARE = ROOT / "fleet-kit" / "fleet" / "share"
+
+    def flags(self):
+        src = (ROOT / "fleet-kit" / "update-fedora.sh").read_text(encoding="utf-8")
+        return set(re.findall(r"^\s*(--[a-z-]+)\)\s", src, re.M))
+
+    def test_the_updater_has_the_two_modes(self):
+        self.assertEqual(self.flags(), {"--dry-run", "--for-real"})
+
+    def test_the_man_page_documents_every_flag(self):
+        page = (ROOT / "man" / "man1" / "cti-agent-update.1").read_text(encoding="utf-8").replace("\\-", "-")
+        for f in self.flags() | {"--uninstall", "--purge"}:
+            self.assertRegex(page, r"(?<![\w-])" + re.escape(f) + r"(?![\w-])", f)
+
+    def test_both_completions_offer_exactly_the_updater_flags(self):
+        for name in ("cti-agent-update.bash", "_cti-agent-update"):
+            with self.subTest(file=name):
+                text = (self.SHARE / name).read_text(encoding="utf-8")
+                code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+                self.assertEqual(set(re.findall(r"(?<![\w-])--[a-z][a-z-]+", code)), self.flags())
+
+    def test_the_completions_are_valid_shell(self):
+        for name, shell in (("cti-agent-update.bash", "bash"), ("_cti-agent-update", "zsh")):
+            with self.subTest(file=name):
+                if shutil.which(shell) is None:
+                    self.skipTest(f"no {shell} here")
+                r = subprocess.run([shell, "-n", str(self.SHARE / name)],
+                                   check=False, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_bash_completion_offers_one_mode_and_then_nothing(self):
+        if shutil.which("bash") is None:
+            self.skipTest("no bash here")
+        script = (f'source "{self.SHARE / "cti-agent-update.bash"}"\n'
+                  't(){ COMP_WORDS=("$@"); COMP_CWORD=$(( $# - 1 )); COMP_TYPE=9; '
+                  '_cti_agent_update 2>/dev/null; echo "${#COMPREPLY[@]} ${COMPREPLY[0]%% *}"; }\n'
+                  't cti-agent-update ""; t cti-agent-update --f; t cti-agent-update --dry-run ""\n')
+        r = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
+        self.assertEqual(r.stdout.split("\n")[:3], ["2 --dry-run", "1 --for-real", "0 "])
+
+    def test_the_installer_installs_and_removes_them(self):
+        inst = (ROOT / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        for name, dest in (("cti-agent-update.bash", "/usr/share/bash-completion/completions/cti-agent-update"),
+                           ("_cti-agent-update", "/usr/share/zsh/site-functions/_cti-agent-update")):
+            self.assertIn(f'"$SRC/fleet/share/{name}" {dest}', inst)
+            self.assertGreaterEqual(inst.count(dest), 3, f"{dest}: installed, relabelled and removed")
 
 
 if __name__ == "__main__":

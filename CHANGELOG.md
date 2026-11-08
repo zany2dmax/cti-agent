@@ -39,6 +39,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **`cti-agent-update` has a man page and tab completion.** `man
+  cti-agent-update` covers both modes, what each checks before it pulls, and
+  the exit codes. In bash and zsh, `sudo cti-agent-update <TAB>` offers
+  `--dry-run` and `--for-real`, tagged or coloured by risk like `cti-agent`'s
+  own completion, and offers nothing more once a mode has been given. The
+  updater is not in the command manifest, so a test now ties its flags to the
+  page and both completions. **Upgrade:** re-run the installer, then open a
+  new shell.
+
 - **A record of what each heartbeat did: beat traces.** Every check-in beat
   now runs with the CLI's `stream-json` output, kept as one file per beat in
   `state/traces` (0600, in a 0700 directory, kept 14 days). It holds the model

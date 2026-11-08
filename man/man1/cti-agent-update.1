@@ -1,0 +1,155 @@
+.TH CTI-AGENT-UPDATE 1 "2026-11-08" "cti-agent 1.5" "CTI Fleet Manual"
+.SH NAME
+cti-agent-update \- bring the fleet box up to date: pull the kit, then run the installer from it
+.SH SYNOPSIS
+.B sudo cti\-agent\-update
+.RB ( \-\-dry\-run | \-\-for\-real )
+.PP
+.B sudo /root/cti\-agent\-kit/fleet\-kit/update\-fedora.sh
+.RB ( \-\-dry\-run | \-\-for\-real )
+.SH DESCRIPTION
+.B cti-agent-update
+is the whole update of a fleet box. It fast-forwards the
+.I kit
+checkout (the one
+.B install\-fedora.sh
+was run from, normally
+.IR /root/cti\-agent\-kit ),
+then hands over to the installer from the freshly pulled kit.
+.PP
+There are two checkouts on the box. The kit holds the installer, the runners,
+the units, the command manifest and these man pages. The installer pulls the
+other one, the Go source under
+.IR /opt/cti\-agent/agent ,
+itself. Nothing else pulls the kit, so running the installer alone would run
+last release's installer over last release's files and build this release's
+source. Pulling the kit first is the reason this command exists.
+.PP
+.B cti-agent-update
+is a three-line script that
+.B install\-fedora.sh
+writes to
+.IR /usr/local/sbin ,
+which is on sudo's secure_path. It runs
+.B fleet\-kit/update\-fedora.sh
+in the kit it was installed from. Before the first install, run that file by
+its path instead.
+.PP
+On
+.BR \-\-for\-real ,
+in order:
+.TP
+.B 1. Checks
+Refuses to run from inside
+.I /opt/cti\-agent
+(the tree the installer pulls), without root, outside a git checkout, when
+the kit has local changes to tracked files, or when its branch has no
+upstream.
+.TP
+.B 2. Fetch
+.B git fetch \-\-tags
+on the kit. The tags come along because the installer stamps the version
+from the nearest tag.
+.TP
+.B 3. Fast-forward
+.B git merge \-\-ff\-only
+to the upstream, if anything is incoming. A kit that has diverged from its
+upstream is refused, never merged.
+.TP
+.B 4. Install
+Prints the kit's version before and after, with a note when the new one is
+not an exact release tag (for example
+.BR 1.5.1\-2\-gabc1234 ,
+which usually means a tag was not pushed). It then
+.BR exec s
+.B install\-fedora.sh
+from the updated kit. That keeps
+.IR fleet.env ,
+the other files in
+.I /etc/cti\-agent
+and the state in
+.IR /var/lib/cti\-agent ,
+and enables no timer.
+.SH HOW TO RUN
+\fBcti-agent-update\fR changes the install, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (fetch and show what is incoming, change nothing) or \fB\-\-for\-real\fR (pull the kit and install from it).
+With neither it prints a usage message and exits 2 without doing anything, and
+both together are refused the same way. This is the rule for every fleet
+command that changes something.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Fetch, then print the kit's path, its current version, the upstream's
+version and the number of incoming commits, with their one-line log and a
+diff summary. Nothing is merged and nothing is installed: an installer run
+from the old checkout would describe the old install, not the update. Does
+not need root, but a kit under
+.I /root
+does.
+.TP
+.B \-\-for\-real
+Pull the kit and run the installer from it. Needs root. When the kit is
+already up to date, the installer is still run.
+.PP
+.B \-\-uninstall
+and
+.B \-\-purge
+are refused (exit 2): they belong to
+.BR install\-fedora.sh ,
+so run that for them. No other argument does anything useful. Anything else
+is passed to the installer, which refuses unknown options, and it does so
+only after the kit has been pulled.
+.SH ENVIRONMENT
+.TP
+.B FLEET_UPDATE_UID
+For the tests only: stands in for
+.B id \-u
+in the root check.
+.SH FILES
+.TP
+.I /usr/local/sbin/cti\-agent\-update
+This command, written by the installer with the kit's path in it.
+.TP
+.I /root/cti\-agent\-kit/fleet\-kit/update\-fedora.sh
+What it runs. The kit's location is wherever it was cloned for the first
+install.
+.TP
+.I /etc/cti\-agent/version
+What the last install recorded.
+.SH EXIT STATUS
+.TP
+.B 0
+Dry run finished.
+.TP
+.B 1
+Refused: not root for
+.BR \-\-for\-real ,
+the kit is not a git checkout, has local changes, has no upstream, or cannot
+be fast-forwarded. Nothing was pulled.
+.TP
+.B 2
+Usage: no mode, both modes,
+.B \-\-uninstall
+or
+.BR \-\-purge ,
+or run from inside
+.IR /opt/cti\-agent .
+.PP
+After the hand-over on
+.BR \-\-for\-real ,
+the exit status is the installer's. If the installer stops partway, it
+prints the line it stopped on and that the box is half-installed.
+.SH EXAMPLES
+.nf
+sudo cti\-agent\-update \-\-dry\-run     # what is incoming; changes nothing
+sudo cti\-agent\-update \-\-for\-real    # pull the kit, then install
+sudo cti\-agent cti\-mailer \-\-check | head \-2   # afterwards: what the binary says it is
+sudo cat /etc/cti\-agent/version                # what the install recorded
+.fi
+.SH SEE ALSO
+.BR cti\-agent (1),
+.BR fleet\-timers (1),
+.BR git\-merge (1)
+.PP
+RUNBOOK.md section 7; CHEATSHEET.md, "Updating the box"; CHANGELOG.md, "Finding out what is
+deployed".

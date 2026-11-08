@@ -175,7 +175,8 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   ok "units removed"
   rm -f /usr/local/sbin/cti-agent-update
   bold "Removing tab completion"
-  rm -f /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent
+  rm -f /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent \
+        /usr/share/bash-completion/completions/cti-agent-update /usr/share/zsh/site-functions/_cti-agent-update
   bold "Removing man pages"
   for page in "$SRC/../man/man1"/*.1; do
     if [ -f "$page" ]; then rm -f "/usr/local/share/man/man1/$(basename "$page")"; fi
@@ -333,11 +334,15 @@ if [ "$MODE" != dryrun ]; then
   install -d -m 0755 /usr/share/bash-completion/completions /usr/share/zsh/site-functions
   sed "s#@CODE_DIR@#$CODE_DIR#g" "$SRC/fleet/share/cti-agent.bash" > /usr/share/bash-completion/completions/cti-agent
   sed "s#@CODE_DIR@#$CODE_DIR#g" "$SRC/fleet/share/_cti-agent" > /usr/share/zsh/site-functions/_cti-agent
+  # cti-agent-update gets files of its own: bash-completion loads by command name.
+  install -m 0644 "$SRC/fleet/share/cti-agent-update.bash" /usr/share/bash-completion/completions/cti-agent-update
+  install -m 0644 "$SRC/fleet/share/_cti-agent-update" /usr/share/zsh/site-functions/_cti-agent-update
   chmod 0644 /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent
   if command -v restorecon >/dev/null; then
-    restorecon -F /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent 2>/dev/null || true
+    restorecon -F /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent \
+      /usr/share/bash-completion/completions/cti-agent-update /usr/share/zsh/site-functions/_cti-agent-update 2>/dev/null || true
   fi
-  ok "tab completion for bash and zsh (open a new shell to pick it up)"
+  ok "tab completion for bash and zsh, cti-agent and cti-agent-update (open a new shell to pick it up)"
 else
   info "would install bash and zsh tab completion"
 fi
