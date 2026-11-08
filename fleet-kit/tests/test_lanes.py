@@ -3461,6 +3461,33 @@ class RunnersToDev(unittest.TestCase):
                            env=self.base, capture_output=True, text=True, timeout=60, check=False)
         return r, self.log.read_text().splitlines()
 
+    def test_quarantined_fleet_mail_is_escalated_never_released(self):
+        """cti-mailbox names mail the filter quarantined that a lane reads; the
+        runner tells the operator (board, and cti-alert on a real run). The
+        fleet never releases it: the digest's Release link acts on a bare GET."""
+        line = ("QUARANTINE: the mail filter is holding mail the fleet reads: "
+                "qualys@qualys.net - Qualys: Scan Results. Release it in the quarantine portal; "
+                "the fleet never releases mail itself.")
+        clean = self.code / "bin" / "cti-mailbox"
+        clean.write_text('#!/usr/bin/env bash\necho "cti-mailbox $*" >> "$STUB_LOG"\n'
+                         f"echo '{line}'\n")
+        clean.chmod(0o755)
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        alerts = [c for c in calls if c.startswith("cti-alert ")]
+        self.assertEqual(len(alerts), 1, calls)
+        self.assertIn("--kind ESCALATION", alerts[0])
+        self.assertIn("--for-real", alerts[0])
+        self.assertIn("Qualys: Scan Results", alerts[0])
+        self.assertTrue(any(c.startswith("fleet-board post @mailbox @you WARN QUARANTINE:") for c in calls), calls)
+
+        self.log.write_text("")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(any(c.startswith("cti-alert ") for c in calls),
+                         "a dry run must not mail the operator")
+        self.assertIn("would alert the operator", r.stdout)
+
     def assertTestSend(self, runner, *args):
         r, calls = self.run_lane(runner, *args, "--to-dev")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

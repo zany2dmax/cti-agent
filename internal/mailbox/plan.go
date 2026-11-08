@@ -38,6 +38,16 @@ type Candidate struct {
 	// lane would escalate "the agent has stopped reading the mailbox" about a
 	// mailbox it was reading perfectly well.
 	SelfSent bool
+
+	// QuarantineDigest is a quarantine digest (an "End User Digest"). See
+	// QuarantineDigest the function for exactly what qualifies.
+	QuarantineDigest bool
+	// DigestRows is how many held messages ParseDigest found in it, and
+	// HeldForFleet those a lane would have read (HeldForFleet the function),
+	// as the operator should see them. Strings and ints, not slices, so a
+	// Candidate stays comparable.
+	DigestRows   int
+	HeldForFleet string
 }
 
 // Decision pairs a candidate with what will happen to it and why.
@@ -69,9 +79,14 @@ type Decision struct {
 //  0. Sent by this fleet -> archive, once Options.SelfMinAge old (a week by
 //     default under cti-mailbox). Our own reports are never processed (the
 //     digest skips them), so no later rule could ever move them.
-//  1. An automatic reply -> Deleted Items, read or not. Declared by its own
-//     headers, or - since 1.3.2 - by a subject that starts the way an
-//     out-of-office does ("Automatic reply:", "Out of Office:" ...).
+//  1. Machine mail nobody here acts on -> Deleted Items, read or not:
+//     an automatic reply, declared by its own headers or - since 1.3.2 - by a
+//     subject that starts the way an out-of-office does ("Automatic reply:",
+//     "Out of Office:" ...); and a quarantine digest (QuarantineDigest),
+//     whoever it is addressed to, on sight. A digest that holds mail the
+//     fleet reads (HeldForFleet) stays DigestKeep instead, for the operator
+//     to release it by hand; so does one whose rows cannot be read, so a
+//     layout change cannot delete the one notice that mattered.
 //  2. No record of a lane having read it -> leave.
 //  3. Read by the lane that OWNS it -> archive, after the grace. The digest
 //     owns what it took a CVE from; cti-appscan owns the Qualys WAS
@@ -192,6 +207,22 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: "sent by this fleet - our own report delivered back to " +
 					"the mailbox it is read from", Known: true})
+		case c.QuarantineDigest && c.HeldForFleet != "" && c.Received.After(now.Add(-DigestKeep)):
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: "a quarantine digest holding mail the fleet reads (" + c.HeldForFleet +
+					") - release it in the quarantine portal; this digest goes after " +
+					DigestKeep.String(),
+				Known: true})
+		case c.QuarantineDigest && c.DigestRows == 0:
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: "a quarantine digest whose held messages could not be read - " +
+					"left for a person, in case the digest's layout has changed",
+				Known: true})
+		case c.QuarantineDigest:
+			out = append(out, Decision{Candidate: c, Action: ActionDelete,
+				Reason: "a quarantine digest holding nothing the fleet reads - nobody " +
+					"reviews quarantine through this mailbox",
+				Known: ok})
 		case headerAuto:
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: "the sending system's headers declare it an automatic reply",

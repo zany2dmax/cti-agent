@@ -948,3 +948,40 @@ func TestACompanionNoticeIsDeletedOnlyOnAnArchivesTerms(t *testing.T) {
 		t.Errorf("on a held day a companion stays: %s", held["comp"].Action)
 	}
 }
+
+// ------------------------------------------------------------ quarantine digests
+
+func TestAQuarantineDigestIsRecognisedBySenderAndSubject(t *testing.T) {
+	senders := []string{"digest@example.com"}
+	subj := "End User Digest: 1 New Message "
+	for name, c := range map[string]struct {
+		from, subject string
+		senders       []string
+		want          bool
+	}{
+		"plain address":         {"digest@example.com", subj, senders, true},
+		"display name":          {"CR Digest <digest@example.com>", subj, senders, true},
+		"sender case differs":   {"DIGEST@EXAMPLE.COM", "end user digest: 2 New Messages", senders, true},
+		"rule off (no senders)": {"digest@example.com", subj, nil, false},
+		"another sender":        {"digest@example.com.attacker.example", subj, senders, false},
+		"display name only":     {"digest@example.com <x@attacker.example>", subj, senders, false},
+		"a person's reply":      {"digest@example.com", "Re: End User Digest", senders, false},
+		"some other notice":     {"digest@example.com", "Your quarantine summary", senders, false},
+	} {
+		if got := QuarantineDigest(c.from, c.subject, c.senders); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+// Like an auto-reply it needs no lane to have read it, so it goes on sight:
+// inside the grace, unread, and on a held day.
+func TestAQuarantineDigestGoesOnSightEvenOnAHeldDay(t *testing.T) {
+	now := at(9)
+	plan := PlanWith([]Candidate{{ID: "d", Received: now.Add(-time.Minute), QuarantineDigest: true, DigestRows: 1}},
+		map[string]Processed{}, Options{Now: now, MinAge: 48 * time.Hour,
+			HoldArchive: "the digest has read no mail today"})
+	if plan[0].Action != ActionDelete || !strings.Contains(plan[0].Reason, "quarantine digest") {
+		t.Errorf("%s %q", plan[0].Action, plan[0].Reason)
+	}
+}

@@ -218,6 +218,8 @@ regression test.
 | `FLEET_USER_AGENT` | User-Agent sent to NVD, EPSS, CISA, advisory feeds, Microsoft and the domains web check. `GRAPH_MAILBOX` is appended as the contact unless the value has its own `(...)` comment |
 | `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. **This file is mailbox cleanup's entire authority to move anything** — no entry, no move |
 | `MAILBOX_SELF_MIN_AGE_HOURS` | How long the fleet's own reports stay in the inbox before cleanup archives them. Default 168 (a week); 0 archives on sight; must be less than `MAILBOX_LOOKBACK_HOURS` |
+| `MAILBOX_DIGEST_SENDERS` | The quarantine digest's sending address(es), exactly. A digest holding nothing the fleet reads goes to Deleted Items; one holding mail from Qualys or `MAILBOX_FEED_SENDERS` stays a week and the operator is alerted to release it. Blank: rule off |
+| `MAILBOX_FEED_SENDERS` | The senders the fleet reads besides Qualys (newsletters, advisory lists): `name@example.com` exactly or `@example.com` for a domain |
 | `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record, default 25 |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Only for the orchestrator heartbeat |
 | `FLEET_BUDGET_*` | Quota ceilings for the heartbeat. See [fleet-kit/README.md → Quota ceilings](fleet-kit/README.md#8-quota-ceilings) |
@@ -436,6 +438,8 @@ nobody watching. Treat the rollout accordingly.
 | Message | Action |
 |---|---|
 | The fleet's own report, delivered back to the mailbox, with a correctly **signed** `X-CTI-Agent-Sent` header | **Archive**, once a week old (`MAILBOX_SELF_MIN_AGE_HOURS`, default 168; a copy is in Sent Items) |
+| A quarantine digest ("End User Digest") from `MAILBOX_DIGEST_SENDERS`, whoever it is addressed to, holding nothing from Qualys or `MAILBOX_FEED_SENDERS` | **Deleted Items**, on sight |
+| The same digest holding mail from Qualys or a feed sender | **Left** a week; the operator is alerted to release the held mail (the fleet never does) |
 | An automatic reply - by its headers, or a subject starting `Automatic reply:`, `Out of Office:` and the like - read by a lane or not | **Deleted Items** (recoverable) |
 | The digest read it and took a CVE from it | **Archive**, after the grace |
 | A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |

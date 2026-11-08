@@ -73,6 +73,14 @@ marked
 when it was one.
 .TP
 .B 4.
+For each
+.B QUARANTINE:
+line (a quarantine digest holding mail a lane reads), posts it to the board as
+a WARN and, on a real run, mails it to the operator with
+.BR "cti\-alert \-\-kind ESCALATION" .
+A dry run only says it would. Releasing the mail is the operator's job.
+.TP
+.B 5.
 If the binary reported an unread backlog at or above the threshold (mail
 with no processing record), posts that line as a separate WARN: it is the
 sign that the digest stopped reading the mailbox.

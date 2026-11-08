@@ -44,6 +44,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/cli"
@@ -178,13 +179,17 @@ func run() int {
 	}
 	since := now.Add(-window)
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
-	msgs, err := g.RecentMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
+	// HTML, for the quarantine digests: their list of held messages is a table,
+	// and Graph's text rendering of a table cannot be parsed reliably.
+	msgs, err := g.RecentMessagesHTML(ctx, cfg.GraphMailbox, cfg.GraphFolder, since)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cti-mailbox: reading %s: %s\n",
 			safelog.Line(cfg.GraphMailbox), safelog.Line(err.Error()))
 		return exitFailure
 	}
 
+	digestSenders := splitList(cfg.MailboxDigestSenders)
+	feedSenders := splitList(cfg.MailboxFeedSenders)
 	candidates := make([]mailbox.Candidate, 0, len(msgs))
 	for _, m := range msgs {
 		candidates = append(candidates, mailbox.Candidate{
@@ -193,8 +198,22 @@ func run() int {
 			// SelfVerified, not SelfSent: archiving is an action taken on
 			// the strength of "we sent this", so it needs the signature, not
 			// a From address or a header any sender could add.
-			SelfSent: m.SelfVerified,
+			SelfSent:         m.SelfVerified,
+			QuarantineDigest: mailbox.QuarantineDigest(m.From, m.Subject, digestSenders),
 		})
+		if c := &candidates[len(candidates)-1]; c.QuarantineDigest {
+			held := mailbox.ParseDigest(m.BodyHTML)
+			c.DigestRows = len(held)
+			c.HeldForFleet = mailbox.HeldForFleet(held, feedSenders)
+			// Told once: a digest that arrived since the last daily run. It
+			// stays in the inbox for DigestKeep with the reason in the plan,
+			// but the alert is not repeated every morning.
+			if c.HeldForFleet != "" && c.Received.After(now.Add(-24*time.Hour)) {
+				fmt.Printf("QUARANTINE: the mail filter is holding mail the fleet reads: %s. "+
+					"Release it in the quarantine portal; the fleet never releases mail itself.\n",
+					safelog.Line(c.HeldForFleet))
+			}
+		}
 	}
 	plan := mailbox.PlanWith(candidates, mailbox.Merge(now, l.Index(), owned...),
 		mailbox.Options{Now: now, MinAge: cfg.MailboxMinAge, SelfMinAge: cfg.MailboxSelfMinAge,
@@ -299,4 +318,15 @@ func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts
 		"applied": forReal, "moved": moved, "failed": failed,
 		"counts": counts, "plan": plan,
 	})
+}
+
+// splitList parses a comma-separated fleet.env list, dropping empties.
+func splitList(s string) []string {
+	var out []string
+	for _, a := range strings.Split(s, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }

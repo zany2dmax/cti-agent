@@ -100,4 +100,27 @@ if printf '%s' "$OUT" | grep -q 'no processing record, at or above'; then
     2>/dev/null || true
 fi
 
+# The mail filter quarantined something a lane reads (a Qualys notice, a feed):
+# cti-mailbox prints one QUARANTINE line per such digest, the morning it
+# arrives. Releasing is a person's job - the digest's Release links act on a
+# bare GET, and the fleet never follows one - so the operator is told: on the
+# board, and by mail through cti-alert, whose recipient is fixed.
+QUAR="$(printf '%s' "$OUT" | grep '^QUARANTINE: ' || true)"
+if [ -n "$QUAR" ]; then
+  while IFS= read -r line; do
+    "$BOARD" post @mailbox @you WARN "$line" 2>/dev/null || true
+    if [ -n "$DRY" ]; then
+      say "dry run - would alert the operator: $line"
+    elif [ -x "$FLEET_CODE/bin/cti-alert" ]; then
+      "$FLEET_CODE/bin/cti-alert" --unit cti-agent-mailbox.service --kind ESCALATION \
+        --for-real --reason "${line#QUARANTINE: }" \
+        || say "warn: cti-alert failed - the held mail is named on the board"
+    else
+      say "warn: cti-alert not found - the held mail is named on the board only"
+    fi
+  done <<EOF
+$QUAR
+EOF
+fi
+
 say "done - $SUMMARY"

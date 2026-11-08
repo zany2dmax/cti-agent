@@ -131,6 +131,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
+- **Quarantine digests are cleaned up, and fleet mail held in quarantine is
+  reported.** The shared mailbox receives "End User Digest" mail - its own and
+  that of distribution lists it is on - and nobody reviews quarantine through
+  it, but the filter can hold something a lane needs: a Qualys notice or a
+  threat-intel feed. With `MAILBOX_DIGEST_SENDERS` set to the digest's sending
+  address, the mailbox cleanup reads each digest's list of held messages
+  (sender and subject text only; every link is discarded). If none is from a
+  sender the fleet reads - a Qualys domain, or one in the new
+  `MAILBOX_FEED_SENDERS` - the digest goes to Deleted Items on sight, whoever
+  it is addressed to. If one is, the digest stays for a week and the operator
+  is told, on the board and by `cti-alert` (ESCALATION), the morning it
+  arrives, to release it in the quarantine portal. The fleet never releases
+  mail: the digest's Release link acts on a bare GET. A digest whose rows
+  cannot be read stays, in case its layout changed. `cti-mailbox` now reads
+  message bodies as HTML. **Upgrade:** re-run the installer and set
+  `MAILBOX_DIGEST_SENDERS` and `MAILBOX_FEED_SENDERS` in `fleet.env`; blank
+  leaves the rule off.
+
 - **The scan lanes now clear the other Qualys notices of a scan they reported
   on.** Qualys sends more than the results for each scan: a "scheduled to
   start" notice before a WAS run, and "Scan Completed" plus the task-owner

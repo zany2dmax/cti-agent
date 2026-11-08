@@ -78,7 +78,22 @@ been in the mailbox for
 .BR MAILBOX_SELF_MIN_AGE_HOURS ;
 until then it is left, with the reason stated.
 .TP
-.B 1. An automatic reply: Deleted Items, read or not
+.B 1a. A quarantine digest: Deleted Items, on sight, unless it holds fleet mail
+An "End User Digest" from an address in
+.BR MAILBOX_DIGEST_SENDERS ,
+exactly, whoever it is addressed to. Its list of held messages is read (sender
+and subject text only; every link is discarded). If none is from a sender the
+fleet reads (a Qualys domain, or
+.BR MAILBOX_FEED_SENDERS ),
+it goes to Deleted Items. If one is, it stays for a week with the held mail
+named in the reason, and the morning it arrives a
+.B QUARANTINE:
+line names it for the runner to escalate. A digest whose rows cannot be read
+stays, in case its layout changed. The fleet never releases quarantined mail:
+the digest's Release link acts on a plain GET. Needs no processing record and
+is not subject to the archive grace or the hold.
+.TP
+.B 1b. An automatic reply: Deleted Items, read or not
 Declared by its headers
 .RB ( "Auto\-Submitted: auto\-replied"
 or
@@ -243,6 +258,18 @@ refuses to start otherwise.
 .B 0
 disables the grace and archives on sight.
 Default:\~\fB48\fR.
+.TP
+.B MAILBOX_DIGEST_SENDERS
+The quarantine digest's sending address(es), exactly, comma-separated. Empty
+(the default) turns the quarantine-digest rule off.
+.TP
+.B MAILBOX_FEED_SENDERS
+The senders the fleet reads besides Qualys, comma-separated:
+.I name@example.com
+for that address exactly,
+.I @example.com
+for that domain exactly. Quarantined mail from one keeps its digest and is
+reported.
 .TP
 .B MAILBOX_SELF_MIN_AGE_HOURS
 How long the fleet's own reports stay in the inbox before they are archived.

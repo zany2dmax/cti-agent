@@ -50,6 +50,16 @@ type Config struct {
 	// back to the inbox: a week by default, then Archive. Zero archives them
 	// on sight.
 	MailboxSelfMinAge time.Duration
+	// MailboxDigestSenders is MAILBOX_DIGEST_SENDERS: the exact addresses the
+	// quarantine digest ("End User Digest") comes from, comma-separated.
+	// Empty turns the quarantine-digest cleanup rule off (mailbox.QuarantineDigest).
+	// Kept as written - Config is compared with == in tests, so no slices.
+	MailboxDigestSenders string
+	// MailboxFeedSenders is MAILBOX_FEED_SENDERS: the senders the fleet reads
+	// besides Qualys (built in) - "name@example.com" exactly, or "@example.com"
+	// for a domain. A quarantine digest holding mail from one is kept and the
+	// operator told (mailbox.HeldForFleet).
+	MailboxFeedSenders string
 
 	JiraBaseURL string
 	// JiraCloudID, when set, sends API calls through the Atlassian gateway
@@ -299,20 +309,22 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		// deployment, and an unconfigured install read that mailbox instead
 		// of refusing to start. Same rule as the mailer: never guess an
 		// address, fail and say which variable is missing.
-		GraphMailbox:       os.Getenv("GRAPH_MAILBOX"),
-		GraphFolder:        getenvDefault("GRAPH_FOLDER", "inbox"),
-		DigestSkipSubjects: strings.Join(skipSubjects(), ","),
-		GraphLookback:      time.Duration(lookbackHours) * time.Hour,
-		LookupProvider:     getenvDefault("LOOKUP_PROVIDER", "qualys"),
-		QualysBaseURL:      os.Getenv("QUALYS_BASE_URL"),
-		QualysUsername:     os.Getenv("QUALYS_USERNAME"),
-		QualysPassword:     os.Getenv("QUALYS_PASSWORD"),
-		QualysKBCachePath:  getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
-		QualysKBMaxAge:     time.Duration(kbMaxAgeHours) * time.Hour,
-		ReportPath:         getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
-		MailboxLookback:    time.Duration(mailboxLookbackHours) * time.Hour,
-		MailboxMinAge:      time.Duration(mailboxMinAgeHours) * time.Hour,
-		MailboxSelfMinAge:  time.Duration(mailboxSelfMinAgeHours) * time.Hour,
+		GraphMailbox:         os.Getenv("GRAPH_MAILBOX"),
+		GraphFolder:          getenvDefault("GRAPH_FOLDER", "inbox"),
+		DigestSkipSubjects:   strings.Join(skipSubjects(), ","),
+		GraphLookback:        time.Duration(lookbackHours) * time.Hour,
+		LookupProvider:       getenvDefault("LOOKUP_PROVIDER", "qualys"),
+		QualysBaseURL:        os.Getenv("QUALYS_BASE_URL"),
+		QualysUsername:       os.Getenv("QUALYS_USERNAME"),
+		QualysPassword:       os.Getenv("QUALYS_PASSWORD"),
+		QualysKBCachePath:    getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
+		QualysKBMaxAge:       time.Duration(kbMaxAgeHours) * time.Hour,
+		ReportPath:           getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
+		MailboxLookback:      time.Duration(mailboxLookbackHours) * time.Hour,
+		MailboxMinAge:        time.Duration(mailboxMinAgeHours) * time.Hour,
+		MailboxSelfMinAge:    time.Duration(mailboxSelfMinAgeHours) * time.Hour,
+		MailboxDigestSenders: os.Getenv("MAILBOX_DIGEST_SENDERS"),
+		MailboxFeedSenders:   os.Getenv("MAILBOX_FEED_SENDERS"),
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),
