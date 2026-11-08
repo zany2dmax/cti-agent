@@ -240,6 +240,19 @@ production's own edge, WAF, TLS or headers, so it is never reported as a
 scan of production.
 Default:\~off.
 .TP
+.B \-\-json
+With
+.BR \-\-list\-apps ,
+print instead the machine-readable listing that
+.B fleet\-owners sync
+reads: format
+.BR cti\-applist/1 ,
+each web app's id, name and URL host as separate fields, the live websites
+no web app scans (the NOT SCANNED list, as hosts), and whether the domains
+lane's website list was available to check against. No field is ever read out
+of another, so a web app whose name contains a URL cannot pose as scanning
+that site.
+.TP
 .B \-\-ticket\-slot
 Leave an invisible slot in the report for
 .B \-\-stamp\-tickets

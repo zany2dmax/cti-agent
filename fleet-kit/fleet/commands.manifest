@@ -80,6 +80,7 @@ flag: --commit-seen STRING | record a --seen-out file in the processed log the m
 flag: --delivered-log STRING | the owners lane's record of the last scan sent or held per application
 flag: --deliveries-out STRING | write which applications' scanner reports to mail to their owners (and which are held, and why) here, for cti-appreport --deliveries; scans already in --delivered-log are left out
 flag: --list-apps | print a complete app-owners.txt for every web app defined in the scanner - owners already on file kept, new apps with a placeholder - and exit
+flag: --json | with --list-apps: print the machine-readable listing fleet-owners sync reads (id, name and URL host as separate fields, and the live websites no web app scans)
 flag: --no-detail | skip the Qualys WAS API; report counts from the notifications only
 flag: --out STRING | write the HTML here
 flag: --seen-out STRING | write the scan notifications this report covered here, for --commit-seen after the report has been sent

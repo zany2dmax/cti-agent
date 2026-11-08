@@ -269,6 +269,29 @@ PoD addresses in SPF. Nothing else is required.
   SECURITY.md under "Build and release gates" and in the README, and
   CHEATSHEET 11a describes the release flow (tag on the personal repo; the
   sync workflow copies it to the company GitHub).
+- **`fleet-owners sync`: owners.db asks Qualys instead of you.** Bringing
+  owners.db in step after adding web apps took a `--list-apps` file, `names`,
+  reading for `<- no owner`, and a `set` and `site rm` per app - and `names`
+  silently skipped ids not yet in owners.db, so running the steps in the
+  documented order lost the new apps' names. `sync` runs `cti-appscan
+  --list-apps` itself, through the `cti-agent` wrapper so the scanner runs as
+  the service account with `/etc/cti-agent/fleet.env` and never as root (run
+  straight from root's empty environment it would have read a `fleet.env` from
+  the service account's state directory). It keeps every web app's
+  name whether or not it has an owner yet (a new `scanner_apps` table,
+  display-only, never in `owners.json`), and reports each thing out of step
+  with its command: an app with no owner, a `site:` row a web app now scans,
+  a site the domains lane no longer lists, an id Qualys no longer has.
+  `--apply` makes only the changes that follow from owners already on file -
+  the new web app takes the `site:` row's owner when exactly one unowned app
+  matches, and the row goes - each recorded in `history`. It reads a new
+  `cti-appscan --list-apps --json` (format `cti-applist/1`: id, name and URL
+  host as separate fields), so a web app whose name contains a URL cannot pose
+  as scanning a site, and refuses the whole listing if any field is off. It
+  acts only where cti-appscan's own coverage check agrees; a `site:` row
+  several unowned apps match is kept; and with no domains-lane website list it
+  only reports. `names` with no
+  file does the same as `sync`; `names FILE` now names every listed app too.
 - **The User-Agent names a contact: the fleet's own mailbox.** Since 4 Nov
   www.cisa.gov answers every scout fetch with 403, and the agent was a bare
   `cti-agent-fleet/1.0` that gave CISA nobody to ask. Every fetch from a public
@@ -282,7 +305,9 @@ PoD addresses in SPF. Nothing else is required.
   to agree. It never impersonates a browser.
 
 **Upgrade:** nothing on the box beyond the reinstall; `GRAPH_MAILBOX` is
-already required. To ask CISA to allow the fleet, quote the
+already required, and `owners.db` gains its `scanner_apps` table on first use.
+After adding or removing web apps in Qualys, run `sudo cti-agent fleet-owners
+sync`. To ask CISA to allow the fleet, quote the
 `x-reference-error` value from a 403 response. To build the cheat sheet PDF on
 a Mac: `brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
 basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and

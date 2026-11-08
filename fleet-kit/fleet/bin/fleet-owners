@@ -4,7 +4,8 @@
   fleet-owners init
   fleet-owners import FILE [--replace] [--allow-domains LIST]
   fleet-owners list | show APP | check | history [N]
-  fleet-owners names FILE
+  fleet-owners sync [--apply]
+  fleet-owners names [FILE]
   fleet-owners set APP --owner EMAIL [--component TEXT]
   fleet-owners rm APP
   fleet-owners watcher add|rm APP EMAIL...
@@ -16,14 +17,18 @@
 APP is the scanner's web app id ("id:123", which survives a rename) or its
 exact name. Run as root: sudo cti-agent fleet-owners ...
 
-NAMES. An id says which application, a name says which one to a person. The
-names are display-only, kept beside the entry in their own table (app_names)
-and shown by list and show; they never reach owners.json, so no lane reads
-them and they decide nothing. They come from the scanner: import takes them
-from the comments cti-appscan --list-apps writes, and 'names FILE' refreshes
-them from a newer listing:
-  sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && \
-    sudo cti-agent fleet-owners names /root/apps.txt
+NAMES AND SYNC. An id says which application, a name says which one to a
+person. The names are the scanner's, so they come from the scanner: 'sync'
+runs cti-appscan --list-apps itself and keeps a mirror of every web app
+Qualys lists (scanner_apps), owned or not, so a new app's name is already
+there when you give it an owner. The mirror is display-only and drift
+detection: it never reaches owners.json, no lane reads it, it decides
+nothing. sync also says what is out of step - a web app with no owner, a
+site: row that a web app now scans, an id Qualys no longer has - with the
+command for each; --apply makes the ones that follow from data already here
+(a new web app takes the owner of the site: row it now scans, and that row
+goes). 'names FILE' still reads a saved --list-apps listing.
+  sudo cti-agent fleet-owners sync
 
 WHY THIS IS PYTHON, AND WHY GO READS A SNAPSHOT
 
@@ -53,6 +58,7 @@ import os
 import re
 import sqlite3
 import stat
+import subprocess  # nosec B404 - runs one fixed, root-owned binary (scanner_listing)
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -82,6 +88,18 @@ SCHEMA_VERSION = 1
 NAMES_DDL = """CREATE TABLE IF NOT EXISTS app_names (
   app TEXT PRIMARY KEY COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
   name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '')"""
+# What the scanner says exists, by id: a mirror of Qualys, refreshed by sync
+# and names. No foreign key on purpose - an app that has no owner yet is
+# exactly the one whose name you need to see when you give it one. Display and
+# drift detection only: never in owners.json, never read by a lane.
+SCANNER_DDL = """CREATE TABLE IF NOT EXISTS scanner_apps (
+  app TEXT PRIMARY KEY COLLATE NOCASE,
+  name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '', seen TEXT NOT NULL)"""
+# The installed wrapper. sync lists the scanner through it, so cti-appscan runs
+# as the service account with /etc/cti-agent/fleet.env, exactly as a hand run
+# does - never as root. The variable is a test hook; the wrapper starts this
+# with an empty environment, so in production it is always the default.
+WRAPPER = os.environ.get("FLEET_OWNERS_WRAPPER", "/usr/local/bin/cti-agent")
 SCHEMA = """
 CREATE TABLE apps (
   app TEXT PRIMARY KEY COLLATE NOCASE,   -- 'id:123' or the scanner's name
@@ -104,6 +122,9 @@ CREATE TABLE allowed_domains (
 CREATE TABLE IF NOT EXISTS app_names (
   app TEXT PRIMARY KEY COLLATE NOCASE REFERENCES apps(app) ON DELETE CASCADE ON UPDATE CASCADE,
   name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS scanner_apps (
+  app TEXT PRIMARY KEY COLLATE NOCASE,
+  name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '', seen TEXT NOT NULL);
 -- Append-only. Who changed what, for a list that decides who is mailed.
 CREATE TABLE changes (
   id INTEGER PRIMARY KEY, at TEXT NOT NULL, by TEXT NOT NULL,
@@ -242,6 +263,7 @@ def connect(create=False):
         # Databases made before names existed gain the table here: it is
         # display-only, so this is not a schema change and the version stays.
         c.execute(NAMES_DDL)
+        c.execute(SCANNER_DDL)
     return c
 
 
@@ -443,6 +465,8 @@ def parse_names(text):
         except Refused:
             continue
         comment = comment.split("<-", 1)[0]
+        # Display only. sync never matches on a host read from this free text
+        # (a name can contain a URL, or the "<-"); it reads --list-apps --json.
         m = re.search(r"(?:^|\s)(https?://\S+)", comment)
         name = comment[:m.start()] if m else comment
         host = ""
@@ -530,8 +554,9 @@ def cmd_import(a):
 def cmd_list(a):
     c = connect()
     rows = c.execute(
-        "SELECT a.app, a.owner, a.component, COALESCE(n.name,'') AS name FROM apps a "
-        "LEFT JOIN app_names n ON n.app=a.app ORDER BY a.app COLLATE NOCASE").fetchall()
+        "SELECT a.app, a.owner, a.component, COALESCE(NULLIF(s.name,''), n.name, '') AS name FROM apps a "
+        "LEFT JOIN scanner_apps s ON s.app=a.app LEFT JOIN app_names n ON n.app=a.app "
+        "ORDER BY a.app COLLATE NOCASE").fetchall()
     for r in rows:
         w = c.execute("SELECT COUNT(*) FROM app_watchers WHERE app=?", (r["app"],)).fetchone()[0]
         h = [x[0] for x in c.execute("SELECT host FROM app_covers WHERE app=? ORDER BY host", (r["app"],))]
@@ -543,7 +568,7 @@ def cmd_list(a):
         if h:
             extra.append("covers=" + ",".join(h))
         # An entry kept by name is its own name; an id with none stored says so.
-        name = r["name"] or ("(run: fleet-owners names FILE)" if ID_RE.match(r["app"]) else "")
+        name = r["name"] or ("(run: fleet-owners sync)" if ID_RE.match(r["app"]) else "")
         if len(name) > 36:
             name = name[:35] + "~"
         print(f"{r['app']:<14} {name:<36} {r['owner'] or '(no owner)':<34} {'  '.join(extra)}")
@@ -554,35 +579,255 @@ def cmd_list(a):
     return 0
 
 
+def store_names(c, found, mirror=False):
+    """Record the scanner's name for every listed application, owned or not.
+    mirror=True means found is the scanner's whole list, so an id missing
+    from it is gone from the scanner and leaves the mirror too. Returns
+    (set, unchanged, not_owned, removed)."""
+    t = now()
+    old = {r["app"].lower(): (r["name"], r["host"]) for r in c.execute("SELECT * FROM scanner_apps")}
+    owned = {r[0].lower() for r in c.execute("SELECT app FROM apps")}
+    n_set = n_same = n_unowned = 0
+    for key, (nm, hst) in found.items():
+        if key.lower() not in owned:
+            n_unowned += 1
+        if old.get(key.lower()) == (nm, hst):
+            n_same += 1
+            continue
+        c.execute("INSERT INTO scanner_apps(app,name,host,seen) VALUES(?,?,?,?) ON CONFLICT(app) DO UPDATE "
+                  "SET name=excluded.name, host=excluded.host, seen=excluded.seen", (key, nm, hst, t))
+        n_set += 1
+    removed = 0
+    if mirror:
+        keep = {k.lower() for k in found}
+        for k in old:
+            if k not in keep:
+                c.execute("DELETE FROM scanner_apps WHERE app=?", (k,))
+                removed += 1
+    return n_set, n_same, n_unowned, removed
+
+
 def cmd_names(a):
+    if not a.file:
+        return cmd_sync(argparse.Namespace(apply=False))
     c = connect()
     path, text = read_trusted(a.file, "names")
-    found = parse_names(text)
-    counts = {"set": 0, "same": 0, "unknown": 0}
+    found = {k: v for k, v in parse_names(text).items() if ID_RE.match(k)}
+    counts = {}
 
     def do():
-        for key, (nm, hst) in found.items():
-            r = c.execute("SELECT app FROM apps WHERE app=?", (key,)).fetchone()
-            if not r:
-                counts["unknown"] += 1
-                continue
-            old = c.execute("SELECT name, host FROM app_names WHERE app=?", (r["app"],)).fetchone()
-            if old and (old["name"], old["host"]) == (nm, hst):
-                counts["same"] += 1
-                continue
-            c.execute("INSERT OR REPLACE INTO app_names(app,name,host) VALUES(?,?,?)", (r["app"], nm, hst))
-            counts["set"] += 1
-        record(c, "names", path, f"{counts['set']} set, {counts['same']} unchanged, "
-               f"{counts['unknown']} not in owners.db")
+        counts["r"] = store_names(c, found)
+        n_set, n_same, n_unowned, _ = counts["r"]
+        record(c, "names", path, f"{n_set} set, {n_same} unchanged, {n_unowned} not in owners.db yet")
     change(c, do)
-    bare = [r[0] for r in c.execute(
-        "SELECT a.app FROM apps a LEFT JOIN app_names n ON n.app=a.app WHERE n.app IS NULL "
-        "AND a.app LIKE 'id:%' ORDER BY a.app")]
-    print(f"names from {path}: {counts['set']} set, {counts['same']} unchanged, "
-          f"{counts['unknown']} for applications not in owners.db.")
-    if bare:
-        print(f"{len(bare)} application(s) still without a name: {', '.join(bare[:10])}"
-              f"{' ...' if len(bare) > 10 else ''} (not in that listing - removed from the scanner?)")
+    n_set, n_same, n_unowned, _ = counts["r"]
+    print(f"names from {path}: {n_set} set, {n_same} unchanged; {n_unowned} of them for applications "
+          f"not in owners.db yet (kept, so the name shows once you set an owner).")
+    return 0
+
+
+# ---------------------------------------------------------------- sync
+#
+# WHY THIS EXISTS
+#
+# What the scanner holds belongs to the scanner. Before this, bringing
+# owners.db in step with Qualys meant running cti-appscan --list-apps into a
+# file, feeding the file to names, reading it for "<- no owner", working out
+# which site: row each new web app now covers, and typing a set and a site rm
+# for each - and names skipped every id not yet in owners.db, so the order of
+# those steps decided whether the names showed at all. sync asks the scanner
+# itself and says what is out of step.
+#
+# Who owns an application is ours, not the scanner's, and it decides who
+# outside the company is mailed our unfixed vulnerabilities. So sync only
+# reports; --apply makes just the changes that follow from data already here:
+# a web app that now scans a site: row's domain gets that row's owner (when
+# exactly one unowned app matches), and the site: row it replaces goes. Every
+# change is in history like any other.
+
+def scanner_listing():
+    """cti-appscan --list-apps through the cti-agent wrapper. Returns (stdout,
+    stderr).
+
+    NOT run directly as root. This process starts with an empty environment
+    (the wrapper's env -i), so a cti-appscan started from here would find no
+    FLEET_ENV and fall back to $FLEET_HOME/fleet.env - a file in the state
+    directory, which the service account can write. A planted one there would
+    choose the Qualys server root talks to, and so the listing --apply acts
+    on. The wrapper drops to the service account and loads
+    /etc/cti-agent/fleet.env, the same run as 'sudo cti-agent cti-appscan
+    --list-apps' by hand."""
+    if not os.path.isabs(WRAPPER):
+        raise Refused(f"{WRAPPER!r} is not an absolute path")
+    trusted_dir(os.path.dirname(WRAPPER))
+    try:
+        st = os.lstat(WRAPPER)
+    except OSError as e:
+        raise Refused(f"{WRAPPER}: {e.strerror} - is the fleet installed?") from e
+    if not stat.S_ISREG(st.st_mode) or st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Refused(f"{WRAPPER} must be a regular file owned by root and writable only by it")
+    try:
+        r = subprocess.run([WRAPPER, "cti-appscan", "--list-apps", "--json"], cwd="/",  # nosec B603
+                           env={"PATH": "/usr/bin:/bin", "SUDO_USER": os.environ.get("SUDO_USER", "")},
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=300, check=False)
+    except subprocess.TimeoutExpired as e:
+        raise Refused("cti-appscan --list-apps took over 5 minutes - is Qualys reachable?") from e
+    if r.returncode != 0:
+        last = tidy((r.stderr.strip().splitlines() or ["no message"])[-1], 300)
+        raise Refused(f"cti-appscan --list-apps failed (exit {r.returncode}): {last}")
+    return r.stdout, r.stderr
+
+
+def parse_listing(text):
+    """--list-apps --json. Returns (found, gap, coverage_known) where found is
+    id -> (name, host). Every value is checked; anything off refuses the
+    whole listing rather than acting on part of it."""
+    try:
+        doc = json.loads(text)
+    except ValueError as e:
+        raise Refused(f"cti-appscan --list-apps --json did not print JSON ({e})") from e
+    if not isinstance(doc, dict) or doc.get("format") != "cti-applist/1":
+        raise Refused("cti-appscan printed a listing this fleet-owners does not know - reinstall both")
+    apps, unscanned, coverage = doc.get("apps"), doc.get("unscanned"), doc.get("coverage")
+    if not isinstance(apps, list) or not isinstance(unscanned, list) or not isinstance(coverage, bool):
+        raise Refused("the scanner listing is malformed")
+    found = {}
+    for a in apps:
+        if not isinstance(a, dict) or not all(isinstance(a.get(k), str) for k in ("id", "name", "host")):
+            raise Refused("the scanner listing has a malformed web app entry")
+        if not re.fullmatch(r"[0-9]{1,20}", a["id"]):
+            raise Refused(f"the scanner listing has a web app id that is not a number: {tidy(a['id'], 40)!r}")
+        found["id:" + a["id"]] = (tidy(a["name"], 80) or "id:" + a["id"], tidy(host_of(a["host"]), 120))
+    gap = set()
+    for d in unscanned:
+        if not isinstance(d, str):
+            raise Refused("the scanner listing has a malformed website entry")
+        gap.add(host_of(d))
+    return found, gap, coverage
+
+
+def drift(c, found, gap, coverage_known):
+    """What is out of step between owners.db and the scanner. Returns a list
+    of (kind, text, action) where action is None or a callable for --apply."""
+    owners = {r["app"].lower(): r for r in c.execute("SELECT app, owner FROM apps")}
+    covers = {}
+    for r in c.execute("SELECT app, host FROM app_covers"):
+        covers.setdefault(host_of(r["host"]), []).append(r["app"])
+    by_host = {}
+    for key, (_, hst) in found.items():
+        if hst:
+            by_host.setdefault(host_of(hst), []).append(key)
+    unowned = [k for k in found if not (owners.get(k.lower()) and owners[k.lower()]["owner"])]
+    out, claimed = [], set()
+
+    for r in c.execute("SELECT domain, owner FROM sites ORDER BY domain").fetchall():
+        d, site_owner = host_of(r["domain"]), r["owner"]
+        apps = by_host.get(d, [])
+        via = covers.get(d, [])
+        if (apps or via) and d in gap:
+            # Go matched the web apps' real URLs and still calls it unscanned:
+            # trust that over a host read from free text.
+            out.append(("check", f"site:{d}: {', '.join(apps or via)} looks like it scans it, but "
+                        f"cti-appscan still lists it as not scanned", None, None))
+        elif apps or via:
+            # --apply acts only when cti-appscan's own coverage check, from the
+            # real URLs, agrees the site is scanned now.
+            sure = coverage_known
+            new = [k for k in apps if k in unowned]
+            if len(new) == 1:
+                k = new[0]
+                claimed.add(k)
+                out.append(("set", f"{k} ({found[k][0]}) now scans {d}; give it the site: row's owner",
+                            f"fleet-owners set {k} --owner {site_owner}",
+                            (lambda k=k, o=site_owner, d=d: apply_set(c, k, o, "sync: from site:" + d))
+                            if sure else None))
+            elif len(new) > 1:
+                out.append(("choose", f"{d} is scanned by {len(new)} unowned web apps "
+                            f"({', '.join(new)}); give one of them {site_owner}, then "
+                            f"remove the site: row", None, None))
+                continue    # the row is the only record of who should own it
+            out.append(("site rm", f"site:{d} is scanned now ({', '.join(apps or via)})",
+                        f"fleet-owners site rm {d}",
+                        (lambda d=d: apply_site_rm(c, d, "sync: scanned now")) if sure else None))
+        elif coverage_known and d not in gap:
+            out.append(("check", f"site:{d} is no longer one of the domains lane's live websites; "
+                        f"remove it if the site is gone", f"fleet-owners site rm {d}", None))
+
+    for k in unowned:
+        if k not in claimed:
+            out.append(("no owner", f"{k} ({found[k][0]}, {found[k][1] or 'no url'}) has no owner",
+                        f"fleet-owners set {k} --owner <email>", None))
+    for key, r in sorted(owners.items()):
+        if ID_RE.match(r["app"]) and key not in {k.lower() for k in found}:
+            out.append(("gone", f"{r['app']} is in owners.db but not in the scanner (deleted in Qualys?)",
+                        f"fleet-owners rm {r['app']}", None))
+    return out
+
+
+def apply_set(c, key, owner, why):
+    owner = email(owner)
+    old = c.execute("SELECT app, owner FROM apps WHERE app=?", (key,)).fetchone()
+    if old:
+        c.execute("UPDATE apps SET owner=?, updated=?, updated_by=? WHERE app=?",
+                  (owner, now(), who(), old["app"]))
+        record(c, "set", old["app"], f"owner {old['owner'] or '(none)'} -> {owner} ({why})")
+    else:
+        c.execute("INSERT INTO apps(app,owner,component,updated,updated_by) VALUES(?,?,'',?,?)",
+                  (key, owner, now(), who()))
+        record(c, "add", key, f"owner {owner} ({why})")
+
+
+def apply_site_rm(c, d, why):
+    if c.execute("DELETE FROM sites WHERE domain=?", (d,)).rowcount:
+        record(c, "site rm", "site:" + d, why)
+
+
+def cmd_sync(a):
+    c = connect()
+    text, _ = scanner_listing()
+    found, gap, coverage_known = parse_listing(text)
+    if not found:
+        raise Refused("the scanner listed no web apps - nothing changed (a failed login would look like this)")
+    result = {}
+
+    def do():
+        result["names"] = store_names(c, found, mirror=True)
+        result["drift"] = drift(c, found, gap, coverage_known)
+        applied = 0
+        if a.apply:
+            for _, _, _, act in result["drift"]:
+                if act:
+                    act()
+                    applied += 1
+        result["applied"] = applied
+        n_set, _, _, removed = result["names"]
+        record(c, "sync", "scanner", f"{len(found)} web apps, {n_set} name(s) updated, {removed} gone; "
+               f"{len(result['drift'])} item(s) out of step, {applied} applied")
+    change(c, do)
+
+    n_set, n_same, _, removed = result["names"]
+    print(f"Qualys lists {len(found)} web app(s): {n_set} name(s) new or changed, {n_same} unchanged"
+          + (f", {removed} no longer in the scanner" if removed else "") + ".")
+    if not coverage_known:
+        print("note: cti-appscan had no domains-lane website list to check coverage against, so "
+              "--apply changes nothing this run; site: rows are only reported.")
+    items = result["drift"]
+    if not items:
+        print("owners.db is in step with the scanner.")
+        return 0
+    print()
+    for kind, msg, cmd, act in items:
+        done = a.apply and act is not None
+        print(f"  {'applied' if done else kind:<9} {msg}")
+        if cmd and not done:
+            print(f"            sudo cti-agent {cmd}")
+    pending = [i for i in items if not (a.apply and i[3])]
+    if not a.apply and any(i[3] for i in items):
+        print("\nRe-run with --apply to make the changes that follow from data already in owners.db "
+              "(the set/site rm pairs above); the rest need you.")
+    elif a.apply:
+        print(f"\n{result['applied']} change(s) applied and recorded in history; {len(pending)} need you.")
     return 0
 
 
@@ -590,7 +835,8 @@ def cmd_show(a):
     c = connect()
     key = require_app(c, app_key(a.app))
     r = c.execute("SELECT * FROM apps WHERE app=?", (key,)).fetchone()
-    nm = c.execute("SELECT name, host FROM app_names WHERE app=?", (key,)).fetchone()
+    nm = (c.execute("SELECT name, host FROM scanner_apps WHERE app=? AND name<>''", (key,)).fetchone()
+          or c.execute("SELECT name, host FROM app_names WHERE app=?", (key,)).fetchone())
     print(f"application : {key}")
     print(f"name        : {(nm['name'] + (' (' + nm['host'] + ')' if nm['host'] else '')) if nm else '-'}")
     print(f"owner       : {r['owner'] or '(none - kept for covers=)'}")
@@ -868,8 +1114,11 @@ def parser():
     x.set_defaults(fn=cmd_import)
     s.add_parser("list").set_defaults(fn=cmd_list)
     x = s.add_parser("names")
-    x.add_argument("file")
+    x.add_argument("file", nargs="?")
     x.set_defaults(fn=cmd_names)
+    x = s.add_parser("sync")
+    x.add_argument("--apply", action="store_true")
+    x.set_defaults(fn=cmd_sync)
     x = s.add_parser("show")
     x.add_argument("app")
     x.set_defaults(fn=cmd_show)

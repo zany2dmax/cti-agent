@@ -78,10 +78,50 @@ also allow these comma-separated domains, typically the value of
 .B list
 Every application and site with its scanner name, owner, component, watcher
 count and covers. An id with no stored name says so; see
-.BR names .
+.BR sync .
 .TP
-.BI names " FILE"
-Store the scanner's application names, from a listing written by
+.BR sync " [" \-\-apply ]
+Ask the scanner what it holds and say what is out of step with the database.
+Runs
+.B cti\-agent cti\-appscan \-\-list\-apps \-\-json
+itself, through the root-owned wrapper, so the scanner runs as the service
+account with
+.IR /etc/cti\-agent/fleet.env ,
+never as root. It keeps every web
+app's name, owned or not, for
+.B list
+and
+.BR show ,
+and reports, each with the command that fixes it: a web app with no owner; a
+.B site:
+row whose domain a web app now scans (with the
+.B set
+that gives the web app that row's owner, when exactly one unowned web app
+matches, and the
+.B site rm
+that retires the row); a
+.B site:
+row the domains lane no longer lists as a live website; and an id Qualys no
+longer has. Changes nothing unless
+.B \-\-apply
+is given, and then only the
+.BR set / "site rm"
+pairs, which follow from owners already in the database, and only when
+.BR cti\-appscan 's
+own coverage check agrees the site is scanned now. A
+.B site:
+row stays when several unowned web apps match it, and nothing is applied when
+the domains lane's website list is missing. The rest are left to you. Every change is recorded in
+.BR history .
+Refuses, changing nothing, when the listing fails or lists no web apps.
+Run it after adding or removing web apps in Qualys.
+.TP
+.BR names " [\fIFILE\fR]"
+Without
+.IR FILE ,
+the same as
+.BR sync .
+With it, store the scanner's application names from a listing written by
 .B cti\-agent cti\-appscan \-\-list\-apps
 (the text after the
 .B #
@@ -91,8 +131,9 @@ and
 .BR show ,
 are never written to
 .IR owners.json ,
-and decide nothing. Only applications already in the database are named; the
-rest are counted. Run it after the scanner gains or renames an application.
+and decide nothing. Every listed application is named, including those not in
+the database yet, so a name shows as soon as you give the application an
+owner.
 .I FILE
 follows the same trust rules as
 .BR import :

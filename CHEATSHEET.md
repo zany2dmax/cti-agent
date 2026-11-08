@@ -155,7 +155,8 @@ sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you
 sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys, plus site: lines for live sites nothing scans
 # application owners live in owners.db (RUNBOOK 11f); edit them with fleet-owners, as root:
 sudo cti-agent fleet-owners list                                  # every app: id, scanner name, owner, watchers, covers
-sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names /root/apps.txt   # (re)fill the app names from Qualys
+sudo cti-agent fleet-owners sync                                  # ask Qualys: names, apps with no owner, site: rows now scanned
+sudo cti-agent fleet-owners sync --apply                          # new web app takes its site: row's owner; the row goes
 sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
 sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
 sudo cti-agent fleet-owners domain allow devshop.example          # owners/watchers may be mailed there

@@ -1251,8 +1251,10 @@ it is ignored, and `cti-mailer` says so.
 ```bash
 sudo cti-agent fleet-owners list           # id, scanner name, owner, watchers, covers
 sudo cti-agent fleet-owners show id:123456
-# the scanner's names (display only; fills the name column of list):
-sudo sh -c 'cti-agent cti-appscan --list-apps > /root/apps.txt' && sudo cti-agent fleet-owners names /root/apps.txt
+# after adding or removing web apps in Qualys: names, apps with no owner,
+# site: rows a web app now scans, ids Qualys no longer has - with the fix for each
+sudo cti-agent fleet-owners sync
+sudo cti-agent fleet-owners sync --apply   # makes the set/site rm pairs it printed
 sudo cti-agent fleet-owners set id:123456 --owner lead@example.com
 sudo cti-agent fleet-owners watcher add id:123456 qa@devshop.example
 sudo cti-agent fleet-owners covers add id:123456 www.example.com
@@ -1261,9 +1263,13 @@ sudo cti-agent fleet-owners domain allow devshop.example --note "builds the shop
 sudo cti-agent fleet-owners history
 ```
 
-`cti-appscan --list-apps` still prints every web app the scanner defines with
-its owner from `owners.db`, and `OWNER@example.com` for one that has none: use
-it to find the ids to `set`.
+`fleet-owners sync` runs `cti-appscan --list-apps` itself, so there is no file
+to write or feed back. Without `--apply` it changes nothing. With it, it makes
+only the changes that follow from owners already on file: a new web app that
+scans a `site:` row's domain takes that row's owner (when exactly one unowned
+app matches) and the row goes. An app with no owner to inherit, a site the
+domains lane no longer lists, and an id Qualys has dropped are reported with
+the command, never acted on, because who is mailed our findings is a decision.
 
 **Backup and restore.** `owners.db` is the record; take a copy with SQLite's
 backup API, and keep an export you can read and diff:
@@ -1395,7 +1401,9 @@ landers, parked pages and domains marked `landing` in `domains.txt` left out).
 The weekly AppSec email lists any that no Qualys WAS web app points at under
 **NOT SCANNED**, and `--list-apps` adds a `site:<domain>` line for each - the
 owner there is who should get a web application scan set up. The line drops
-out once a web app covers the site. If a listed site is really a landing page,
+out once a web app covers the site; the `site:` row in `owners.db` does not,
+until `fleet-owners sync --apply` hands its owner to the new web app and removes
+it. If a listed site is really a landing page,
 mark it `landing` in `domains.txt` instead.
 
 Recurring tickets link back. When a new ticket is filed for an application

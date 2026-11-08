@@ -124,3 +124,46 @@ func Unscanned(sites []Site, apps []App) []Site {
 	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
 	return out
 }
+
+// AppListing is the machine-readable --list-apps --json, for fleet-owners
+// sync. Every value is its own field: the owners-file listing puts a web
+// app's name and URL in one free-text comment, and a name containing a URL (or
+// the "<-" the listing uses for notes) could be read back as the URL.
+// fleet-owners runs as root and, with --apply, decides from this which web app
+// takes a site: row's owner, so it must never parse one field out of another.
+type AppListing struct {
+	Format string      `json:"format"`
+	Apps   []ListedApp `json:"apps"`
+	// Unscanned are the live websites no web app scans, directly or through
+	// covers= - the NOT SCANNED list - as hosts, www. dropped.
+	Unscanned []string `json:"unscanned"`
+	// Coverage is false when the domains lane's website list could not be
+	// read, so Unscanned says nothing.
+	Coverage bool `json:"coverage"`
+}
+
+// ListedApp is one web app in an AppListing. Host is from its URL only.
+type ListedApp struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+}
+
+// AppListingFormat names the shape, so a reader can refuse one it does not know.
+const AppListingFormat = "cti-applist/1"
+
+// NewAppListing builds the listing from the scanner's apps and the domains
+// lane's sites, with the coverage rules the weekly report uses.
+func NewAppListing(apps []App, sites []Site, coverage bool, o Owners) AppListing {
+	l := AppListing{Format: AppListingFormat, Apps: []ListedApp{}, Unscanned: []string{}, Coverage: coverage}
+	for _, a := range apps {
+		l.Apps = append(l.Apps, ListedApp{ID: a.ID, Name: a.Name, Host: hostOf(a.URL)})
+	}
+	if coverage {
+		gap, _ := Coverage(sites, apps, o)
+		for _, s := range gap {
+			l.Unscanned = append(l.Unscanned, hostOf(s.Domain))
+		}
+	}
+	return l
+}

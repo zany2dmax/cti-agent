@@ -86,6 +86,10 @@ func run() int {
 	listApps := flag.Bool("list-apps", false,
 		"print a complete app-owners.txt for every web app defined in the scanner - "+
 			"owners already on file kept, new apps with a placeholder - and exit")
+	listJSON := flag.Bool("json", false,
+		"with --list-apps: print the machine-readable listing fleet-owners sync reads "+
+			"(each app's id, name and URL host as separate fields, and the live websites "+
+			"no web app scans) instead of the owners file")
 	stampTickets := flag.String("stamp-tickets", "",
 		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports already "+
 			"written, using the --tickets-out file, then exit")
@@ -125,7 +129,7 @@ func run() int {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	if *listApps {
-		return doListApps(cfg)
+		return doListApps(cfg, *listJSON)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -738,7 +742,7 @@ func attachRemedies(ctx context.Context, sc appscan.Scanner, scans []appscan.Sca
 // doListApps prints a complete owners file to stdout. Read-only: one WAS
 // search, and the current owners file. Redirect it, edit the placeholders,
 // install it.
-func doListApps(cfg config.Config) int {
+func doListApps(cfg config.Config, asJSON bool) int {
 	api, _ := newScanner(cfg).(appscan.AppLister)
 	if api == nil {
 		return die("--list-apps needs the scanner's credentials (QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD) and a scanner that can list its applications")
@@ -753,7 +757,17 @@ func doListApps(cfg config.Config) int {
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
-	sites, _ := loadSites()
+	sites, asOf := loadSites()
+	if asJSON {
+		// For fleet-owners sync, which acts on it as root: no field is read
+		// out of another, so a web app's name cannot pose as its URL.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(appscan.NewAppListing(apps, sites, !asOf.IsZero() || len(sites) > 0, owners)); err != nil {
+			return die("writing the listing: %s", safelog.Line(err.Error()))
+		}
+		return exitOK
+	}
 	text, unowned, stale := appscan.OwnersSkeleton(apps, sites, owners)
 	fmt.Print(text)
 	gap, proxied := appscan.Coverage(sites, apps, owners)
