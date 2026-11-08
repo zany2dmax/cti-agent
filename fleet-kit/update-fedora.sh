@@ -21,8 +21,11 @@
 # --for-real, no default. A dry run does not merge anything, because an installer
 # run from the old checkout would describe the old install, not the update.
 #
-# Any other argument is passed to the installer (for example --uninstall is not,
-# deliberately: use the installer for that).
+# Nothing else is accepted, and nothing is passed to the installer. The only
+# options it takes are --dry-run (this script's own), --uninstall and --purge
+# (not an update: run the installer for those), so passing arguments on could
+# only ever fail - and it would fail after the pull, a box half-updated by a
+# typo. An unknown argument stops it here, before anything is fetched.
 #
 # FLEET_UPDATE_UID exists for the tests: it stands in for `id -u` so the root
 # check can be exercised without being root. install-fedora.sh checks root itself.
@@ -35,13 +38,15 @@ main() {
   # shellcheck source=fleet/share/fleet-mode.sh
   . "$here/fleet/share/fleet-mode.sh"
 
-  local dry="" real="" pass=()
+  local dry="" real=""
   for a in "$@"; do
     case "$a" in
       --dry-run)  dry=1 ;;
       --for-real) real=1 ;;
       --uninstall|--purge) echo "update-fedora: $a is the installer's, run install-fedora.sh for it" >&2; exit 2 ;;
-      *) pass+=("$a") ;;
+      -h|--help) echo "usage: sudo cti-agent-update --dry-run|--for-real   (man cti-agent-update)"; exit 0 ;;
+      *) echo "update-fedora: unknown argument: $a - nothing was fetched or installed" >&2
+         echo "usage: sudo cti-agent-update --dry-run|--for-real" >&2; exit 2 ;;
     esac
   done
   fleet_require_mode update-fedora "$dry" "$real" "" "" "sudo cti-agent-update --dry-run|--for-real"
@@ -111,7 +116,7 @@ main() {
   # exec: the installer replaces this process. This file may just have changed on
   # disk, and a shell must not read another line of a script that was rewritten
   # under it.
-  exec "$here/install-fedora.sh" ${pass[@]+"${pass[@]}"}
+  exec "$here/install-fedora.sh"
 }
 
 # One line, so bash has read all of it before main can change this file.

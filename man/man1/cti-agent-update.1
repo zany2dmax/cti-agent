@@ -90,15 +90,18 @@ does.
 .B \-\-for\-real
 Pull the kit and run the installer from it. Needs root. When the kit is
 already up to date, the installer is still run.
+.TP
+.BR \-h ", " \-\-help
+Print the usage line and exit 0. Nothing is fetched.
 .PP
 .B \-\-uninstall
 and
 .B \-\-purge
 are refused (exit 2): they belong to
 .BR install\-fedora.sh ,
-so run that for them. No other argument does anything useful. Anything else
-is passed to the installer, which refuses unknown options, and it does so
-only after the kit has been pulled.
+so run that for them. Any other argument is refused the same way, before
+anything is fetched, so a typo never leaves the kit pulled and the install
+not run. The installer is always run with no arguments.
 .SH ENVIRONMENT
 .TP
 .B FLEET_UPDATE_UID
@@ -119,7 +122,8 @@ What the last install recorded.
 .SH EXIT STATUS
 .TP
 .B 0
-Dry run finished.
+Dry run finished, or
+.BR \-\-help .
 .TP
 .B 1
 Refused: not root for
@@ -132,7 +136,7 @@ Usage: no mode, both modes,
 .B \-\-uninstall
 or
 .BR \-\-purge ,
-or run from inside
+an unknown argument, or run from inside
 .IR /opt/cti\-agent .
 .PP
 After the hand-over on

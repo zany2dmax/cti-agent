@@ -93,10 +93,29 @@ class UpdateFedora(unittest.TestCase):
         self.assertIn("INSTALLER two", r.stdout)
         self.assertNotIn("INSTALLER one", r.stdout)
 
-    def test_other_arguments_go_to_the_installer(self):
+    def test_an_unknown_argument_stops_it_before_the_pull(self):
+        # The installer refuses every option it could be handed, so passing one
+        # on only ever failed - after the kit had been pulled. Now it stops here.
         self.publish("two", tag="v1.1")
-        r = self.run_update("--for-real", "--something")
-        self.assertIn("INSTALLER two args=--something", r.stdout)
+        for args in (("--for-real", "--something"), ("--something", "--for-real"), ("--dry-run", "x")):
+            with self.subTest(args=args):
+                r = self.run_update(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("unknown argument", r.stderr)
+                self.assertNotIn("INSTALLER", r.stdout)
+                self.assertEqual(git(self.kit, "describe", "--tags", "--always").strip(), "v1.0")
+
+    def test_the_installer_is_run_with_no_arguments(self):
+        self.publish("two", tag="v1.1")
+        r = self.run_update("--for-real")
+        self.assertIn("INSTALLER two args=\n", r.stdout)
+
+    def test_help_says_how_and_changes_nothing(self):
+        self.publish("two", tag="v1.1")
+        r = self.run_update("--help")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--dry-run|--for-real", r.stdout)
+        self.assertEqual(git(self.kit, "describe", "--tags", "--always").strip(), "v1.0")
 
     def test_an_up_to_date_kit_still_reinstalls(self):
         r = self.run_update("--for-real")

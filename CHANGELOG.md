@@ -179,6 +179,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **A typo on `cti-agent-update` pulled the kit and then installed nothing.**
+  Anything other than `--dry-run` or `--for-real` was passed on to the
+  installer, which refuses every option it could receive, so `sudo
+  cti-agent-update --for-real --foo` fast-forwarded the kit and then stopped.
+  An unknown argument is now refused before anything is fetched (exit 2), the
+  installer is always run with no arguments, and `--help` prints the usage
+  line. **Upgrade:** nothing; it takes effect at the next update.
+
 - **Section headings in the Go lanes' emails showed in lowercase in Outlook.**
   They were typed in normal case and relied on a CSS `text-transform` that
   Outlook ignores, so "Coverage check" and its like appeared as written. The
