@@ -36,7 +36,26 @@ func (r Request) Name() string {
 	if r.Form != nil && strings.TrimSpace(r.Form.Name) != "" {
 		return oneLine(r.Form.Name, 100)
 	}
-	return oneLine(r.Subject, 100)
+	return oneLine(stripReplyPrefixes(r.Subject), 100)
+}
+
+// stripReplyPrefixes drops leading "Re:", "Fw:" and "Fwd:" (any case, repeated),
+// which say a message was forwarded, not what it is about.
+func stripReplyPrefixes(s string) string {
+	for {
+		t := strings.TrimSpace(s)
+		l := strings.ToLower(t)
+		switch {
+		case strings.HasPrefix(l, "re:"):
+			s = t[3:]
+		case strings.HasPrefix(l, "fw:"):
+			s = t[3:]
+		case strings.HasPrefix(l, "fwd:"):
+			s = t[4:]
+		default:
+			return t
+		}
+	}
 }
 
 // NeedsTicket is true for a request that needs a person on the Kanban board: a

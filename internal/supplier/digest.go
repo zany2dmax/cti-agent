@@ -79,8 +79,10 @@ func plural(n int, one, many string) string {
 // when there are no requests, because a day with none sends nothing.
 //
 // board is the link to the board (https only, else it is left out) and
-// boardName is what to call it ("the CYBR board").
-func Digest(reqs []Request, org string, day time.Time, board, boardName string) (b Block, ok bool) {
+// boardName is what to call it ("the CYBR board"). automatic is how many
+// messages from the fleet's own machine senders were left out, said in a line so
+// nothing is skipped silently; it does not by itself make a digest.
+func Digest(reqs []Request, org string, day time.Time, board, boardName string, automatic int) (b Block, ok bool) {
 	if len(reqs) == 0 {
 		return Block{}, false
 	}
@@ -106,6 +108,12 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string) 
 	// Plain text.
 	var t strings.Builder
 	t.WriteString(lead + "\n")
+	autoLine := ""
+	if automatic > 0 {
+		autoLine = fmt.Sprintf("%d automatic %s from the mail filter left out: not %s.", automatic,
+			plural(automatic, "message", "messages"), plural(automatic, "a request", "requests"))
+		t.WriteString(autoLine + "\n")
+	}
 	if link := safeLink(board); link != "" && todo > 0 {
 		t.WriteString("Board: " + link + "\n")
 	}
@@ -169,6 +177,9 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string) 
 		emailkit.Card(&h, rt, VerdictLabel(r.Decision.Verdict)+": "+r.Name(), lines.String())
 	}
 	emailkit.BodyClose(&h)
+	if autoLine != "" {
+		emailkit.Note(&h, e(autoLine))
+	}
 	emailkit.Note(&h, "The lane reads the request and its form only. It never opens the tax or bank attachments, never replies to the requester and never moves their mail.")
 	emailkit.Foot(&h, "Supplier-request lane")
 	return Block{Subject: subject, Text: t.String(), HTML: h.String()}, true

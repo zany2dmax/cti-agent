@@ -88,17 +88,30 @@ const contextLookback = 21 * 24 * time.Hour
 // thread is read whole, back to contextLookback before that time. It reads each
 // thread's form through ReadForms, the only path to attachment bytes, and
 // builds the model's input. It changes nothing in the mailbox.
-func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen map[string]bool, mailbox string, since time.Time) ([]Item, error) {
+//
+// isAutomatic says whether a message is one of the fleet's own machine senders
+// (the mail filter's quarantine digest): such a message is not a request and is
+// left out, and the second result counts those inside the window so the digest
+// can say how many were skipped. It decides by sender address and subject only,
+// never by what a message says, so nothing a requester writes can use it.
+func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen map[string]bool, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) ([]Item, int, error) {
 	msgs, err := mail.Addressed(ctx, since.Add(-contextLookback))
 	if err != nil {
-		return nil, fmt.Errorf("reading the mailbox: %w", err)
+		return nil, 0, fmt.Errorf("reading the mailbox: %w", err)
 	}
 	var items []Item
+	automatic := 0
 	for _, t := range group(msgs) {
-		// The fleet's own mail is not a request.
+		// The fleet's own mail is not a request, and neither is its quarantine digest.
 		var mine thread
 		for _, m := range t {
-			if !strings.EqualFold(strings.TrimSpace(m.From), strings.TrimSpace(mailbox)) {
+			switch {
+			case strings.EqualFold(strings.TrimSpace(m.From), strings.TrimSpace(mailbox)):
+			case isAutomatic != nil && isAutomatic(m.From, m.Subject):
+				if !m.Received.Before(since) {
+					automatic++
+				}
+			default:
 				mine = append(mine, m)
 			}
 		}
@@ -112,14 +125,14 @@ func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, s
 		}
 		it, err := buildItem(ctx, mine, src, p, cfg)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if seen[it.Request.Label()] {
 			continue
 		}
 		items = append(items, it)
 	}
-	return items, nil
+	return items, automatic, nil
 }
 
 func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) (Item, error) {

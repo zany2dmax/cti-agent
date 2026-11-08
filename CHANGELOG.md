@@ -83,6 +83,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   digest email to `SUPPLIER_TO`, checked against `SUPPLIER_ALLOW_TO` (no
   fallback), links the board; a day with no new requests sends nothing. A form
   shared as a link is not opened - that request is Unsure, with the reason.
+  The mail filter's quarantine digest, which also lands on the list, is left
+  out (the address already in `MAILBOX_DIGEST_SENDERS`, exact sender and
+  subject) and counted in the digest; nothing else is skipped.
   The judgement is a Claude session with **no tools** (`SUPPLIER_MODEL`); code
   checks its quotes against the request and can only move an answer toward
   Unsure, and with no model, or one that is down, every request is Unsure.

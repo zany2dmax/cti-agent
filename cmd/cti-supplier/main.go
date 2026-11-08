@@ -39,6 +39,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/jira"
+	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/supplier"
 )
@@ -163,7 +164,7 @@ func doCollect(dir string, window time.Duration) int {
 	if address == "" {
 		// An unset address means the lane does nothing, like every other lane.
 		logf("SUPPLIER_ADDRESS is not set, so the lane does nothing")
-		if err := writeItems(dir, nil); err != nil {
+		if err := writeItems(dir, nil, 0); err != nil {
 			return die("%s", safelog.Line(err.Error()))
 		}
 		return exitOK
@@ -198,7 +199,13 @@ func doCollect(dir string, window time.Duration) int {
 	mail := graphMail{c: g, mailbox: cfg.GraphMailbox, folder: folder, address: address}
 	src := supplier.GraphSource{Client: g, Mailbox: cfg.GraphMailbox}
 
-	items, err := supplier.Collect(ctx, mail, src, policy(), laneConfig(), seen.Set(), cfg.GraphMailbox, time.Now().Add(-window))
+	// The mail filter's quarantine digest also lands on the list. It comes from
+	// the one address the cleanup lane already knows (MAILBOX_DIGEST_SENDERS),
+	// matched exactly with the subject, so a person's reply to a digest is not
+	// mistaken for one. Unset: nothing is skipped.
+	digestSenders := splitList(cfg.MailboxDigestSenders)
+	automatic := func(from, subject string) bool { return mailbox.QuarantineDigest(from, subject, digestSenders) }
+	items, skipped, err := supplier.Collect(ctx, mail, src, policy(), laneConfig(), seen.Set(), cfg.GraphMailbox, time.Now().Add(-window), automatic)
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
@@ -206,8 +213,8 @@ func doCollect(dir string, window time.Duration) int {
 		r := it.Request
 		logf("found  : %s (form %s, %d file(s) left unopened)", safelog.Line(r.Name()), r.State, len(r.Skipped))
 	}
-	logf("collect: %d new request(s) in the last %s, %d already reported", len(items), window, len(seen))
-	if err := writeItems(dir, items); err != nil {
+	logf("collect: %d new request(s) in the last %s, %d already reported, %d automatic message(s) left out", len(items), window, len(seen), skipped)
+	if err := writeItems(dir, items, skipped); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	return exitOK
@@ -221,11 +228,18 @@ func resultPath(dir string, i int) string {
 	return filepath.Join(dir, fmt.Sprintf("%03d.result.json", i))
 }
 
-func writeItems(dir string, items []supplier.Item) error {
+// collected is requests.json: the new requests and how many automatic messages
+// were left out, which the digest says.
+type collected struct {
+	Items            []supplier.Item `json:"items"`
+	AutomaticSkipped int             `json:"automatic_skipped"`
+}
+
+func writeItems(dir string, items []supplier.Item, automatic int) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(items, "", "  ")
+	b, err := json.MarshalIndent(collected{Items: items, AutomaticSkipped: automatic}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -247,10 +261,11 @@ func doFinish(dir string, fileJira bool) int {
 	if err != nil {
 		return die("reading %s: %s", safelog.Line(itemsPath(dir)), safelog.Line(err.Error()))
 	}
-	var items []supplier.Item
-	if err := json.Unmarshal(b, &items); err != nil {
+	var col collected
+	if err := json.Unmarshal(b, &col); err != nil {
 		return die("%s does not parse: %s", safelog.Line(itemsPath(dir)), safelog.Line(err.Error()))
 	}
+	items := col.Items
 	if len(items) == 0 {
 		logf("finish : no new requests, nothing to judge or send")
 		return exitOK
@@ -287,7 +302,7 @@ func doFinish(dir string, fileJira bool) int {
 	}
 
 	block, ok := supplier.Digest(supplier.Requests(outcomes), emailkit.Org(), time.Now(),
-		env("SUPPLIER_BOARD_URL"), env("SUPPLIER_BOARD_NAME"))
+		env("SUPPLIER_BOARD_URL"), env("SUPPLIER_BOARD_NAME"), col.AutomaticSkipped)
 	if ok {
 		for name, body := range map[string]string{"digest.html": block.HTML, "digest.txt": block.Text, "digest.subject": block.Subject + "\n"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
@@ -432,4 +447,15 @@ func newTickets(project string, fileJira bool) supplier.Tickets {
 		}
 	}
 	return t
+}
+
+// splitList parses a comma-separated fleet.env list, dropping empties.
+func splitList(s string) []string {
+	var out []string
+	for _, a := range strings.Split(s, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }

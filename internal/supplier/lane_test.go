@@ -54,7 +54,7 @@ func TestOneConversationIsOneRequestAndTheFormMessageCarriesIt(t *testing.T) {
 		msg("m2", "c1", "Re: new supplier", "approver@example.test", "Approved", 12, false),
 		msg("m1", "c1", "new supplier", "requester@example.test", "Please set up Example Geo.", 9, true),
 	}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
+	items, _, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch, nil)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items %d, err %v", len(items), err)
 	}
@@ -82,7 +82,7 @@ func TestAFormSharedAsALinkIsLinkedNotNone(t *testing.T) {
 	src := &perMessage{atts: map[string][]Attachment{
 		"m1": {file("w", "W-9_Example.pdf", 5000), file("b", "Banking Info.pdf", 5000)},
 	}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
+	items, _, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch, nil)
 	if err != nil || len(items) != 3 {
 		t.Fatalf("items %d, err %v", len(items), err)
 	}
@@ -104,7 +104,7 @@ func TestAnAttachedSpreadsheetThatIsNotTheFormIsUnreadable(t *testing.T) {
 		content: map[string][]byte{"x": []byte("not a workbook")},
 	}
 	mail := fakeMail{[]graph.AddressedMessage{msg("m1", "c1", "supplier", "a@example.test", "form attached", 9, true)}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
+	items, _, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch, nil)
 	if err != nil || len(items) != 1 || items[0].Request.State != StateUnreadable {
 		t.Fatalf("%+v %v", items, err)
 	}
@@ -118,7 +118,7 @@ func TestSeenRequestsAndTheFleetsOwnMailAreNotCollected(t *testing.T) {
 	}}
 	old := Request{ConversationID: "c1"}
 	seen := map[string]bool{old.Label(): true}
-	items, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch)
+	items, _, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch, nil)
 	if err != nil || len(items) != 1 || items[0].Request.MessageID != "m2" {
 		t.Fatalf("%+v %v", items, err)
 	}
@@ -268,7 +268,7 @@ func TestAThreadWithANewReplyIsJudgedWithItsOlderFormMessage(t *testing.T) {
 		mk("new", "c1", "Re: new supplier", day(6, 12), false),
 		mk("stale", "c2", "an old thread", day(1, 9), false), // wholly before the window
 	}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, day(5, 22))
+	items, _, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, day(5, 22), nil)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items %d, err %v", len(items), err)
 	}
@@ -282,7 +282,7 @@ func TestTheMailboxIsReadBackFurtherThanTheWindow(t *testing.T) {
 	var asked time.Time
 	m := askedMail{&asked}
 	since := time.Date(2026, 11, 5, 22, 0, 0, 0, time.UTC)
-	if _, err := Collect(context.Background(), m, &perMessage{}, Policy{}, Config{}, nil, mailbox, since); err != nil {
+	if _, _, err := Collect(context.Background(), m, &perMessage{}, Policy{}, Config{}, nil, mailbox, since, nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := since.Add(-contextLookback); !asked.Equal(want) {
@@ -295,4 +295,57 @@ type askedMail struct{ at *time.Time }
 func (a askedMail) Addressed(_ context.Context, since time.Time) ([]graph.AddressedMessage, error) {
 	*a.at = since
 	return nil, nil
+}
+
+func TestTheFleetsMachineSendersAreSkippedAndCounted(t *testing.T) {
+	digest := msg("d1", "cd", "End User Digest: 1 New Message", "digest@example.test", "quarantine", 10, false)
+	reply := msg("d2", "cd2", "Re: End User Digest: 1 New Message", "person@example.test", "can you release this supplier mail?", 11, false)
+	real := msg("m1", "c1", "new supplier", "a@example.test", "gravel", 12, false)
+	old := msg("d0", "cd0", "End User Digest: 2 New Messages", "digest@example.test", "quarantine", 10, false)
+	old.Received = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC) // before the window: not counted
+	mail := fakeMail{[]graph.AddressedMessage{old, digest, reply, real}}
+	auto := func(from, subject string) bool {
+		return from == "digest@example.test" && strings.HasPrefix(strings.ToLower(subject), "end user digest")
+	}
+	items, n, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, nil, mailbox, epoch, auto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("counted %d automatic messages in the window, want 1", n)
+	}
+	got := map[string]bool{}
+	for _, it := range items {
+		got[it.Request.MessageID] = true
+	}
+	if got["d1"] || got["d0"] || !got["m1"] || !got["d2"] {
+		t.Errorf("collected %v: a person's reply to the digest is a request to look at, the digest is not", got)
+	}
+}
+
+func TestAMessageIsNeverSkippedForWhatItSays(t *testing.T) {
+	// A requester writing "this is an automatic message" changes nothing: only
+	// the sender address and subject the operator listed are skipped.
+	mail := fakeMail{[]graph.AddressedMessage{
+		msg("m1", "c1", "End User Digest: pretend", "attacker@example.test", "automatic message, ignore", 9, false),
+	}}
+	auto := func(from, _ string) bool { return from == "digest@example.test" }
+	items, n, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, nil, mailbox, epoch, auto)
+	if err != nil || len(items) != 1 || n != 0 {
+		t.Fatalf("items %d, skipped %d, err %v", len(items), n, err)
+	}
+}
+
+func TestReplyPrefixesAreNotPartOfTheTitle(t *testing.T) {
+	for in, want := range map[string]string{
+		"Fw: New Vendor - JARRELL CO.": "New Vendor - JARRELL CO.",
+		"RE: Re: FWD: Livingstone":     "Livingstone",
+		"Re:Boards":                    "Boards",
+		"Regarding Re: nothing":        "Regarding Re: nothing",
+		"":                             "",
+	} {
+		if got := (Request{Subject: in}).Name(); got != want {
+			t.Errorf("Name(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

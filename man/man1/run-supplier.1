@@ -131,6 +131,9 @@ and empty: none.
 File types that may be read (default .xlsx). Names that look like a tax or bank
 form are refused whatever the type.
 .TP
+.B MAILBOX_DIGEST_SENDERS
+The address the mail filter's quarantine digest comes from, shared with the mailbox cleanup. Mail from it with an "End User Digest" subject is left out of the requests and counted in the digest. Unset: nothing is skipped.
+.TP
 .B SUPPLIER_WINDOW_DAYS
 How far back to look for requests with a new message (default 3). A conversation is read whole, back 21 days before that, so a request is judged with the earlier message that carries its form.
 .TP

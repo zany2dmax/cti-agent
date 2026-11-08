@@ -25,7 +25,7 @@ func twoItems() []supplier.Item {
 func setup(t *testing.T, items []supplier.Item) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := writeItems(dir, items); err != nil {
+	if err := writeItems(dir, items, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"SUPPLIER_JIRA_PROJECT", "SUPPLIER_BOARD_URL", "SUPPLIER_TECH_TERMS", "FLEET_ORG"} {
@@ -36,7 +36,7 @@ func setup(t *testing.T, items []supplier.Item) string {
 
 func TestCollectWritesOneInputPerRequestPrivately(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeItems(dir, twoItems()); err != nil {
+	if err := writeItems(dir, twoItems(), 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"requests.json", "000.input.txt", "001.input.txt"} {
@@ -58,8 +58,9 @@ func TestWithNoAddressTheLaneDoesNothing(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "requests.json"))
-	if strings.TrimSpace(string(b)) != "null" && strings.TrimSpace(string(b)) != "[]" {
-		t.Errorf("requests.json = %s", b)
+	var col collected
+	if err := json.Unmarshal(b, &col); err != nil || len(col.Items) != 0 || col.AutomaticSkipped != 0 {
+		t.Errorf("requests.json = %s (%v)", b, err)
 	}
 }
 
@@ -148,5 +149,29 @@ func TestTheOperatorsTechWordListReplacesTheDefault(t *testing.T) {
 	}
 	if c := laneConfig(); c.TechTerms != nil {
 		t.Errorf("unset should be the defaults (nil): %#v", c.TechTerms)
+	}
+}
+
+func TestTheAutomaticCountReachesTheDigest(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeItems(dir, twoItems(), 3); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"SUPPLIER_JIRA_PROJECT", "SUPPLIER_BOARD_URL", "SUPPLIER_TECH_TERMS", "FLEET_ORG"} {
+		t.Setenv(k, "")
+	}
+	if code := doFinish(dir, false); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	txt, _ := os.ReadFile(filepath.Join(dir, "digest.txt"))
+	if !strings.Contains(string(txt), "3 automatic messages from the mail filter left out") {
+		t.Errorf("digest.txt:\n%s", txt)
+	}
+}
+
+func TestSplitListDropsEmpties(t *testing.T) {
+	got := splitList(" a@example.test, ,b@example.test,")
+	if len(got) != 2 || got[0] != "a@example.test" || got[1] != "b@example.test" {
+		t.Errorf("%#v", got)
 	}
 }
