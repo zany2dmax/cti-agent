@@ -41,6 +41,9 @@ func (p *perMessage) Content(_ context.Context, _, id string, _ int64) ([]byte, 
 
 const mailbox = "box@example.test"
 
+// epoch is before every message the tests make, so the window includes them all.
+var epoch = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+
 func TestOneConversationIsOneRequestAndTheFormMessageCarriesIt(t *testing.T) {
 	form := workbook(t, completeForm)
 	src := &perMessage{
@@ -51,7 +54,7 @@ func TestOneConversationIsOneRequestAndTheFormMessageCarriesIt(t *testing.T) {
 		msg("m2", "c1", "Re: new supplier", "approver@example.test", "Approved", 12, false),
 		msg("m1", "c1", "new supplier", "requester@example.test", "Please set up Example Geo.", 9, true),
 	}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, time.Now())
+	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items %d, err %v", len(items), err)
 	}
@@ -79,7 +82,7 @@ func TestAFormSharedAsALinkIsLinkedNotNone(t *testing.T) {
 	src := &perMessage{atts: map[string][]Attachment{
 		"m1": {file("w", "W-9_Example.pdf", 5000), file("b", "Banking Info.pdf", 5000)},
 	}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, time.Now())
+	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
 	if err != nil || len(items) != 3 {
 		t.Fatalf("items %d, err %v", len(items), err)
 	}
@@ -101,7 +104,7 @@ func TestAnAttachedSpreadsheetThatIsNotTheFormIsUnreadable(t *testing.T) {
 		content: map[string][]byte{"x": []byte("not a workbook")},
 	}
 	mail := fakeMail{[]graph.AddressedMessage{msg("m1", "c1", "supplier", "a@example.test", "form attached", 9, true)}}
-	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, time.Now())
+	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, epoch)
 	if err != nil || len(items) != 1 || items[0].Request.State != StateUnreadable {
 		t.Fatalf("%+v %v", items, err)
 	}
@@ -115,7 +118,7 @@ func TestSeenRequestsAndTheFleetsOwnMailAreNotCollected(t *testing.T) {
 	}}
 	old := Request{ConversationID: "c1"}
 	seen := map[string]bool{old.Label(): true}
-	items, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, time.Now())
+	items, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch)
 	if err != nil || len(items) != 1 || items[0].Request.MessageID != "m2" {
 		t.Fatalf("%+v %v", items, err)
 	}
@@ -246,4 +249,50 @@ func TestSeenRoundTripsAndForgetsOldEntries(t *testing.T) {
 	if _, err := LoadSeen(path); err == nil {
 		t.Error("a damaged record was accepted")
 	}
+}
+
+func TestAThreadWithANewReplyIsJudgedWithItsOlderFormMessage(t *testing.T) {
+	form := workbook(t, completeForm)
+	src := &perMessage{
+		atts:    map[string][]Attachment{"old": {file("f", "Supplier Form.xlsx", 4000)}},
+		content: map[string][]byte{"f": form},
+	}
+	day := func(d, h int) time.Time { return time.Date(2026, 11, d, h, 0, 0, 0, time.UTC) }
+	mk := func(id, conv, subj string, at time.Time, attach bool) graph.AddressedMessage {
+		m := msg(id, conv, subj, "a@example.test", "text", 0, attach)
+		m.Received = at
+		return m
+	}
+	mail := fakeMail{[]graph.AddressedMessage{
+		mk("old", "c1", "new supplier", day(5, 21), true), // before the window
+		mk("new", "c1", "Re: new supplier", day(6, 12), false),
+		mk("stale", "c2", "an old thread", day(1, 9), false), // wholly before the window
+	}}
+	items, err := Collect(context.Background(), mail, src, Policy{}, Config{}, nil, mailbox, day(5, 22))
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items %d, err %v", len(items), err)
+	}
+	r := items[0].Request
+	if r.State != StateRead || r.MessageID != "old" {
+		t.Errorf("the thread was judged without its form: state %s, message %s", r.State, r.MessageID)
+	}
+}
+
+func TestTheMailboxIsReadBackFurtherThanTheWindow(t *testing.T) {
+	var asked time.Time
+	m := askedMail{&asked}
+	since := time.Date(2026, 11, 5, 22, 0, 0, 0, time.UTC)
+	if _, err := Collect(context.Background(), m, &perMessage{}, Policy{}, Config{}, nil, mailbox, since); err != nil {
+		t.Fatal(err)
+	}
+	if want := since.Add(-contextLookback); !asked.Equal(want) {
+		t.Errorf("read from %v, want %v", asked, want)
+	}
+}
+
+type askedMail struct{ at *time.Time }
+
+func (a askedMail) Addressed(_ context.Context, since time.Time) ([]graph.AddressedMessage, error) {
+	*a.at = since
+	return nil, nil
 }

@@ -77,12 +77,19 @@ func group(msgs []graph.AddressedMessage) []thread {
 // maxReplies bounds how many later messages of a thread are shown to the model.
 const maxReplies = 5
 
-// Collect finds the new supplier requests: threads addressed to the list whose
-// label is not in seen. It reads each thread's form through ReadForms, the only
-// path to attachment bytes, and builds the model's input. It changes nothing in
-// the mailbox.
+// contextLookback is how far before the window the lane reads, so a thread that
+// has new activity in the window is judged with its earlier messages - the one
+// that carries the form is usually the first, and a window that started after it
+// would judge the request on a reply that says only "Approved".
+const contextLookback = 21 * 24 * time.Hour
+
+// Collect finds the new supplier requests: threads addressed to the list that
+// have a message since the given time and whose label is not in seen. Each
+// thread is read whole, back to contextLookback before that time. It reads each
+// thread's form through ReadForms, the only path to attachment bytes, and
+// builds the model's input. It changes nothing in the mailbox.
 func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen map[string]bool, mailbox string, since time.Time) ([]Item, error) {
-	msgs, err := mail.Addressed(ctx, since)
+	msgs, err := mail.Addressed(ctx, since.Add(-contextLookback))
 	if err != nil {
 		return nil, fmt.Errorf("reading the mailbox: %w", err)
 	}
@@ -96,6 +103,11 @@ func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, s
 			}
 		}
 		if len(mine) == 0 {
+			continue
+		}
+		// Only a thread with something new in the window is a candidate; the
+		// older messages are there for context, not to bring back an old thread.
+		if mine[len(mine)-1].Received.Before(since) {
 			continue
 		}
 		it, err := buildItem(ctx, mine, src, p, cfg)

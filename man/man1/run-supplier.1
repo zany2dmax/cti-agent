@@ -132,7 +132,7 @@ File types that may be read (default .xlsx). Names that look like a tax or bank
 form are refused whatever the type.
 .TP
 .B SUPPLIER_WINDOW_DAYS
-How far back to look (default 3).
+How far back to look for requests with a new message (default 3). A conversation is read whole, back 21 days before that, so a request is judged with the earlier message that carries its form.
 .TP
 .B FLEET_SUPPLIER_TIME
 When the installer pins the timer, in

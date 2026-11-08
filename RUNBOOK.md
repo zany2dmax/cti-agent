@@ -1238,6 +1238,8 @@ so a rerun after a failure is safe. If an item cannot be filed (the project is
 not in `JIRA_ALLOW_CREATE`, Jira is down) the digest still goes out and the run
 fails after it, so the failure alert fires and the request is not lost.
 
+`SUPPLIER_WINDOW_DAYS` (default 3) is how far back to look for requests with a new message. A conversation is read whole - back a further 21 days - so a request is judged with the message that carries its form, not just the latest reply. For a first trial, set it to 30 to see a realistic batch.
+
 The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` and
 `SUPPLIER_UNSURE_TEXT` (generic defaults apply), and `SUPPLIER_TECH_TERMS`, the
 words that stop a No from standing (a supplier whose name, subject or notes hold
