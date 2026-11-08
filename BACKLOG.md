@@ -99,7 +99,14 @@ is real, not before. Finished work moves out of this file into
   determine a 100% Yes it says so on the item, in words along the lines of "we
   could not determine a 100% Yes, so this is Unsure, and an Unsure gets a CYBR
   Kanban to-do", so the person knows to check it by hand. Exact text is a
-  `fleet.env` template. Nothing about the lane's design is open now.
+  `fleet.env` template. **Linked forms (decided 2026-11-08):** a form can
+  arrive as a SharePoint/OneDrive link in the message body instead of an
+  attachment (a technology supplier did). The lane does not open links: it
+  marks that request Unsure with the reason "form not readable: linked, not
+  attached" and judges from the message text. **Built:** `internal/supplier`
+  reads the form (fields found by label text, blanks kept, required-but-empty
+  fields listed) on the shared `internal/xlsx` reader. Not built: finding the
+  messages, the judgement, the Jira item and the digest.
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a
