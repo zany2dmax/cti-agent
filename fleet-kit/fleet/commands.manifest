@@ -221,6 +221,20 @@ flag: --to STRING | end of the window (default: one hour after --since)
 flag: --top INT | rows to print per table (default 20)
 flag: --type STRING | stream type: message, maillog or audit (default "message")
 
+command: cti-supplier
+about: Supplier-request lane: find new supplier requests, judge them, file Kanban items, write the digest
+runs: effect
+modes: --dry-run --for-real
+risk: --collect safe
+risk: --finish changes
+risk: --commit-seen writes
+flag: --dry-run | read and judge, say what would be filed, write nothing to Jira or the record of what was reported
+flag: --for-real | with --finish: file the Kanban items; with --commit-seen: record the requests as reported
+flag: --collect DIR | find new supplier requests and write what the model needs into this directory
+flag: --finish DIR | judge the requests in this directory, file the Kanban items and write the digest
+flag: --commit-seen FILE | record a seen.json from --finish so the same requests are not reported again, then exit
+flag: --since DURATION | how far back to look for requests (default SUPPLIER_WINDOW_DAYS days, else 3)
+
 command: cti-vmscan
 about: Combine the week's Qualys VM scan-result notices into one report
 runs: local
@@ -398,6 +412,14 @@ flag: --to-dev | test send to FLEET_DEV_EMAIL only
 flag: --month YYYY-MM | a past release: --dry-run replays it; --for-real needs FLEET_CONFIRM_RESEND=MONTH too
 flag: --for-real | send the synopsis and mark it sent
 flag: --resend | with --for-real: send a release that was already sent
+
+command: run-supplier
+about: Supplier-request lane: judge each new supplier request, file a Kanban item for the critical or unsure ones, email one digest
+runs: effect
+modes: --dry-run --for-real --to-dev
+flag: --dry-run | judge and render, file and send nothing, record nothing
+flag: --for-real | judge, file the Kanban items, send the digest, record the requests as reported
+flag: --to-dev | test send of the digest to FLEET_DEV_EMAIL only; no items filed
 
 command: run-vmscan
 about: Weekly Qualys VM scan report: the two scheduled scans combined into one email

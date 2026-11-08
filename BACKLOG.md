@@ -124,11 +124,17 @@ is real, not before. Finished work moves out of this file into
   so the lane never sets `includeNo`; no address, contact or remittance detail
   goes in; everything from the request is escaped for Jira wiki markup) and
   `supplier.Digest` (counts, the board link, https links only; no email on a
-  day with no requests). Not built: running the model, the lane command that
-  files the items and sends the digest, and its `fleet.env` settings (the
-  address, question and meaning wording, Unsure text, technology word list,
-  the project key and assignee email, `CYBR` in `JIRA_ALLOW_CREATE`, the
-  digest's recipient list).
+  day with no requests). **Lane built (2026-11-08):** `cmd/cti-supplier`
+  (`--collect`, `--finish`, `--commit-seen`, each under `--dry-run` or
+  `--for-real`), `run-supplier` (the model runs with no tools, one request per
+  call; no model or a failed one means Unsure), the `cti-agent-supplier`
+  service and timer (daily 07:45, off until enabled), the `SUPPLIER_*`
+  settings, man pages, runbook, lanes and security notes. **Not verified:** a
+  run against the real mailbox, Jira and the API - the `claude` flags were
+  checked against `--help` only and the runner tests use stubs. Next: a
+  `--dry-run` with `SUPPLIER_MODEL` set, then `--to-dev`, then enable the timer.
+  Still open: a single shared model-lane runner (H4) now that there are two
+  model uses, and whether to widen the form reader if the form changes.
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a

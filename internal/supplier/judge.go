@@ -279,6 +279,12 @@ func techTermIn(text string, terms []string) string {
 // output code cannot use is itself an answer, and the answer is Unsure with the
 // reason. Every rule below can only move a verdict toward Unsure.
 func Judge(raw []byte, in Input, cfg Config) Decision {
+	return judge(raw, in, in.Source(), cfg)
+}
+
+// judge is Judge with the text the model read given explicitly, so a caller
+// that stored it can check evidence against exactly that.
+func judge(raw []byte, in Input, source string, cfg Config) Decision {
 	r, err := ParseResult(raw)
 	if err != nil {
 		return unsure("The judgement could not be read, so this request needs a person.", err.Error())
@@ -303,7 +309,7 @@ func Judge(raw []byte, in Input, cfg Config) Decision {
 	}
 
 	// Evidence must be copied from the request, not composed.
-	src := squash(in.Source())
+	src := squash(source)
 	for _, q := range r.Evidence {
 		q = strings.TrimSpace(q)
 		if q == "" {

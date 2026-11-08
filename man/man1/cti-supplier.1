@@ -1,0 +1,138 @@
+.TH CTI-SUPPLIER 1 "2026-11-08" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+cti-supplier \- supplier-request lane: find new supplier requests, judge them, file Kanban items, write the digest
+.SH SYNOPSIS
+.B cti-supplier
+.RB ( \-\-dry\-run | \-\-for\-real )
+.B \-\-collect
+.I DIR
+.RB [ \-\-since
+.IR DURATION ]
+.PP
+.B cti-supplier
+.RB ( \-\-dry\-run | \-\-for\-real )
+.B \-\-finish
+.I DIR
+.PP
+.B cti-supplier \-\-for\-real \-\-commit\-seen
+.I FILE
+.PP
+.B sudo cti\-agent cti\-supplier
+.RI [ options ]
+.SH DESCRIPTION
+.B cti-supplier
+is the deterministic half of the supplier-request lane;
+.BR run\-supplier (1)
+drives it and the model between its two stages. It sends no mail. It changes
+nothing in the mailbox, never replies to a requester, and never opens the tax or
+bank attachments.
+.PP
+Like every command that files or records something, it must be told how to run:
+.B \-\-dry\-run
+reads and judges and writes only its own work directory;
+.B \-\-for\-real
+also files the Kanban items and records what was reported. With neither it prints
+usage and exits 2.
+.SS \-\-collect
+Reads the CTI mailbox (Graph, read-only) for messages received in the window
+that have
+.B SUPPLIER_ADDRESS
+in To or Cc, groups them into conversations (one request each), and skips the
+fleet's own mail and any request already reported. For each it reads the
+supplier request form from an attached
+.B .xlsx
+(fields are found by their label text, not their position; blanks stay blank;
+required fields left empty are listed), and records whether the form was
+.BR read ,
+.B linked
+(shared as a link in the message, which is not opened),
+.B unreadable
+(a spreadsheet that is not the form) or
+.B none
+(judged from the message text). It writes
+.B requests.json
+and one
+.B NNN.input.txt
+per request, in which the request sits inside an untrusted block. The only way
+code reaches attachment bytes is a policy that opens
+.B .xlsx
+files only, refuses names that contain a whole word such as w9, bank, routing,
+void, tax, irs or ach, and caps the size.
+.SS \-\-finish
+Reads each
+.B NNN.result.json
+the runner saved from the model. A request with none is Unsure. Every answer is
+checked: quotes must be copied from the request, a No is refused where the form
+was not read or the name or notes hold a technology word or the request tried to
+steer the reader, and output that cannot be parsed is Unsure. Code only ever
+moves an answer toward Unsure.
+.PP
+A Yes or an Unsure needs a Kanban item. With
+.B \-\-for\-real
+it is found by its label (one per conversation, so a rerun never files twice) or
+filed in
+.BR SUPPLIER_JIRA_PROJECT ,
+which must be in
+.BR JIRA_ALLOW_CREATE .
+The item carries the business fields of the form and the reason, and no address,
+contact or remittance detail. A failure to file one item is recorded and does not
+stop the others or the digest. Writes
+.BR digest.html ,
+.BR digest.txt ,
+.BR digest.subject ,
+.B seen.json
+and
+.BR problems.txt .
+.SS \-\-commit\-seen
+Records the requests in a
+.B seen.json
+as reported, in
+.BR state/supplier\-seen.json ,
+which holds a label and a date and no supplier name. Run by
+.BR run\-supplier (1)
+after a real send.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Read and judge, say what would be filed, write nothing to Jira or the record of what was reported.
+.TP
+.B \-\-for\-real
+With \-\-finish, file the Kanban items. With \-\-commit\-seen, record the requests as reported.
+.TP
+.BI \-\-collect " DIR"
+Find new supplier requests and write what the model needs into this directory.
+.TP
+.BI \-\-finish " DIR"
+Judge the requests in this directory, file the items and write the digest.
+.TP
+.BI \-\-commit\-seen " FILE"
+Record a seen.json so the same requests are not reported again, then exit.
+.TP
+.BI \-\-since " DURATION"
+How far back to look for requests (default
+.B SUPPLIER_WINDOW_DAYS
+days, else 3).
+.SH ENVIRONMENT
+See
+.BR run\-supplier (1)
+for the SUPPLIER_* settings. Jira uses JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_CLOUD_ID and JIRA_ALLOW_CREATE; Graph uses TENANT_ID, CLIENT_ID, CLIENT_SECRET, GRAPH_MAILBOX and GRAPH_FOLDER.
+.SH EXIT STATUS
+.TP
+.B 0
+The stage finished.
+.TP
+.B 1
+The mailbox could not be read, a file could not be written, or a setting is invalid.
+.TP
+.B 2
+No mode was given, or the modes contradict each other.
+.SH EXAMPLES
+Look for requests and see what the model would be shown:
+.PP
+.EX
+sudo cti\-agent cti\-supplier \-\-dry\-run \-\-collect /tmp/supplier\-work
+.EE
+.SH SEE ALSO
+.BR run\-supplier (1),
+.BR cti\-mailer (1),
+.BR cti\-jira (1)

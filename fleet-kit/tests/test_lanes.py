@@ -3680,6 +3680,162 @@ class TestUserAgent(unittest.TestCase):
             src = (LANES / f"{name}.py").read_text()
             self.assertNotRegex(src, r"mailto:[A-Za-z0-9]", name)
 
+class SupplierRunner(unittest.TestCase):
+    """run-supplier with the three programs it calls replaced by stubs that
+    record their arguments, so the test says exactly what the runner asked of
+    each: which mode cti-supplier got, whether the model was shown a request
+    with no tools, what the mailer was told, and when the record was updated."""
+
+    RUNNER = KIT / "fleet" / "bin" / "run-supplier"
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.code = self.tmp / "code"
+        (self.code / "bin").mkdir(parents=True)
+        (self.code / "share").mkdir()
+        (self.code / "agents" / "supplier").mkdir(parents=True)
+        shutil.copy(KIT / "fleet" / "share" / "fleet-mode.sh", self.code / "share")
+        (self.code / "agents" / "supplier" / "CLAUDE.md").write_text("STANDING INSTRUCTIONS")
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.log = self.tmp / "calls.log"
+        self.stub("cti-mailer", 'echo "mailer $*" >> "$CALLS"\n')
+        self.stub("claude",
+                  'echo "claude $*" >> "$CALLS"\n'
+                  'echo "stdin: $(head -c 20)" >> "$CALLS"\n'
+                  'echo \'{"schema":"cti-supplier/1"}\'\n')
+        self.problems = ""
+        self.requests = 2
+        self.write_supplier()
+
+    def stub(self, name, body):
+        f = self.code / "bin" / name
+        f.write_text("#!/usr/bin/env bash\n" + body)
+        f.chmod(0o755)
+
+    def write_supplier(self, digest=True):
+        # --collect makes N inputs; --finish writes a digest, seen.json and problems.
+        digest_cmds = ("echo 'Supplier requests: 2' > $DIR/digest.subject; "
+                       "echo hi > $DIR/digest.html; echo hi > $DIR/digest.txt;") if digest else ""
+        self.stub("cti-supplier", """
+echo "supplier $*" >> "$CALLS"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --collect) DIR="$2"; MODE=collect; shift;;
+    --finish) DIR="$2"; MODE=finish; shift;;
+  esac
+  shift
+done
+if [ "$MODE" = collect ]; then
+  for (( i = 0; i < %d; i++ )); do printf 'REQUEST %%s' "$i" > "$DIR/00$i.input.txt"; done
+fi
+if [ "$MODE" = finish ]; then
+  %s
+  echo '["fleet-supplier-x"]' > "$DIR/seen.json"
+  printf '%%s' "%s" > "$DIR/problems.txt"
+fi
+""" % (self.requests, digest_cmds, self.problems))
+
+    def run_it(self, *args, env=None):
+        e = {"PATH": "/usr/bin:/bin", "HOME": str(self.home), "FLEET_HOME": str(self.home),
+             "FLEET_CODE": str(self.code), "FLEET_ENV": str(self.tmp / "none.env"),
+             "CALLS": str(self.log), "FLEET_DEV_EMAIL": "dev@example.test",
+             "CLAUDE_BIN": str(self.code / "bin" / "claude")}
+        e.update(env or {})
+        return subprocess.run(["bash", str(self.RUNNER), *args], check=False,
+                              capture_output=True, text=True, env=e)
+
+    def calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_for_real_files_sends_to_the_lane_and_records(self):
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.calls()
+        self.assertIn(f"supplier --for-real --collect {self.home}/state/supplier-work-", " ".join(c))
+        self.assertTrue(any(x.startswith("supplier --for-real --finish ") for x in c), c)
+        self.assertTrue(any(x.startswith("mailer --lane supplier ") and x.endswith("--for-real") for x in c), c)
+        self.assertTrue(any(x.startswith("supplier --for-real --commit-seen ") for x in c), c)
+        self.assertEqual(list((self.home / "state").glob("supplier-work-*")), [],
+                         "the work directory holds request text and must not be left behind")
+
+    def test_a_dry_run_files_nothing_sends_nothing_and_records_nothing(self):
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.calls()
+        self.assertFalse(any(x.startswith("supplier") and "--for-real" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x for x in c), c)
+        self.assertTrue(any(x.startswith("supplier --dry-run --finish") for x in c), c)
+        self.assertTrue(any(x.startswith("mailer --lane supplier") and x.endswith("--dry-run") for x in c), c)
+
+    def test_a_test_send_goes_to_dev_only_and_files_nothing(self):
+        r = self.run_it("--to-dev", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.calls()
+        self.assertTrue(any(x.startswith("mailer --to-dev ") for x in c), c)
+        self.assertFalse(any("--lane" in x for x in c), c)
+        self.assertFalse(any(x.startswith("supplier") and "--for-real" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x for x in c), c)
+
+    def test_the_model_is_given_no_tools_and_the_request_on_stdin(self):
+        self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        claude = [x for x in self.calls() if x.startswith("claude ")]
+        self.assertEqual(len(claude), 2, "one model call per request")
+        for line in claude:
+            for want in ("--tools ", "--strict-mcp-config", "--no-session-persistence",
+                         "--setting-sources project", "--model sonnet",
+                         "--system-prompt STANDING INSTRUCTIONS"):
+                self.assertIn(want, line)
+            self.assertNotIn("--allowedTools", line)
+            self.assertNotIn("--dangerously", line)
+        self.assertTrue(any(x.startswith("stdin: REQUEST") for x in self.calls()))
+
+    def test_with_no_model_set_the_model_is_never_called(self):
+        r = self.run_it("--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(any(x.startswith("claude ") for x in self.calls()))
+        self.assertIn("every request is Unsure", r.stderr)
+
+    def test_a_missing_claude_binary_or_instructions_falls_back_to_unsure(self):
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet", "CLAUDE_BIN": str(self.tmp / "nope")})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("claude binary was not found", r.stderr)
+        (self.code / "agents" / "supplier" / "CLAUDE.md").unlink()
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("instructions are not at", r.stderr)
+
+    def test_a_model_that_fails_leaves_that_request_unjudged_and_the_run_going(self):
+        self.stub("claude", 'echo "boom" >&2\nexit 1\n')
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no usable judgement", r.stderr)
+        self.assertTrue(any(x.startswith("supplier --dry-run --finish") for x in self.calls()))
+
+    def test_no_new_requests_sends_nothing(self):
+        self.requests = 0
+        self.write_supplier()
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(any(x.startswith("mailer") or "--finish" in x for x in self.calls()), self.calls())
+        self.assertIn("no new supplier requests", r.stderr)
+
+    def test_a_ticket_that_could_not_be_filed_fails_the_run_after_the_digest_goes_out(self):
+        self.problems = "Example Co: creating the item: jira said no"
+        self.write_supplier()
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("jira said no", r.stderr)
+        c = self.calls()
+        self.assertTrue(any(x.startswith("mailer --lane supplier") for x in c), "the digest must still go out")
+        self.assertTrue(any("--commit-seen" in x for x in c), "and the requests be recorded as reported")
+
+    def test_unknown_arguments_are_refused(self):
+        r = self.run_it("--for-real", "--file-jira")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("unknown argument", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

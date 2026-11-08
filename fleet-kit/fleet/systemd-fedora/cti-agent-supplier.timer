@@ -1,0 +1,16 @@
+[Unit]
+Description=Supplier-request lane, daily 07:45 local
+
+[Timer]
+# Every morning. Requests arrive on working days, but a request that comes in on
+# a Friday evening should not wait until Monday, and a day with none sends no
+# email. The installer pins the time to FLEET_TIMEZONE with FLEET_SUPPLIER_TIME;
+# without a timezone it runs on the system clock. Off until the operator enables
+# it, and the lane does nothing until SUPPLIER_ADDRESS is set.
+OnCalendar=*-*-* 07:45:00
+AccuracySec=1min
+Persistent=true
+Unit=cti-agent-supplier.service
+
+[Install]
+WantedBy=timers.target

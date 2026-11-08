@@ -335,6 +335,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-alert` | systemd `OnFailure=`, and `run-appscan` | Makes a failed unit loud. Always exits 0 — a non-zero exit would mark the *alerter* failed and make `systemctl --failed` misleading |
 | `cti-appscan` | `run-appscan`, weekly | The application-security report, from the DAST scanner's own completion emails, with the KnowledgeBase fix for each finding and one Jira ticket per application (filed by `cti-jira --appscan-tickets`, assigned to the owner in `app-owners.txt`, with optional `watchers=`). Labels every count *authenticated* or *unauthenticated* scan, because a zero from a scan that never logged in is not the same number. Raises a fault only when a configured credential **failed**, or a scan did not finish |
 | `cti-vmscan` | `run-vmscan`, weekly | The Qualys VM scan report: the newest "Scan Results" notice for each scheduled scan, combined into one email with the scans kept separate. A scheduled scan with no result, or one that did not finish, is the first thing it says. Sends nothing itself; records the notices it used so the mailbox cleanup archives them |
+| `cti-supplier` | `run-supplier`, daily | The supplier-request lane: finds new requests in the shared mailbox (address in To or Cc), reads each one's form (an `.xlsx`; never the tax or bank attachments) and message text, and after a no-tools model has judged each, checks the answer in code (it can only move toward Unsure), files a Kanban item for each Yes or Unsure, and writes one digest. Sends nothing itself; chained to `cti-mailer --lane supplier` |
 | `cti-appreport` | `run-appowners`, daily; `run-appscan` when `WAS_ATTACH_REPORT=1`; by hand to test | Fetches the DAST scanner's own per-application report (Qualys WAS: create, poll, download, delete) as a zip for `cti-jira --appscan-reports` to attach. Writes files only; the report carries the scan account's session cookies, so it is `0600` and deleted after attaching. The scanner is chosen by `APPSCAN_REPORT_PROVIDER` through `appscan.ReportFetcher` |
 | `cti-domains` | `run-domains`, weekly | The domains check: registrar (read-only GoDaddy token, never auth codes), DNS, web, verified TLS, and mail posture by role, diffed against last week's state. Sends nothing; chained to `cti-mailer --lane dom`. `--actions-out` writes the DNS changes for `cti-jira --domains-actions` |
 | `cti-budget` | `run-checkin`, before each beat | Rations the orchestrator's share of a shared Claude subscription: window and daily ceilings, exponential backoff after a rate limit |
@@ -384,6 +385,7 @@ cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
 cmd/cti-alert/                 failure alerter, invoked by systemd OnFailure=
 cmd/cti-appscan/               weekly application-security report from DAST email
 cmd/cti-vmscan/                weekly Qualys VM scan report: the two scheduled scans combined
+cmd/cti-supplier/              supplier-request lane: find, judge, file Kanban items, digest
 cmd/cti-appreport/             the scanner's own per-application report, zipped, for the Jira ticket
 cmd/cti-domains/               weekly domains check: registrar, DNS, web, mail records
 cmd/cti-budget/                model-quota ledger for the orchestrator heartbeat
@@ -420,6 +422,8 @@ internal/qualysrl/             header-driven Qualys API rate limiter (WAS client
 internal/domains/              inventory, probes, findings by role, week-over-week diff
 internal/vmscan/               Qualys VM scan-result notices: parser, the two weeklies combined, the report
 internal/netmap/               network spreadsheet (.xlsx) against Qualys Asset Groups, by address; operator rules
+internal/xlsx/                 reads an .xlsx workbook with the standard library only
+internal/supplier/             supplier request form reader, attachment policy, judgement checks, Jira item, digest
 internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
 internal/vulnlookup/           provider-neutral lookup interface and result types
 internal/vulnlookup/qualys/    Qualys implementation
@@ -432,7 +436,7 @@ fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
 fleet-kit/fleet/lanes/         enrich, scout, brief, mailer
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday,
-                               run-appscan, run-vmscan, run-domains, run-mailbox-cleanup,
+                               run-appscan, run-vmscan, run-supplier, run-domains, run-mailbox-cleanup,
                                fleet-board, fleet-db, fleet-journal,
                                fleet-timers, checkin-bash-guard
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions

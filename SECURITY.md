@@ -16,6 +16,7 @@ A threat model that claims controls it does not have is worse than none.
 - [Reporting a vulnerability](#reporting-a-vulnerability)
 - [What this system handles](#what-this-system-handles)
 - [Trust boundaries](#trust-boundaries)
+- [The supplier-request lane: untrusted mail reaching a model with no tools](#the-supplier-request-lane-untrusted-mail-reaching-a-model-with-no-tools)
 - [AI triage: untrusted input reaching a model with tools](#ai-triage-untrusted-input-reaching-a-model-with-tools)
 - [Data sensitivity: the report is a targeting list](#data-sensitivity-the-report-is-a-targeting-list)
 - [Credentials and secrets](#credentials-and-secrets)
@@ -81,6 +82,35 @@ input.** Anyone can send mail to a published security address. Every design
 decision downstream of the mailbox assumes the sender is hostile.
 
 ---
+
+## The supplier-request lane: untrusted mail reaching a model with no tools
+
+The first live use of a model on untrusted input is the supplier-request lane
+(`run-supplier`), and it is built to the narrowest version of the design below:
+the model has **no tools at all**. Each request is passed on stdin to
+`claude -p` started with `--tools ""`, `--strict-mcp-config`,
+`--no-session-persistence` and project-only settings, from an empty work
+directory. It cannot read, write, run or send anything; it returns one JSON
+object. The standing instructions are root-owned
+(`/opt/cti-agent/agents/supplier/CLAUDE.md`), and the sender, subject, form and
+text are all inside an untrusted block whose markers are removed from hostile
+text.
+
+What code does with the answer is the control. `cti-supplier` parses it
+strictly, requires every quoted line to appear in the request, and can **only
+move an answer toward Unsure**: a No is refused when the form was not read, when
+the name or notes hold a technology word, or when the request tried to steer the
+reader, and output code cannot use is Unsure. An attacker who fully controls the
+request can therefore make the lane ask a person; they cannot make it say No.
+The attachments the lane may open are `.xlsx` forms only, by a policy that
+refuses names like w9, bank, routing, void, tax, irs and ach, so the scanned tax
+and bank files are never fetched. The lane never replies to a requester and
+never moves their mail.
+
+Not verified here: the `claude` flags above were checked against the installed
+CLI's `--help`, not exercised against the API, so run
+`sudo cti-agent run-supplier --dry-run` with `SUPPLIER_MODEL` set before
+enabling the timer.
 
 ## AI triage: untrusted input reaching a model with tools
 

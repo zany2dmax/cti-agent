@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+#
+# run-supplier - the supplier-request lane: judge each new supplier request,
+# file a Kanban item for the ones that may be critical, and email the security
+# team one digest that points at the board.
+#
+# The shared mailbox is on the supplier-request distribution list. Each request
+# (a conversation with SUPPLIER_ADDRESS in To or Cc) is read - the message text
+# and the supplier request form, never the W-9 or bank attachments - and judged
+# against one question: will this supplier touch company data, systems or
+# networks, or provide technology? A Yes or an Unsure gets a Jira item in
+# SUPPLIER_JIRA_PROJECT; a No appears in the digest only.
+#
+# THE MODEL. With SUPPLIER_MODEL set, each request is shown to a Claude session
+# that has NO tools, no MCP servers, no session file and no hooks: it reads one
+# file and writes one JSON object. cti-supplier checks every claim in that
+# object against the request and only ever moves an answer toward Unsure. With
+# SUPPLIER_MODEL unset, or the model down, or its output unusable, a request is
+# Unsure - the lane degrades toward asking a person, never toward a No.
+#
+# Recipients are SUPPLIER_TO, checked against SUPPLIER_ALLOW_TO, which has no
+# fallback: unset means the mailer refuses. See cti-mailer(1).
+#
+# USAGE (one of the three is required; with none it prints usage and exits 2)
+#   run-supplier --for-real   judge, file the items, send the digest, record the
+#                             requests as reported
+#   run-supplier --dry-run    judge and render, file and send nothing, record nothing
+#   run-supplier --to-dev     test send of the digest to FLEET_DEV_EMAIL only; no items filed
+set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+
+# Sourced here AND loaded by the binary, as every runner does: the `sudo
+# cti-agent` wrapper passes only the layout variables, so the credentials can
+# only arrive through fleet.env.
+FLEET_HOME="${FLEET_HOME:-$HOME}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+set +a
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+export FLEET_HOME FLEET_CODE
+STATE="$FLEET_HOME/state"
+
+fail() { echo "[run-supplier] error: $*" >&2; exit 1; }
+log()  { echo "[run-supplier] $*" >&2; }
+
+DRY=""
+REAL=""
+TODEV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)  DRY="--dry-run" ;;
+    --for-real) REAL=1 ;;
+    --to-dev)   TODEV=1 ;;
+    *)          fail "unknown argument: $1 (only --dry-run, --for-real and --to-dev are accepted)" ;;
+  esac
+  shift
+done
+fleet_require_mode run-supplier "$DRY" "$REAL" "$TODEV" allow-dev
+if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
+  fail "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"
+fi
+
+SUPPLIER="$FLEET_CODE/bin/cti-supplier"
+MAILER="$FLEET_CODE/bin/cti-mailer"
+[ -x "$SUPPLIER" ] || fail "cti-supplier not found at $SUPPLIER - rerun the installer"
+[ -x "$MAILER" ] || fail "cti-mailer not found at $MAILER - rerun the installer"
+
+# cti-supplier needs a mode too. Only --for-real files items and records the
+# requests as reported; a dry run and a test send do neither.
+if [ -n "$REAL" ]; then SMODE="--for-real"; else SMODE="--dry-run"; fi
+
+mkdir -p "$STATE"
+chmod 0700 "$STATE" 2>/dev/null || true
+STAMP="$(date -u +%Y-%m-%d)"
+WORK="$STATE/supplier-work-$STAMP"
+# The work directory holds the form's answers and hostile mail text: private,
+# fresh each run.
+rm -rf "$WORK"
+mkdir -m 0700 "$WORK"
+
+"$SUPPLIER" "$SMODE" --collect "$WORK" \
+  || fail "cti-supplier --collect exited non-zero (check outbound 443 to Graph)"
+
+shopt -s nullglob
+INPUTS=("$WORK"/*.input.txt)
+shopt -u nullglob
+if [ "${#INPUTS[@]}" -eq 0 ]; then
+  log "no new supplier requests - nothing to judge or send"
+  rm -rf "$WORK"
+  log "done"
+  exit 0
+fi
+log "${#INPUTS[@]} new request(s)"
+
+# ── the model ───────────────────────────────────────────────────────────────
+judge_all() {
+  local instr="${SUPPLIER_INSTRUCTIONS:-$FLEET_CODE/agents/supplier/CLAUDE.md}"
+  local claude="${CLAUDE_BIN:-}"
+  [ -n "$claude" ] || claude="$(command -v claude 2>/dev/null || true)"
+  if [ -z "${SUPPLIER_MODEL:-}" ]; then
+    log "SUPPLIER_MODEL is not set: no judgement is run, so every request is Unsure and gets a Kanban item"
+    return 0
+  fi
+  if [ ! -r "$instr" ]; then
+    log "warn: the agent's instructions are not at $instr - no judgement is run, every request is Unsure"
+    return 0
+  fi
+  if [ -z "$claude" ] || [ ! -x "$claude" ]; then
+    log "warn: the claude binary was not found (set CLAUDE_BIN in $FLEET_ENV) - no judgement is run, every request is Unsure"
+    return 0
+  fi
+  local prompt; prompt="$(cat "$instr")"
+  local limit=()
+  if command -v timeout >/dev/null 2>&1; then limit=(timeout "${SUPPLIER_MODEL_TIMEOUT:-180}"); fi
+  local in out ok=0 bad=0
+  for in in ${INPUTS[@]+"${INPUTS[@]}"}; do
+    out="${in%.input.txt}.result.json"
+    # No tools (--tools ""), no MCP servers, no session file, no settings from
+    # the host (the working directory is the empty work directory, and only
+    # project settings are read). The request is data on stdin, not a prompt
+    # the model is asked to obey; the standing instructions are the system prompt.
+    if ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
+          --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
+          --system-prompt "$prompt" < "$in" > "$out.tmp" 2> "$out.err" ) && [ -s "$out.tmp" ]; then
+      mv "$out.tmp" "$out"; ok=$((ok + 1))
+    else
+      rm -f "$out.tmp"; bad=$((bad + 1))
+      log "warn: no usable judgement for $(basename "$in") ($(head -c 200 "$out.err" 2>/dev/null | tr '\n' ' ')) - it will be Unsure"
+    fi
+    rm -f "$out.err"
+  done
+  log "judged $ok request(s); $bad without a judgement"
+}
+judge_all
+
+# ── file, render ────────────────────────────────────────────────────────────
+"$SUPPLIER" "$SMODE" --finish "$WORK" \
+  || fail "cti-supplier --finish exited non-zero"
+
+PROBLEMS=0
+if [ -s "$WORK/problems.txt" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do log "problem: $line"; done < "$WORK/problems.txt"
+  PROBLEMS=1
+fi
+
+# ── send ────────────────────────────────────────────────────────────────────
+if [ -s "$WORK/digest.subject" ]; then
+  SUBJECT="$(head -n 1 "$WORK/digest.subject")"
+  log "subject: $SUBJECT"
+  if [ -n "$TODEV" ]; then
+    # FLEET_DEV_EMAIL only. SUPPLIER_TO / SUPPLIER_ALLOW_TO are not consulted,
+    # so a test works before the lane's audience is configured.
+    # shellcheck disable=SC2086
+    "$MAILER" --to-dev --html "$WORK/digest.html" --text "$WORK/digest.txt" --subject "$SUBJECT" $DRY \
+      || fail "test send failed"
+  else
+    # shellcheck disable=SC2086
+    "$MAILER" --lane supplier --html "$WORK/digest.html" --text "$WORK/digest.txt" --subject "$SUBJECT" "${DRY:---for-real}" \
+      || fail "send failed - if SUPPLIER_TO or SUPPLIER_ALLOW_TO is unset the mailer refuses by design"
+    # Sent: record the requests as reported so tomorrow's digest does not list
+    # them again. Non-fatal - the digest is out, and the worst case is that a
+    # request is listed once more (the Kanban item is found by its label, never
+    # filed twice).
+    if [ -z "$DRY" ] && [ -s "$WORK/seen.json" ]; then
+      "$SUPPLIER" --for-real --commit-seen "$WORK/seen.json" \
+        || log "warn: could not record the requests as reported; they may be listed again tomorrow"
+    fi
+  fi
+else
+  log "no digest to send"
+fi
+
+if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
+  log "nothing was filed or recorded. The work is in $WORK (it holds request text - delete it when done)"
+else
+  rm -rf "$WORK"
+fi
+[ "$PROBLEMS" = 0 ] || fail "some Kanban items could not be filed (see the problems above); the digest went out"
+log "done"

@@ -1,0 +1,168 @@
+.TH RUN-SUPPLIER 1 "2026-11-08" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+run-supplier \- supplier-request lane: judge each new supplier request, file a Kanban item for the critical or unsure ones, email one digest
+.SH SYNOPSIS
+.B run\-supplier
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
+.PP
+.B sudo cti\-agent run\-supplier
+.RB ( \-\-dry\-run | \-\-for\-real | \-\-to\-dev )
+.SH DESCRIPTION
+The shared mailbox is on the supplier-request distribution list.
+.B run-supplier
+runs
+.BR cti\-supplier (1)
+to find each new request (a conversation with
+.B SUPPLIER_ADDRESS
+in To or Cc) and read it: the message text and the supplier request form, never
+the W\-9 or bank attachments. Each request is judged against one question: will
+this supplier touch company data, systems or networks, or provide technology? A
+Yes means the supplier is critical and has to go through third\-party risk
+management; a No is a supplier of materials or other non\-technology goods.
+.PP
+A Yes or an Unsure gets an item on the security team's Kanban board (Jira
+project
+.BR SUPPLIER_JIRA_PROJECT ).
+An Unsure is treated as critical: it means the lane could not determine a
+certain Yes, so a person has to look. A No gets no item and appears in the digest
+only. One digest email goes to the security team, pointing at the board, and a
+day with no new requests sends nothing.
+.SS The model
+With
+.B SUPPLIER_MODEL
+set, each request is shown to a Claude session started with no tools, no MCP
+servers, no session file and no settings from the host. It reads one file and
+writes one JSON object. Its instructions are in
+.BR agents/supplier/CLAUDE.md .
+.BR cti\-supplier (1)
+then checks every claim against the request and only ever moves an answer toward
+Unsure: a Yes or No needs a quote copied from the request; a No is refused when
+the form was not read, when the name or notes hold a technology word, or when the
+request tried to steer the reader.
+.PP
+With
+.B SUPPLIER_MODEL
+unset, or the model missing or down, or its output unusable, a request is Unsure.
+The lane degrades toward asking a person, never toward a No.
+.PP
+Recipients are
+.BR SUPPLIER_TO ,
+checked against
+.BR SUPPLIER_ALLOW_TO ,
+neither of which has a fallback: unset means the mailer refuses. It is run by
+.B cti\-agent\-supplier.service
+as
+.B run\-supplier \-\-for\-real
+from
+.BR cti\-agent\-supplier.timer ,
+daily at 07:45 local (the installer pins it to
+.B FLEET_TIMEZONE
+with
+.BR FLEET_SUPPLIER_TIME ).
+It is off until enabled, and does nothing until
+.B SUPPLIER_ADDRESS
+is set.
+.SH HOW TO RUN
+\fBrun\-supplier\fR files tickets and mails a digest, so it has no default: it has to be told how to run. Give exactly one of
+\fB\-\-dry\-run\fR (judge and render; file nothing, send nothing, record nothing), \fB\-\-for\-real\fR (file the items, send the digest,
+record the requests as reported), or \fB\-\-to\-dev\fR (a test send of the digest to FLEET_DEV_EMAIL only; no items are filed).
+With none it prints a usage message and exits 2 without doing anything, and two that contradict each other are refused the same way.
+.SH OPTIONS
+A shell argument, matched exactly. Any other argument is refused.
+.TP
+.B \-\-dry\-run
+Judge the new requests and render the digest. The mailbox is read and the model
+is called, but nothing is filed in Jira, nothing is sent and nothing is recorded.
+The work directory under
+.B state/
+is kept so the digest can be read; it holds request text, so delete it when done.
+.TP
+.B \-\-for\-real
+File the Kanban items, send the digest to the lane's recipients, and record the
+requests as reported so tomorrow's digest does not list them again.
+.TP
+.B \-\-to\-dev
+Mail the digest to
+.B FLEET_DEV_EMAIL
+only, subject prefixed [DEV TEST]. No items are filed and nothing is recorded.
+.SH ENVIRONMENT
+.TP
+.B SUPPLIER_ADDRESS
+The supplier-request address. Unset: the lane does nothing.
+.TP
+.B SUPPLIER_TO
+.TQ
+.B SUPPLIER_ALLOW_TO
+Recipients and the allowlist they are checked against. No fallback.
+.TP
+.B SUPPLIER_MODEL
+The model alias or id that judges each request. Unset: every request is Unsure.
+.TP
+.B SUPPLIER_JIRA_PROJECT
+The project for the Kanban items; it must also be in
+.BR JIRA_ALLOW_CREATE .
+.TP
+.B SUPPLIER_JIRA_TYPE
+The issue type (default Task).
+.TP
+.B SUPPLIER_OWNER_EMAIL
+The Jira user the items are assigned to. An unknown user leaves them unassigned.
+.TP
+.B SUPPLIER_BOARD_URL
+.TQ
+.B SUPPLIER_BOARD_NAME
+The board's https link and what the digest calls it.
+.TP
+.B SUPPLIER_QUESTION
+.TQ
+.B SUPPLIER_MEANING
+.TQ
+.B SUPPLIER_TPRM
+.TQ
+.B SUPPLIER_UNSURE_TEXT
+The organisation's own wording for the question, what a Yes means, the risk
+process, and what an Unsure item says. Generic defaults apply.
+.TP
+.B SUPPLIER_TECH_TERMS
+Comma\-separated words that stop a No from standing. Unset: built\-in list; set
+and empty: none.
+.TP
+.B SUPPLIER_FORM_TYPES
+File types that may be read (default .xlsx). Names that look like a tax or bank
+form are refused whatever the type.
+.TP
+.B SUPPLIER_WINDOW_DAYS
+How far back to look (default 3).
+.TP
+.B FLEET_SUPPLIER_TIME
+When the installer pins the timer, in
+.BR FLEET_TIMEZONE .
+.SH EXIT STATUS
+.TP
+.B 0
+The digest was sent (or rendered, for
+.BR \-\-dry\-run ), or there was nothing new.
+.TP
+.B 1
+cti\-supplier or cti\-mailer failed, a binary is missing, or one or more Kanban
+items could not be filed. In the last case the digest still went out and the
+requests were recorded; the problem is in the journal and the failure alert.
+.TP
+.B 2
+No mode was given, or an unknown argument.
+.SH EXAMPLES
+Rehearse today's requests:
+.PP
+.EX
+sudo cti\-agent run\-supplier \-\-dry\-run
+.EE
+.PP
+Send the digest to yourself first:
+.PP
+.EX
+sudo cti\-agent run\-supplier \-\-to\-dev
+.EE
+.SH SEE ALSO
+.BR cti\-supplier (1),
+.BR cti\-mailer (1),
+.BR cti\-jira (1)

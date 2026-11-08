@@ -69,6 +69,31 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   14; 0 turns traces off) and `CHECKIN_TRACE_MAX_MB` (default 20) in
   `fleet.env`.
 
+- **The supplier-request lane: judge each new supplier request and point the
+  security team at their Kanban board.** `run-supplier` (timer
+  `cti-agent-supplier`, daily 07:45, `FLEET_SUPPLIER_TIME`, off until enabled;
+  does nothing until `SUPPLIER_ADDRESS` is set) finds each new request in the
+  shared mailbox - a conversation with that address in To or Cc - reads the
+  message text and the supplier request form (an `.xlsx`, read by its labels;
+  never the W-9 or bank attachments, which a policy refuses by type and by
+  name), and judges it: will this supplier touch company data, systems or
+  networks, or provide technology? A Yes, and an Unsure (no certain Yes, so
+  treated as critical), each get a Jira item in `SUPPLIER_JIRA_PROJECT` (found
+  again by a label, never filed twice); a No appears in the digest only. One
+  digest email to `SUPPLIER_TO`, checked against `SUPPLIER_ALLOW_TO` (no
+  fallback), links the board; a day with no new requests sends nothing. A form
+  shared as a link is not opened - that request is Unsure, with the reason.
+  The judgement is a Claude session with **no tools** (`SUPPLIER_MODEL`); code
+  checks its quotes against the request and can only move an answer toward
+  Unsure, and with no model, or one that is down, every request is Unsure.
+  New commands `cti-supplier` and `run-supplier`, with man pages; new
+  packages `internal/supplier` and `internal/xlsx` (the `.xlsx` reader moved
+  out of `internal/netmap`, behaviour unchanged). **Upgrade:** re-run the
+  installer; set the `SUPPLIER_*` settings in `fleet.env` (see
+  `fleet.env.example`), add the project to `JIRA_ALLOW_CREATE`, run
+  `sudo cti-agent run-supplier --dry-run`, then `--to-dev`, then enable
+  `cti-agent-supplier.timer`.
+
 - **The weekly Qualys VM scan report: the two scheduled scans in one email.**
   `run-vmscan` (timer `cti-agent-vmscan`, Mondays 08:00, `FLEET_VMSCAN_TIME`)
   reads the "Qualys: Scan Results" notices for "Weekly Scheduled Scan for

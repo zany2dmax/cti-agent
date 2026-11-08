@@ -270,9 +270,10 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent cti-appscan --since 336h --out FILE` | The report over any window, by hand. Sends nothing; chain it to `cti-mailer --lane was` |
 | `sudo cti-agent run-domains --dry-run` | The weekly domains check, rendered to `state/`, sent nowhere, baseline not advanced, Jira lock-down ticket only previewed |
 | `sudo cti-agent run-vmscan --dry-run` | The weekly VM scan report (the two scheduled scans combined, plus the network spreadsheet coverage check), rendered to `state/`, sent nowhere. `run-vmscan --to-dev` mails it to `FLEET_DEV_EMAIL` only |
+| `sudo cti-agent run-supplier --dry-run` | The supplier-request lane: judges each new request and renders the digest into `state/`; files nothing, sends nothing, records nothing. `run-supplier --to-dev` mails the digest to `FLEET_DEV_EMAIL` only |
 | `sudo cti-agent cti-vmscan --subnets-file FILE.xlsx --out F.html --text-out F.txt --csv-out F.csv` | The same report and coverage check by hand against a downloaded copy of the spreadsheet. Sends nothing; the files land in `/var/lib/cti-agent/` |
 | `sudo cti-agent run-patchtuesday --dry-run` | The monthly synopsis, sent nowhere, manifest untouched. **Run by hand for now** - see [The monthly Patch Tuesday synopsis](#the-monthly-patch-tuesday-synopsis) |
-| `sudo cti-agent run-<lane> --to-dev` | Test send for `run-digest`, `run-patchtuesday`, `run-appscan`, `run-vmscan` and `run-domains`: the real lane, mailed to `FLEET_DEV_EMAIL` only (subject `[DEV TEST] ...`), with everything else a dry run - nothing recorded, no tickets, no baseline. `cti-alert --to-dev` likewise |
+| `sudo cti-agent run-<lane> --to-dev` | Test send for `run-digest`, `run-patchtuesday`, `run-appscan`, `run-vmscan`, `run-supplier` and `run-domains`: the real lane, mailed to `FLEET_DEV_EMAIL` only (subject `[DEV TEST] ...`), with everything else a dry run - nothing recorded, no tickets, no baseline. `cti-alert --to-dev` likewise |
 | `sudo cti-agent cti-mailer --to-dev --html FILE --subject S` | Send any rendered file to `FLEET_DEV_EMAIL` only, subject `[DEV TEST] ...`, to see it in a real mail client without mailing the team |
 | `sudo cti-agent mailer.py --check` | Decode the token, list granted app roles |
 | `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |

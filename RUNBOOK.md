@@ -1187,6 +1187,67 @@ Scan Notification go to Deleted Items on the same timing; they are matched to
 the run (report reference, or title and launch time), never by subject alone.
 An unfinished scan's notices stay in the inbox for a person.
 
+
+### The supplier-request lane (run-supplier)
+
+`cti-agent-supplier.timer`, every day 07:45 (`FLEET_SUPPLIER_TIME`), runner
+`run-supplier`. **Off until you enable it, and it does nothing until
+`SUPPLIER_ADDRESS` is set.** The shared mailbox is on the supplier-request
+distribution list; each new request (a conversation with that address in To or
+Cc) is read and judged against one question: will this supplier touch company
+data, systems or networks, or provide technology? A **Yes** means the supplier
+is critical and has to go through third-party risk management; a **No** is a
+supplier of materials or other non-technology goods. A Yes, and an **Unsure**,
+each get a Kanban item in `SUPPLIER_JIRA_PROJECT`; a No appears in the digest
+only. One digest to the security team points at the board; a day with nothing
+new sends nothing.
+
+What it reads: the message text and the supplier request form, an `.xlsx`
+attachment read by its labels (so a second version of the form still works).
+It **never opens the W-9 or bank attachments**: only `.xlsx` files are read, and
+a name containing w9, bank, routing, void, tax, irs or ach is refused whatever
+its type. A form shared as a link in the message instead of attached is not
+opened; that request is Unsure, with the reason on the item. It never replies to
+the requester and never moves their mail.
+
+An **Unsure** is not a failure: it says the lane could not determine a certain
+Yes, so a person decides. It is also what every request becomes when
+`SUPPLIER_MODEL` is unset, `claude` is missing, or the model's answer cannot be
+used, so a broken model means more to-dos, never a supplier waved through.
+
+```bash
+sudo cti-agent run-supplier --dry-run   # judge and render into state/; file, send and record nothing
+sudo cti-agent run-supplier --to-dev    # the digest to FLEET_DEV_EMAIL only; no items filed
+sudo cti-agent run-supplier --for-real  # file the items, send the digest, record the requests as reported
+```
+
+**To turn it on**, in `/etc/cti-agent/fleet.env` (see `fleet.env.example`): set
+`SUPPLIER_ADDRESS`, `SUPPLIER_TO` and `SUPPLIER_ALLOW_TO` (own pair, no
+fallback), `SUPPLIER_JIRA_PROJECT` (also in `JIRA_ALLOW_CREATE`) with
+`SUPPLIER_OWNER_EMAIL`, and `SUPPLIER_BOARD_URL`. Set `SUPPLIER_MODEL` (an alias
+such as `sonnet`) and make sure `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
+is set. Then run `--dry-run` and read the digest and the items it says it would
+file (the work directory under `state/` is kept after a dry run and holds the
+request text, so delete it), then `--to-dev`, then enable the timer. The
+installer builds `cti-supplier` and puts the model's instructions at
+`/opt/cti-agent/agents/supplier/CLAUDE.md`, root-owned.
+
+A request is reported once (`state/supplier-seen.json` holds a label and a date,
+no names), and its Kanban item is found again by a label rather than filed twice,
+so a rerun after a failure is safe. If an item cannot be filed (the project is
+not in `JIRA_ALLOW_CREATE`, Jira is down) the digest still goes out and the run
+fails after it, so the failure alert fires and the request is not lost.
+
+The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` and
+`SUPPLIER_UNSURE_TEXT` (generic defaults apply), and `SUPPLIER_TECH_TERMS`, the
+words that stop a No from standing (a supplier whose name, subject or notes hold
+one is Unsure, not No).
+
+**Not yet verified:** the `claude` flags the runner passes (no tools, no MCP, no
+session file) were checked against `claude --help`, not run against the API; the
+tests use stub programs. The first `--dry-run` with `SUPPLIER_MODEL` set is the
+real check.
+
 ### Reports to application owners, by email
 
 `cti-agent-appowners.timer`, daily 07:15, runner `run-appowners`. For every

@@ -319,6 +319,12 @@ done
 # copy of the same values.
 run install -m 0644 -o root -g root "$SRC/fleet/lanes/email-tokens.json" "$CODE_DIR/lanes/email-tokens.json"
 info "lanes/email-tokens.json"
+# The supplier-request lane's standing instructions: the system prompt of the
+# no-tools model that judges each request. Root-owned like the code, so the
+# service account cannot rewrite what its own model is told. Data, not code: 0644.
+run install -d -m 0755 -o root -g root "$CODE_DIR/agents/supplier"
+run install -m 0644 -o root -g root "$SRC/fleet/agents/supplier/CLAUDE.md" "$CODE_DIR/agents/supplier/CLAUDE.md"
+info "agents/supplier/CLAUDE.md"
 # The list of fleet commands and what each takes, and what answers questions
 # about it: `cti-agent` with no arguments, `cti-agent CMD --help`, and the TAB
 # completions all read this one file.
@@ -710,6 +716,15 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-vmscan"
   ok "built $CODE_DIR/bin/cti-vmscan"
 
+  # Supplier-request lane: judge each new supplier request, file a Kanban item
+  # for the critical or unsure ones, and email one digest. Sends through
+  # cti-mailer --lane supplier, which refuses unless SUPPLIER_TO and
+  # SUPPLIER_ALLOW_TO are both set, and does nothing at all until
+  # SUPPLIER_ADDRESS is set, so installing it does not arm it.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-supplier" ./cmd/cti-supplier )
+  chmod 0755 "$CODE_DIR/bin/cti-supplier"
+  ok "built $CODE_DIR/bin/cti-supplier"
+
   # The scanner's own report per application, for the AppSec tickets. Writes
   # files only; run-appscan calls it when WAS_ATTACH_REPORT=1.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-appreport" ./cmd/cti-appreport )
@@ -771,7 +786,7 @@ ok "daemon-reload"
 # looked correct and silently did nothing.
 TZFAIL=0
 FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"; MAILBOX_AT="07:00:00"
-APPOWNERS_AT="07:15:00"; APPSCAN_AT="07:30:00"; DOMAINS_AT="08:00:00"; VMSCAN_AT="08:00:00"
+APPOWNERS_AT="07:15:00"; APPSCAN_AT="07:30:00"; DOMAINS_AT="08:00:00"; VMSCAN_AT="08:00:00"; SUPPLIER_AT="07:45:00"
 if [ -r "$CONF_DIR/fleet.env" ]; then
   # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
   # version did to a real install. An absent key must read as empty here: every
@@ -785,6 +800,7 @@ if [ -r "$CONF_DIR/fleet.env" ]; then
   APPSCAN_AT="$(cfgval FLEET_APPSCAN_TIME)";       APPSCAN_AT="${APPSCAN_AT:-07:30:00}"
   DOMAINS_AT="$(cfgval FLEET_DOMAINS_TIME)";       DOMAINS_AT="${DOMAINS_AT:-08:00:00}"
   VMSCAN_AT="$(cfgval FLEET_VMSCAN_TIME)";         VMSCAN_AT="${VMSCAN_AT:-08:00:00}"
+  SUPPLIER_AT="$(cfgval FLEET_SUPPLIER_TIME)";     SUPPLIER_AT="${SUPPLIER_AT:-07:45:00}"
 fi
 
 if [ -n "$FLEET_TZ" ]; then
@@ -803,6 +819,7 @@ if [ -n "$FLEET_TZ" ]; then
                 "cti-agent-appscan.timer:Fri *-*-* $APPSCAN_AT" \
                 "cti-agent-domains.timer:Tue *-*-* $DOMAINS_AT" \
                 "cti-agent-vmscan.timer:Mon *-*-* $VMSCAN_AT" \
+                "cti-agent-supplier.timer:*-*-* $SUPPLIER_AT" \
                 "cti-agent-patchtuesday.timer:Wed *-*-09..15 $PATCHTUE_AT"; do
       unit="${pair%%:*}"; cal="${pair#*:}"
       # Parse every schedule before writing it: a typo in one time must fail
@@ -1053,7 +1070,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" \
          "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
-         "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" \
+         "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi

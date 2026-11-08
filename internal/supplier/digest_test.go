@@ -43,7 +43,7 @@ func TestTheDigestPointsAtTheBoardAndCountsEachVerdict(t *testing.T) {
 	}
 	// Critical first, then unsure, then not critical.
 	ic, iu, in := strings.Index(b.Text, "CRITICAL - Cloud Backup"), strings.Index(b.Text, "UNSURE - Mystery"), strings.Index(b.Text, "NOT CRITICAL - Gravel")
-	if !(ic >= 0 && ic < iu && iu < in) {
+	if ic < 0 || ic >= iu || iu >= in {
 		t.Errorf("not ordered critical, unsure, not critical:\n%s", b.Text)
 	}
 }

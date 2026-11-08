@@ -92,11 +92,8 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string) 
 	todo := yes + unsure
 	dateStr := day.Format("Monday 2 January 2006")
 
-	var lead string
-	switch {
-	case todo == 0:
-		lead = fmt.Sprintf("%d supplier %s came in and none needs a to-do.", len(reqs), plural(len(reqs), "request", "requests"))
-	default:
+	lead := fmt.Sprintf("%d supplier %s came in and none needs a to-do.", len(reqs), plural(len(reqs), "request", "requests"))
+	if todo > 0 {
 		lead = fmt.Sprintf("%d supplier %s came in. %d %s a to-do on %s.",
 			len(reqs), plural(len(reqs), "request", "requests"), todo, plural(todo, "has", "have"), boardName)
 	}
@@ -161,10 +158,10 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string) 
 		if r.Decision.Reason != "" {
 			lines.WriteString(e(oneLine(r.Decision.Reason, 300)) + "<br>")
 		}
-		lines.WriteString(fmt.Sprintf("Sent by %s, %s", e(oneLine(r.From, 80)), r.Received.UTC().Format("2006-01-02")))
+		fmt.Fprintf(&lines, "Sent by %s, %s", e(oneLine(r.From, 80)), r.Received.UTC().Format("2006-01-02"))
 		if r.TicketKey != "" {
 			if link := safeLink(r.TicketURL); link != "" {
-				lines.WriteString(fmt.Sprintf(` &middot; <a href="%s" style="color:%s">%s</a>`, e(link), emailkit.Navy, e(r.TicketKey)))
+				fmt.Fprintf(&lines, ` &middot; <a href="%s" style="color:%s">%s</a>`, e(link), emailkit.Navy, e(r.TicketKey))
 			} else {
 				lines.WriteString(" &middot; " + e(r.TicketKey))
 			}
