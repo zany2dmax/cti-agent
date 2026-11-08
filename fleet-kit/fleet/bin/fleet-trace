@@ -43,7 +43,7 @@ NAME = re.compile(r"^checkin-\d{8}T\d{6}(-\d+)?\.jsonl$")
 # Untrusted text reaches the operator's terminal through `show`. Anything that
 # is not printable - ANSI escapes above all, which can rewrite what the screen
 # says - is replaced, and newlines are flattened where one line is expected.
-_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def clean(text, limit=None, oneline=True):
@@ -66,7 +66,7 @@ def usage(msg=None):
     sys.exit(2)
 
 
-# ── rendering ───────────────────────────────────────────────────────────────
+# -- rendering ---------------------------------------------------------------
 
 def tool_summary(name, inp):
     """The one argument that says what a tool call was for."""
@@ -207,7 +207,7 @@ def parse(raw):
     return ev if isinstance(ev, dict) else None
 
 
-# ── subcommands ─────────────────────────────────────────────────────────────
+# -- subcommands -------------------------------------------------------------
 
 def cmd_init(args):
     if args:

@@ -3332,8 +3332,14 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         # Zs is every space character except the ordinary one.
         root = pathlib.Path(__file__).resolve().parents[2]
         found = []
-        for pattern in ("**/*.py", "**/*.go", "**/*.sh", "**/*.yml"):
-            for f in root.glob(pattern):
+        # Plus every script with no extension: fleet-kit/fleet/bin is Python
+        # and bash named like commands, and a glob on *.py never saw it. That
+        # is how a regex in fleet-trace shipped with the bidi overrides
+        # themselves in it instead of their escapes, caught only by bandit.
+        scripts = [f for f in root.rglob("*") if f.is_file() and not f.suffix
+                   and ".git" not in f.parts and f.read_bytes()[:2] == b"#!"]
+        for pattern in ("**/*.py", "**/*.go", "**/*.sh", "**/*.yml", scripts):
+            for f in (root.glob(pattern) if isinstance(pattern, str) else pattern):
                 if ".git" in f.parts or "__pycache__" in f.parts:
                     continue
                 try:
