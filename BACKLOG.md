@@ -120,7 +120,8 @@ is real, not before. Finished work moves out of this file into
   **Jira item and digest built (pure builders):** `supplier.TicketSummary` /
   `TicketDescription` / `Labels` / `FindJQL` (one item per conversation, found
   again by a hashed label so a rerun never files twice; Yes and Unsure get an
-  item, a No gets none unless asked; no address, contact or remittance detail
+  item, a No gets none - decided 2026-11-08, a No appears in the digest only,
+  so the lane never sets `includeNo`; no address, contact or remittance detail
   goes in; everything from the request is escaped for Jira wiki markup) and
   `supplier.Digest` (counts, the board link, https links only; no email on a
   day with no requests). Not built: running the model, the lane command that
