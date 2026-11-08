@@ -29,9 +29,11 @@
 // is a person's job.
 //
 // IT ARCHIVES NOTHING ON A DAY NOTHING WAS PROCESSED. The operator's rule is
-// "only after a CTI email is processed". A day where the agent read nothing -
-// because it broke, because the mailbox went quiet, because a credential
-// expired - is a day where nothing should be filed away. Automatic replies
+// "only after the digest has read the mailbox". A day where the agent read
+// nothing but automatic replies - because it broke, because a credential
+// expired - is a day where nothing should be filed away. A day with no CVE is
+// not such a day (see mailbox.ProcessedToday): that gate used to hold every
+// archive on every quiet day. Automatic replies
 // are still deleted (since 1.3.2): that needs no fleet health, and skipping
 // whole days is how out-of-office replies piled up in the inbox.
 package main
@@ -143,9 +145,9 @@ func run() int {
 	ok, todayCount := l.ProcessedToday(time.Now(), loc)
 	hold := ""
 	if !ok {
-		hold = "no CTI email has been processed today, so nothing is filed " +
+		hold = "the digest has read no mail today, so nothing is filed " +
 			"away - the fleet may not be reading the mailbox"
-		fmt.Printf("No CTI email has been processed today (%s): archiving "+
+		fmt.Printf("The digest has read no mail today (%s): archiving "+
 			"nothing, deleting automatic replies only.\n",
 			time.Now().In(loc).Format("2006-01-02"))
 	}
@@ -205,7 +207,7 @@ func run() int {
 	// is almost always one of these two numbers.
 	fmt.Printf("  window %s, archive grace %s, own-report grace %s\n",
 		window, cfg.MailboxMinAge, cfg.MailboxSelfMinAge)
-	fmt.Printf("%s: %d message(s) in the window; %d CTI email(s) processed today\n",
+	fmt.Printf("%s: %d message(s) in the window; %d read by the digest today\n",
 		cfg.GraphMailbox, len(candidates), todayCount)
 	// The leave count is split, because its two halves mean opposite things:
 	// mail the agent read and is not responsible for is a security team's

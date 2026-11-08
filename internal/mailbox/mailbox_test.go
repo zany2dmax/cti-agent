@@ -213,7 +213,7 @@ func TestTheBacklogAlarmCountsOnlyMailTheAgentNeverRead(t *testing.T) {
 
 // ---------------------------------------------------------------- the day gate
 
-func TestTheLaneOnlyRunsOnADayACTIEmailWasProcessed(t *testing.T) {
+func TestTheLaneOnlyRunsOnADayTheDigestReadRealMail(t *testing.T) {
 	loc := time.UTC
 	l := &Log{}
 
@@ -222,17 +222,25 @@ func TestTheLaneOnlyRunsOnADayACTIEmailWasProcessed(t *testing.T) {
 		t.Errorf("empty log: ok=%v n=%d", ok, n)
 	}
 
-	// Read today, but nothing carried a CVE - an inbox full of out-of-office
-	// replies is not a processed CTI day.
-	l.Entries = []Processed{{ID: "a", HasCVE: false, ReadAt: at(6)}}
+	// Read today, but only automatic replies - not evidence that the digest
+	// is reading the mailbox.
+	l.Entries = []Processed{{ID: "a", AutoReply: true, ReadAt: at(6)}}
 	if ok, _ := l.ProcessedToday(at(9), loc); ok {
-		t.Error("auto-replies alone must not count as a processed CTI email")
+		t.Error("auto-replies alone must not count as a day the digest read the mailbox")
 	}
 
-	// A CVE-bearing message today.
-	l.Entries = append(l.Entries, Processed{ID: "b", HasCVE: true, ReadAt: at(6)})
+	// A quiet day: real mail read, none of it naming a CVE. This used to
+	// hold every archive, so the scan notices the weekly lanes own sat in
+	// the inbox on every day the threat feeds had nothing new.
+	l.Entries = append(l.Entries, Processed{ID: "q", HasCVE: false, ReadAt: at(6)})
 	if ok, n := l.ProcessedToday(at(9), loc); !ok || n != 1 {
-		t.Errorf("ok=%v n=%d, want true 1", ok, n)
+		t.Errorf("quiet day: ok=%v n=%d, want true 1 - no CVE is not a broken fleet", ok, n)
+	}
+
+	// A CVE-bearing message today counts as well.
+	l.Entries = append(l.Entries, Processed{ID: "b", HasCVE: true, ReadAt: at(6)})
+	if ok, n := l.ProcessedToday(at(9), loc); !ok || n != 2 {
+		t.Errorf("ok=%v n=%d, want true 2", ok, n)
 	}
 
 	// Yesterday's CVE does not license today's cleanup.
@@ -587,7 +595,7 @@ func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
 	}
 }
 
-// On a day no CTI email was processed nothing is filed away - but
+// On a day the digest read no mail nothing is filed away - but
 // auto-replies still go, which needs no fleet health at all.
 func TestAHeldDayStillDeletesAutoRepliesButArchivesNothing(t *testing.T) {
 	now := at(9)
@@ -596,12 +604,12 @@ func TestAHeldDayStillDeletesAutoRepliesButArchivesNothing(t *testing.T) {
 		{ID: "ooo", Subject: "Automatic reply: away", Received: now},
 		{ID: "own", SelfSent: true, Received: now},
 	}, map[string]Processed{"adv": {ID: "adv", HasCVE: true}},
-		Options{Now: now, HoldArchive: "no CTI email processed today"})
+		Options{Now: now, HoldArchive: "the digest has read no mail today"})
 	byID := map[string]Decision{}
 	for _, d := range plan {
 		byID[d.ID] = d
 	}
-	if byID["adv"].Action != ActionLeave || !strings.Contains(byID["adv"].Reason, "no CTI email") {
+	if byID["adv"].Action != ActionLeave || !strings.Contains(byID["adv"].Reason, "read no mail") {
 		t.Errorf("held advisory: %s %q", byID["adv"].Action, byID["adv"].Reason)
 	}
 	if byID["ooo"].Action != ActionDelete {

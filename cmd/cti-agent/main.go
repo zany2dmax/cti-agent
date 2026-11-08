@@ -278,7 +278,7 @@ func main() {
 		// digest is the ONLY writer of the processed-message log, and that log
 		// is the cleanup lane's only authority to move mail. With no
 		// FLEET_HOME the digest wrote nothing, reported nothing, and
-		// cti-mailbox then answered "No CTI email has been processed today"
+		// cti-mailbox then answered "The digest has read no mail today"
 		// every single day - a refusal indistinguishable from a quiet mailbox,
 		// forever, with both lanes exiting 0 and looking healthy.
 		log.Printf("NOTE: neither FLEET_PROCESSED_LOG nor FLEET_HOME is set, so "+

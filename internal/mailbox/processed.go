@@ -281,13 +281,22 @@ func (l *Log) Index() map[string]Processed {
 	return m
 }
 
-// ProcessedToday reports whether any message was read today in the given
-// location, and how many.
+// ProcessedToday reports whether the digest read real mail today in the given
+// location, and how many messages.
 //
-// This is the "only after a CTI email is processed" gate. It asks specifically
-// for a message that CARRIED A CVE: a day on which the agent read nothing but
-// out-of-office replies has not processed a CTI email, and the cleanup lane
-// must not treat it as a normal day.
+// This is the cleanup lane's health gate: archive only on a day the digest is
+// known to have read the mailbox. "Real mail" means anything but an automatic
+// reply - a day on which the agent read nothing but out-of-office replies is
+// not evidence that it is reading the mailbox, and must not count.
+//
+// IT USED TO ASK FOR A MESSAGE THAT CARRIED A CVE, and that was a bug. A quiet
+// day - the intel newsletters, the Qualys notices and the supplier mail all
+// read, none of them naming a CVE - looked exactly like a broken fleet, so
+// nothing was archived: not the scan notices cti-appscan and cti-vmscan own,
+// on any quiet day, which in a week of "no new CVEs" briefs was most days.
+// Mail held that way for MAILBOX_LOOKBACK_HOURS then fell out of the window
+// and stayed in the inbox for good. Whether the digest found a CVE is a fact
+// about the threat landscape, not about whether the fleet is working.
 func (l *Log) ProcessedToday(now time.Time, loc *time.Location) (bool, int) {
 	if loc == nil {
 		loc = time.UTC
@@ -296,7 +305,7 @@ func (l *Log) ProcessedToday(now time.Time, loc *time.Location) (bool, int) {
 	start := time.Date(y, m, d, 0, 0, 0, 0, loc)
 	n := 0
 	for _, e := range l.Entries {
-		if e.HasCVE && !e.ReadAt.Before(start) {
+		if !e.AutoReply && !e.ReadAt.Before(start) {
 			n++
 		}
 	}

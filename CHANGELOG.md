@@ -192,6 +192,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   Outlook ignores, so "Coverage check" and its like appeared as written. The
   capitals are now written into the heading. **Upgrade:** nothing.
 
+- **The mailbox cleanup archived nothing on a day with no new CVEs.** Its
+  health check ("has the digest read the mailbox today?") asked for a message
+  that carried a CVE, so on a quiet day - newsletters, Qualys notices and
+  supplier mail all read, none naming a CVE - it decided the fleet "may not be
+  reading the mailbox" and held every archive. The Qualys WAS and VM notices
+  the weekly lanes own stayed in the inbox on every such day, and once older
+  than `MAILBOX_LOOKBACK_HOURS` (14 days) they were never looked at again. The
+  check now counts any message the digest read today except automatic
+  replies, so a day of only out-of-office replies still holds. The hold
+  message now reads "the digest has read no mail today". Mail already older
+  than the lookback is not swept by this; a one-off
+  `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m --dry-run` shows
+  what a longer window would do. **Upgrade:** nothing; it takes effect at the
+  next cleanup.
+
 ## 1.5.2 — 2026-11-07
 
 **Upgrade:** pull and re-run the installer. Nothing else is required.

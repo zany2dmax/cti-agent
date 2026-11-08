@@ -1049,10 +1049,12 @@ not in that log. Inferring "processed" from something adjacent, like a report
 existing or a digest having been sent, is true in plenty of cases where the
 message was never read.
 
-**No CTI email processed today, no archiving.** A day where the agent read
-nothing — it broke, a credential expired, the mailbox went quiet — is a day to
-file nothing away. A mailbox full of out-of-office replies and no advisories
-does not count either. Since 1.3.2 the auto-replies themselves are still
+**No mail read today, no archiving.** A day where the digest read nothing —
+it broke, a credential expired, the mailbox went quiet — is a day to file
+nothing away. A day it read only out-of-office replies does not count either.
+A day with no CVE does: whether the feeds named a CVE says nothing about
+whether the fleet is working, and until the fix in the Unreleased CHANGELOG
+that check held every archive on every quiet day. Since 1.3.2 the auto-replies themselves are still
 deleted that day: skipping whole days is how they piled up, and deleting one
 needs no fleet health.
 

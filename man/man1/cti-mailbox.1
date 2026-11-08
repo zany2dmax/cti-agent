@@ -50,9 +50,12 @@ nor
 .BR FLEET_PROCESSED_LOG ),
 stops the run.
 .PP
-When no message carrying a CVE was recorded as read today (in
+When the digest recorded no message as read today (in
 .BR FLEET_TIMEZONE ),
-nothing is archived that day: the fleet may not be reading the mailbox.
+not counting automatic replies, nothing is archived that day: the fleet may
+not be reading the mailbox. A day whose mail named no CVE is not such a day;
+before the fix in the Unreleased changelog it was, and every quiet day held
+every archive.
 Automatic replies are still deleted, and the fleet's own reports still
 archived.
 .PP
@@ -289,7 +292,7 @@ through
 .TP
 .B 0
 The plan was printed (dry run), or every move in it succeeded, or the run
-refused because no CTI email was processed today. The refusal is deliberate:
+refused because the digest read no mail today. The refusal is deliberate:
 a non-zero exit would mark the unit failed and send an alert about a lane
 that behaved correctly. A backlog warning does not change the status.
 .TP

@@ -15,8 +15,8 @@ against the shared CTI mailbox and reports the result on the board.
 .B cti\-mailbox
 moves advisories the digest has a record of reading to Archive, moves
 header-confirmed out-of-office replies to Deleted Items, and leaves
-everything else where it is. It refuses to act on a day with no processed
-CTI email, and that refusal is a success.
+everything else where it is. It archives nothing on a day the digest read
+no mail (automatic replies do not count), and that refusal is a success.
 .PP
 It has no default: it has to be told how to run, with exactly one of
 .B \-\-dry\-run
@@ -131,8 +131,8 @@ Under
 .I mailbox\-cleanup\-DATE.json
 The plan:
 what was archived, deleted and left, and why. 0600. Written on dry and real
-runs alike, but not when the binary refuses because no CTI email was
-processed today; the board line names the path either way.
+runs alike, but not when the binary refuses because the digest read no
+mail today; the board line names the path either way.
 .I DATE
 is the local date, so a later run the same day replaces it.
 .TP

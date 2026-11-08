@@ -441,8 +441,8 @@ nobody watching. Treat the rollout accordingly.
 | A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
 | Everything else | **Left alone** |
 
-On a day no CTI email was processed nothing is archived, but auto-replies
-still go. For a one-off sweep of old auto-replies:
+On a day the digest read no mail (out-of-office replies do not count) nothing
+is archived, but auto-replies still go. For a one-off sweep of old auto-replies:
 `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m --dry-run`, then run it
 again without `--dry-run`.
 
@@ -2082,7 +2082,7 @@ systemctl list-timers 'cti-agent-*' --all
 | `recorded N message(s) in …` | the processed-message log was written; cleanup has something to work from |
 | `distinct CVE(s)` but no `recorded` line | the digest ran but could not write the log — cleanup will refuse every day and look healthy |
 | `NOTE: neither FLEET_PROCESSED_LOG nor FLEET_HOME is set` | the same, with the cause named |
-| `No CTI email has been processed today` | either a genuinely quiet day, or the above. The three commands distinguish them |
+| `The digest has read no mail today` | either an empty mailbox, or the above. The three commands distinguish them (older builds said `No CTI email has been processed today`, and said it on every day without a CVE) |
 | `severity bands for 0 of N` | an old build. That column no longer exists |
 
 ---
