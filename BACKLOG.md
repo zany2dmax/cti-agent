@@ -128,6 +128,22 @@ is real, not before. Finished work moves out of this file into
   services. Resolve every name and report only live hosts missing from
   `domains.txt`, dangling CNAMEs (takeover risk, High) and names new since
   last week; historical names that no longer resolve are dropped
+- *Maybe:* CAA and DNSSEC checks for the domains lane (noted 2026-11-08). First
+  find out whether Qualys already reports them: a search found nothing in
+  Qualys EASM's Domain Security documentation beyond SPF and DKIM, so the
+  likely answer is no, but the docs may lag the product - look in the tenant
+  (CSAM, EASM, Domain Security) or ask the Qualys account manager before
+  building. If it does not, add the small version to the domains lane, Go
+  standard library only like the rest: the CAA lookup (walking up the name
+  until a CAA record is found, since a subdomain inherits its parent's), DS
+  and DNSKEY presence for DNSSEC, and the validating resolver's authenticated
+  (AD) answer bit. Estimate 2 to 3 days without a DNS library (about a day
+  with `miekg/dns`, which would break the no-dependency rule). Reporting
+  rules to settle when it is picked up: whether a missing CAA record is a
+  finding for every domain or only those that send mail or serve a site, and
+  whether DNSSEC counts for a domain parked at the registrar. Security-ratings
+  platforms (Bitsight, UpGuard, SecurityScorecard) score both, so if the
+  company already pays for one, reading its API may beat building this
 - Domains lane, the Proofpoint on Demand Log API half: **built** behind
   `DOMAINS_MAIL_GATEWAY=pod` (off by default; `domains.MailGateway` with
   `podgw` as the first implementation, see [INTERFACES.md](INTERFACES.md) and
@@ -146,19 +162,6 @@ is real, not before. Finished work moves out of this file into
   the exact CertView API endpoints and fields (to be checked against a live
   call, as the sandbox cannot reach Qualys), and whether IT wants a Jira
   ticket per certificate
-- Weekly Qualys scan summary: check the two weekly scans Qualys runs on
-  Thursday and summarize both in one email on Friday. Noted only, not
-  designed; which two scans (and which audience) to be settled when it is
-  picked up
-- Subnet coverage in Qualys: take the network team's subnet spreadsheet and
-  check that every subnet is accounted for in Qualys. Probably a combination
-  of the Asset Groups API (which subnets each asset group holds) and the
-  coverage of the two weekly scans sent on Thursday (which asset groups those
-  scans actually target), so a subnet that is in the spreadsheet but in no
-  scanned asset group is reported. Related to the weekly Qualys scan summary
-  above. Noted only, not designed; open questions: the spreadsheet's format
-  and where it is kept (it must stay out of the repo), how subnets are
-  matched (exact, or contained within a larger range), and who gets the result
 - Fleet housekeeping: watch and trim the fleet's own data so the box never
   fills up quietly - the orchestrator's `board.md` and its archive (rotate or
   trim by size/age), `state/memory.db` (size, rollup and pruning, periodic
