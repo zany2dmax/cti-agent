@@ -561,6 +561,18 @@ journal logs
 .B model:
 on every beat (section 7).
 .TP
+.B CHECKIN_TRACE_DAYS
+Days to keep each beat's trace in
+.IR state/traces ;
+see
+.BR fleet\-trace (1).
+Default 14. 0 runs the beat untraced, in the CLI's text mode. A value that is
+not a number warns and uses 14; it does not stop the beat.
+.TP
+.B CHECKIN_TRACE_MAX_MB
+The most one beat's trace may grow to before it stops recording (the beat
+goes on). Default 20.
+.TP
 .BR ANTHROPIC_API_KEY ", " ANTHROPIC_AUTH_TOKEN ", " CLAUDE_CODE_OAUTH_TOKEN
 The credential. At most one may be set (section 7).
 .TP
@@ -583,6 +595,21 @@ sends a HOLD (section 4).
 Directory for the beat's output copy.
 Default:\~\fI/tmp\fR (private to the unit).
 .SH FILES
+.TP
+.I /var/lib/cti\-agent/state/traces/checkin\-*.jsonl
+The beat traces: the CLI's
+.B stream\-json
+for each beat, 0600 in a 0700 directory, pruned after
+.B CHECKIN_TRACE_DAYS
+days. When traces are on the beat runs with
+.BR "\-\-output\-format stream\-json \-\-verbose" ,
+the journal gets a timeline from
+.BR fleet\-trace (1)
+instead of the raw text, and
+.B cti\-budget record
+still gets only what text mode printed. If
+.B fleet\-trace init
+fails the beat runs untraced and says so.
 .TP
 .I /var/lib/cti\-agent/.checkin.lock
 The overlap lock, a directory. A lock over 30 minutes old is taken over.
@@ -696,6 +723,7 @@ systemctl list\-timers cti\-agent\-checkin.timer
 .BR fleet\-db (1),
 .BR fleet\-journal (1),
 .BR fleet\-timers (1),
+.BR fleet\-trace (1),
 .BR checkin\-bash\-guard (1),
 .BR cti\-kev (1),
 .BR cti\-patchtuesday (1),

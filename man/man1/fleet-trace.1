@@ -1,0 +1,175 @@
+.TH FLEET-TRACE 1 "2026-11-08" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+fleet-trace \- keep and read a record of what each heartbeat did
+.SH SYNOPSIS
+.B fleet\-trace show
+.RI [ FILE " | " \fB\-\-last\fR ]
+.RB [ \-\-full ]
+.br
+.B fleet\-trace list
+.RB [ \-n
+.IR N ]
+.br
+.B fleet\-trace prune \-\-days
+.I N
+.br
+.B fleet\-trace init
+.br
+.B fleet\-trace tee \-\-out
+.I FILE
+.B \-\-plain
+.I FILE
+.RB [ \-\-max\-mb
+.IR N ]
+.PP
+.B sudo cti\-agent fleet\-trace
+.I subcommand
+.SH DESCRIPTION
+Every orchestrator heartbeat that
+.BR run\-checkin (1)
+starts is recorded as it happens: the model and tools it started with, each
+tool it called and with what, whether the call succeeded or was denied, what
+it said, and at the end how many turns it took, the tokens it used and what it
+cost. The record is the
+.B claude
+CLI's own
+.B stream\-json
+output, one JSON object per line, kept in
+.IR $FLEET_HOME/state/traces .
+.PP
+Before traces, the only account of a beat was whatever the model chose to
+print. A trace answers "why did the heartbeat escalate on Tuesday?" from what
+it actually did.
+.PP
+A trace holds everything the beat read, including untrusted advisory and mail
+text. It is handled like a report: mode 0600 in a 0700 directory, never
+mailed, never committed. The beat itself cannot read it:
+.B run\-checkin
+grants no
+.B Read
+on
+.I state/
+and does not grant
+.BR fleet\-trace .
+.PP
+.B show
+and
+.B list
+replace every control character, ANSI escape and bidirectional override with
+.B ?
+before printing, so text the beat read cannot rewrite what the operator's
+terminal shows.
+.SH COMMANDS
+.TP
+.BR show " [\fIFILE\fR | " \-\-last "] [" \-\-full ]
+Print one beat as a timeline. With no argument, or
+.BR \-\-last ,
+the newest trace. A
+.I FILE
+without a slash is looked for in the trace directory. Tool results are shown
+as a size and ok or ERROR; with
+.B \-\-full
+their text is printed as well, sanitized, up to 4000 characters each.
+.TP
+.BR list " [" \-n " \fIN\fR]"
+One line per beat, newest first: the trace's name and size, ok or ERROR,
+turns, tool calls denied, and cost. Default 10; 0 lists all. A trace with no
+result line (the beat was killed) shows
+.BR none .
+.TP
+.BI "prune \-\-days " N
+Delete traces older than
+.I N
+days. Only files named
+.BI checkin\- YYYYMMDD T HHMMSS .jsonl
+in the trace directory are touched, never through a link.
+.B run\-checkin
+runs it after every beat with
+.BR CHECKIN_TRACE_DAYS .
+.TP
+.B init
+Create the trace directory, mode 0700, and prove a file can be written in
+it. Prints the directory.
+.B run\-checkin
+runs it before each beat and runs the beat untraced if it fails.
+.TP
+.BI "tee \-\-out " FILE " \-\-plain " FILE " \fR[\fP\-\-max\-mb " N\fR]\fP
+Used by
+.BR run\-checkin ,
+not by people. Reads the beat's output on standard input and does three
+things with it: keeps every line in the new file
+.B \-\-out
+(created 0600, refused if it exists), prints the timeline to standard output
+for the journal, and writes to
+.B \-\-plain
+only what the CLI's text mode used to print: lines that are not JSON
+(standard error), API error messages, and the final result.
+.B cti\-budget record
+classifies that file, by words such as
+.BR 429 ,
+.B quota
+and
+.BR billing ;
+the timeline's token counts or the tool output in front of it would turn
+ordinary beats into holds.
+.IP
+The trace stops at
+.B \-\-max\-mb
+megabytes (default 20) with a
+.B truncated
+marker; the reading does not. A trace that cannot be written stops the
+trace, not the reading, so the beat is never cut off by a full disk.
+.SH ENVIRONMENT
+.TP
+.B FLEET_HOME
+The state directory; traces are in
+.IR $FLEET_HOME/state/traces .
+.SH FILES
+.TP
+.I /var/lib/cti\-agent/state/traces/checkin\-*.jsonl
+One file per beat. The first line is
+.BR {"type":"fleet_trace",...} ;
+a line the CLI printed that was not JSON is kept as
+.BR {"type":"fleet_trace_text","text":...} ;
+every other line is the CLI's own event.
+.SH EXIT STATUS
+.TP
+.B 0
+Done.
+.TP
+.B 1
+.BR show :
+no trace, or it cannot be read.
+.BR tee :
+the trace or the plain file could not be written in full; the reading still
+went to the end.
+.BR init :
+the directory cannot be made or written.
+.TP
+.B 2
+Usage: an unknown subcommand or argument.
+.SH EXAMPLES
+The last beat:
+.PP
+.EX
+sudo cti\-agent fleet\-trace show \-\-last
+.EE
+.PP
+The last day of beats at a glance:
+.PP
+.EX
+sudo cti\-agent fleet\-trace list \-n 48
+.EE
+.PP
+One beat with every tool result:
+.PP
+.EX
+sudo cti\-agent fleet\-trace show checkin\-20261108T093000.jsonl \-\-full | less
+.EE
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR cti\-budget (1),
+.BR fleet\-journal (1),
+.BR cti\-agent (1)
+.PP
+HARNESS.md, H1.

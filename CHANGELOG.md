@@ -39,6 +39,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **A record of what each heartbeat did: beat traces.** Every check-in beat
+  now runs with the CLI's `stream-json` output, kept as one file per beat in
+  `state/traces` (0600, in a 0700 directory, kept 14 days). It holds the model
+  and tools the beat started with, every tool call with its arguments, which
+  calls failed or were denied, what the beat said, and the turns, tokens and
+  cost at the end. `sudo cti-agent fleet-trace show --last` prints a beat as a
+  timeline (`--full` adds each tool's output), and `fleet-trace list` gives
+  one line per beat. The journal shows the same timeline, without tool
+  output, in place of the raw text. A trace holds the untrusted text the beat
+  read, so the beat cannot read traces (no grant on `state/`, `fleet-trace` is
+  not granted), and `show` strips terminal escapes from it. `cti-budget`
+  still classifies only what the CLI's text mode used to print (stderr, API
+  errors, the final result), so token counts and tool output cannot turn an
+  ordinary beat into a rate-limit or out-of-credit hold. Traces are
+  best-effort: if `state/traces` cannot be written the beat runs untraced and
+  says so, and a trace that hits `CHECKIN_TRACE_MAX_MB` stops recording, not
+  the beat. New command `fleet-trace`, with a man page; HARNESS.md, item H1.
+  **Upgrade:** re-run the installer. Optional: `CHECKIN_TRACE_DAYS` (default
+  14; 0 turns traces off) and `CHECKIN_TRACE_MAX_MB` (default 20) in
+  `fleet.env`.
+
 - **The weekly Qualys VM scan report: the two scheduled scans in one email.**
   `run-vmscan` (timer `cti-agent-vmscan`, Mondays 08:00, `FLEET_VMSCAN_TIME`)
   reads the "Qualys: Scan Results" notices for "Weekly Scheduled Scan for

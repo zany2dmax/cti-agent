@@ -302,6 +302,15 @@ sub: export | write owners.json
 sub: snapshot | write the snapshot
 sub: backup | copy the database
 
+command: fleet-trace
+about: What each heartbeat did: tools, denials, turns, cost (state/traces)
+runs: local
+sub: show | print one beat as a timeline (--last, --full)
+sub: list | the latest beats, one line each (-n N)
+sub: prune | delete traces older than --days N
+sub: init | create the trace directory
+sub: tee | used by run-checkin: record a beat from stdin
+
 command: fleet-timers
 about: Whether a timer has been disabled, which raises no alarm on its own
 runs: read

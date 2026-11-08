@@ -1,0 +1,447 @@
+#!/usr/bin/python3 -sE
+"""fleet-trace - keep and read a record of what each heartbeat did.
+
+  fleet-trace init                    create the trace directory (0700)
+  fleet-trace tee --out FILE --plain FILE [--max-mb N]
+                                      read a beat's stream-json on stdin: keep
+                                      every line in --out, print a timeline for
+                                      the journal, write the beat's plain text
+                                      (what cti-budget classifies) to --plain
+  fleet-trace show [FILE | --last] [--full]
+                                      print one beat as a timeline
+  fleet-trace list [-n N]             the latest beats, one line each
+  fleet-trace prune --days N          delete traces older than N days
+
+Traces live in $FLEET_HOME/state/traces, 0600 in a 0700 directory. A trace
+holds everything the beat read, including untrusted advisory and mail text,
+so it is handled like a report: never mailed, never committed, and not
+readable by the beat itself (run-checkin grants no Read on state/).
+
+Why --plain exists. cti-budget tells "the quota refused us" from "the account
+is out of credit" from "the script broke" by matching words such as "429",
+"quota" and "billing" in the beat's output. Before traces that output was the
+CLI's text mode: the final answer and any error. Handing it the timeline or
+the raw stream instead would put token counts and tool output in front of the
+classifier, and an advisory that mentions billing, or a beat that used 4290
+tokens, would read as a hold. So --plain gets exactly what text mode printed:
+lines that are not JSON (stderr), API error messages, and the result text.
+
+This program never stops reading stdin. If it exited early, claude would die
+of SIGPIPE in the middle of a beat; so a failure to write the trace stops the
+trace, not the reading.
+"""
+import json
+import os
+import re
+import sys
+import time
+
+FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
+TRACE_DIR = os.path.join(FLEET_HOME, "state", "traces")
+NAME = re.compile(r"^checkin-\d{8}T\d{6}(-\d+)?\.jsonl$")
+
+# Untrusted text reaches the operator's terminal through `show`. Anything that
+# is not printable - ANSI escapes above all, which can rewrite what the screen
+# says - is replaced, and newlines are flattened where one line is expected.
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
+
+
+def clean(text, limit=None, oneline=True):
+    text = "" if text is None else str(text)
+    if oneline:
+        text = " ".join(text.split())
+    text = _CTRL.sub("?", text)
+    if limit is not None and len(text) > limit:
+        text = text[:limit] + f"... [{len(text) - limit} more chars]"
+    return text
+
+
+USAGE = __doc__.split("\n\n")[1]
+
+
+def usage(msg=None):
+    if msg:
+        print(f"fleet-trace: {msg}", file=sys.stderr)
+    print("usage:\n" + USAGE, file=sys.stderr)
+    sys.exit(2)
+
+
+# ── rendering ───────────────────────────────────────────────────────────────
+
+def tool_summary(name, inp):
+    """The one argument that says what a tool call was for."""
+    if not isinstance(inp, dict):
+        return ""
+    for key in ("command", "file_path", "path", "pattern", "skill", "url", "query"):
+        if key in inp:
+            return str(inp[key])
+    return ",".join(sorted(inp))
+
+
+def result_size(content):
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(len(c.get("text", "")) for c in content if isinstance(c, dict))
+    return 0
+
+
+def result_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(c.get("text", "") for c in content if isinstance(c, dict))
+    return ""
+
+
+class Timeline:
+    """Turns stream-json events into lines a person reads.
+
+    Tool results are shown as a size and ok/ERROR, not their content: the
+    content is untrusted text and the journal is read by more people than
+    the trace. --full on `show` prints it, sanitized.
+    """
+
+    def __init__(self, out, full=False):
+        self.out = out
+        self.full = full
+        self.turn = 0
+        self.tools = {}
+
+    def line(self, text):
+        self.out.write(f"[trace] {text}\n")
+
+    def event(self, ev):
+        t = ev.get("type")
+        if t == "fleet_trace":
+            if ev.get("truncated"):
+                self.line(f"trace truncated at {ev.get('max_bytes')} bytes; the beat went on")
+            return
+        if t == "fleet_trace_text":
+            self.line(f"stderr: {clean(ev.get('text'), 300)}")
+            return
+        if t == "system" and ev.get("subtype") == "init":
+            mcp = ev.get("mcp_servers") or []
+            self.line(f"start: model {clean(ev.get('model'))}, "
+                      f"{len(ev.get('tools') or [])} tools, {len(mcp)} MCP servers, "
+                      f"permission mode {clean(ev.get('permissionMode'))}, "
+                      f"auth {clean(ev.get('apiKeySource'))}, "
+                      f"claude {clean(ev.get('claude_code_version'))}")
+            return
+        if t == "assistant":
+            msg = ev.get("message") or {}
+            if ev.get("is_api_error_message"):
+                self.line(f"API ERROR ({clean(ev.get('error'))}): "
+                          f"{clean(result_text(msg.get('content')), 300)}")
+                return
+            self.turn += 1
+            for block in msg.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and block.get("text", "").strip():
+                    self.line(f"turn {self.turn} says: {clean(block['text'], 300)}")
+                elif block.get("type") == "tool_use":
+                    name = clean(block.get("name"))
+                    self.tools[block.get("id")] = name
+                    self.line(f"turn {self.turn} tool {name}: "
+                              f"{clean(tool_summary(name, block.get('input')), 200)}")
+            return
+        if t == "user":
+            content = (ev.get("message") or {}).get("content")
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                name = self.tools.get(block.get("tool_use_id"), "?")
+                c = block.get("content")
+                if block.get("is_error"):
+                    self.line(f"  {name} -> ERROR: {clean(result_text(c), 200)}")
+                else:
+                    self.line(f"  {name} -> ok, {result_size(c)} chars")
+                if self.full:
+                    for l in clean(result_text(c), 4000, oneline=False).splitlines():
+                        self.out.write(f"        | {l}\n")
+            return
+        if t == "result":
+            u = ev.get("usage") or {}
+            denials = ev.get("permission_denials") or []
+            status = "ERROR" if ev.get("is_error") else "ok"
+            reason = ev.get("terminal_reason") or ev.get("subtype")
+            cost = ev.get("total_cost_usd")
+            self.line(f"end: {status} ({clean(reason)}), {ev.get('num_turns')} turns, "
+                      f"{(ev.get('duration_ms') or 0) / 1000:.0f}s, "
+                      f"tokens in {u.get('input_tokens', 0)} + cache read "
+                      f"{u.get('cache_read_input_tokens', 0)} + cache write "
+                      f"{u.get('cache_creation_input_tokens', 0)}, out "
+                      f"{u.get('output_tokens', 0)}"
+                      + (f", ${cost:.4f}" if isinstance(cost, (int, float)) else "")
+                      + f", {len(denials)} denied")
+            for d in denials:
+                if isinstance(d, dict):
+                    self.line(f"  DENIED {clean(d.get('tool_name'))}: "
+                              f"{clean(tool_summary(d.get('tool_name'), d.get('tool_input')), 200)}")
+            return
+
+
+def plain_lines(ev, raw):
+    """What text mode would have printed for this line - see the docstring."""
+    if ev is None:
+        return [raw]
+    if ev.get("type") == "assistant" and ev.get("is_api_error_message"):
+        out = []
+        if ev.get("error"):
+            out.append(f"API error: {ev['error']}")
+        text = result_text((ev.get("message") or {}).get("content"))
+        if text:
+            out.append(text)
+        return out
+    if ev.get("type") == "result" and isinstance(ev.get("result"), str):
+        return [ev["result"]]
+    return []
+
+
+def parse(raw):
+    try:
+        ev = json.loads(raw)
+    except ValueError:
+        return None
+    return ev if isinstance(ev, dict) else None
+
+
+# ── subcommands ─────────────────────────────────────────────────────────────
+
+def cmd_init(args):
+    if args:
+        usage("init takes no arguments")
+    os.makedirs(TRACE_DIR, mode=0o700, exist_ok=True)
+    if os.path.islink(TRACE_DIR) or not os.path.isdir(TRACE_DIR):
+        print(f"fleet-trace: {TRACE_DIR} is not a directory", file=sys.stderr)
+        sys.exit(1)
+    os.chmod(TRACE_DIR, 0o700)
+    # A real write, so a full or read-only disk turns traces off before the
+    # beat rather than during it.
+    probe = os.path.join(TRACE_DIR, f".probe-{os.getpid()}")
+    with open(os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write("ok\n")
+    os.unlink(probe)
+    print(TRACE_DIR)
+
+
+def _open_new(path):
+    """0600, and never through a link or onto a file that is already there."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    return os.fdopen(os.open(path, flags, 0o600), "wb")
+
+
+def cmd_tee(args):
+    out_path = plain_path = None
+    max_mb = 20
+    it = iter(args)
+    for a in it:
+        if a == "--out":
+            out_path = next(it, None)
+        elif a == "--plain":
+            plain_path = next(it, None)
+        elif a == "--max-mb":
+            v = next(it, "")
+            if not v.isdigit() or int(v) < 1:
+                usage("--max-mb takes a whole number of megabytes, 1 or more")
+            max_mb = int(v)
+        else:
+            usage(f"unknown argument {a!r}")
+    if not out_path or not plain_path:
+        usage("tee needs --out FILE and --plain FILE")
+    max_bytes = max_mb * 1024 * 1024
+
+    errors = []
+    try:
+        trace = _open_new(out_path)
+    except OSError as e:
+        trace = None
+        errors.append(f"cannot create {out_path}: {e.strerror}")
+    try:
+        # --plain is run-checkin's mktemp file: it exists already, 0600.
+        plain = open(plain_path, "w", encoding="utf-8", errors="replace")
+    except OSError as e:
+        plain = None
+        errors.append(f"cannot write {plain_path}: {e.strerror}")
+
+    written = 0
+
+    def keep(line):
+        """Append one JSON line to the trace, within --max-mb."""
+        nonlocal trace, written
+        if trace is None:
+            return
+        data = line.encode("utf-8") + b"\n"
+        try:
+            if written + len(data) > max_bytes:
+                trace.write(json.dumps({"type": "fleet_trace", "truncated": True,
+                                        "max_bytes": max_bytes}).encode() + b"\n")
+                trace.close()
+                trace = None
+                errors.append(f"trace stopped at {max_mb} MB (--max-mb)")
+                return
+            trace.write(data)
+            written += len(data)
+        except OSError as e:
+            errors.append(f"trace write failed: {e.strerror}; trace stopped")
+            try:
+                trace.close()
+            except OSError:
+                pass
+            trace = None
+
+    keep(json.dumps({"type": "fleet_trace", "version": 1, "unit": "checkin",
+                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
+    tl = Timeline(sys.stdout)
+    for rawb in sys.stdin.buffer:
+        raw = rawb.decode("utf-8", "replace").rstrip("\r\n")
+        try:
+            if not raw.strip():
+                continue
+            ev = parse(raw)
+            # Every trace line is JSON, so a non-JSON line is wrapped.
+            keep(raw if ev is not None else
+                 json.dumps({"type": "fleet_trace_text", "text": raw}, ensure_ascii=False))
+            if ev is None:
+                # Not JSON: stderr or a crash message. Shown as it came,
+                # because that is what the journal always showed.
+                sys.stdout.write(raw + "\n")
+            else:
+                tl.event(ev)
+            if plain is not None:
+                for l in plain_lines(ev, raw):
+                    plain.write(l + "\n")
+            sys.stdout.flush()
+        except Exception as e:  # noqa: BLE001 - never stop reading; see docstring
+            errors.append(f"line skipped: {e.__class__.__name__}")
+    for f in (trace, plain):
+        if f is not None:
+            try:
+                f.close()
+            except OSError:
+                pass
+    for e in dict.fromkeys(errors):
+        print(f"fleet-trace: {e}", file=sys.stderr)
+    if os.path.exists(out_path):
+        print(f"[trace] kept in {out_path}")
+    sys.exit(1 if errors else 0)
+
+
+def _traces():
+    try:
+        names = os.listdir(TRACE_DIR)
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        p = os.path.join(TRACE_DIR, n)
+        if NAME.match(n) and os.path.isfile(p) and not os.path.islink(p):
+            out.append(p)
+    return sorted(out)
+
+
+def _events(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            ev = parse(raw)
+            if ev is not None:
+                yield ev
+
+
+def cmd_show(args):
+    full = "--full" in args
+    rest = [a for a in args if a != "--full"]
+    if rest == ["--last"] or not rest:
+        traces = _traces()
+        if not traces:
+            print(f"fleet-trace: no traces in {TRACE_DIR}", file=sys.stderr)
+            sys.exit(1)
+        path = traces[-1]
+    elif len(rest) == 1 and not rest[0].startswith("-"):
+        path = rest[0]
+        if os.sep not in path:
+            path = os.path.join(TRACE_DIR, path)
+    else:
+        usage("show takes one FILE, or --last, and optionally --full")
+    print(f"== {path}")
+    tl = Timeline(sys.stdout, full=full)
+    try:
+        for ev in _events(path):
+            tl.event(ev)
+    except OSError as e:
+        print(f"fleet-trace: cannot read {path}: {e.strerror}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _summary(path):
+    """The result line of one trace, read from the end of the file."""
+    size = 0
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 256 * 1024))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return size, None
+    for raw in reversed(tail):
+        ev = parse(raw)
+        if ev and ev.get("type") == "result":
+            return size, ev
+    return size, None
+
+
+def cmd_list(args):
+    n = 10
+    if args:
+        if len(args) != 2 or args[0] != "-n" or not args[1].isdigit():
+            usage("list takes -n N")
+        n = int(args[1])
+    traces = _traces()[-n:] if n else _traces()
+    if not traces:
+        print(f"(no traces in {TRACE_DIR})")
+        return
+    print(f"{'trace':<34} {'size':>8}  {'result':<6} {'turns':>5} {'denied':>6} {'cost':>9}")
+    for p in reversed(traces):
+        size, ev = _summary(p)
+        if ev is None:
+            print(f"{os.path.basename(p):<34} {size:>8}  {'none':<6} {'-':>5} {'-':>6} {'-':>9}")
+            continue
+        cost = ev.get("total_cost_usd")
+        print(f"{os.path.basename(p):<34} {size:>8}  "
+              f"{'ERROR' if ev.get('is_error') else 'ok':<6} {ev.get('num_turns', '-'):>5} "
+              f"{len(ev.get('permission_denials') or []):>6} "
+              f"{(f'${cost:.4f}' if isinstance(cost, (int, float)) else '-'):>9}")
+
+
+def cmd_prune(args):
+    if len(args) != 2 or args[0] != "--days" or not args[1].isdigit():
+        usage("prune takes --days N")
+    days = int(args[1])
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for p in _traces():
+        try:
+            if os.lstat(p).st_mtime < cutoff:
+                os.unlink(p)
+                removed += 1
+        except OSError:
+            pass
+    print(f"fleet-trace: pruned {removed} trace(s) older than {days} days")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        usage()
+    sub, args = argv[0], argv[1:]
+    cmds = {"init": cmd_init, "tee": cmd_tee, "show": cmd_show,
+            "list": cmd_list, "prune": cmd_prune}
+    if sub not in cmds:
+        usage(f"unknown subcommand {sub!r}")
+    os.umask(0o077)
+    cmds[sub](args)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

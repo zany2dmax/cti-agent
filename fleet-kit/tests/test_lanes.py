@@ -22,6 +22,7 @@ import sys
 import shutil
 import subprocess
 import tempfile
+import time
 import unicodedata
 import unittest
 
@@ -2044,7 +2045,8 @@ class TestFileShape(unittest.TestCase):
                              for r in self._orchestrator_grant()))
 
     def _checkin_box(self, overrides=None, plant=(), claude_json=None,
-                     guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None, extra_env=None):
+                     guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None, extra_env=None,
+                     trace=False, stream=None, claude_rc=0):
         """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
         install-fedora.sh lays it out, read-only to this test's user, and a
         fake stat(1) that reports root ownership unless told otherwise.
@@ -2052,6 +2054,9 @@ class TestFileShape(unittest.TestCase):
         overrides maps a path relative to the box to {"u": uid, "a": mode} for
         stat to report, so a single wrong entry can be tested on its own.
         plant lists paths relative to HOME to create before the run.
+        trace installs the real fleet-trace and a cti-budget stub; stream is
+        the stream-json the fake claude prints when asked for it, and
+        claude_rc its exit status.
         Returns (CompletedProcess, what the fake claude and fleet-board saw).
         """
         root = pathlib.Path(__file__).resolve().parents[2]
@@ -2068,8 +2073,15 @@ class TestFileShape(unittest.TestCase):
         # Sourced by every runner that changes something (the "say how" rule).
         shutil.copy(root / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh",
                     code / "share" / "fleet-mode.sh")
-        for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert"):
+        for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert") + (
+                ("cti-budget",) if trace else ()):
             (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
+        if trace:
+            shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
+                        code / "bin" / "fleet-trace")
+        stream_file = d / "stream.jsonl"
+        stream_file.write_text("".join(json.dumps(e) + "\n" if isinstance(e, dict) else e + "\n"
+                                       for e in (stream or [])))
         # run-checkin pipes a redirect through the guard and wants exit 2.
         (code / "bin" / "checkin-bash-guard").write_text(guard)
         (code / "checkin-settings.json").write_text(json.dumps(settings if settings is not None else {
@@ -2078,7 +2090,9 @@ class TestFileShape(unittest.TestCase):
         (code / "orchestrator" / "CLAUDE.md").write_text("# test\n")
         (code / "orchestrator" / ".claude" / "skills" / "checkin" / "SKILL.md").write_text("# test\n")
         (fake / "claude").write_text(
-            f'#!/bin/sh\n{{ echo "claude cwd=$PWD"; for a; do echo "arg $a"; done; }} >> "{ran}"\n')
+            f'#!/bin/sh\n{{ echo "claude cwd=$PWD"; for a; do echo "arg $a"; done; }} >> "{ran}"\n'
+            f'case " $* " in *" --output-format stream-json "*) cat "{stream_file}";; esac\n'
+            f'exit {int(claude_rc)}\n')
         (fake / "uname").write_text("#!/bin/sh\necho Linux\n")
         (fake / "python3").symlink_to(sys.executable)
         table = d / "stat.json"
@@ -2245,6 +2259,172 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             "numStartups": 3, "projects": {"/x": {"allowedTools": [], "mcpServers": {}}}})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("claude cwd", ran)
+
+    # ── the beat trace (HARNESS.md, H1) ──────────────────────────────────────
+
+    BEAT = [
+        {"type": "system", "subtype": "init", "model": "test-model", "tools": ["Bash", "Read"],
+         "mcp_servers": [], "permissionMode": "default", "apiKeySource": "ANTHROPIC_API_KEY",
+         "claude_code_version": "0.0.0"},
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "Checking the board."},
+            {"type": "tool_use", "id": "t1", "name": "Bash",
+             "input": {"command": "$FLEET_CODE/bin/fleet-board read"}}]}},
+        # Untrusted text the beat read: it says every word cti-budget matches.
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": False,
+             "content": "advisory: billing quota exceeded, HTTP 429, rate limit"}]}},
+        {"type": "result", "subtype": "success", "is_error": False, "num_turns": 2,
+         "duration_ms": 4290, "total_cost_usd": 0.0429,
+         "usage": {"input_tokens": 4290, "output_tokens": 429},
+         "permission_denials": [], "result": "Beat done, nothing to escalate."},
+    ]
+
+    def test_the_beat_is_traced_and_budget_sees_only_what_text_mode_printed(self):
+        """A traced beat runs with stream-json, keeps every event in a 0600
+        file under state/traces, and prints a timeline to the journal - but
+        cti-budget classifies only the final result, never the tool output or
+        the token counts, or this ordinary beat would read as a rate limit."""
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        args = [l[4:] for l in ran.splitlines() if l.startswith("arg ")]
+        self.assertEqual(args[args.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", args)
+        self.assertIn("[trace] turn 1 tool Bash: $FLEET_CODE/bin/fleet-board read", r.stdout)
+        self.assertIn("[trace] end: ok", r.stdout)
+        self.assertNotIn("billing quota", r.stdout)  # tool output stays out of the journal
+        record = ran[ran.index("cti-budget record"):]
+        self.assertIn("Beat done, nothing to escalate.", record)
+        for word in ("429", "quota", "billing", "rate limit"):
+            self.assertNotIn(word, record.lower())
+        m = re.search(r"\[trace\] kept in (\S+)", r.stdout)
+        self.assertIsNotNone(m, r.stdout)
+        path = pathlib.Path(m.group(1))
+        self.assertEqual(path.parent.name, "traces")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        lines = [json.loads(l) for l in path.read_text().splitlines()]
+        self.assertEqual(lines[0]["type"], "fleet_trace")
+        self.assertEqual([l["type"] for l in lines[1:]], [e["type"] for e in self.BEAT])
+
+    def test_an_out_of_credit_beat_still_reaches_the_classifier(self):
+        """The 24 September outage: the credit message must reach cti-budget
+        through the trace path exactly as it did in text mode."""
+        stream = [
+            {"type": "system", "subtype": "init", "model": "m", "tools": []},
+            {"type": "assistant", "is_api_error_message": True, "error": "billing_error",
+             "message": {"content": [{"type": "text", "text": "Credit balance is too low"}]}},
+            {"type": "result", "subtype": "success", "is_error": True, "num_turns": 1,
+             "terminal_reason": "api_error", "result": "Credit balance is too low"},
+            "some stderr line",
+        ]
+        r, ran = self._checkin_box(trace=True, stream=stream, claude_rc=1)
+        self.assertIn("--exit 1", ran)
+        record = ran[ran.index("cti-budget record"):]
+        self.assertIn("Credit balance is too low", record)
+        self.assertIn("some stderr line", record)
+        self.assertIn("[trace] API ERROR (billing_error)", r.stdout)
+        self.assertIn("[trace] end: ERROR (api_error)", r.stdout)
+
+    def test_traces_off_runs_the_beat_as_before(self):
+        """CHECKIN_TRACE_DAYS=0, or no fleet-trace on the box, is text mode;
+        a value that is not a number warns and keeps the default."""
+        for label, kw in (("days 0", {"trace": True, "extra_env": {"CHECKIN_TRACE_DAYS": "0"}}),
+                          ("no fleet-trace", {})):
+            with self.subTest(label):
+                r, ran = self._checkin_box(stream=self.BEAT, **kw)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertNotIn("arg --output-format", ran)
+                self.assertNotIn("[trace]", r.stdout)
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT,
+                                   extra_env={"CHECKIN_TRACE_DAYS": "two weeks"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("is not a number of days; using 14", r.stderr)
+        self.assertIn("arg stream-json", ran)
+
+    def test_the_beat_cannot_read_its_own_traces(self):
+        """A trace holds every advisory the beat read. The beat's Read grant
+        covers reports, logs and archive; never state/, where traces live,
+        and fleet-trace is not a granted command."""
+        rules = self._orchestrator_grant()
+        self.assertFalse(any("state" in r for r in rules if r.startswith("Read(")), rules)
+        self.assertFalse(any("fleet-trace" in r for r in rules), rules)
+
+    def _fleet_trace(self, home, *args, stdin=""):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        return subprocess.run(
+            [sys.executable, str(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace"), *args],
+            input=stdin, capture_output=True, text=True, check=False,
+            env={"PATH": "/usr/bin:/bin", "FLEET_HOME": str(home)})
+
+    def test_fleet_trace_keeps_reading_when_it_cannot_write(self):
+        """If fleet-trace stopped reading, claude would die of SIGPIPE mid-beat.
+        An unwritable trace stops the trace, not the timeline or --plain."""
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            plain = d / "plain"
+            plain.write_text("")
+            stdin = "".join(json.dumps(e) + "\n" for e in self.BEAT)
+            r = self._fleet_trace(d, "tee", "--out", str(d / "no" / "such" / "x.jsonl"),
+                                  "--plain", str(plain), stdin=stdin)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("cannot create", r.stderr)
+            self.assertIn("[trace] end: ok", r.stdout)
+            self.assertEqual(plain.read_text(), "Beat done, nothing to escalate.\n")
+
+    def test_fleet_trace_caps_the_file_and_wraps_text(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            (d / "plain").write_text("")
+            out = d / "t.jsonl"
+            big = json.dumps({"type": "user", "message": {"content": "x" * 700000}})
+            r = self._fleet_trace(d, "tee", "--out", str(out), "--plain", str(d / "plain"),
+                                  "--max-mb", "1",
+                                  stdin="not json\n" + (big + "\n") * 3 + json.dumps(self.BEAT[-1]) + "\n")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("trace stopped at 1 MB", r.stderr)
+            self.assertIn("[trace] end: ok", r.stdout)  # read to the end regardless
+            lines = [json.loads(l) for l in out.read_text().splitlines()]
+            self.assertEqual(lines[1], {"type": "fleet_trace_text", "text": "not json"})
+            self.assertTrue(lines[-1].get("truncated"))
+            self.assertLessEqual(out.stat().st_size, 1024 * 1024 + 200)
+
+    def test_fleet_trace_show_strips_terminal_escapes(self):
+        """`show` puts untrusted text on the operator's terminal. An ANSI
+        escape in an advisory must not be able to rewrite what it says."""
+        with tempfile.TemporaryDirectory() as d:
+            home = pathlib.Path(d)
+            self.assertEqual(self._fleet_trace(home, "init").returncode, 0)
+            t = home / "state" / "traces" / "checkin-20260101T000000.jsonl"
+            evil = "ok\x1b[2J\x1b]0;pwned\x07\u202eevil"
+            t.write_text(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": evil}]}}) + "\n" + json.dumps(self.BEAT[-1]) + "\n")
+            for args in (("show", "--last"), ("show", "--last", "--full"), ("list",)):
+                with self.subTest(args=args):
+                    r = self._fleet_trace(home, *args)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertNotIn("\x1b", r.stdout)
+                    self.assertNotIn("\x07", r.stdout)
+                    self.assertNotIn("\u202e", r.stdout)
+            self.assertIn("checkin-20260101T000000.jsonl", r.stdout)
+
+    def test_fleet_trace_prune_removes_only_old_traces(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = pathlib.Path(d)
+            self._fleet_trace(home, "init")
+            tdir = home / "state" / "traces"
+            old, new, other = (tdir / "checkin-20250101T000000.jsonl",
+                               tdir / "checkin-20260101T000000.jsonl", tdir / "keep.txt")
+            for f in (old, new, other):
+                f.write_text("{}\n")
+            past = time.time() - 30 * 86400
+            os.utime(old, (past, past))
+            os.utime(other, (past, past))
+            r = self._fleet_trace(home, "prune", "--days", "14")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse(old.exists())
+            self.assertTrue(new.exists())
+            self.assertTrue(other.exists())
 
     def test_fleet_journal_reads_the_fleets_units_and_nothing_else(self):
         """journalctl:* granted --cursor-file=PATH, which overwrites PATH as the

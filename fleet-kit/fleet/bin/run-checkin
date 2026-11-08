@@ -348,6 +348,26 @@ if [ -n "$CHECKIN_MODEL" ]; then
   MODEL_ARGS=(--model "$CHECKIN_MODEL")
 fi
 
+# CHECKIN_TRACE_DAYS / CHECKIN_TRACE_MAX_MB - the beat trace (HARNESS.md, H1).
+# Each beat's full stream-json is kept in state/traces for this many days, so
+# "why did the heartbeat do that?" has an answer that is not whatever the
+# model chose to print. 0 keeps no traces and runs the beat in text mode, as
+# before. Unlike CHECKIN_MODEL a bad value does not refuse the beat: a typo in
+# a retention setting is not worth a silent heartbeat, so it says so and uses
+# the default.
+CHECKIN_TRACE_DAYS="${CHECKIN_TRACE_DAYS:-14}"
+CHECKIN_TRACE_MAX_MB="${CHECKIN_TRACE_MAX_MB:-20}"
+case "$CHECKIN_TRACE_DAYS" in
+  ''|*[!0123456789]*)
+    echo "run-checkin: CHECKIN_TRACE_DAYS='$CHECKIN_TRACE_DAYS' is not a number of days; using 14" >&2
+    CHECKIN_TRACE_DAYS=14 ;;
+esac
+case "$CHECKIN_TRACE_MAX_MB" in
+  ''|0|*[!0123456789]*)
+    echo "run-checkin: CHECKIN_TRACE_MAX_MB='$CHECKIN_TRACE_MAX_MB' is not a size in MB; using 20" >&2
+    CHECKIN_TRACE_MAX_MB=20 ;;
+esac
+
 # A stored login does not live in the same place on both platforms, and
 # checking the wrong one is worse than not checking at all. On Linux the token
 # is a file under the config dir; on macOS it is a Keychain item and that file
@@ -610,12 +630,48 @@ set +e
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 SETTINGS_ARGS=()
 [ -f "$CHECKIN_SETTINGS" ] && SETTINGS_ARGS=(--settings "$CHECKIN_SETTINGS")
-"$CLAUDE" -p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default \
-  --setting-sources project ${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"} \
-  --strict-mcp-config \
-  --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS" \
-  < /dev/null 2>&1 | tee "$beat_log"
-rc="${PIPESTATUS[0]}"
+CLAUDE_ARGS=(-p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default
+  --setting-sources project ${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"}
+  --strict-mcp-config
+  --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS")
+
+# THE TRACE. With a trace the beat runs with --output-format stream-json and
+# fleet-trace sits where tee was: it keeps every event in state/traces (0600,
+# a directory the beat is granted no Read on, since a trace holds the
+# untrusted text the beat read), prints a timeline to the journal, and writes
+# to $beat_log only what text mode used to print - stderr, API errors and the
+# final result. That last part is load-bearing: cti-budget classifies
+# $beat_log by matching words like "429", "quota" and "billing", and token
+# counts or tool output in front of it would turn ordinary beats into holds.
+#
+# Traces are best-effort. fleet-trace init proves the directory is writable
+# and the interpreter runs BEFORE the beat; if it cannot, or traces are off,
+# the beat runs exactly as it did before traces existed.
+TRACE_TOOL="$FLEET_CODE/bin/fleet-trace"
+TRACE=""
+if [ "$CHECKIN_TRACE_DAYS" -gt 0 ] && [ -x "$TRACE_TOOL" ]; then
+  if "$TRACE_TOOL" init >/dev/null 2>&1; then
+    TRACE="$FLEET_HOME/state/traces/checkin-$(date '+%Y%m%dT%H%M%S').jsonl"
+    [ -e "$TRACE" ] && TRACE="${TRACE%.jsonl}-$$.jsonl"
+  else
+    echo "[run-checkin $(date '+%F %H:%M:%S')] trace: off - fleet-trace init failed; beat runs in text mode" >&2
+  fi
+fi
+
+if [ -n "$TRACE" ]; then
+  "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} --output-format stream-json --verbose \
+    < /dev/null 2>&1 \
+    | "$TRACE_TOOL" tee --out "$TRACE" --plain "$beat_log" --max-mb "$CHECKIN_TRACE_MAX_MB"
+  # One statement, so both are read from the same pipeline.
+  rc="${PIPESTATUS[0]}" trace_rc="${PIPESTATUS[1]}"
+  if [ "$trace_rc" -ne 0 ]; then
+    echo "[run-checkin $(date '+%F %H:%M:%S')] trace: fleet-trace exited $trace_rc; the trace may be incomplete" >&2
+  fi
+  "$TRACE_TOOL" prune --days "$CHECKIN_TRACE_DAYS" >/dev/null 2>&1 || true
+else
+  "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} < /dev/null 2>&1 | tee "$beat_log"
+  rc="${PIPESTATUS[0]}"
+fi
 set -e
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
 

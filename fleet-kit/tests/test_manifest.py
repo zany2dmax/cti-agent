@@ -110,7 +110,7 @@ class TestCommandManifest(unittest.TestCase):
     def test_flags_match_what_the_code_accepts(self):
         # Subcommand tools parse positional words, not flags; their sub: lines
         # are checked for presence only (below), and their flags by hand.
-        positional = {"fleet-board", "fleet-db", "fleet-owners", "cti-budget"}
+        positional = {"fleet-board", "fleet-db", "fleet-owners", "fleet-trace", "cti-budget"}
         for name, c in self.cmds.items():
             if name in positional:
                 continue
@@ -127,6 +127,7 @@ class TestCommandManifest(unittest.TestCase):
             "fleet-board": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-board",
             "fleet-db": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-db",
             "fleet-owners": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-owners",
+            "fleet-trace": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
             "cti-budget": ROOT / "cmd" / "cti-budget" / "main.go",
         }
         for name, path in files.items():

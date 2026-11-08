@@ -1,7 +1,8 @@
 # The agent harness: what the fleet has, and what it is missing
 
-> **STATUS: DESIGN.** Nothing on this page beyond section 1 is built. The work
-> items are in [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
+> **STATUS: DESIGN, H1 BUILT.** H1 (beat traces) is built and unreleased; see
+> [CHANGELOG.md](CHANGELOG.md). The other work items are in
+> [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
 > argued about before any code depends on it.
 
 "Harness" here means everything around the model that turns it into an agent
@@ -97,7 +98,11 @@ copying it would mean two copies of the controls drifting apart.
 
 Each item is small enough to ship on its own, and each feeds the next.
 
-### H1. Beat traces
+### H1. Beat traces (built, unreleased)
+
+What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
+`list`, `prune`) and the trace path in `run-checkin`, with
+`CHECKIN_TRACE_DAYS` and `CHECKIN_TRACE_MAX_MB`. The plan as written:
 
 - Run the beat with `--output-format stream-json --verbose` and keep the
   stream as `state/traces/checkin-<timestamp>.jsonl`, 0600, rotated by age

@@ -50,14 +50,11 @@ is real, not before. Finished work moves out of this file into
     Qualys-only today
 - **Agent harness** (the reasoning, what already exists and the order, is in
   [HARNESS.md](HARNESS.md); each item ships on its own and feeds the next):
-  - H1. Beat traces: run the check-in with `--output-format stream-json`, keep
-    each beat as `state/traces/*.jsonl` (0600, rotated), and add a
-    `fleet-trace` reader. `cti-budget record` must still get the CLI's error
-    text so rate-limit and out-of-credit detection keep working
   - H2. Eval harness: 5 to 10 check-in scenarios with fake `$FLEET_HOME`
     fixtures (quiet day, silent lane, Sev5/KEV, prompt injection in an
     advisory, existing HOLD), behavior checked from the trace, run by hand
-    with `task eval` (3 runs each, pass rate), never in `task ship`
+    with `task eval` (3 runs each, pass rate), never in `task ship`. Scores
+    from the beat traces (H1, built: `fleet-trace`)
   - H3. Structured check-in verdict: the skill ends in one `cti-checkin/1`
     JSON object, verified in Go the way `internal/triage` verifies
     `cti-triage/1`; invalid or missing is a board ERROR
