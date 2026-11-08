@@ -218,6 +218,10 @@ def main(argv):
             ph = ",".join("?" * len(cols))
             sets = ",".join(f"{k}=excluded.{k}" for k in cols if k != "cve")
             # cols is the fixed list above; every value goes through a ? bind.
+            # The two "nosec B608" below are kept on purpose. Some bandit
+            # versions flag these f-strings as SQL injection and some do not;
+            # where it does not, bandit logs "nosec encountered, but no failed
+            # test" - expected, harmless, and cheaper than a failed build.
             names = ",".join(cols)
             upsert = f"ON CONFLICT(cve) DO UPDATE SET {sets}, updated=excluded.updated"  # nosec B608
             sql = f"INSERT INTO findings({names},first_seen,updated) VALUES({ph},?,?) {upsert}"  # nosec B608

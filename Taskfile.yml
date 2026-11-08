@@ -274,7 +274,9 @@ tasks:
     # Not the tests: they launch the scripts under test and write throwaway
     # fixtures, which is what bandit exists to flag. Its "nosec encountered but
     # no failed test" and "Test in comment" lines on stderr are bandit's own
-    # logging and do not change the exit status.
+    # logging and do not change the exit status. The "no failed test" lines for
+    # fleet-db's two B608 annotations are expected: they stay so a bandit
+    # version that does flag those lines still passes (see the note in fleet-db).
     cmds:
       - |
         export PATH="$HOME/.local/bin:$PATH"

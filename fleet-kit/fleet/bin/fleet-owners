@@ -58,7 +58,9 @@ import os
 import re
 import sqlite3
 import stat
-import subprocess  # nosec B404 - runs one fixed, root-owned binary (scanner_listing)
+# Runs one fixed, root-owned binary (scanner_listing). The justification is on
+# its own line because bandit reads every word after "nosec" as a test name.
+import subprocess  # nosec B404
 import sys
 import tempfile
 from datetime import datetime, timezone
