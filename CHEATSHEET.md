@@ -321,6 +321,19 @@ sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:
 
 ## 11. Updating the box
 
+The whole loop, laptop to production, is two commands:
+
+```bash
+task ship                            # on the Mac: every check, then git push; any failure stops it
+sudo cti-agent-update --for-real     # on the Fedora box: pull the kit, then install from it
+```
+
+Add `--dry-run` on the box first to see what is incoming. If gosec lags a Go
+release, the Mac side is `GOSEC_GOTOOLCHAIN=go1.26.9 task ship` (Taskfile.yml
+explains). An untagged push installs too, but the box then reports a version
+like `1.5.2-3-gabc1234`; releases are tagged as in 11a. `man cti-agent-update`
+has the details.
+
 Run the installer from the kit checkout in `/root/cti-agent-kit`, never from a
 personal home directory. Make it the first time (the repository is public, so
 no key is needed):

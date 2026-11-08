@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="680" height="1220" viewBox="0 0 680 1220" role="img" aria-labelledby="flow-title flow-desc">
 <title id="flow-title">cti-agent delivery pipeline: laptop to production</title>
-<desc id="flow-desc">A MacBook Pro runs task ship, a gated sequence ending in git push to the public GitHub repo zany2dmax/cti-agent. On a Fedora server in Azure, cti-agent-update pulls the kit from that repo and then runs fleet-kit/install-fedora.sh from it; the installer pulls the Go source itself and is idempotent. GitHub Actions polls the public repo for new tags and copies each new release to the private company repo REDACTED-ORG/cti-agent, which is protected by PrimeSec AI code scan and the task ship gates.</desc>
+<desc id="flow-desc">An update is two commands: task ship on the Mac, then sudo cti-agent-update --for-real on the Fedora server. A MacBook Pro runs task ship, a gated sequence ending in git push to the public GitHub repo zany2dmax/cti-agent. On a Fedora server in Azure, sudo cti-agent-update --for-real pulls the kit from that repo and then runs fleet-kit/install-fedora.sh from it; the installer pulls the Go source itself and is idempotent. GitHub Actions polls the public repo for new tags and copies each new release to the private company repo REDACTED-ORG/cti-agent, which is protected by PrimeSec AI code scan and the task ship gates.</desc>
 <style>
 .hw{font-family:'Marker Felt','Segoe Print','Bradley Hand','Comic Sans MS','Chalkboard SE',cursive}
 .t{font-size:14px}
@@ -36,7 +36,7 @@
 <rect x="45" y="197" width="140" height="60" rx="8" fill="none" stroke="#1E9E4A" stroke-width="2.6"/>
 <rect x="46.5" y="198" width="140" height="60" rx="8" fill="none" stroke="#1E9E4A" stroke-width="1.2" opacity="0.5" transform="rotate(-0.6 115 227)"/>
 <text class="th hw" x="115" y="224" text-anchor="middle" style="fill:#1E9E4A">task ship</text>
-<text class="ts hw" x="115" y="244" text-anchor="middle" style="fill:#333">Taskfile target</text>
+<text class="ts hw" x="115" y="244" text-anchor="middle" style="fill:#333">on the Mac</text>
 
 <path d="M115 261 L115 280" fill="none" stroke="#1E9E4A" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
 
@@ -91,21 +91,22 @@
 <g transform="translate(500,162) scale(1.0833)" fill="#1A1A1A"><path d="M12.001 0C5.376 0 .008 5.369.004 11.992H.002v9.287h.002A2.726 2.726 0 0 0 2.73 24h9.275c6.626-.004 11.993-5.372 11.993-11.997C23.998 5.375 18.628 0 12 0zm2.431 4.94c2.015 0 3.917 1.543 3.917 3.671 0 .197.001.395-.03.619a1 1 0 0 1-1.137.893 1 1 0 0 1-.842-1.175 3 3 0 0 0 .013-.337c0-1.207-.987-1.672-1.92-1.672-.934 0-1.775.784-1.777 1.672.016 1.027 0 2.046 0 3.07l1.732-.012c1.352-.028 1.368 2.009.016 1.998l-1.748.013c-.004.826.006.677.002 1.093 0 0 .015 1.01-.016 1.776-.209 2.25-2.124 4.046-4.424 4.046-2.438 0-4.448-1.993-4.448-4.437.073-2.515 2.078-4.492 4.603-4.469l1.409-.01v1.996l-1.409.013h-.007c-1.388.04-2.577.984-2.6 2.47a2.44 2.44 0 0 0 2.452 2.439c1.356 0 2.441-.987 2.441-2.437l-.001-7.557c0-.14.005-.252.02-.407.23-1.848 1.883-3.256 3.754-3.256"/></g>
 <rect x="495" y="190" width="150" height="74" rx="8" fill="none" stroke="#0A8F8F" stroke-width="2.6"/>
 <rect x="496.5" y="191" width="150" height="74" rx="8" fill="none" stroke="#0A8F8F" stroke-width="1.2" opacity="0.5" transform="rotate(-0.6 570 227)"/>
-<text class="th hw" x="570" y="222" text-anchor="middle" style="fill:#0A8F8F">Fedora server</text>
-<text class="ts hw" x="570" y="245" text-anchor="middle" style="fill:#333">cti-agent-update</text>
+<text class="th hw" x="570" y="214" text-anchor="middle" style="fill:#0A8F8F">Fedora server</text>
+<text class="ts hw" x="570" y="236" text-anchor="middle" style="fill:#1A1A1A">sudo cti-agent-update</text>
+<text class="ts hw" x="570" y="253" text-anchor="middle" style="fill:#1A1A1A">--for-real</text>
 
 <path d="M570 268 Q574 276 570 284" fill="none" stroke="#0A8F8F" stroke-width="3" stroke-linecap="round" marker-end="url(#at)"/>
 
 <rect x="495" y="290" width="150" height="54" rx="8" fill="none" stroke="#0A8F8F" stroke-width="2.6"/>
 <rect x="496.5" y="291" width="150" height="54" rx="8" fill="none" stroke="#0A8F8F" stroke-width="1.2" opacity="0.5" transform="rotate(0.6 570 317)"/>
 <text class="th hw" x="570" y="313" text-anchor="middle" style="fill:#0A8F8F">install script</text>
-<text class="ts hw" x="570" y="332" text-anchor="middle" style="fill:#333">runs from that kit</text>
+<text class="ts hw" x="570" y="332" text-anchor="middle" style="fill:#333">from the updated kit</text>
 
 <path d="M570 348 L570 378" fill="none" stroke="#0A8F8F" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
 
 <rect x="390" y="380" width="275" height="356" rx="6" fill="#FFF3A6" stroke="#C9A400" stroke-width="2"/>
 <text class="th hw" x="406" y="406" style="fill:#0A8F8F;font-size:16px">install-fedora.sh = the setup</text>
-<text class="ts hw" x="406" y="426" style="fill:#333">./fleet-kit/install-fedora.sh</text>
+<text class="ts hw" x="406" y="426" style="fill:#333">run for you by cti-agent-update</text>
 <rect x="400" y="431" width="218" height="19" rx="3" fill="#FFB347" opacity="0.5"/>
 <text class="th hw" x="406" y="445" style="fill:#1A1A1A">Idempotent: safe to re-run</text>
 <path d="M642 441 a10 10 0 1 0 -4 -9 M634 428 l4 5 l6 -4" fill="none" stroke="#EE7B00" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -189,6 +190,19 @@
 <path d="M346 1070 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0" fill="none" stroke="#C9A400" stroke-width="2" stroke-linecap="round"/>
 <text class="ts hw" x="346" y="1090" style="fill:#333">also gating pushes (task ship):</text>
 <text class="th hw" x="346" y="1108" style="fill:#1E9E4A">gosec, govulncheck, bandit, scan</text>
+
+<rect x="22" y="884" width="290" height="232" rx="6" fill="#FFF3A6" stroke="#C9A400" stroke-width="2"/>
+<text class="th hw" x="38" y="910" style="fill:#1A1A1A;font-size:16px">an update = two commands</text>
+<path d="M38 918 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0" fill="none" stroke="#C9A400" stroke-width="2" stroke-linecap="round"/>
+<text class="th hw" x="38" y="944" style="fill:#1D5FD0">1  on the Mac</text>
+<text class="th hw" x="62" y="966" style="fill:#1E9E4A;font-size:16px">task ship</text>
+<text class="ts hw" x="62" y="984" style="fill:#333">every check, then git push</text>
+<text class="th hw" x="38" y="1014" style="fill:#0A8F8F">2  on the Fedora box</text>
+<text class="th hw" x="62" y="1036" style="fill:#0A8F8F;font-size:16px">sudo cti-agent-update</text>
+<text class="th hw" x="62" y="1056" style="fill:#0A8F8F;font-size:16px">--for-real</text>
+<text class="ts hw" x="62" y="1074" style="fill:#333">pulls the kit, then runs the</text>
+<text class="ts hw" x="62" y="1090" style="fill:#333">installer from it</text>
+<text class="ts hw" x="38" y="1108" style="fill:#EE7B00">--dry-run first shows what's incoming</text>
 
 <path d="M52 1150 L84 1150" stroke="#1E9E4A" stroke-width="3" stroke-linecap="round"/>
 <path d="M88 1150 L104 1150" stroke="#0A8F8F" stroke-width="3" stroke-linecap="round"/>
