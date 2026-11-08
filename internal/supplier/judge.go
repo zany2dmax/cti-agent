@@ -61,6 +61,29 @@ type Config struct {
 	// TechTerms are words which, found in the supplier name, subject or the
 	// form's notes, stop a No from standing. Nil means DefaultTechTerms.
 	TechTerms []string
+	// TPRM names the process a critical supplier goes through, in the
+	// organisation's words. Empty means a generic phrase.
+	TPRM string
+	// UnsureText is what the Jira item says when the answer is Unsure. Empty
+	// means a generic sentence. It is operator text, not model output.
+	UnsureText string
+}
+
+func (c Config) tprm() string {
+	if strings.TrimSpace(c.TPRM) != "" {
+		return strings.TrimSpace(c.TPRM)
+	}
+	return "third-party risk management process"
+}
+
+func (c Config) unsureText(board string) string {
+	if strings.TrimSpace(c.UnsureText) != "" {
+		return strings.TrimSpace(c.UnsureText)
+	}
+	if board == "" {
+		board = "security team's"
+	}
+	return "We could not determine a 100% Yes, so this is Unsure, and an Unsure gets a to-do on the " + board + " Kanban board."
 }
 
 // DefaultTechTerms are whole words that suggest a technology supplier.

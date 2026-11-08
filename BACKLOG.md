@@ -117,9 +117,17 @@ is real, not before. Finished work moves out of this file into
   quote copied from the request, a No is refused when the form was linked or
   unreadable, when the name, subject or notes hold a technology word, or when
   the request tried to steer the reader, and output code cannot use is Unsure.
-  Not built: running the model, the lane command and its `fleet.env` settings
-  (question and meaning wording, technology word list), the Jira item and the
-  digest.
+  **Jira item and digest built (pure builders):** `supplier.TicketSummary` /
+  `TicketDescription` / `Labels` / `FindJQL` (one item per conversation, found
+  again by a hashed label so a rerun never files twice; Yes and Unsure get an
+  item, a No gets none unless asked; no address, contact or remittance detail
+  goes in; everything from the request is escaped for Jira wiki markup) and
+  `supplier.Digest` (counts, the board link, https links only; no email on a
+  day with no requests). Not built: running the model, the lane command that
+  files the items and sends the digest, and its `fleet.env` settings (the
+  address, question and meaning wording, Unsure text, technology word list,
+  the project key and assignee email, `CYBR` in `JIRA_ALLOW_CREATE`, the
+  digest's recipient list).
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a
