@@ -1217,7 +1217,9 @@ hanging on a prompt nobody can answer.
 
 `CLAUDE_BIN` pins the binary; blank auto-detects `/usr/bin/claude` (dnf) or
 `/usr/local/bin/claude`. It must be root-owned - a copy in the service
-account's HOME is refused. `CLAUDE_CONFIG_DIR`
+account's HOME is refused. `CHECKIN_MODEL` picks the heartbeat's model (`haiku`,
+`sonnet`, `opus`, `fable` or a full `claude-...` id); blank is the account's
+default, and anything else refuses the beat with an ERROR on the board. `CLAUDE_CONFIG_DIR`
 moves credentials elsewhere — leave it blank, the default is already under
 `FLEET_HOME`.
 

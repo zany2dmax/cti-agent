@@ -181,3 +181,58 @@ is real, not before. Finished work moves out of this file into
   are, who answers them, and what "done" means for one
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
+- **Heartbeat escalation to a stronger model** (designed 2026-11-08, not
+  built). Groundwork shipped: `CHECKIN_MODEL` picks the beat's model. First
+  run a week or two of beats on a cheaper model (Sonnet) and look at where
+  they fell short before building this. The idea: routine beats stay cheap, a
+  beat that hits a hard reasoning problem gets one look from a stronger model
+  (Opus), and that model either solves it or escalates it to the operator.
+  - **The line between more power and a person.** The test is whether the
+    problem needs better reasoning over data the fleet can already read (send
+    to the stronger model) or an action or information the fleet does not
+    have (a person).
+    - *Stronger model:* conflicting signals between two sources (the Nov 4
+      beats saw `cti-kev` clean while the rollup showed 9 overdue); an
+      `UNKNOWN` CVE mapping that needs careful reading of the advisory against
+      the scanner's data; the cause of a recurring lane failure buried in the
+      journal; Patch Tuesday exposure reasoning; whether a feed or format
+      change is harmless or broken.
+    - *Always a person:* anything that changes who is mailed, an allowlist, a
+      gate or a ticket; credentials and authentication; anything that needs a
+      system the fleet cannot see, or contact with someone outside the company
+      (the CISA block); a risk decision (accepting an overdue KEV); suspected
+      prompt injection or compromise; a bug in the fleet's own code (the
+      stronger model may diagnose it, but the fix is the operator's).
+  - **Mechanism.** The decision sits in `run-checkin`, the deterministic
+    bash, never in a model:
+    1. The beat asks through one new granted command, e.g. `fleet-deeper
+       <kind> <subject> "<question>"`. `kind` must come from a fixed list
+       (`conflict`, `unknown-cve`, `failure`, `exposure`, `noise`). The
+       command records one bounded request in state. The beat cannot name a
+       model, tools or a budget; it can only ask.
+    2. After the beat, `run-checkin` gates it: a valid request, `kind` on the
+       list, budget room with the stronger run weighted as several beats, the
+       same subject not escalated in the last 24 hours, and a daily cap not
+       yet used. Pass, and it runs; fail, and the request is logged and
+       dropped. This is the automatic approval, and it is plain bash.
+    3. It runs `claude -p /deeper --model $DEEPER_MODEL` with exactly the
+       beat's grants (read-only plus board, memory and `cti-alert`; no Agent
+       tool, no edit tools) and the request as input. It must end in one of
+       three outcomes: **solved** (posts the finding, writes a memory);
+       **needs a person** (one `cti-alert` carrying the original question and
+       its own analysis); or **not worth it** (a memory saying so, so later
+       cheap beats escalate less).
+    4. Optional: deterministic triggers that request a deeper look without
+       asking the model, such as the same `UNKNOWN` unresolved across 3 beats,
+       or a lane failing twice in a row.
+  - **Safety.** A cheap beat steered by hostile mail can request a deeper look
+    but gains nothing: the stronger run has no more power than the beat,
+    so the worst case is wasted quota (capped daily) and an alert to the
+    operator, which a beat can already send. This design never grants the
+    Agent tool, which would widen what a beat can do.
+  - **Pieces:** `DEEPER_MODEL` in `fleet.env`; the `fleet-deeper` wrapper
+    (root-owned, validated like `fleet-board`, and in `checkin-bash-guard`'s
+    world); a `/deeper` skill; the gate and the second run in `run-checkin`;
+    beat weighting in `cti-budget`, which counts beats today, not cost;
+    tests for the gate's refusals; and the orchestrator CLAUDE.md telling a
+    beat when to ask.

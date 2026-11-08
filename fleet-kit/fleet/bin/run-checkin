@@ -317,6 +317,37 @@ if [ "$FLEET_OS" = "linux" ]; then
   code_owned_by_root "$CLAUDE" || exit 1
 fi
 
+# CHECKIN_MODEL - which model the beat runs on. Unset: the account's default,
+# as before. The operator's choice, never the beat's: it is read here, from
+# fleet.env, and the model cannot change it mid-beat.
+#
+# A value that is not a model alias or a claude-* id refuses the beat, loudly,
+# rather than quietly running the default: a typo would otherwise leave the
+# operator comparing weeks of "Sonnet" beats that were never Sonnet. The
+# character list is spelled out because a [a-z] range follows the locale.
+CHECKIN_MODEL="${CHECKIN_MODEL:-}"
+MODEL_ARGS=()
+if [ -n "$CHECKIN_MODEL" ]; then
+  model_ok=1
+  case "$CHECKIN_MODEL" in
+    haiku|sonnet|opus|fable) ;;
+    claude-?*)
+      case "$CHECKIN_MODEL" in
+        *[!abcdefghijklmnopqrstuvwxyz0123456789.-]*) model_ok=0 ;;
+      esac ;;
+    *) model_ok=0 ;;
+  esac
+  if [ "$model_ok" != 1 ]; then
+    echo "run-checkin: CHECKIN_MODEL='$CHECKIN_MODEL' in $FLEET_ENV is not a model." >&2
+    echo "  Use an alias (haiku, sonnet, opus, fable) or a full id (claude-...)," >&2
+    echo "  or leave it blank for the account's default." >&2
+    "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
+      "heartbeat cannot start: CHECKIN_MODEL in fleet.env is not a model name" 2>/dev/null || true
+    exit 1
+  fi
+  MODEL_ARGS=(--model "$CHECKIN_MODEL")
+fi
+
 # A stored login does not live in the same place on both platforms, and
 # checking the wrong one is worse than not checking at all. On Linux the token
 # is a file under the config dir; on macOS it is a Keychain item and that file
@@ -443,6 +474,7 @@ if [ -x "$BUDGET" ]; then
 fi
 
 echo "[run-checkin $(date '+%F %H:%M:%S')] using $CLAUDE in $AGENT_DIR"
+echo "[run-checkin $(date '+%F %H:%M:%S')] model: ${CHECKIN_MODEL:-account default}"
 cd "$AGENT_DIR"
 
 # Deliberately NOT exec - exec replaces this shell and discards the EXIT trap,
@@ -578,7 +610,7 @@ set +e
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 SETTINGS_ARGS=()
 [ -f "$CHECKIN_SETTINGS" ] && SETTINGS_ARGS=(--settings "$CHECKIN_SETTINGS")
-"$CLAUDE" -p "/checkin" --permission-mode default \
+"$CLAUDE" -p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default \
   --setting-sources project ${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"} \
   --strict-mcp-config \
   --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS" \

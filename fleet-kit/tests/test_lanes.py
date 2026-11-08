@@ -2044,7 +2044,7 @@ class TestFileShape(unittest.TestCase):
                              for r in self._orchestrator_grant()))
 
     def _checkin_box(self, overrides=None, plant=(), claude_json=None,
-                     guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None):
+                     guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None, extra_env=None):
         """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
         install-fedora.sh lays it out, read-only to this test's user, and a
         fake stat(1) that reports root ownership unless told otherwise.
@@ -2113,6 +2113,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                "FLEET_ENV": str(d / "none.env"), "TMPDIR": str(tmp),
                "CLAUDE_BIN": str(fake / "claude"),
                "ANTHROPIC_API_KEY": "test-placeholder"}
+        env.update(extra_env or {})
         r = subprocess.run(["bash", str(code / "bin" / "run-checkin"), "--for-real"], env=env,
                            capture_output=True, text=True, check=False)
         return r, (ran.read_text() if ran.exists() else "")
@@ -2188,6 +2189,30 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertNotIn("systemctl", grant)
         self.assertIn("/code/bin/fleet-timers:*)", grant)
         self.assertNotIn("journalctl", grant)
+
+    def test_checkin_model_is_the_operators_choice_and_checked(self):
+        """CHECKIN_MODEL picks the beat's model; unset keeps the account
+        default; anything that is not a model name refuses the beat rather
+        than silently running the default."""
+        r, ran = self._checkin_box()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("arg --model", ran)
+        self.assertIn("model: account default", r.stdout)
+        for model in ("sonnet", "opus", "claude-sonnet-5-5"):
+            with self.subTest(model=model):
+                r, ran = self._checkin_box(extra_env={"CHECKIN_MODEL": model})
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                args = [l[4:] for l in ran.splitlines() if l.startswith("arg ")]
+                self.assertEqual(args[args.index("--model") + 1], model)
+                self.assertIn(f"model: {model}", r.stdout)
+        for bad in ("gpt-4", "Sonnet", "claude-", "sonnet --dangerously-skip-permissions",
+                    "claude-x\n--model", "claude-é"):
+            with self.subTest(bad=bad):
+                r, ran = self._checkin_box(extra_env={"CHECKIN_MODEL": bad})
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("is not a model", r.stderr)
+                self.assertNotIn("claude cwd=", ran)
+                self.assertIn("fleet-board post @you @operator ERROR", ran)
 
     def test_the_heartbeat_refuses_steering_files_the_account_could_plant(self):
         """A beat steered once must not leave behind something that steers

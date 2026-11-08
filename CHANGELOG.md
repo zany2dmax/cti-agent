@@ -269,6 +269,15 @@ PoD addresses in SPF. Nothing else is required.
   SECURITY.md under "Build and release gates" and in the README, and
   CHEATSHEET 11a describes the release flow (tag on the personal repo; the
   sync workflow copies it to the company GitHub).
+- **`CHECKIN_MODEL` picks the heartbeat's model.** Set it in `fleet.env` to
+  an alias (`haiku`, `sonnet`, `opus`, `fable`) or a full `claude-...` id;
+  blank keeps the account's default, as before. It is the operator's choice,
+  read by `run-checkin` and passed as `--model`; the beat cannot change it.
+  A value that is not a model name refuses the beat with an ERROR on the board
+  rather than quietly running the default, so weeks of beats meant for one
+  model are never silently another. Each beat logs `model: ...` and the
+  healthcheck shows the last one. Groundwork for escalating hard problems to a
+  stronger model (BACKLOG: "Heartbeat escalation to a stronger model").
 - **`fleet-owners sync`: owners.db asks Qualys instead of you.** Bringing
   owners.db in step after adding web apps took a `--list-apps` file, `names`,
   reading for `<- no owner`, and a `set` and `site rm` per app - and `names`
@@ -307,7 +316,8 @@ PoD addresses in SPF. Nothing else is required.
 **Upgrade:** nothing on the box beyond the reinstall; `GRAPH_MAILBOX` is
 already required, and `owners.db` gains its `scanner_apps` table on first use.
 After adding or removing web apps in Qualys, run `sudo cti-agent fleet-owners
-sync`. To ask CISA to allow the fleet, quote the
+sync`. To try the heartbeat on a cheaper model, add `CHECKIN_MODEL=sonnet` to
+`/etc/cti-agent/fleet.env`; the next beat picks it up, no reinstall needed. To ask CISA to allow the fleet, quote the
 `x-reference-error` value from a 403 response. To build the cheat sheet PDF on
 a Mac: `brew install pandoc`, then a LaTeX with pdflatex (`brew install --cask
 basictex`, then `sudo tlmgr install fvextra etoolbox framed`, or MacTeX), and

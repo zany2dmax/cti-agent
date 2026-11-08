@@ -226,6 +226,8 @@ if printf '%s\n' "$beat" | grep -q 'disallowed tools: Edit,Write,NotebookEdit'; 
 elif [ -n "$beat" ]; then
   warn "no 'disallowed tools' line yet - the build predates e1821be or no beat has run since"
 fi
+model="$(printf '%s\n' "$beat" | grep -o '\] model: .*' | tail -1 | cut -d' ' -f3-)"
+[ -n "$model" ] && info "heartbeat model: $model (CHECKIN_MODEL in fleet.env)"
 
 # ── the fleet's own view ─────────────────────────────────────────────────────
 section "Fleet"

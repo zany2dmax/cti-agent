@@ -548,6 +548,19 @@ Absolute path to
 .BR claude ;
 empty searches (section 7).
 .TP
+.B CHECKIN_MODEL
+The model the beat runs on, passed as
+.BR \-\-model :
+an alias
+.RB ( haiku ", " sonnet ", " opus ", " fable )
+or a full
+.B claude\-
+id. Empty: the account's default. Any other value refuses the beat, exit 1,
+with an ERROR on the board, rather than running the default unnoticed. The
+journal logs
+.B model:
+on every beat (section 7).
+.TP
 .BR ANTHROPIC_API_KEY ", " ANTHROPIC_AUTH_TOKEN ", " CLAUDE_CODE_OAUTH_TOKEN
 The credential. At most one may be set (section 7).
 .TP
