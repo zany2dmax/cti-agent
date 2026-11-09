@@ -35,9 +35,31 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6 — 2026-11-08
+
+**Upgrade:** `sudo cti-agent-update --for-real`, then open a new shell for the
+tab completion. **One thing changes how you type commands:** every command that
+changes something now needs `--dry-run` or `--for-real` (see "Every command that
+changes something has to be told how to run"). Everything else is optional
+configuration; each entry says what.
 
 ### Added
+
+- **`fleet-owners sync`: the owners list asks the scanner, not the operator.**
+  Bringing `owners.db` in step after a web application was added took a saved
+  `--list-apps` file, `names`, a read for "no owner" and a `set` and `site rm`
+  per application. `sudo cti-agent fleet-owners sync` now lists the scanner
+  itself, keeps every web application's name (owned or not, display only, never
+  in `owners.json`) and reports what is out of step with the command for each:
+  an application with no owner, a `site:` row a web application now scans, a
+  site the domains lane no longer lists, an id Qualys no longer has. `--apply`
+  makes only the changes that follow from owners already on file: a new web
+  application takes the owner of the one matching `site:` row, and the row goes.
+  The scanner runs through the `cti-agent` wrapper as the service account, and
+  reads a new `cti-appscan --list-apps --json` listing (`cti-applist/1`) with
+  the id, name and host as separate fields, so a name cannot pose as scanning a
+  site; any malformed field refuses the whole listing. **Upgrade:** re-run the
+  installer. Run `sync` after adding web applications in Qualys.
 
 - **`cti-agent-update` has a man page and tab completion.** `man
   cti-agent-update` covers both modes, what each checks before it pulls, and
@@ -180,6 +202,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   the reverse. **Upgrade:** re-run the installer, then open a new shell.
 
 ### Changed
+
+- **The heartbeat's model is the operator's choice, and it works economically.**
+  `CHECKIN_MODEL` in `fleet.env` sets the model `run-checkin` passes (`haiku`,
+  `sonnet`, `opus`, `fable` or a `claude-*` id); blank keeps the account default.
+  The beat cannot change it, anything unrecognised refuses the beat with a board
+  ERROR instead of quietly running the default, each beat logs `model: ...`, and
+  the healthcheck shows the last. The orchestrator's instructions gained a
+  section on working economically: do routine, checkable work in the beat and
+  hand anything needing judgement, a stronger model or a person (unsettled
+  UNKNOWNs, anything touching recipients, allowlists, gates or tickets, mail
+  that reads like instructions, failures with no clear cause) to the operator,
+  and keep each beat small. **Upgrade:** re-run the installer. Optional:
+  `CHECKIN_MODEL`.
 
 - **Quarantine digests are cleaned up, and fleet mail held in quarantine is
   reported.** The shared mailbox receives "End User Digest" mail - its own and
