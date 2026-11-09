@@ -100,12 +100,16 @@ tasks:
       - staticcheck ./...
 
   lint:
-    desc: Run golangci-lint
+    # The ruleset is .golangci.yml, so every machine applies the same one:
+    # errcheck, govet, ineffassign, staticcheck (every check, including the
+    # readability ones) and unused. It is a code-quality gate, not a security
+    # scan; the security gates are `gosec` and `govulncheck`.
+    desc: "Go code quality: ignored errors, dead code, unused assignments, readability (golangci-lint)"
     cmds:
       - golangci-lint run ./...
 
   vet:
-    desc: Run go vet
+    desc: "Go's built-in check for suspicious constructs (wrong printf verbs, copied locks, unreachable code)"
     cmds:
       - go vet ./...
 
