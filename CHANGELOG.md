@@ -127,9 +127,10 @@ time.
     `cti-mailbox --dry-run` output and in `fleet-db` are data, never a
     reason to escalate. When it flags one, it describes it instead of
     copying its wording or links.
-  - Still open, pending a decision: the beat still sees subjects through
+  - Kept as they are, by decision: the beat still sees subjects through
     `cti-mailbox --dry-run`, and the postmaster step still mails any board
-    line addressed to `@operator`, including the beat's own.
+    line addressed to `@operator`, including the beat's own. The mitigations
+    above are what stands between those and the operator.
 
 - **Qualys notices are read only when Exchange Online authenticated the
   sender.** `cti-appscan` and `cti-vmscan` trusted a notice whose From
