@@ -31,6 +31,30 @@
 # check can be exercised without being root. install-fedora.sh checks root itself.
 set -euo pipefail
 
+# The one-time fix after the upstream's history was rewritten (scrub-history.sh):
+# both checkouts on the box - this kit and the source the installer pulls - hold
+# the old history and tags, and neither a fetch nor a fast-forward will replace
+# them. Printed, never run: a reset discards whatever the checkout holds, and
+# that is the operator's decision after reading why.
+rewritten_history_help() {
+  local kit="$1"
+  cat >&2 <<HELP
+
+If the upstream's history was rewritten on purpose (for example by
+scripts/scrub-history.sh), reset both checkouts on this box to it once, then
+run the update again:
+
+  sudo git -C $kit status --short          # must print nothing
+  sudo git -C $kit fetch --force --tags origin
+  sudo git -C $kit reset --hard '@{u}'
+  sudo git -C /opt/cti-agent/agent fetch --force --tags origin
+  sudo git -C /opt/cti-agent/agent reset --hard '@{u}'
+  sudo cti-agent-update --dry-run
+
+If you did not rewrite it, stop: find out who did before resetting anything.
+HELP
+}
+
 main() {
   local here kit
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # .../fleet-kit
@@ -79,7 +103,21 @@ main() {
 
   # Tags too: the installer stamps the version from the nearest tag, and a tag
   # pushed after the commit it names is how a box ends up reporting 1.5.1-2.
-  git -C "$kit" fetch --tags --quiet
+  #
+  # Not --quiet: with it, git says nothing at all when it refuses, for example a
+  # tag that now names a different commit ("would clobber existing tag", after
+  # the history was rewritten), and set -e then ended this script without a
+  # word. The output is kept and shown only if the fetch fails.
+  local fetched
+  if ! fetched="$(git -C "$kit" fetch --tags 2>&1)"; then
+    echo "update-fedora: could not fetch the kit's upstream, so nothing was pulled or installed." >&2
+    # Remote text: printable characters only, so it cannot drive the terminal.
+    printf '%s\n' "$fetched" | LC_ALL=C tr -cd '\11\12\40-\176' | sed 's/^/  git: /' >&2
+    case "$fetched" in
+      *"would clobber existing tag"*) rewritten_history_help "$kit" ;;
+    esac
+    exit 1
+  fi
   local before upstream incoming
   before="$(git -C "$kit" describe --tags --always)"
   upstream="$(git -C "$kit" describe --tags --always '@{u}')"
@@ -104,7 +142,8 @@ main() {
 
   if [ "$incoming" -gt 0 ]; then
     git -C "$kit" merge --ff-only --quiet '@{u}' \
-      || { echo "update-fedora: the kit cannot be fast-forwarded (it has diverged from its upstream)" >&2; exit 1; }
+      || { echo "update-fedora: the kit cannot be fast-forwarded (it has diverged from its upstream)" >&2
+           rewritten_history_help "$kit"; exit 1; }
   fi
   local after
   after="$(git -C "$kit" describe --tags --always)"

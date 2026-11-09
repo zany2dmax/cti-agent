@@ -141,6 +141,50 @@ class UpdateFedora(unittest.TestCase):
         self.assertIn("local changes", r.stderr)
         self.assertNotIn("INSTALLER", r.stdout)
 
+    def rewrite_upstream(self, retag):
+        """What scrub-history.sh then a force push does: the same history with
+        new commit ids, and (if retag) the release tag moved onto the new one."""
+        other = self.tmp / "rewriter"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], check=True)
+        git(other, "commit", "-q", "--amend", "-m", "one, rewritten")
+        if retag:
+            git(other, "tag", "-f", "v1.0")
+            git(other, "push", "-q", "--force", "origin", "main", "--tags")
+        else:
+            git(other, "push", "-q", "--force", "origin", "main")
+
+    def test_a_rewritten_tag_stops_it_out_loud_with_the_fix(self):
+        # Seen for real: git fetch --tags --quiet refuses a moved tag without a
+        # word, and set -e ended the update with no output at all.
+        self.rewrite_upstream(retag=True)
+        for mode in ("--dry-run", "--for-real"):
+            r = self.run_update(mode)
+            self.assertEqual(r.returncode, 1, mode)
+            self.assertIn("nothing was pulled or installed", r.stderr)
+            self.assertIn("would clobber existing tag", r.stderr)
+            self.assertIn("fetch --force --tags origin", r.stderr)
+            self.assertIn("reset --hard", r.stderr)
+            self.assertIn("/opt/cti-agent/agent", r.stderr)
+            self.assertNotIn("INSTALLER", r.stdout)
+        # Printed, never run: the kit still has the old history.
+        self.assertEqual(git(self.kit, "log", "-1", "--format=%s").strip(), "one")
+
+    def test_a_rewritten_branch_is_refused_with_the_fix(self):
+        self.rewrite_upstream(retag=False)
+        r = self.run_update("--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot be fast-forwarded", r.stderr)
+        self.assertIn("reset --hard", r.stderr)
+        self.assertNotIn("INSTALLER", r.stdout)
+
+    def test_a_fetch_that_fails_says_so(self):
+        git(self.kit, "remote", "set-url", "origin", str(self.tmp / "gone.git"))
+        r = self.run_update("--dry-run")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("could not fetch", r.stderr)
+        self.assertIn("git: ", r.stderr)
+        self.assertNotIn("would clobber", r.stderr)
+
     def test_a_real_update_needs_root_but_looking_does_not(self):
         self.assertEqual(self.run_update("--for-real", uid="1000").returncode, 1)
         self.assertEqual(self.run_update("--dry-run", uid="1000").returncode, 0)

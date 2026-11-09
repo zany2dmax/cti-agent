@@ -254,6 +254,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **`cti-agent-update` stopped without a word when a tag had moved.** After a
+  history rewrite and force push, `git fetch --tags --quiet` refuses to move
+  the box's old tags, and with `--quiet` says nothing; the update ended there
+  with no output. The fetch now shows git's message when it fails, and a
+  moved tag or a branch that cannot be fast-forwarded prints the one-time fix
+  for both checkouts on the box (the kit and `/opt/cti-agent/agent`). It is
+  printed, never run. See REWRITTEN HISTORY in `cti-agent-update(1)`.
+
 - **A typo on `cti-agent-update` pulled the kit and then installed nothing.**
   Anything other than `--dry-run` or `--for-real` was passed on to the
   installer, which refuses every option it could receive, so `sudo

@@ -49,12 +49,15 @@ upstream.
 .B 2. Fetch
 .B git fetch \-\-tags
 on the kit. The tags come along because the installer stamps the version
-from the nearest tag.
+from the nearest tag. If the fetch fails, git's own message is shown and
+nothing is pulled. A tag git will not move ("would clobber existing tag")
+means the upstream's history was rewritten; see
+.BR "REWRITTEN HISTORY" .
 .TP
 .B 3. Fast-forward
 .B git merge \-\-ff\-only
 to the upstream, if anything is incoming. A kit that has diverged from its
-upstream is refused, never merged.
+upstream is refused, never merged, with the same advice as a moved tag.
 .TP
 .B 4. Install
 Prints the kit's version before and after, with a note when the new one is
@@ -128,8 +131,9 @@ Dry run finished, or
 .B 1
 Refused: not root for
 .BR \-\-for\-real ,
-the kit is not a git checkout, has local changes, has no upstream, or cannot
-be fast-forwarded. Nothing was pulled.
+the kit is not a git checkout, has local changes, has no upstream, could not
+be fetched, or cannot be fast-forwarded. Nothing was pulled, and the reason
+is printed.
 .TP
 .B 2
 Usage: no mode, both modes,
@@ -143,6 +147,20 @@ After the hand-over on
 .BR \-\-for\-real ,
 the exit status is the installer's. If the installer stops partway, it
 prints the line it stopped on and that the box is half-installed.
+.SH REWRITTEN HISTORY
+After the upstream's history is rewritten on purpose (for example by
+.IR scripts/scrub\-history.sh )
+and force-pushed, both checkouts on the box still hold the old commits and
+tags: the kit, and the source the installer pulls in
+.IR /opt/cti\-agent/agent .
+A fetch will not move their tags and a fast-forward cannot reach the new
+branch, so the update stops and prints the one-time fix: check the kit has
+no local changes, then for each checkout
+.B git fetch \-\-force \-\-tags origin
+and
+.BR "git reset \-\-hard @{u}" ,
+then a dry run. It is printed, never run: a reset discards what the checkout
+holds. If you did not rewrite the history, find out who did first.
 .SH EXAMPLES
 .nf
 sudo cti\-agent\-update \-\-dry\-run     # what is incoming; changes nothing
