@@ -428,3 +428,33 @@ func TestANonKEVSev5BelowCriticalStillWaits(t *testing.T) {
 		t.Errorf("KEV: ShouldFile=%v NeedsApproval=%v, want true false", ShouldFile(k), NeedsApproval(k))
 	}
 }
+
+// The product follows the CVE in the summary, so it survives a long title
+// being truncated, and is a row in the description. Asked for 2026-11-09:
+// every ticket should say which product it is about.
+func TestTheSummaryNamesTheProductRightAfterTheCVE(t *testing.T) {
+	f := kev85880()
+	f.Product = "Google Chrome"
+	f.Title = strings.Repeat("very long title ", 40)
+	s := Summary(f, now)
+	if !strings.Contains(s, "CVE-2026-85880 - Google Chrome - 441 hosts") {
+		t.Errorf("product not right after the CVE: %q", s)
+	}
+	if len(s) > MaxSummary {
+		t.Errorf("summary is %d bytes, over %d", len(s), MaxSummary)
+	}
+	if d := Description(f, now, "hosts.csv"); !strings.Contains(d, "|Product|Google Chrome|") {
+		t.Errorf("description has no Product row:\n%s", d)
+	}
+}
+
+func TestNoProductLeavesTheSummaryAsItWas(t *testing.T) {
+	f := kev85880()
+	s := Summary(f, now)
+	if strings.Contains(s, "CVE-2026-85880 -  - ") || !strings.Contains(s, "CVE-2026-85880 - 441 hosts") {
+		t.Errorf("summary without a product changed shape: %q", s)
+	}
+	if d := Description(f, now, "hosts.csv"); strings.Contains(d, "|Product|") {
+		t.Errorf("description has an empty Product row:\n%s", d)
+	}
+}

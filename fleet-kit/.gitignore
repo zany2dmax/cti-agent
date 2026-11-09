@@ -10,3 +10,4 @@ __pycache__/
 qualys_kb_cache.json
 nvd-cache.json
 kev-cache.json
+products.json

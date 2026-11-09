@@ -1400,6 +1400,113 @@ class HeldForApproval(unittest.TestCase):
         self.assertEqual(brief.load_held(self.enriched), [])
 
 
+class ProductName(unittest.TestCase):
+    """Every finding and fleet ticket says which product it is about.
+
+    Asked for 2026-11-09: "the targeted configuration item ... highlighted,
+    i.e. Chrome, Safari, PHP". From the CISA KEV catalog first, NVD's CPE
+    data second, and never guessed.
+    """
+
+    NVD = {"configurations": [{"nodes": [{"cpeMatch": [
+        {"vulnerable": True, "criteria": "cpe:2.3:a:google:chrome:*:*:*:*:*:*:*:*"},
+        {"vulnerable": False, "criteria": "cpe:2.3:o:microsoft:windows:-:*:*:*:*:*:*:*"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:google:chrome:*:*:*:*:*:*:*:*"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:nodejs:node\\.js:*:*:*:*:*:*:*:*"},
+        {"vulnerable": True, "criteria": "not-a-cpe"},
+    ]}]}]}
+
+    def test_only_vulnerable_cpes_count_once_each(self):
+        self.assertEqual(enrich.cpe_products(self.NVD),
+                         [["google", "chrome"], ["nodejs", "node.js"]])
+
+    def test_no_configuration_is_no_products(self):
+        self.assertEqual(enrich.cpe_products({}), [])
+
+    def test_names_read_like_names(self):
+        self.assertEqual(enrich.product_for({"cpe_products": [["php", "php"]]}), ("PHP", "NVD"))
+        self.assertEqual(enrich.product_for({"cpe_products": [["google", "chrome"]]}),
+                         ("Google Chrome", "NVD"))
+        self.assertEqual(enrich.product_for({"cpe_products": [["apple", "macos"]]}),
+                         ("Apple macOS", "NVD"))
+        self.assertEqual(enrich.product_name("Microsoft", "Microsoft Exchange Server"),
+                         "Microsoft Exchange Server")
+
+    def test_kev_wins_over_nvd(self):
+        f = {"kev_vendor": "Google", "kev_product": "Chromium V8",
+             "cpe_products": [["google", "chrome"]]}
+        self.assertEqual(enrich.product_for(f), ("Google Chromium V8", "CISA KEV"))
+
+    def test_a_long_list_is_cut_and_says_so(self):
+        f = {"cpe_products": [["v", f"p{i}"] for i in range(5)]}
+        name, _ = enrich.product_for(f)
+        self.assertTrue(name.endswith("+2 more"), name)
+
+    def test_nothing_known_is_empty_not_guessed(self):
+        self.assertEqual(enrich.product_for({"description": "A flaw in Google Chrome."}), ("", ""))
+
+    def test_the_map_keeps_kev_and_findings_and_merges(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "products.json")
+            enrich.save_products([{"cve": "CVE-2026-1", "product": "PHP"}],
+                                 {"CVE-2026-2": {"kev_vendor": "Apple", "kev_product": "Safari"}}, path)
+            enrich.save_products([{"cve": "CVE-2026-3", "product": "Node.js"}], {}, path)
+            got = brief.load_products(os.path.join(tmp, "enriched-x.json"))
+        self.assertEqual(got, {"CVE-2026-1": "PHP", "CVE-2026-2": "Apple Safari",
+                               "CVE-2026-3": "Node.js"})
+
+    def test_enrich_writes_product_on_every_finding(self):
+        stub_enrichment()
+        with tempfile.TemporaryDirectory() as tmp:
+            raw, out = os.path.join(tmp, "r.md"), os.path.join(tmp, "e.json")
+            with open(raw, "w") as f:
+                f.write(REPORT)
+            sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
+            with quiet():
+                enrich.main()
+            with open(out) as fh:
+                d = json.load(fh)
+        self.assertTrue(all("product" in f for f in d["findings"]))
+
+    def finding(self, **kw):
+        f = {"cve": "CVE-2026-9", "priority": "Sev5", "status": "PRESENT",
+             "host_count": 3, "rationale": "r"}
+        f.update(kw)
+        return f
+
+    def test_the_card_highlights_the_product(self):
+        html = brief.finding_block(self.finding(product="Google <Chrome>", product_source="NVD"))
+        self.assertIn("Google &lt;Chrome&gt;", html)
+        self.assertIn('title="from NVD"', html)
+
+    def test_the_card_says_when_no_product_was_found(self):
+        self.assertIn("product not identified", brief.finding_block(self.finding(product="")))
+
+    def test_an_old_row_without_the_field_renders_as_before(self):
+        self.assertNotIn("product not identified", brief.finding_block(self.finding()))
+
+    def test_fleet_tickets_name_the_product_from_the_map(self):
+        d = {"findings": [self.finding(cve="CVE-2026-1", product="PHP")],
+             "counts": {}, "total": 1, "generated": "now",
+             "_products": {"CVE-2026-2": "Apple Safari"},
+             "_tickets": {
+                 "CVE-2026-1": {"key": "CR-1", "cve": "CVE-2026-1", "status": "Open"},
+                 "CVE-2026-2": {"key": "CR-2", "cve": "CVE-2026-2", "status": "Open"},
+                 "CVE-2026-3": {"key": "CR-3", "cve": "CVE-2026-3", "status": "Open"}}}
+        html = brief.fleet_tickets_section(d)
+        self.assertIn("PHP", html)
+        self.assertIn("Apple Safari", html)
+        txt = "\n".join(brief.fleet_tickets_text(d))
+        self.assertIn("Product: PHP", txt)
+        self.assertIn("Product: Apple Safari", txt)
+        self.assertEqual(txt.count("Product:"), 2)
+
+    def test_the_text_digest_names_the_product(self):
+        d = {"findings": [self.finding(product="PHP")], "counts": {"Sev5": 1},
+             "total": 1, "generated": "now"}
+        self.assertIn("CVE-2026-9  [PHP]", brief.render_text(d, "daily"))
+
+
 class RemediationNote(unittest.TestCase):
     """A ticketed finding must stop reporting as un-actioned.
 

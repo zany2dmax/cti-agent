@@ -32,6 +32,7 @@ type enrichedRow struct {
 	KEV       any    `json:"kev"`  // 1/0, sometimes true/false
 	KEVDue    string `json:"kev_due"`
 	KEVName   string `json:"kev_name"`
+	Product   string `json:"product"`  // "Google Chrome"; "" when not identified
 	Priority  string `json:"priority"` // "Sev5".."Sev1"
 	QIDs      string `json:"qids"`     // comma-separated
 	HostCount int    `json:"host_count"`
@@ -139,6 +140,7 @@ func (r enrichedRow) toFinding() jira.Finding {
 		Severity:  severity(r.Priority),
 		CVSS:      asText(r.CVSS),
 		Title:     strings.TrimSpace(r.KEVName),
+		Product:   strings.TrimSpace(r.Product),
 		HostCount: r.HostCount,
 	}
 	if f.Title == "" {

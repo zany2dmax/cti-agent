@@ -308,3 +308,10 @@ func TestAStoredPresentThatIsNowGoneIsNotFiled(t *testing.T) {
 		t.Fatalf("filed %+v for a CVE the scanner no longer finds", got)
 	}
 }
+
+func TestTheProductReachesTheFinding(t *testing.T) {
+	r := enrichedRow{CVE: "CVE-1", Priority: "Sev5", Product: "  Google Chrome "}
+	if f := r.toFinding(); f.Product != "Google Chrome" {
+		t.Errorf("Product = %q", f.Product)
+	}
+}

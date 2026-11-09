@@ -312,11 +312,52 @@ def qids_cell(f):
             f"Menlo,monospace'>{shown}</span>{extra}</div>")
 
 
+def product_label(f):
+    """What a finding is about - Google Chrome, PHP - as enrich.py named it.
+
+    None when the finding predates the product field (an old rollup row), so
+    the card renders as it always did; "" when enrich looked and found no
+    name, which the card says rather than leaving the reader to wonder.
+    """
+    if "product" not in f:
+        return None
+    return " ".join(str(f.get("product") or "").split())
+
+
+def product_html(f):
+    p = product_label(f)
+    if p is None:
+        return ""
+    if not p:
+        return ('<span style="color:#718096;font-weight:400;font-size:12px">'
+                '&middot; product not identified</span>')
+    src = f.get("product_source") or ""
+    title = f' title="from {esc(src)}"' if src else ""
+    return (f'<span{title} style="background:#fff4c2;color:#1a202c;padding:1px 6px;'
+            f'border-radius:3px;font-weight:700">{esc(p)}</span>')
+
+
+def products_by_cve(data):
+    """cve -> product name, for rows that are not today's findings.
+
+    Today's findings win; the product map enrich.py keeps beside the enriched
+    file fills in the rest (every KEV entry, and every CVE enriched before),
+    so a ticket for a CVE not in today's mail still says what it is about.
+    """
+    out = dict(data.get("_products") or {})
+    for f in data.get("findings") or []:
+        if f.get("product"):
+            out[f["cve"]] = f["product"]
+    return out
+
+
 def finding_block(f, tickets=None):
     # tickets defaults to empty so every existing caller and test keeps
     # working, and a finding with no ticket renders exactly as it did before.
     color, bg, _ = PRI[f["priority"]]
     cve = esc(f["cve"])
+    product = product_html(f)
+    product = f"&nbsp;{product}" if product else ""
     link = f"https://nvd.nist.gov/vuln/detail/{cve}"
     badges = []
     if f.get("kev"):
@@ -357,7 +398,7 @@ def finding_block(f, tickets=None):
                style="border-left:4px solid {color};background:{bg};border-radius:0 4px 4px 0">
           <tr><td style="padding:12px 14px">
             <div style="font:700 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
-              <a href="{link}" style="color:{color};text-decoration:none">{cve}</a>
+              <a href="{link}" style="color:{color};text-decoration:none">{cve}</a>{product}
               <span style="color:#4a5568;font-weight:400">
                 &middot; {esc(f.get('host_count') or 0)} host(s)</span>
             </div>
@@ -465,8 +506,13 @@ def fleet_tickets_section(data):
     open_, closed = _fleet_tickets(data)
     if not open_ and not closed:
         return ""
+    products = products_by_cve(data)
 
     def row(t):
+        product = products.get(t.get("cve") or "") if t.get("kind") != "domains-lockdown" else ""
+        product = (f'<span style="background:#fff4c2;color:#1a202c;padding:0 4px;'
+                   f'border-radius:3px;font-weight:700">{esc(product)}</span> &middot; '
+                   if product else "")
         key = esc(t["key"])
         url = t.get("url") or ""
         if url.startswith(("http://", "https://")):
@@ -483,7 +529,7 @@ def fleet_tickets_section(data):
             "<td style=\"padding:5px 8px 5px 0;vertical-align:top;white-space:nowrap;"
             f"color:#4a5568\">{esc(t.get('cve') or '')}<br>{status}</td>"
             "<td style=\"padding:5px 0;vertical-align:top;color:#2d3748\">"
-            f"<b>{esc(_ticket_hosts(t))}</b>"
+            f"{product}<b>{esc(_ticket_hosts(t))}</b>"
             f"{outcome}"
             "</td></tr>")
 
@@ -517,9 +563,14 @@ def held_section(data):
     held = data.get("_held") or []
     if not held:
         return ""
+    products = products_by_cve(data)
+
+    def prod(h):
+        p = products.get(h["cve"])
+        return f"<br><b>{esc(p)}</b>" if p else ""
     rows = ''.join(
-        "<tr><td style=\"padding:3px 12px 3px 0;white-space:nowrap\">"
-        f"<b>{esc(h['cve'])}</b></td>"
+        "<tr><td style=\"padding:3px 12px 3px 0;white-space:nowrap;vertical-align:top\">"
+        f"<b>{esc(h['cve'])}</b>{prod(h)}</td>"
         f"<td style=\"padding:3px 12px 3px 0;white-space:nowrap\">"
         f"{esc(_held_hosts(h))}</td>"
         f"<td style=\"padding:3px 0;color:#4a5568\">{esc(h.get('title') or '')}</td></tr>"
@@ -555,9 +606,11 @@ def held_text(data):
     lines = [f"HELD FOR APPROVAL - {len(held)} Sev5 with no ticket", "-" * 68,
              "  Confirmed present and known exploited, but neither on CISA KEV nor",
              "  CVSS 9.0+, so the scheduled run does not file it."]
+    products = products_by_cve(data)
     for h in held:
         title = f"  {h['title']}" if h.get("title") else ""
-        lines.append(f"  {h['cve']:<16} {_held_hosts(h)}{title}")
+        prod = f"  [{products[h['cve']]}]" if products.get(h["cve"]) else ""
+        lines.append(f"  {h['cve']:<16} {_held_hosts(h)}{prod}{title}")
     lines += ["  To file them:", f"    {_approve_command(data)}", ""]
     return lines
 
@@ -568,10 +621,14 @@ def fleet_tickets_text(data):
         return []
     lines = [f"FLEET TICKETS - {len(open_)} open, re-checked against the scanner today",
              "-" * 68]
+    products = products_by_cve(data)
 
     def add(t):
         lines.append(f"  {t['key']:<10} {t.get('cve') or '':<16} "
                      f"{t.get('status') or '':<14} {_ticket_hosts(t)}")
+        p = products.get(t.get("cve") or "") if t.get("kind") != "domains-lockdown" else ""
+        if p:
+            lines.append(f"    Product: {p}")
         if t.get("outcome"):
             lines.append(f"    {t['outcome']}")
         if t.get("url"):
@@ -836,6 +893,24 @@ def _ticket_map(enriched_path):
     return got if isinstance(got, dict) else {}
 
 
+def load_products(enriched_path):
+    """The cve -> product map enrich.py keeps beside the enriched file.
+
+    Missing or unreadable is silent: it costs a product name in FLEET
+    TICKETS, and the digest renders without it.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(enriched_path)), "products.json")
+    try:
+        with open(path) as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    data = got.get("data") if isinstance(got, dict) else None
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v}
+
+
 def load_held(enriched_path):
     """CVEs cti-jira held for approval, from the same map as the tickets.
 
@@ -910,7 +985,9 @@ def render_text(data, kind):
             lines.append("  NOTE: UNKNOWN rows below are unverified coverage, "
                          "not confirmed exposure.")
         for f in group[:limits[p]]:
-            lines.append(f"  {f['cve']}  {f.get('status')}  "
+            prod = product_label(f)
+            prod = "" if prod is None else f"  [{prod or 'product not identified'}]"
+            lines.append(f"  {f['cve']}{prod}  {f.get('status')}  "
                          f"{f.get('host_count') or 0} host(s)")
             lines.append(f"    {f.get('rationale')}")
             tl = ticket_cell_text(f, data.get("_tickets") or {})
@@ -961,6 +1038,7 @@ def main():
     # contract that enrich.py owns.
     data["_tickets"] = load_tickets(args.enriched)
     data["_held"] = load_held(args.enriched)
+    data["_products"] = load_products(args.enriched)
     data["_enriched"] = args.enriched
 
     if args.subject_only:

@@ -36,6 +36,8 @@ FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 STATE = os.path.join(FLEET_HOME, "state")
 NVD_CACHE = os.path.join(STATE, "nvd-cache.json")
 KEV_CACHE = os.path.join(STATE, "kev-cache.json")
+# Beside the enriched file it describes, where brief.py looks for it.
+PRODUCTS_NAME = "products.json"
 
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 EPSS_API = "https://api.first.org/data/v1/epss"
@@ -244,7 +246,10 @@ def parse_meta(path):
 def fetch_nvd(cves):
     """One request per CVE (NVD has no bulk-by-id endpoint), cached 7 days."""
     cache = load_cache(NVD_CACHE, timedelta(days=NVD_TTL_DAYS)) or {}
-    stale = [c for c in cves if c not in cache]
+    # An entry cached before "cpe_products" existed is stale: without it the
+    # product line would read "not identified" for up to a week when NVD
+    # actually knows the answer.
+    stale = [c for c in cves if c not in cache or "cpe_products" not in cache[c]]
     if stale:
         log(f"NVD: {len(cache)} cached, fetching {len(stale)} "
             f"(~{int(len(stale) * NVD_DELAY)}s"
@@ -258,9 +263,11 @@ def fetch_nvd(cves):
             time.sleep(NVD_DELAY)
         data = http_json(f"{NVD_API}?cveId={urllib.parse.quote(cve)}", headers=headers)
         entry = {"cvss": None, "cvss_severity": None, "description": None,
-                 "kev_nvd": False, "vuln_status": None, "published": None}
+                 "kev_nvd": False, "vuln_status": None, "published": None,
+                 "cpe_products": []}
         if data and data.get("vulnerabilities"):
             v = data["vulnerabilities"][0].get("cve", {})
+            entry["cpe_products"] = cpe_products(v)
             entry["vuln_status"] = v.get("vulnStatus")
             entry["published"] = v.get("published")
             entry["kev_nvd"] = bool(v.get("cisaExploitAdd"))
@@ -284,6 +291,131 @@ def fetch_nvd(cves):
     if stale:
         save_cache(NVD_CACHE, cache)
     return cache
+
+
+# --------------------------------------------------------------- product name
+#
+# "Which product is this about?" - Chrome, Safari, PHP - on every finding and
+# fleet ticket. Two sources the lane already downloads, in order of trust:
+#
+#   1. The CISA KEV catalog's vendorProject and product: one clean name,
+#      written by a person, e.g. "Google" / "Chromium V8".
+#   2. NVD's CPE configuration: the vulnerable products as vendor:product
+#      pairs, e.g. cpe:2.3:a:google:chrome. Missing for a CVE NVD has not
+#      analysed yet, which is common in its first weeks.
+#
+# When neither has an answer the product is "" and the email says "product
+# not identified". Nothing guesses one from the description text.
+
+# CPE names are lower case. These words read as acronyms; the rest are
+# capitalised. A wrong case here is cosmetic, never a wrong product.
+_CPE_UPPER = {"php", "http", "https", "ssh", "ssl", "tls", "sql", "iis", "dns",
+              "vpn", "api", "os", "xml", "pdf", "smb", "rdp", "ldap", "nas",
+              "jdk", "jre", "ftp", "cms", "ip", "wan", "lan", "ui", "bios",
+              "uefi", "vm", "esxi", "nfs", "snmp", "ntp", "ssl_vpn"}
+_CPE_NAMES = {"macos": "macOS", "mac_os_x": "macOS", "iphone_os": "iOS",
+              "ipados": "iPadOS", "watchos": "watchOS", "tvos": "tvOS",
+              "visionos": "visionOS", "node.js": "Node.js"}
+PRODUCT_MAX = 3   # name this many, then "+N more"
+
+
+def _cpe_unescape(s):
+    """CPE 2.3 escapes punctuation with a backslash: node\\.js -> node.js."""
+    return re.sub(r"\\(.)", r"\1", s or "")
+
+
+def _cpe_words(s):
+    if s in _CPE_NAMES:
+        return _CPE_NAMES[s]
+    words = [w for w in re.split(r"[_\s]+", s) if w]
+    return " ".join(w.upper() if w.lower() in _CPE_UPPER
+                    else (w[:1].upper() + w[1:]) for w in words)
+
+
+def product_name(vendor, product):
+    """One readable name from a vendor and a product.
+
+    The vendor is dropped when the product already starts with it, so
+    php:php reads "PHP" and Microsoft / "Microsoft Exchange Server" does not
+    say Microsoft twice.
+    """
+    v = " ".join((vendor or "").split())
+    p = " ".join((product or "").split())
+    if not p:
+        return v
+    if not v or p.lower().startswith(v.lower()):
+        return p
+    return f"{v} {p}"
+
+
+def cpe_products(nvd_cve):
+    """Vulnerable (vendor, product) pairs from an NVD CVE record, in order.
+
+    Only cpeMatch entries marked vulnerable count. The others say what the
+    product runs on ("Chrome on Windows"), and naming Windows for a Chrome
+    bug would send the reader to the wrong machines.
+    """
+    seen, out = set(), []
+    for conf in nvd_cve.get("configurations") or []:
+        for node in conf.get("nodes") or []:
+            for m in node.get("cpeMatch") or []:
+                if not m.get("vulnerable"):
+                    continue
+                # cpe:2.3:<part>:<vendor>:<product>:... An escaped colon
+                # (\:) inside a field is rare enough that a split is fine:
+                # the worst case is an odd-looking name, not a wrong one.
+                parts = (m.get("criteria") or "").split(":")
+                if len(parts) < 5 or parts[0] != "cpe":
+                    continue
+                pair = (_cpe_unescape(parts[3]), _cpe_unescape(parts[4]))
+                if pair in seen or "*" in pair or "-" in pair or "" in pair:
+                    continue
+                seen.add(pair)
+                out.append(list(pair))
+    return out
+
+
+def product_for(f):
+    """(product, source) for an enriched finding; ("", "") when unknown."""
+    name = product_name(f.get("kev_vendor"), f.get("kev_product"))
+    if name:
+        return name, "CISA KEV"
+    names = []
+    for pair in f.get("cpe_products") or []:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        n = product_name(_cpe_words(pair[0]), _cpe_words(pair[1]))
+        if n and n not in names:
+            names.append(n)
+    if not names:
+        return "", ""
+    shown = ", ".join(names[:PRODUCT_MAX])
+    if len(names) > PRODUCT_MAX:
+        shown += f" +{len(names) - PRODUCT_MAX} more"
+    return shown, "NVD"
+
+
+def save_products(findings, kev, path):
+    """Remember each CVE's product name, for tickets whose CVE is not in
+    today's mail.
+
+    The FLEET TICKETS section lists every open ticket, most of them for CVEs
+    that are not in today's findings, and the NVD cache is thrown away weekly.
+    This map is what lets brief.py name the product for those: every KEV
+    entry (most fleet tickets are KEV), plus each finding's own answer.
+    Merged, never pruned: one short line per CVE.
+    """
+    known = load_cache(path, timedelta(days=36500)) or {}
+    before = dict(known)
+    for cve, v in (kev or {}).items():
+        name = product_name(v.get("kev_vendor"), v.get("kev_product"))
+        if name:
+            known[cve] = name
+    for f in findings:
+        if f.get("product"):
+            known[f["cve"]] = f["product"]
+    if known != before:
+        save_cache(path, known)
 
 
 def fetch_epss(cves):
@@ -432,7 +564,9 @@ def fetch_kev():
     """Bulk KEV catalog. NVD already flags KEV membership, but the catalog is
     the only place with the remediation due date and ransomware association."""
     cache = load_cache(KEV_CACHE, timedelta(hours=KEV_TTL_HOURS))
-    if cache is not None:
+    # A cache written before kev_vendor existed is refetched once, or the
+    # product names would be missing until it expired.
+    if cache and any("kev_vendor" in v for v in cache.values()):
         log(f"KEV: {len(cache)} entries (cached)")
         return cache
     data = http_json(KEV_FEED, timeout=90)
@@ -449,6 +583,8 @@ def fetch_kev():
                 "ransomware": v.get("knownRansomwareCampaignUse"),
                 "kev_name": v.get("vulnerabilityName"),
                 "kev_action": v.get("requiredAction"),
+                "kev_vendor": v.get("vendorProject"),
+                "kev_product": v.get("product"),
             }
     log(f"KEV: {len(kev)} entries (catalog {data.get('catalogVersion')})")
     save_cache(KEV_CACHE, kev)
@@ -617,6 +753,7 @@ def main():
             # NVD's flag is the fallback when the catalog fetch failed.
             f["kev"] = 1 if (nvd.get(cve) or {}).get("kev_nvd") else 0
         f["priority"], f["rationale"] = prioritize(f)
+        f["product"], f["product_source"] = product_for(f)
 
     # Before the upsert, or everything looks previously-seen.
     n_new, n_seen, n_unknown = mark_novelty(findings)
@@ -651,6 +788,12 @@ def main():
                 -(f.get("epss") or 0), f["cve"])
 
     rows = sorted(findings.values(), key=rank)
+    products_path = os.path.join(os.path.dirname(os.path.abspath(args.out)), PRODUCTS_NAME)
+    try:
+        save_products(rows, kev, products_path)
+    except OSError as e:
+        # A missing product map costs a name in FLEET TICKETS, nothing else.
+        log(f"WARNING: could not update {products_path} ({e})")
 
     counts = {p: sum(1 for f in rows if f["priority"] == p) for p in SEV_ORDER}
     result = {

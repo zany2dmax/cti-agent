@@ -35,6 +35,33 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The first
+digest after the upgrade re-reads NVD once for every CVE in its cache and the
+KEV catalog once, to pick up the product data the old cache dropped, so that
+run is slower (about 6.5 seconds a CVE without `NVD_API_KEY`).
+
+### Added
+
+- **Every finding and fleet ticket names the product it is about** (Google
+  Chrome, Apple Safari, PHP), highlighted:
+  - on each finding card in the daily and weekly digests, next to the CVE,
+    with "product not identified" when no source had a name;
+  - on each row of FLEET TICKETS and HELD FOR APPROVAL;
+  - in the plain-text digest;
+  - in the Jira summary, right after the CVE (`CVE-… - Google Chrome - 12
+    hosts, CISA KEV - …`), and as a Product row in the ticket body. New
+    tickets only: existing tickets keep their titles.
+
+  The name comes from the CISA KEV catalog's vendor and product first, then
+  from NVD's CPE data (vulnerable entries only, so a Chrome bug never names
+  Windows). Nothing guesses one from the description. `enrich.py` keeps a
+  CVE-to-product map, `state/products.json`, so a ticket whose CVE is not in
+  today's mail still gets its name.
+
+---
+
 ## 1.6.2 — 2026-11-09
 
 **Upgrade:** nothing. Documentation only: the 1.6.1 tag was cut before this

@@ -39,14 +39,18 @@ const MaxSummary = 255
 // dependency on the report format, or changing a column in the email becomes a
 // change to the ticketing contract.
 type Finding struct {
-	CVE       string
-	QIDs      []string
-	Hosts     []string
-	KEV       bool
-	KEVDueOn  time.Time // zero when not a KEV entry
-	Severity  int       // 5..1, 5 highest
-	CVSS      string
-	Title     string
+	CVE      string
+	QIDs     []string
+	Hosts    []string
+	KEV      bool
+	KEVDueOn time.Time // zero when not a KEV entry
+	Severity int       // 5..1, 5 highest
+	CVSS     string
+	Title    string
+	// Product is what the CVE is about - "Google Chrome", "PHP" - from the
+	// CISA KEV catalog or NVD's CPE data, named by enrich.py. Empty when
+	// neither source had one; nothing guesses it.
+	Product   string
 	QQL       string // the Qualys query that reproduces the host list
 	FirstSeen time.Time
 
@@ -135,6 +139,12 @@ func Summary(f Finding, now time.Time) string {
 	}
 	b.WriteString(f.CVE)
 	b.WriteString(" - ")
+	// Right after the CVE: "which product?" is the first thing a person
+	// scanning the queue needs, and a long title must not truncate it away.
+	if p := strings.TrimSpace(f.Product); p != "" {
+		b.WriteString(p)
+		b.WriteString(" - ")
+	}
 
 	hosts := fmt.Sprintf("%d host", f.Count())
 	if f.Count() != 1 {
@@ -199,6 +209,9 @@ func Description(f Finding, now time.Time, csvName string) string {
 
 	b.WriteString("||Field||Value||\n")
 	b.WriteString(row("CVE", f.CVE))
+	if p := strings.TrimSpace(f.Product); p != "" {
+		b.WriteString(row("Product", p))
+	}
 	if t := strings.TrimSpace(f.Title); t != "" {
 		b.WriteString(row("Title", t))
 	}
