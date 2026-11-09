@@ -1294,7 +1294,7 @@ The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` a
 words that stop a No from standing (a supplier whose name, subject or notes hold
 one is Unsure, not No).
 
-**Testing the judgement.** `task eval:supplier` runs the real model on 42 invented
+**Testing the judgement.** `task eval:supplier` runs the real model on 53 invented
 requests (clear materials, clear technology, blank and vague forms, linked and
 unreadable forms, and hostile ones: injected instructions, a request that tries
 to close the untrusted block, fake authority, bait to fabricate a quote), calls it

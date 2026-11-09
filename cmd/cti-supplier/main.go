@@ -375,7 +375,7 @@ func doFinish(dir string, fileJira bool) int {
 	}
 	// Only what did not fail is recorded as reported: a request whose item could
 	// not be filed is collected again next run and filed then.
-	sb, _ := json.Marshal(supplier.SeenRecords(outcomes))
+	sb, _ := json.Marshal(supplier.SeenRecordsFor(outcomes, ok))
 	if err := os.WriteFile(filepath.Join(dir, "seen.json"), sb, 0o600); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}

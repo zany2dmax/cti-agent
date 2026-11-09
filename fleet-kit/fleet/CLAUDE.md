@@ -25,8 +25,16 @@ reach the operator with:
 
 ```
 $FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --for-real \
-  --kind ESCALATION --reason "<what you need and why, in one or two lines>"
+  --kind ESCALATION --reason "<what you are asking, what happens if you do nothing, then the detail>"
 ```
+
+Write the reason in plain English, in this order: first one sentence saying
+what you are asking the operator to do or decide. Second, one sentence saying
+what happens if they do nothing. Only then the detail (ticket numbers, host
+counts, unit names). The operator is reading it on a phone between other things
+and should not need to decode it: spell out an abbreviation the first time
+(known-exploited-vulnerability list, not KEV on its own) and say "serious" before
+a Sev5. Keep the whole reason under about 600 characters.
 
 Write the reason in plain words. Every Bash call you make passes a guard that
 refuses shell syntax. It refuses a less-than or greater-than sign, a pipe, a

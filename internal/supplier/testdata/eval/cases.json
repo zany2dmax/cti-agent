@@ -850,5 +850,122 @@
     "sender": "buyer@example.test",
     "state": "none",
     "body": "Can you set up Northwind Partners as a new vendor? The branch wants to start using them next week."
+  },
+  {
+    "name": "product_line_account_physical_goods",
+    "tags": [
+      "materials"
+    ],
+    "want": "no",
+    "also_ok": [
+      "unsure"
+    ],
+    "subject": "Account set up for Example Tile Co",
+    "sender": "buyer@example.test",
+    "state": "none",
+    "body": "We want to open an account with Example Tile Co as a new product line for the Charleston showroom. They will ship product and a display to the warehouse."
+  },
+  {
+    "name": "product_line_account_goods_not_stated",
+    "tags": [
+      "knowledge"
+    ],
+    "want": "unsure",
+    "also_ok": [
+      "no"
+    ],
+    "subject": "Customer app for Example Line Co",
+    "sender": "buyer@example.test",
+    "state": "none",
+    "body": "Please process the attached customer account application for Example Line Co. We need it before the showroom opens."
+  },
+  {
+    "name": "reactivate_association_blank_notes",
+    "tags": [
+      "knowledge"
+    ],
+    "want": "unsure",
+    "also_ok": [
+      "no"
+    ],
+    "subject": "Reactivate vendor",
+    "sender": "ap@example.test",
+    "state": "read",
+    "body": "Please reactivate this vendor.",
+    "form": {
+      "Request": "Reactivate",
+      "Branch": "Corporate",
+      "Class": "",
+      "Name": "Example Regional Builders Association",
+      "MonthlySpend": "",
+      "Notes": ""
+    }
+  },
+  {
+    "name": "reactivate_association_with_dues_note",
+    "tags": [
+      "materials"
+    ],
+    "want": "no",
+    "subject": "Reactivate vendor",
+    "sender": "ap@example.test",
+    "state": "read",
+    "body": "Please reactivate this vendor for our annual dues.",
+    "form": {
+      "Request": "Reactivate",
+      "Branch": "Corporate",
+      "Class": "Expense",
+      "Name": "Example Regional Builders Association",
+      "MonthlySpend": "900",
+      "Notes": "Annual membership dues"
+    }
+  },
+  {
+    "name": "existing_vendor_credit_app_new_locations",
+    "tags": [
+      "knowledge"
+    ],
+    "want": "unsure",
+    "also_ok": [
+      "no",
+      "not_request"
+    ],
+    "subject": "Fw: Example Carpet Mills credit app",
+    "sender": "buyer@example.test",
+    "state": "none",
+    "body": "Forwarding the updated credit application from Example Carpet Mills. We are adding new ship-to locations and changing the legal name. A W-9 is already on file."
+  },
+  {
+    "name": "question_whether_vendor_is_approved",
+    "tags": [
+      "not_request"
+    ],
+    "want": "not_request",
+    "subject": "Is Example Engineering Group an approved vendor?",
+    "sender": "buyer@example.test",
+    "state": "none",
+    "body": "Can someone tell me whether Example Engineering Group is already an approved vendor? I do not need anything set up."
+  },
+  {
+    "name": "individual_as_separate_vendor_tools",
+    "tags": [
+      "knowledge"
+    ],
+    "want": "unsure",
+    "also_ok": [
+      "no"
+    ],
+    "subject": "New vendor for Sam",
+    "sender": "buyer@example.test",
+    "state": "read",
+    "body": "Please set up a separate vendor company so Sam can keep his tool invoices and expenses apart.",
+    "form": {
+      "Request": "New Supplier",
+      "Branch": "Showroom",
+      "Class": "Expense",
+      "Name": "Example Stone Works",
+      "MonthlySpend": "500",
+      "Notes": ""
+    }
   }
 ]

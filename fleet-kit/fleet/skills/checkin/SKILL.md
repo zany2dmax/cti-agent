@@ -106,8 +106,14 @@ waits for the digest.
 
 ```
 $FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION \
-  --reason "Sev5: CVE-... present on N hosts. Approve notifying the DL? board id <id>"
+  --reason "Please approve emailing the distribution list about a serious flaw on N hosts. If you do nothing it waits for tomorrow's digest. Detail: the CVE number and the board line id go here."
 ```
+
+The reason reads in plain English, in this order: one sentence saying what you
+are asking the operator to do or decide, one sentence saying what happens if
+they do nothing, then the detail. Spell out an abbreviation the first time and
+keep it under about 600 characters. The guard in CLAUDE.md lists the characters
+a Bash call may not contain.
 
 `cti-alert` is your only mail. It has no `--to`; the operator is the only
 person it can reach, which is the point.

@@ -75,10 +75,12 @@ MAILER="$FLEET_CODE/bin/cti-mailer"
 # Real runs only, and both are non-fatal - the worst case is a request listed
 # once more or mail filed a day late.
 #
-#   record_seen   the requests as reported, so they are not listed again. Only
-#                 when a digest was sent: a day whose only news is threads set
-#                 aside sends none, and recording them then would drop them from
-#                 every later digest, which is where they are listed.
+#   record_seen   the requests as reported, so they are not listed again. Every
+#                 real run; cti-supplier leaves out of seen.json what a digest
+#                 would have listed when none was sent (a thread set aside, on a
+#                 day whose only news is such threads), so those are still listed
+#                 later, and keeps the quiet ones (a reply that changed nothing)
+#                 so they are not judged again every day.
 #   record_owned  the messages of the requests dealt with, so the daily mailbox
 #                 cleanup (cti-mailbox) files them in Archive after its grace.
 #                 Every real run, including a day with nothing new: mail settled
@@ -191,11 +193,11 @@ if [ -s "$WORK/digest.subject" ]; then
     # shellcheck disable=SC2086
     "$MAILER" --lane supplier --html "$WORK/digest.html" --text "$WORK/digest.txt" --subject "$SUBJECT" "${DRY:---for-real}" \
       || fail "send failed - if SUPPLIER_TO or SUPPLIER_ALLOW_TO is unset the mailer refuses by design"
-    record_seen
   fi
 else
   log "no digest to send"
 fi
+record_seen
 record_owned
 
 if [ -n "$DRY" ] || [ -n "$TODEV" ]; then

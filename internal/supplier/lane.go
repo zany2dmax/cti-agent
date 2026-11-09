@@ -442,10 +442,20 @@ func (o *Outcome) fileTicket(ctx context.Context, tickets Tickets, project strin
 // SeenRecords is what to remember after a send: every outcome that did not
 // fail. One whose item could not be filed or commented is left out, so the next
 // run collects it again and tries again instead of the lane believing it done.
-func SeenRecords(outs []Outcome) []SeenRecord {
+func SeenRecords(outs []Outcome) []SeenRecord { return SeenRecordsFor(outs, true) }
+
+// SeenRecordsFor is SeenRecords for a run that did or did not send a digest.
+//
+// With no digest, an outcome the digest would have listed (Reported) is left
+// out: it has not been shown to anyone, and recording it would drop it from
+// every later digest. That is the thread set aside as not a supplier request, on
+// a day whose only news is such threads. What is still recorded is a reply that
+// changed nothing, which is quiet by design: leaving it out re-judged it, with a
+// model call, every day until some other request caused a digest.
+func SeenRecordsFor(outs []Outcome, digestSent bool) []SeenRecord {
 	out := []SeenRecord{}
 	for _, o := range outs {
-		if o.Err != "" {
+		if o.Err != "" || (!digestSent && o.Reported()) {
 			continue
 		}
 		r := o.Request

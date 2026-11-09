@@ -771,3 +771,22 @@ func TestAReplyNewerThanTheJudgementIsNotHandedOver(t *testing.T) {
 		t.Errorf("settled %v, items %d: a thread with a newer message is judged again, not filed away", c.Settled, len(c.Items))
 	}
 }
+
+func TestOnADayWithNoDigestAThreadSetAsideIsKeptForALaterDigestButAQuietReplyIsRecorded(t *testing.T) {
+	aside := Outcome{Request: Request{ConversationID: "a", Decision: Decision{Verdict: NotRequest}}}
+	quiet := Outcome{Request: Request{ConversationID: "q", Decision: Decision{Verdict: No}}, Update: true, Changed: false}
+	failed := Outcome{Request: Request{ConversationID: "f", Decision: Decision{Verdict: Unsure}}, Err: "jira down"}
+	outs := []Outcome{aside, quiet, failed}
+
+	none := SeenRecordsFor(outs, false)
+	if len(none) != 1 || none[0].Label != quiet.Request.Label() {
+		t.Errorf("no digest: recorded %v, want only the quiet reply", none)
+	}
+	sent := SeenRecordsFor(outs, true)
+	if len(sent) != 2 {
+		t.Errorf("digest sent: recorded %d, want the set-aside thread and the quiet reply (not the failed one)", len(sent))
+	}
+	if len(SeenRecords(outs)) != 2 {
+		t.Error("SeenRecords is SeenRecordsFor with a digest sent")
+	}
+}

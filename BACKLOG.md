@@ -129,11 +129,8 @@ is real, not before. Finished work moves out of this file into
   `--for-real`), `run-supplier` (the model runs with no tools, one request per
   call; no model or a failed one means Unsure), the `cti-agent-supplier`
   service and timer (daily 07:45, off until enabled), the `SUPPLIER_*`
-  settings, man pages, runbook, lanes and security notes. **Not verified:** a
-  run against the real mailbox, Jira and the API - the `claude` flags were
-  checked against `--help` only and the runner tests use stubs. Next: a
-  `--dry-run` with `SUPPLIER_MODEL` set, then `--to-dev`, then enable the timer.
-  **Dry run on the real mailbox (2026-11-08):** the model step worked end to end
+  settings, man pages, runbook, lanes and security notes. **Dry run on the real
+  mailbox (2026-11-08):** the model step worked end to end
   (the no-tools flags are accepted; 20 requests judged, none failed), which
   also showed that a window cutting a conversation hid its form message (fixed:
   threads are read whole) and that the quarantine digest was filed as a request
@@ -142,7 +139,11 @@ is real, not before. Finished work moves out of this file into
   form state changed, commented on its existing item and listed as updated; each
   Yes or Unsure item lists what is still needed; a request whose item failed is
   no longer recorded as reported. Many open Unsure items are accepted on purpose:
-  the board is what prompts the requester to be asked for more.
+  the board is what prompts the requester to be asked for more. **Real run
+  (2026-11-09):** 19 requests judged and 12 items filed (CYBR-821 to 832), which
+  exposed two things now fixed: items were created in Jira's first status, Open,
+  which the board has no column for (the lane now moves them to To Do), and
+  nothing filed the mail away (the cleanup now archives what the lane dealt with).
   **Waiting on the TPRM owner's final question wording**, to be added to the
   supplier request form itself (website, what is supplied, data and system
   access, security contact): then the form reader learns those fields, a
@@ -243,10 +244,6 @@ is real, not before. Finished work moves out of this file into
   opens with two or three lines saying in plain English what it is asking and
   what happens if you do nothing, ahead of the detail. Noted only, not
   designed
-- Supplier request mail: the shared inbox also collects supplier requests, and
-  nothing tidies them. Probably its own lane (they are not CTI mail and need a
-  different owner and rules than cti-mailbox). Not designed: what the requests
-  are, who answers them, and what "done" means for one
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
 - **Heartbeat escalation to a stronger model** (designed 2026-11-08, not

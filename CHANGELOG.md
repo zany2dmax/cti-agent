@@ -47,6 +47,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   updated, reported earlier with nothing new, or left out as an automatic
   message). The list is capped at 60 rows, the rest counted. It shows only on a
   day a digest is sent, since a day with nothing new still sends nothing.
+- **The orchestrator writes escalations in plain English.** Its instructions and
+  the check-in skill now ask for the same order every time: one sentence saying
+  what it asks the operator to do or decide, one saying what happens if they do
+  nothing, then the detail (ticket numbers, counts, unit names), abbreviations
+  spelled out, under about 600 characters. A test checks that the skill's
+  example gets past the Bash guard.
+- **A reply that changed nothing is no longer judged every day.** The supplier
+  runner recorded requests as reported only on a day a digest was sent, so a
+  quiet reply on a day with no digest was judged again, with a model call, until
+  some other request caused one. It now records on every real run. What a digest
+  would have listed but none was sent for (a thread set aside, on a day whose
+  only news is such threads) is still held back, so it appears in the next
+  digest.
+- **Seven more model-evaluation cases from the real run**: account applications
+  for a product line, a credit application for an existing vendor, a vendor
+  reactivation with and without notes, a question about whether a vendor is
+  approved, and an individual set up as a vendor. Run on Sonnet, 3 runs each:
+  20 of 21 acceptable, none dangerous; the one miss was a dues-paying
+  association judged Unsure once where No was wanted. The model stays cautious on
+  existing-vendor credit applications (Unsure each time), so the Unsure volume
+  on the board will not fall from instruction changes alone.
 - **The mailbox cleanup files supplier requests away once they are dealt with.**
   The supplier lane now records the messages of every request it judged not
   critical, or critical or unsure with its Kanban item filed, in

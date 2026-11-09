@@ -2500,6 +2500,28 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                     self.assertEqual(r.stdout, "")
 
+    def test_the_orchestrator_is_told_to_write_escalations_in_plain_english(self):
+        """The operator reads an escalation on a phone: what is being asked, and
+        what happens if nothing is done, come before any detail. The example the
+        skill gives must itself get past the Bash guard, or the beat copies a
+        command that costs it a turn."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        claude = (root / "fleet-kit" / "fleet" / "CLAUDE.md").read_text(encoding="utf-8")
+        skill = (root / "fleet-kit" / "fleet" / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
+        for name, text in (("CLAUDE.md", claude), ("SKILL.md", skill)):
+            with self.subTest(name):
+                self.assertIn("what happens if", text)
+                self.assertIn("plain English", text)
+        m = re.search(r'--reason "([^"<>]*If you do nothing[^"<>]*)"', skill)
+        self.assertIsNotNone(m, "the skill shows an example escalation that says what happens if nothing is done")
+        guard = root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
+        cmd = ('/opt/cti-agent/bin/cti-alert --unit cti-agent-checkin.service --for-real '
+               '--kind ESCALATION --reason "%s"' % m.group(1))
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+        r = subprocess.run([sys.executable, "-I", str(guard)], input=payload,
+                           capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_the_bash_guard_refuses_shell_syntax_and_fails_closed(self):
         """A prefix grant names a command, not the shell around it. The guard
         hook lets through one granted command with plain arguments and
@@ -3794,15 +3816,19 @@ fi
         self.assertFalse(any("--finish" in x for x in c), c)
         self.assertFalse(any("--commit-seen" in x for x in c), c)
 
-    def test_a_day_with_no_digest_hands_over_mail_but_does_not_record_reported(self):
-        # Threads set aside are listed only when a digest goes out; recording
-        # them as reported on a day with none would drop them for good.
+    def test_a_day_with_no_digest_still_records_what_cti_supplier_wrote(self):
+        # What belongs in seen.json on such a day is cti-supplier's call (see
+        # SeenRecordsFor); the runner must not skip the commit, or a reply that
+        # changed nothing is judged again every day.
         self.write_supplier(digest=False)
         r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
         self.assertEqual(r.returncode, 0, r.stderr)
         c = self.calls()
         self.assertTrue(any("--commit-owned" in x for x in c), c)
-        self.assertFalse(any("--commit-seen" in x for x in c), c)
+        # cti-supplier decides what seen.json holds on a day with no digest; the
+        # runner always hands it over on a real run.
+        self.assertTrue(any("--commit-seen" in x for x in c), c)
+        self.assertFalse(any(x.startswith("mailer") for x in c), c)
 
     def test_a_dry_run_files_nothing_sends_nothing_and_records_nothing(self):
         r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
