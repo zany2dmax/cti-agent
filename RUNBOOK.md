@@ -1265,6 +1265,22 @@ The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` a
 words that stop a No from standing (a supplier whose name, subject or notes hold
 one is Unsure, not No).
 
+**Testing the judgement.** `task eval:supplier` runs the real model on 26 invented
+requests (clear materials, clear technology, blank and vague forms, linked and
+unreadable forms, and hostile ones: injected instructions, a request that tries
+to close the untrusted block, fake authority, bait to fabricate a quote), calls it
+exactly as the runner does, passes each answer through the same checks as
+production, and prints how often the final verdict was the one wanted. Each case
+runs 3 times, so the result is a rate. It fails only on a **dangerous** result (a
+final No where No was not wanted) and reports being **too cautious** separately,
+which is what tuning the instructions is for. It costs tokens, so it is run by
+hand before changing the instructions or `SUPPLIER_MODEL`, never in `task ship`;
+it needs `claude` logged in or `ANTHROPIC_API_KEY`. `SUPPLIER_EVAL_MODEL`,
+`SUPPLIER_EVAL_RUNS`, `SUPPLIER_EVAL_ONLY` (case-name substrings) and
+`SUPPLIER_EVAL_REPORT` (full results as JSON) adjust it. The cases are in
+`internal/supplier/testdata/eval/cases.json`; add one whenever a real request
+surprises you, with invented names only.
+
 **Not yet verified:** the `claude` flags the runner passes (no tools, no MCP, no
 session file) were checked against `claude --help`, not run against the API; the
 tests use stub programs. The first `--dry-run` with `SUPPLIER_MODEL` set is the

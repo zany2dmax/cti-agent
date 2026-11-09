@@ -141,6 +141,13 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
   pass/fail.
 - Real traces from H1 that surprised us become new scenarios.
 
+**Done for the supplier lane:** `task eval:supplier` is this idea for the
+supplier-request judgement - 26 invented requests in
+`internal/supplier/testdata/eval/cases.json`, the real model called as production
+calls it, a rate per case (3 runs), failing only on a dangerous result. Cheap
+checks on the cases themselves (valid, invented data only, no hostile case may
+allow a No) run with every `go test`.
+
 ### H3. Structured check-in verdict
 
 - The check-in skill ends with one JSON object, schema `cti-checkin/1`:

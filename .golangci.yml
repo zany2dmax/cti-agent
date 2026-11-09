@@ -32,6 +32,13 @@
 
 version: "2"
 
+run:
+  # The model evaluations (internal/supplier/eval_test.go) are built only with
+  # -tags eval so `go test ./...` never calls a model. Lint them anyway: a file
+  # the gate cannot see is a file that rots.
+  build-tags:
+    - eval
+
 linters:
   enable:
     - errcheck

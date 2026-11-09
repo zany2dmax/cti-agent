@@ -99,6 +99,18 @@ tasks:
     cmds:
       - staticcheck ./...
 
+  eval:supplier:
+    desc: "Run the real model on the invented supplier requests and report how often it is right (costs tokens; by hand, never in ship)"
+    # Calls the model exactly as run-supplier does (no tools, no MCP) on the cases
+    # in internal/supplier/testdata/eval/cases.json, and passes each answer through
+    # the same checks as production. Each case runs SUPPLIER_EVAL_RUNS times
+    # (default 3): the result is a rate. It fails only on a DANGEROUS result, a
+    # final No where No was not wanted. Needs claude logged in (or
+    # ANTHROPIC_API_KEY). Settings: SUPPLIER_EVAL_MODEL, SUPPLIER_EVAL_RUNS,
+    # SUPPLIER_EVAL_PARALLEL, SUPPLIER_EVAL_ONLY, SUPPLIER_EVAL_REPORT.
+    cmds:
+      - go test -tags eval ./internal/supplier -run TestEvalSupplierJudgement -v -count=1 -timeout 60m
+
   lint:
     # The ruleset is .golangci.yml, so every machine applies the same one:
     # errcheck, govet, ineffassign, staticcheck (every check, including the

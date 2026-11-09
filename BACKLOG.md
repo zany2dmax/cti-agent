@@ -148,8 +148,11 @@ is real, not before. Finished work moves out of this file into
   access, security contact): then the form reader learns those fields, a
   requester's Yes becomes a Yes, a blank becomes "still needed", and the website
   gives a safe place to start a lookup done by code, not by the model.
-  Not done: an eval set to tune the instructions and compare models (above in
-  this entry's plan), the lookup by code, and a shared model-lane runner (H4).
+  **Eval set built:** `task eval:supplier` (26 invented requests, 3 runs each,
+  fails only on a dangerous No; `internal/supplier/eval_test.go`, built with
+  `-tags eval`). **Not run yet:** claude's login on the workstation had expired,
+  so there is no baseline; run it, then tune the instructions and compare models
+  against it. Not done: the lookup by code, and a shared model-lane runner (H4).
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a

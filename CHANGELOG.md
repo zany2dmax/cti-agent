@@ -90,6 +90,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   still needed (the form, blank required fields, what the supplier provides), in
   fixed wording. A request whose item could not be filed is no longer recorded as
   reported, so the next run files it.
+  `task eval:supplier` runs the real model on 26 invented requests (by hand,
+  never in ship) and reports how often its verdict is the one wanted, failing
+  only when a supplier would have been waved through.
   The mail filter's quarantine digest, which also lands on the list, is left
   out (the address already in `MAILBOX_DIGEST_SENDERS`, exact sender and
   subject) and counted in the digest; nothing else is skipped.
