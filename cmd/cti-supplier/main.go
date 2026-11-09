@@ -111,6 +111,16 @@ func laneConfig() supplier.Config {
 		TPRM:       env("SUPPLIER_TPRM"),
 		UnsureText: env("SUPPLIER_UNSURE_TEXT"),
 	}
+	// Staff mail domains, for the "not a supplier request" answer: the domain of
+	// the request address itself plus any listed in SUPPLIER_INTERNAL_DOMAINS.
+	if a := env("SUPPLIER_ADDRESS"); strings.Contains(a, "@") {
+		c.InternalDomains = append(c.InternalDomains, a[strings.LastIndex(a, "@")+1:])
+	}
+	for _, d := range strings.Split(env("SUPPLIER_INTERNAL_DOMAINS"), ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			c.InternalDomains = append(c.InternalDomains, d)
+		}
+	}
 	// Set and empty means "no technology words"; unset means the defaults.
 	if v, ok := os.LookupEnv("SUPPLIER_TECH_TERMS"); ok {
 		c.TechTerms = []string{}

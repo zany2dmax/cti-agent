@@ -90,7 +90,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   still needed (the form, blank required fields, what the supplier provides), in
   fixed wording. A request whose item could not be filed is no longer recorded as
   reported, so the next run files it.
-  `task eval:supplier` runs the real model on 42 invented requests (by hand,
+  A thread that is not a request to set up a supplier at all (staff updating an
+  existing vendor, a customer's credit application) can be **set aside**: no
+  item, listed last in the digest, no digest of its own. Code accepts it only
+  for a thread started at the company's own domain (`SUPPLIER_ADDRESS`'s, plus
+  `SUPPLIER_INTERNAL_DOMAINS`), with no form attached or linked, a quote from the
+  request, no technology word and no attempt to steer the reader.
+  `task eval:supplier` runs the real model on 46 invented requests (by hand,
   never in ship) and reports how often its verdict is the one wanted, failing
   only when a supplier would have been waved through.
   The mail filter's quarantine digest, which also lands on the list, is left

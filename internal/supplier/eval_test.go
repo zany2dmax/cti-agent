@@ -42,6 +42,9 @@ import (
 	"time"
 )
 
+// evalConfig names the invented staff domain, so a staff thread can be set aside.
+var evalConfig = Config{InternalDomains: []string{"example.test"}}
+
 type evalRun struct {
 	Raw   string `json:"raw"`   // what the model said: yes, no, unsure, unparsable, or error
 	Final string `json:"final"` // what the lane would act on, after code's checks
@@ -154,14 +157,14 @@ func evalOnce(claude, model, instr string, c EvalCase) evalRun {
 		if err != nil {
 			msg = err.Error() + " " + msg
 		}
-		d := Judge(nil, in, Config{})
+		d := Judge(nil, in, evalConfig)
 		return evalRun{Raw: "error", Final: d.Verdict, Err: msg}
 	}
 	r := evalRun{Raw: "unparsable"}
 	if res, err := ParseResult(out.Bytes()); err == nil {
 		r.Raw, r.Why = res.Verdict, oneLine(res.Reason, 200)
 	}
-	d := Judge(out.Bytes(), in, Config{})
+	d := Judge(out.Bytes(), in, evalConfig)
 	r.Final = d.Verdict
 	r.Notes = oneLine(strings.Join(d.Notes, "; "), 200)
 	return r
@@ -210,7 +213,7 @@ func reportEval(t *testing.T, results []evalResult) {
 				exactN++
 				exact++
 			}
-			if run.Final == No && !r.Case.acceptable(No) {
+			if (run.Final == No || run.Final == NotRequest) && !r.Case.acceptable(run.Final) {
 				dangN++
 				dangerous++
 				t.Errorf("DANGEROUS %s: final No where %s is wanted. The model said %q: %s (code's notes: %s)",

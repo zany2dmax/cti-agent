@@ -33,6 +33,14 @@ const (
 	Yes    = "yes"
 	No     = "no"
 	Unsure = "unsure"
+	// NotRequest says the thread is not a request to set up a new supplier at
+	// all: staff maintaining an existing vendor's record, a customer's credit
+	// application, an internal question. It gets no Kanban item, and the digest
+	// lists it as set aside so a person can still see what was left out. Like a
+	// No it must clear every gate below, and it has one more: the thread has to
+	// have been started by someone inside the company, so no supplier can
+	// describe its own request out of review.
+	NotRequest = "not_request"
 )
 
 // FormState says what the lane found for a request's form, which limits what
@@ -67,6 +75,26 @@ type Config struct {
 	// UnsureText is what the Jira item says when the answer is Unsure. Empty
 	// means a generic sentence. It is operator text, not model output.
 	UnsureText string
+	// InternalDomains are the mail domains of the company's own staff. A
+	// NotRequest answer is accepted only for a thread that a sender at one of
+	// these started. Empty means none is accepted.
+	InternalDomains []string
+}
+
+// internalSender is true when the address is at one of the internal domains.
+func (c Config) internalSender(addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	at := strings.LastIndex(addr, "@")
+	if at < 0 {
+		return false
+	}
+	dom := addr[at+1:]
+	for _, d := range c.InternalDomains {
+		if d = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(d)), "@"); d != "" && d == dom {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Config) tprm() string {
@@ -244,7 +272,8 @@ type Decision struct {
 }
 
 // NeedsTPRM is true for Yes and for Unsure: an Unsure is treated as critical.
-func (d Decision) NeedsTPRM() bool { return d.Verdict != No }
+// A No and a NotRequest need nobody.
+func (d Decision) NeedsTPRM() bool { return d.Verdict != No && d.Verdict != NotRequest }
 
 // squash collapses all whitespace, so a quote that spans a line break still
 // matches the text it came from.
@@ -302,10 +331,10 @@ func judge(raw []byte, in Input, source string, cfg Config) Decision {
 		d.Notes = append(d.Notes, "the request contains text aimed at an AI reader")
 	}
 	switch d.Verdict {
-	case Yes, No, Unsure:
+	case Yes, No, Unsure, NotRequest:
 	default:
 		return unsure("The judgement gave no usable answer, so this request needs a person.",
-			fmt.Sprintf("verdict %q is not yes, no or unsure", r.Verdict))
+			fmt.Sprintf("verdict %q is not yes, no, unsure or not_request", r.Verdict))
 	}
 
 	// Evidence must be copied from the request, not composed.
@@ -328,25 +357,40 @@ func judge(raw []byte, in Input, source string, cfg Config) Decision {
 		d.Reason = "Not enough shown to be sure (" + strings.ToLower(r.Verdict) + " had no supporting quote). " + d.Reason
 		return d
 	}
-	if d.Verdict != No {
+	if d.Verdict != No && d.Verdict != NotRequest {
 		return d
 	}
 
-	// From here only a No is being checked, and a No must clear every gate.
+	// From here only a No or a NotRequest is being checked, and each must clear
+	// every gate.
+	what := "a No"
+	if d.Verdict == NotRequest {
+		what = "something other than a new supplier request"
+	}
 	gate := func(note string) Decision {
 		d.Notes = append(d.Notes, note)
 		d.Verdict = Unsure
-		d.Reason = "Could not be shown to be a No. " + d.Reason
+		d.Reason = "Could not be shown to be " + what + ". " + d.Reason
 		return d
 	}
 	if r.InjectionAttempt {
 		return gate("a No is not accepted when the request tries to steer the reader")
 	}
-	switch in.State {
-	case StateLinked:
-		return gate("form not readable: linked, not attached")
-	case StateUnreadable:
-		return gate("form not readable: the attachment is not a supplier form")
+	if d.Verdict == NotRequest {
+		// A supplier form, attached or linked, is a request to set one up.
+		switch {
+		case in.State != StateNone:
+			return gate("a supplier form came with this thread, so it is treated as a request")
+		case !cfg.internalSender(in.Sender):
+			return gate("the thread was not started by a sender at an internal domain")
+		}
+	} else {
+		switch in.State {
+		case StateLinked:
+			return gate("form not readable: linked, not attached")
+		case StateUnreadable:
+			return gate("form not readable: the attachment is not a supplier form")
+		}
 	}
 	var named string
 	if in.Form != nil {

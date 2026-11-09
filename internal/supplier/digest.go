@@ -41,6 +41,8 @@ func order(reqs []Request) []Request {
 			return 0
 		case Unsure:
 			return 1
+		case NotRequest:
+			return 3
 		}
 		return 2
 	}
@@ -53,13 +55,15 @@ func order(reqs []Request) []Request {
 	return out
 }
 
-func counts(reqs []Request) (yes, unsure, no int) {
+func counts(reqs []Request) (yes, unsure, no, aside int) {
 	for _, r := range reqs {
 		switch r.Decision.Verdict {
 		case Yes:
 			yes++
 		case No:
 			no++
+		case NotRequest:
+			aside++
 		default:
 			unsure++
 		}
@@ -77,7 +81,9 @@ func plural(n int, one, many string) string {
 // Digest renders the email that tells the security team to go to the Kanban
 // board. It is a pointer, not the work: the board holds the items. ok is false
 // when there is nothing to say, because a day with no new requests and no
-// updates sends nothing.
+// updates sends nothing, and neither does a day whose only news is requests set
+// aside as not being supplier requests: they are listed when a digest goes out
+// for another reason, and the lane's log names them every run.
 //
 // reqs holds the new requests and the earlier ones that got new information
 // (Request.Updated). board is the link to the board (https only, else it is left
@@ -92,17 +98,22 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 		boardName = "the Kanban board"
 	}
 	reqs = order(reqs)
-	yes, unsure, no := counts(reqs)
-	updated, todoNew := 0, 0
+	yes, unsure, no, aside := counts(reqs)
+	updated, todoNew, asideNew := 0, 0, 0
 	for _, r := range reqs {
 		switch {
 		case r.Updated:
 			updated++
+		case r.Decision.Verdict == NotRequest:
+			asideNew++
 		case r.Decision.NeedsTPRM():
 			todoNew++
 		}
 	}
-	newN := len(reqs) - updated
+	newN := len(reqs) - updated - asideNew
+	if newN == 0 && updated == 0 {
+		return Block{}, false
+	}
 	dateStr := day.Format("Monday 2 January 2006")
 
 	var lead string
@@ -118,8 +129,14 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 	if updated > 0 && newN > 0 {
 		lead += fmt.Sprintf(" %d earlier %s got new information.", updated, plural(updated, "request", "requests"))
 	}
+	if asideNew > 0 {
+		lead += fmt.Sprintf(" %d more %s set aside as not a request to set up a supplier; they are listed last.", asideNew, plural(asideNew, "thread was", "threads were"))
+	}
 
 	subject := fmt.Sprintf("Supplier requests: %d - %d critical, %d unsure, %d not critical", len(reqs), yes, unsure, no)
+	if aside > 0 {
+		subject = strings.Replace(subject, " not critical", fmt.Sprintf(" not critical, %d set aside", aside), 1)
+	}
 	if updated > 0 {
 		subject += fmt.Sprintf(" (%d updated)", updated)
 	}
@@ -161,6 +178,9 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 		if r.Decision.Verdict == Unsure {
 			t.WriteString("  Treated as critical until a person decides.\n")
 		}
+		if r.Decision.Verdict == NotRequest {
+			t.WriteString("  Not a request to set up a supplier, so no item was filed.\n")
+		}
 		if n := strings.Join(r.Needs(), " "); n != "" {
 			t.WriteString("  Still needed: " + n + "\n")
 		}
@@ -182,11 +202,15 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 		leadHTML += fmt.Sprintf(` <a href="%s" style="color:%s">Open %s</a>.`, e(link), emailkit.Navy, e(boardName))
 	}
 	emailkit.Lead(&h, tone, leadHTML)
-	emailkit.Tiles(&h, []emailkit.Tile{
+	tiles := []emailkit.Tile{
 		{Label: "Critical", N: yes, Tone: emailkit.Red},
 		{Label: "Unsure", N: unsure, Tone: emailkit.Amber},
 		{Label: "Not critical", N: no, Tone: emailkit.Grey},
-	}, "An unsure is treated as critical until a person decides.")
+	}
+	if aside > 0 {
+		tiles = append(tiles, emailkit.Tile{Label: "Set aside", N: aside, Tone: emailkit.Grey})
+	}
+	emailkit.Tiles(&h, tiles, "An unsure is treated as critical until a person decides.")
 	emailkit.BodyOpen(&h)
 	for _, r := range reqs {
 		rt := emailkit.Grey

@@ -160,3 +160,35 @@ func TestTheDigestSaysWhatIsStillNeeded(t *testing.T) {
 		t.Error("a No was asked for more")
 	}
 }
+
+func asideRequest(name string) Request {
+	return Request{Subject: name, From: "buyer@example.test", Received: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC),
+		Decision: Decision{Verdict: NotRequest, Reason: "staff are merging vendor records"}}
+}
+
+func TestADayOfOnlySetAsideThreadsSendsNothing(t *testing.T) {
+	if _, ok := Digest([]Request{asideRequest("Pfister - PFI001")}, "", time.Now(), "https://board.example.test", "the board", 0); ok {
+		t.Fatal("a digest went out for requests that are not requests")
+	}
+}
+
+func TestSetAsideThreadsAreListedLastWhenADigestGoesOutAnyway(t *testing.T) {
+	reqs := []Request{asideRequest("Pfister - PFI001"),
+		{Subject: "Mystery Co", From: "a@example.test", Received: time.Now(), Decision: Decision{Verdict: Unsure, Reason: "unclear"}}}
+	b, ok := Digest(reqs, "", time.Now(), "https://board.example.test", "the board", 0)
+	if !ok {
+		t.Fatal("no digest")
+	}
+	if !strings.Contains(b.Subject, "1 set aside") || !strings.Contains(b.Subject, "Supplier requests: 2 - 0 critical, 1 unsure") {
+		t.Errorf("subject: %q", b.Subject)
+	}
+	if !strings.HasPrefix(b.Text, "1 supplier request came in. 1 has a to-do") || !strings.Contains(b.Text, "1 more thread was set aside") {
+		t.Errorf("lead: %q", b.Text)
+	}
+	if strings.Index(b.Text, "SET ASIDE - Pfister") < strings.Index(b.Text, "UNSURE - Mystery") {
+		t.Errorf("set aside not last:\n%s", b.Text)
+	}
+	if !strings.Contains(b.Text, "no item was filed") {
+		t.Errorf("text: %s", b.Text)
+	}
+}

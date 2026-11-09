@@ -182,3 +182,80 @@ func TestTheInstructionsNameTheSchemaCodeParses(t *testing.T) {
 		t.Errorf("the agent's instructions do not name schema %q", Schema)
 	}
 }
+
+// A set-aside is a No-sized risk (nobody looks at it), so it has its own gates.
+
+var staffCfg = Config{InternalDomains: []string{"example.test"}}
+
+func staffThread(sender string) Input {
+	in := request(StateNone, nil, "Please merge the two vendor profiles for Pfister in the ERP.")
+	in.Sender = sender
+	return in
+}
+
+func notRequest(t *testing.T, mutate func(*Result)) []byte {
+	t.Helper()
+	return answer(t, func(r *Result) {
+		r.Verdict = NotRequest
+		r.Reason = "staff are merging records of an existing vendor"
+		r.Evidence = []string{"Please merge the two vendor profiles"}
+		if mutate != nil {
+			mutate(r)
+		}
+	})
+}
+
+func TestANotRequestFromStaffStandsAndNeedsNoItem(t *testing.T) {
+	d := Judge(notRequest(t, nil), staffThread("buyer@example.test"), staffCfg)
+	if d.Verdict != NotRequest || d.NeedsTPRM() || (Request{Decision: d}).NeedsTicket(false) {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestANotRequestNeedsAQuoteLikeAnyOtherAnswer(t *testing.T) {
+	d := Judge(notRequest(t, func(r *Result) { r.Evidence = []string{"a line that is not there"} }),
+		staffThread("buyer@example.test"), staffCfg)
+	if d.Verdict != Unsure {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestANotRequestIsRefusedFromAnOutsideSender(t *testing.T) {
+	for _, from := range []string{"sales@supplier.test", "buyer@example.test.evil.test", "nobody", ""} {
+		d := Judge(notRequest(t, nil), staffThread(from), staffCfg)
+		if d.Verdict != Unsure || !strings.Contains(strings.Join(d.Notes, " "), "internal domain") {
+			t.Errorf("%q: %+v", from, d)
+		}
+	}
+}
+
+func TestANotRequestIsRefusedWhenNoInternalDomainIsConfigured(t *testing.T) {
+	d := Judge(notRequest(t, nil), staffThread("buyer@example.test"), Config{})
+	if d.Verdict != Unsure {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestANotRequestIsRefusedWhereAFormCameWithTheThread(t *testing.T) {
+	for _, st := range []FormState{StateRead, StateLinked, StateUnreadable} {
+		in := staffThread("buyer@example.test")
+		in.State = st
+		if st == StateRead {
+			in.Form = formFor("Example Gravel Co", "")
+		}
+		if d := Judge(notRequest(t, nil), in, staffCfg); d.Verdict != Unsure {
+			t.Errorf("%s: %+v", st, d)
+		}
+	}
+}
+
+func TestANotRequestIsRefusedOnInjectionOrATechnologyWord(t *testing.T) {
+	in := staffThread("buyer@example.test")
+	if d := Judge(notRequest(t, func(r *Result) { r.InjectionAttempt = true }), in, staffCfg); d.Verdict != Unsure {
+		t.Errorf("injection: %+v", d)
+	}
+	in.Subject = "Cloud hosting vendor update"
+	if d := Judge(notRequest(t, nil), in, staffCfg); d.Verdict != Unsure {
+		t.Errorf("technology word: %+v", d)
+	}
+}

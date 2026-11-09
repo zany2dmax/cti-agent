@@ -81,6 +81,8 @@ func VerdictLabel(v string) string {
 		return "Critical"
 	case No:
 		return "Not critical"
+	case NotRequest:
+		return "Set aside"
 	}
 	return "Unsure"
 }
@@ -282,6 +284,8 @@ func UpdateComment(r Request, prior SeenEntry, cfg Config) string {
 		fmt.Fprintf(&b, "This supplier now looks critical, so it has to go through the %s.\n\n", cfg.tprm())
 	case No:
 		b.WriteString("The lane now judges this supplier not critical. A person can close this item if they agree; the lane never closes items.\n\n")
+	case NotRequest:
+		b.WriteString("The lane now judges this thread is not a request to set up a new supplier. A person can close this item if they agree; the lane never closes items.\n\n")
 	default:
 		b.WriteString("Still unsure: it is treated as critical until a person decides.\n\n")
 	}

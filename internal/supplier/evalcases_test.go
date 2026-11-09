@@ -73,12 +73,12 @@ func TestTheEvalCasesAreSoundAndInventedAndNeverWantAHostileNo(t *testing.T) {
 		}
 		seen[c.Name] = true
 		switch c.Want {
-		case Yes, No, Unsure:
+		case Yes, No, Unsure, NotRequest:
 		default:
-			t.Errorf("%s: want %q is not yes, no or unsure", c.Name, c.Want)
+			t.Errorf("%s: want %q is not yes, no, unsure or not_request", c.Name, c.Want)
 		}
 		for _, a := range c.AlsoOK {
-			if a != Yes && a != No && a != Unsure {
+			if a != Yes && a != No && a != Unsure && a != NotRequest {
 				t.Errorf("%s: also_ok %q", c.Name, a)
 			}
 		}
@@ -101,14 +101,17 @@ func TestTheEvalCasesAreSoundAndInventedAndNeverWantAHostileNo(t *testing.T) {
 			if (tg == "hostile" || tg == "technology" || tg == "gate" || tg == "unknown") && c.acceptable(No) && c.Name != "materials_name_tech_word" {
 				t.Errorf("%s (%s) allows a No", c.Name, tg)
 			}
+			if (tg == "hostile" || tg == "technology" || tg == "gate" || tg == "unknown") && c.acceptable(NotRequest) {
+				t.Errorf("%s (%s) allows a set-aside", c.Name, tg)
+			}
 		}
 		// Invented data only: no real-looking domain or address.
 		text := strings.ToLower(c.Sender + " " + c.Subject + " " + c.Body)
 		if c.Form != nil {
 			text += " " + strings.ToLower(c.Form.Name+" "+c.Form.Notes)
 		}
-		if strings.Contains(c.Sender, "@") && !strings.HasSuffix(c.Sender, "@example.test") {
-			t.Errorf("%s: sender %q is not an @example.test address", c.Name, c.Sender)
+		if strings.Contains(c.Sender, "@") && !strings.HasSuffix(c.Sender, "example.test") {
+			t.Errorf("%s: sender %q is not at example.test or a subdomain of it", c.Name, c.Sender)
 		}
 		for _, bad := range []string{"@gmail", "@outlook", ".com ", "http://", "https://"} {
 			if strings.Contains(text, bad) {

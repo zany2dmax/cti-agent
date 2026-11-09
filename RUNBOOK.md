@@ -1210,6 +1210,18 @@ its type. A form shared as a link in the message instead of attached is not
 opened; that request is Unsure, with the reason on the item. It never replies to
 the requester and never moves their mail.
 
+A fourth answer, **Set aside**, is for a thread that is not a request to set up a
+supplier at all: staff changing an account number, merging duplicate vendor
+profiles, a customer's credit application. It files no item. Code accepts it only
+when the model quotes the request, no supplier form came with the thread, the
+thread was started by someone at your own domain (the one in `SUPPLIER_ADDRESS`,
+plus `SUPPLIER_INTERNAL_DOMAINS`), and nothing in it points to technology or
+tries to steer the reader; anything else stays Unsure. Set-aside threads are
+listed last in a digest that goes out for another reason, and a day with only
+set-aside threads sends no digest, so **read the lane's log (`journalctl -u
+cti-agent-supplier`) now and then** to see what was set aside. They are recorded as
+reported, so they are not judged again unless the thread gets a newer message.
+
 An **Unsure** is not a failure: it says the lane could not determine a certain
 Yes, so a person decides. It is also what every request becomes when
 `SUPPLIER_MODEL` is unset, `claude` is missing, or the model's answer cannot be

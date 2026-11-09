@@ -580,3 +580,38 @@ func TestTheItemAndTheCommentSayWhatIsStillNeededAndEscapeEverything(t *testing.
 		t.Errorf("an unescaped markup character survived in %q (left: %q)", why, left)
 	}
 }
+
+func staffItem(id string) Item {
+	r := sampleRequest(No)
+	r.MessageID, r.ConversationID, r.From = id, "conv-"+id, "buyer@example.test"
+	r.State, r.Form, r.Subject = StateNone, nil, "Pfister - PFI001"
+	in := Input{MessageID: id, Sender: r.From, Subject: r.Subject, State: StateNone, Body: "Please merge the two vendor profiles"}
+	return Item{Request: r, Input: Render(in, Config{}), Source: in.Source()}
+}
+
+func setAside(id string) []byte {
+	return []byte(fmt.Sprintf(`{"schema":"cti-supplier/1","message_id":%q,"verdict":"not_request","reason":"merging records","evidence":["Please merge the two vendor profiles"]}`, id))
+}
+
+func TestFinishFilesNothingForASetAsideThreadButRecordsIt(t *testing.T) {
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{staffItem("s")}, map[int][]byte{0: setAside("s")}, staffCfg, tk, "CYBR", true)
+	o := out[0]
+	if o.Request.Decision.Verdict != NotRequest || o.Ticket != "" || len(tk.created) != 0 {
+		t.Fatalf("%+v created %v", o, tk.created)
+	}
+	if recs := SeenRecords(out); len(recs) != 1 || recs[0].Entry.Verdict != NotRequest {
+		t.Errorf("a set-aside thread must be recorded so it is not judged every day: %+v", recs)
+	}
+}
+
+func TestAnItemFiledAsUnsureThenSetAsideGetsACommentNotASilentDrop(t *testing.T) {
+	it := staffItem("s")
+	it.Update, it.Prior = true, reportedAt(9) // was Unsure, with CYBR-7
+	it.Request.LastReceived = time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{it}, map[int][]byte{0: setAside("s")}, staffCfg, tk, "CYBR", true)
+	if out[0].Ticket != "commented" || len(tk.comments) != 1 || !strings.Contains(tk.comments[0], "not a request to set up a new supplier") {
+		t.Fatalf("%+v comments %v", out[0], tk.comments)
+	}
+}
