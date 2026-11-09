@@ -73,8 +73,10 @@ func TestAnUnreadSubjectOnlyMatchWaitsForTheDigest(t *testing.T) {
 	if by["old"] != ActionDelete {
 		t.Errorf("subject-only match older than the grace: %s, want delete", by["old"])
 	}
-	if by["hdr"] != ActionDelete {
-		t.Errorf("header-declared auto-reply is never held: %s", by["hdr"])
+	// PrimeSec 10969069: Auto-Submitted is the sender's to set, so an unread
+	// header-declared match waits for the digest too.
+	if by["hdr"] != ActionLeave {
+		t.Errorf("fresh unread header-declared auto-reply: %s, want leave until the digest reads it", by["hdr"])
 	}
 }
 
@@ -100,10 +102,9 @@ func TestAutoReplySubjectsAreMatchedAtTheStartOnly(t *testing.T) {
 }
 
 func TestACVEBearingMessageIsArchivedNeverDeleted(t *testing.T) {
-	// A SUBJECT-only auto-reply match the digest took a CVE from is archived:
-	// anyone can title a message "Automatic reply:", and a real advisory under
-	// that subject is evidence. A message whose HEADERS declare it an
-	// auto-reply is deleted whatever it quoted - the operator's "always".
+	// An auto-reply match the digest took a CVE from is archived: anyone can
+	// title a message "Automatic reply:" or set Auto-Submitted: auto-replied
+	// (PrimeSec 10969069), and a real advisory sent that way is evidence.
 	proc := map[string]Processed{
 		"subj": {ID: "subj", HasCVE: true},
 		"hdr":  {ID: "hdr", HasCVE: true, AutoReply: true},
@@ -118,8 +119,8 @@ func TestACVEBearingMessageIsArchivedNeverDeleted(t *testing.T) {
 	if byID["subj"].Action != ActionArchive {
 		t.Errorf("subject-only + CVE: %s, want archive", byID["subj"].Action)
 	}
-	if byID["hdr"].Action != ActionDelete {
-		t.Errorf("header-declared auto-reply: %s, want delete", byID["hdr"].Action)
+	if byID["hdr"].Action != ActionArchive {
+		t.Errorf("header-declared auto-reply + CVE: %s, want archive", byID["hdr"].Action)
 	}
 }
 
@@ -556,8 +557,10 @@ func TestEveryInputCombinationIsPinnedDown(t *testing.T) {
 		{in{subjAuto: true}, ActionDelete, "unread, subject says auto-reply"},
 		// A stored verdict alone no longer deletes: the live headers decide.
 		{in{record: true, recAuto: true}, ActionLeave, "recorded as an auto-reply, headers now say not"},
-		{in{record: true, cve: true, hdrAuto: true}, ActionDelete,
-			"headers outrank a quoted CVE"},
+		{in{record: true, cve: true, hdrAuto: true}, ActionArchive,
+			"header auto-reply with a CVE: the header is the sender's to set, archived (PrimeSec 10969069)"},
+		{in{record: true, hdrAuto: true}, ActionDelete,
+			"header auto-reply, read, no CVE"},
 		{in{record: true, cve: true, subjAuto: true}, ActionArchive,
 			"subject only, with a CVE: evidence, archived"},
 		{in{record: true, owner: OwnerAppScan, subjAuto: true}, ActionDelete,

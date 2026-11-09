@@ -1,4 +1,4 @@
-.TH CTI-MAILBOX 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-MAILBOX 1 "2026-11-09" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lane has read, delete auto-replies, leave the rest
 .SH SYNOPSIS
@@ -102,12 +102,8 @@ Declared by its headers
 .RB ( "Auto\-Submitted: auto\-replied"
 or
 .BR auto\-notified ,
-or
-.B X\-Auto\-Response\-Suppress: All
-with an
-.B Auto\-Submitted
-value containing
-.BR auto ),
+exactly; never
+.BR auto\-generated ),
 or by a subject that
 .B starts
 like an out-of-office:
@@ -117,10 +113,12 @@ like an out-of-office:
 and their common variants (not
 .BR OOO: ,
 which people use for their own notices). Anyone can title a message that
-way, so a subject-only match is bounded twice: one no lane has read yet waits
+way, and any sender can set
+.BR Auto\-Submitted ,
+so either kind of match is bounded twice: one no lane has read yet waits
 .B GRAPH_LOOKBACK_HOURS
 for the digest, and one the digest took a CVE from is archived instead.
-Header-declared replies go on sight. Not subject to the archive grace.
+Not subject to the archive grace.
 .TP
 .B 2. No processing record: leave
 Nothing else that no lane has a record of reading is ever moved.

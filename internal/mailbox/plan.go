@@ -82,7 +82,9 @@ type Decision struct {
 //  1. Machine mail nobody here acts on -> Deleted Items, read or not:
 //     an automatic reply, declared by its own headers or - since 1.3.2 - by a
 //     subject that starts the way an out-of-office does ("Automatic reply:",
-//     "Out of Office:" ...); and a quarantine digest (QuarantineDigest),
+//     "Out of Office:" ...), unless the digest took a CVE from it (archived)
+//     or it is unread and younger than SubjectGrace (left for the digest);
+//     and a quarantine digest (QuarantineDigest),
 //     whoever it is addressed to, on sight. A digest that holds mail the
 //     fleet reads (HeldForFleet) stays DigestKeep instead, for the operator
 //     to release it by hand; so does one whose rows cannot be read, so a
@@ -104,12 +106,16 @@ type Decision struct {
 // "Processed first" exists to protect mail somebody may need; nobody needs a
 // bounce, and Deleted Items is recoverable.
 //
-// The subject match is deliberately narrow (a prefix, not a substring) and
-// has one exception: a subject-only match the digest took a CVE from is
-// archived, not deleted. Anyone can title a message "Automatic reply:", and
-// a real advisory filed under that subject is evidence. A message whose
-// HEADERS say auto-reply is deleted whatever it quoted - that is the sending
-// system's own declaration.
+// The subject match is deliberately narrow (a prefix, not a substring), and
+// both kinds of match have the same two exceptions. An auto-reply the digest
+// took a CVE from is archived, not deleted, and one no lane has read yet waits
+// Options.SubjectGrace for the digest. Header-declared auto-replies used to
+// skip both: the header was trusted as "the sending system's own
+// declaration". But Auto-Submitted is a header any outside sender can set,
+// so a real advisory carrying `Auto-Submitted: auto-replied` went to Deleted
+// Items before the digest read it or after it took a CVE from it (PrimeSec
+// attack vector 10969069). A genuine out-of-office quotes no CVE, so it still
+// goes on sight once the digest has read it, and after the grace if not.
 //
 // # WHY RULE 4 IS "LEAVE" AND NOT "ARCHIVE"
 //
@@ -143,7 +149,8 @@ type Options struct {
 	// CVE exception below can only protect a message the digest has read; a
 	// real advisory titled "Automatic reply: ..." arriving just before the
 	// cleanup would otherwise be deleted before the digest ever saw it.
-	// Header-declared auto-replies are not held.
+	// Header-declared auto-replies are held the same way: the header is the
+	// sender's to set.
 	SubjectGrace time.Duration
 	// HoldArchive, when set, turns every archive except our own reports into
 	// a leave with this as the reason. cti-mailbox sets it on a day no CTI
@@ -173,6 +180,14 @@ func AutoReplySubject(subject string) bool {
 		}
 	}
 	return false
+}
+
+// autoReplyWhy names what marked a message an automatic reply.
+func autoReplyWhy(header bool) string {
+	if header {
+		return "its headers declare it an automatic reply"
+	}
+	return "the subject marks it an automatic reply"
 }
 
 // PlanWith is Plan with every option.
@@ -223,17 +238,14 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 				Reason: "a quarantine digest holding nothing the fleet reads - nobody " +
 					"reviews quarantine through this mailbox",
 				Known: ok})
-		case headerAuto:
-			out = append(out, Decision{Candidate: c, Action: ActionDelete,
-				Reason: "the sending system's headers declare it an automatic reply",
-				Known:  ok})
-		case subjectAuto && !ok && o.SubjectGrace > 0 && c.Received.After(now.Add(-o.SubjectGrace)):
+		case (headerAuto || subjectAuto) && !ok && o.SubjectGrace > 0 &&
+			c.Received.After(now.Add(-o.SubjectGrace)):
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
-				Reason: "the subject looks like an automatic reply, but no lane has " +
-					"read it yet - it waits for the digest in case it is a real advisory"})
-		case subjectAuto && (!ok || !rec.HasCVE):
+				Reason: autoReplyWhy(headerAuto) + ", but no lane has read it yet - " +
+					"it waits for the digest in case it is a real advisory"})
+		case (headerAuto || subjectAuto) && (!ok || !rec.HasCVE):
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
-				Reason: "the subject marks it an automatic reply",
+				Reason: autoReplyWhy(headerAuto),
 				Known:  ok})
 		case !ok:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,

@@ -80,6 +80,18 @@ time.
     through run-checkin's prefix-matched Bash allowlist. The guard has
     refused `$(...)` since 1.5; the same entry closes the quote bypass that
     still got it through.
+  - Attack vector 10969069 (Medium) - externally sent mail with a spoofed
+    Auto-Submitted header is moved to Deleted Items by the mailbox cleanup
+    lane. Fixed by the auto-reply entry below.
+
+- **A header-declared auto-reply gets the same two checks as a subject
+  match.** `Auto-Submitted: auto-replied` sent a message to Deleted Items on
+  sight, before the not-yet-read grace and the "archive it if the digest took
+  a CVE from it" exception that subject matches already had. Any outside
+  sender can set that header, so a real advisory carrying it could be deleted
+  before the digest read it. Both checks now apply to either kind of match.
+  A genuine out-of-office still goes to Deleted Items: once the digest has
+  read it, or after `GRAPH_LOOKBACK_HOURS` if no lane has.
 
 - **`checkin-bash-guard` reads quotes the way bash does.** It found the
   single-quoted spans with a regex, which also took the `'` inside a
