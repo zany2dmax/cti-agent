@@ -200,3 +200,34 @@ func TestTheFooterCarriesTheConfiguredAttribution(t *testing.T) {
 		t.Fatalf("ok=%v\nhtml tail: %s\ntext tail: %s", ok, b.HTML[len(b.HTML)-400:], b.Text[len(b.Text)-120:])
 	}
 }
+
+func TestTheListOfEmailsReadIsShownEscapedAndCapped(t *testing.T) {
+	var rows []MailRow
+	for i := 0; i < maxRead+5; i++ {
+		rows = append(rows, MailRow{Label: "l", Received: day, From: "a@example.test", Subject: "s", Result: "Unsure", Handling: HandledNew})
+	}
+	rows[0].Subject = `<script>alert(1)</script> Gravel`
+	rows[0].From = `"><img src=x>`
+	b, ok := DigestRead([]Request{named("Gravel Co", No, 9)}, "", day, "", "", 0, rows)
+	if !ok {
+		t.Fatal("no digest")
+	}
+	if strings.Contains(b.HTML, "<script>") || strings.Contains(b.HTML, "<img src=x>") {
+		t.Error("a subject or sender from the mail was not escaped")
+	}
+	for _, want := range []string{"EMAILS READ THIS RUN", "5 more in the lane"} {
+		if !strings.Contains(b.HTML, want) {
+			t.Errorf("html lacks %q", want)
+		}
+	}
+	if !strings.Contains(b.Text, "+5 more in the lane's log") {
+		t.Error("the text version does not say how many were left off the list")
+	}
+	none, _ := DigestRead([]Request{named("Gravel Co", No, 9)}, "", day, "", "", 0, nil)
+	if strings.Contains(none.Text, "EMAILS READ") || strings.Contains(none.HTML, "EMAILS READ") {
+		t.Error("an empty list left a heading behind")
+	}
+	if _, ok := DigestRead(nil, "", day, "", "", 0, rows); ok {
+		t.Error("a list of emails read made a digest on a day with no requests")
+	}
+}

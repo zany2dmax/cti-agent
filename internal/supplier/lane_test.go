@@ -615,3 +615,79 @@ func TestAnItemFiledAsUnsureThenSetAsideGetsACommentNotASilentDrop(t *testing.T)
 		t.Fatalf("%+v comments %v", out[0], tk.comments)
 	}
 }
+
+func TestEveryMessageInTheWindowIsListedWithWhatWasDoneWithIt(t *testing.T) {
+	auto := msg("d1", "cd", "End User Digest: 1 New Message", "digest@example.test", "quarantine", 10, false)
+	own := msg("o1", "co", "Supplier requests: 1", mailbox, "our own digest", 10, false)
+	fresh := msg("m1", "c1", "new supplier", "a@example.test", "gravel", 12, false)
+	oldMsg := msg("m0", "c0", "earlier supplier", "b@example.test", "paving", 9, false)
+	reply := msg("m2", "c0", "Re: earlier supplier", "b@example.test", "thanks", 8, false)
+	early := msg("m9", "c1", "context only", "a@example.test", "before the window", 1, false)
+	early.Received = time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	reported := Request{ConversationID: "c0", MessageID: "m0"}
+	seen := Seen{reported.Label(): {LastReceived: time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC), Verdict: No}}
+	auto2 := func(from, subject string) bool { return from == "digest@example.test" }
+	c, err := CollectRead(context.Background(), fakeMail{[]graph.AddressedMessage{auto, own, fresh, oldMsg, reply, early}}, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch, auto2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range c.Read {
+		got[r.Subject] = r.Handling
+	}
+	want := map[string]string{
+		"End User Digest: 1 New Message": HandledAutomatic,
+		"new supplier":                   HandledNew,
+		"earlier supplier":               HandledReported,
+		"Re: earlier supplier":           HandledReported,
+	}
+	for subj, h := range want {
+		if got[subj] != h {
+			t.Errorf("%q handled as %q, want %q (all: %v)", subj, got[subj], h, got)
+		}
+	}
+	if _, ok := got["Supplier requests: 1"]; ok {
+		t.Error("the mailbox's own mail was listed as read")
+	}
+	if _, ok := got["context only"]; ok {
+		t.Error("a message from before the window was listed: it was read for context, not in the window")
+	}
+	if len(c.Items) != 1 || c.Automatic != 1 {
+		t.Errorf("items %d, automatic %d", len(c.Items), c.Automatic)
+	}
+}
+
+func TestAnnotateSaysWhatCameOfEachMessage(t *testing.T) {
+	req := func(conv, verdict string) Request {
+		return Request{ConversationID: conv, MessageID: conv, Decision: Decision{Verdict: verdict}}
+	}
+	a, b, c, d := req("a", Unsure), req("b", Yes), req("c", No), req("d", Unsure)
+	outs := []Outcome{
+		{Request: a},
+		{Request: b, Update: true, Changed: true},
+		{Request: c, Update: true},
+		{Request: d, Err: "jira down"},
+	}
+	t0 := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	rows := []MailRow{
+		{Label: a.Label(), Received: t0, Handling: HandledNew},
+		{Label: b.Label(), Received: t0.Add(time.Hour), Handling: HandledUpdate},
+		{Label: c.Label(), Received: t0.Add(2 * time.Hour), Handling: HandledUpdate},
+		{Label: d.Label(), Received: t0.Add(3 * time.Hour), Handling: HandledNew},
+		{Received: t0.Add(4 * time.Hour), Handling: HandledAutomatic},
+		{Label: "x", Received: t0.Add(5 * time.Hour), Handling: HandledReported},
+	}
+	got := Annotate(rows, outs)
+	var results []string
+	for _, r := range got {
+		results = append(results, r.Result)
+	}
+	want := []string{"Reported earlier, nothing new", "Left out: automatic message from the mail filter",
+		"Could not be filed, will be tried again", "New reply, judgement unchanged (not critical)", "Updated: critical", "Unsure"}
+	if strings.Join(results, "|") != strings.Join(want, "|") {
+		t.Errorf("results (newest first)\n got %q\nwant %q", results, want)
+	}
+	if rows[0].Result != "" {
+		t.Error("Annotate changed the slice it was given")
+	}
+}

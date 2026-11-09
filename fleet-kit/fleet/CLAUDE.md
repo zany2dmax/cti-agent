@@ -28,6 +28,13 @@ $FLEET_CODE/bin/cti-alert --unit cti-agent-checkin.service --for-real \
   --kind ESCALATION --reason "<what you need and why, in one or two lines>"
 ```
 
+Write the reason in plain words. Every Bash call you make passes a guard that
+refuses shell syntax. It refuses a less-than or greater-than sign, a pipe, a
+semicolon, an ampersand, a backtick and a newline anywhere in the command. It
+also refuses a dollar sign, asterisk, question mark, open square bracket and
+tilde unless the span is in single quotes. Use "and" or a full stop instead of a semicolon, and
+write "about" or "approx" instead of a tilde. A refused call costs a turn.
+
 `cti-alert` is the only command you have that sends mail, and that is
 deliberate. It has no `--to`: the recipient is fixed by `FLEET_OPERATOR_EMAIL`
 in the configuration, so neither you nor anything you read can redirect it.
@@ -295,7 +302,7 @@ Each heartbeat:
 
 Handles in this fleet: `@you` (orchestrator), `@operator` (the human),
 `@ingest`, `@enrich`, `@scout`, `@brief`, `@patchtuesday`, `@mailbox`,
-`@appscan`, `@domains`, `@all`.
+`@appscan`, `@domains`, `@vmscan`, `@supplier`, `@all`.
 
 ## The lanes, and who runs them
 
@@ -311,6 +318,8 @@ operator runs by hand. You read what they did; you do not run them.
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly, **run by the operator by hand for now** (both article sites block the box, so the articles are saved in a browser into `$FLEET_HOME/inbox/patchtuesday/YYYY-MM/`; the timer is disabled): read Microsoft's release data (MSRC API), cross-check BleepingComputer and (optionally) the Qualys blog, correlate against Host Detection via the CVE→QID mapping **and** the QIDs Qualys publishes in the review's QQL, publish the QQL. The table is **one row per QID** (a QID is one update somebody installs), not per CVE. It also writes the release manifest the daily digest reads - see below |
 | `@appscan` | `$FLEET_CODE/bin/run-appscan` | Weekly, Fridays: read the DAST scanner's own scan-completion emails (Qualys WAS today), pull per-finding detail from its API where credentials allow, and send the application-security report to `$WAS_TO` - the people who own application code, **not** the digest audience. See "The AppSec report" below |
 | `@domains` | `$FLEET_CODE/bin/run-domains` | Weekly, Tuesdays 08:00: every domain in the operator's inventory checked against the GoDaddy account, DNS, the web and its mail records, diffed against last week, sent to `$DOM_TO` (security team), then the DNS changes it lists (DNS CHANGES FOR IT) filed by `cti-jira --domains-actions` as one Jira lock-down ticket for IT, commented on only when the list changes. No model involved. A run advances the week-over-week baseline, which is one more reason it is not yours to re-run |
+| `@vmscan` | `$FLEET_CODE/bin/run-vmscan` | Weekly: read the Qualys VM scan-result notices in the CTI mailbox, take the newest result for each scheduled scan, and send one report with the scans kept separate to `$VMSCAN_TO`. A scheduled scan with no result is the first thing it says. No model involved |
+| `@supplier` | `$FLEET_CODE/bin/run-supplier` | Daily, 07:45 UTC (`cti-agent-supplier.timer`; a timer new in 1.6, **intended**, not a stray): read new supplier-request mail addressed to the shared mailbox's supplier list, and the request form attached to it (never the W-9 or bank files), judge whether the supplier will touch company data or systems or provide technology, file a Kanban item in Jira for a Yes or an Unsure, and send one digest to `$SUPPLIER_TO` that lists every email it read. The judgement is one model call with no tools; code can only move an answer toward Unsure. It sends nothing on a day with nothing new, so a quiet day is not a failure. Never run it with `--for-real` yourself |
 | `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily: archive mail its owning lane has read - CTI advisories the agent took a CVE from, Qualys WAS notices the AppSec weekly reported on - and the fleet's own reports (only when their `X-CTI-Agent-Sent` header is correctly signed), move automatic replies (headers or subject prefix) to Deleted Items, **leave everything else**. `cybersecurity@` is the team's shared reporting mailbox, so reported phishing, alerts and mail from colleagues stay in the inbox where a human can see them - "read looking for CVEs" is not "triaged". **You do not run this with `--for-real`** - see below |
 | — | `$FLEET_CODE/lanes/mailer.py` | Graph sendMail. The scheduled runners invoke this. **You cannot** - it is not in your allowlist. Escalate with `cti-alert` instead. |
 

@@ -87,7 +87,45 @@ const maxReplies = 5
 // would judge the request on a reply that says only "Approved".
 const contextLookback = 21 * 24 * time.Hour
 
-// Collect finds the new supplier requests: threads addressed to the list that
+// Handling is what the lane did with a message it read.
+const (
+	HandledNew       = "new"       // a new request, judged
+	HandledUpdate    = "update"    // a reported request with a newer message, judged again
+	HandledReported  = "reported"  // a request reported before, nothing newer
+	HandledAutomatic = "automatic" // one of the fleet's own machine senders, left out
+)
+
+// MailRow is one message the lane read in the window, for the digest's list of
+// emails read. Handling is set at collect; Result is filled in at finish, when
+// the verdicts exist (see Annotate).
+type MailRow struct {
+	Label    string    `json:"label,omitempty"`
+	Received time.Time `json:"received"`
+	From     string    `json:"from"`
+	Subject  string    `json:"subject"`
+	Handling string    `json:"handling"`
+	Result   string    `json:"result,omitempty"`
+}
+
+// Collected is what one collect pass found.
+type Collected struct {
+	Items []Item
+	// Automatic counts the machine-sender messages inside the window.
+	Automatic int
+	// Read lists every message inside the window that the lane looked at, including
+	// the automatic ones and the ones already reported, so the digest can answer
+	// "what did it actually read?".
+	Read []MailRow
+}
+
+// Collect finds the new supplier requests: see CollectRead. It returns the items
+// and the count of automatic messages left out.
+func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen Seen, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) ([]Item, int, error) {
+	c, err := CollectRead(ctx, mail, src, p, cfg, seen, mailbox, since, isAutomatic)
+	return c.Items, c.Automatic, err
+}
+
+// CollectRead finds the new supplier requests: threads addressed to the list that
 // have a message since the given time and whose label is not in seen. Each
 // thread is read whole, back to contextLookback before that time. It reads each
 // thread's form through ReadForms, the only path to attachment bytes, and
@@ -95,16 +133,21 @@ const contextLookback = 21 * 24 * time.Hour
 //
 // isAutomatic says whether a message is one of the fleet's own machine senders
 // (the mail filter's quarantine digest): such a message is not a request and is
-// left out, and the second result counts those inside the window so the digest
+// left out, and the Automatic count is those inside the window so the digest
 // can say how many were skipped. It decides by sender address and subject only,
 // never by what a message says, so nothing a requester writes can use it.
-func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen Seen, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) ([]Item, int, error) {
+//
+// Read records each message inside the window (not the older ones read for
+// context) with what was done with it. The mailbox's own mail is not listed.
+func CollectRead(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen Seen, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) (Collected, error) {
+	var out Collected
 	msgs, err := mail.Addressed(ctx, since.Add(-contextLookback))
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading the mailbox: %w", err)
+		return Collected{}, fmt.Errorf("reading the mailbox: %w", err)
 	}
-	var items []Item
-	automatic := 0
+	row := func(m graph.AddressedMessage, label, handling string) MailRow {
+		return MailRow{Label: label, Received: m.Received, From: m.From, Subject: m.Subject, Handling: handling}
+	}
 	for _, t := range group(msgs) {
 		// The fleet's own mail is not a request, and neither is its quarantine digest.
 		var mine thread
@@ -113,7 +156,8 @@ func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, s
 			case strings.EqualFold(strings.TrimSpace(m.From), strings.TrimSpace(mailbox)):
 			case isAutomatic != nil && isAutomatic(m.From, m.Subject):
 				if !m.Received.Before(since) {
-					automatic++
+					out.Automatic++
+					out.Read = append(out.Read, row(m, "", HandledAutomatic))
 				}
 			default:
 				mine = append(mine, m)
@@ -129,20 +173,31 @@ func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, s
 		}
 		it, err := buildItem(ctx, mine, src, p, cfg)
 		if err != nil {
-			return nil, 0, err
+			return Collected{}, err
 		}
+		label := it.Request.Label()
+		handling := HandledNew
 		// A request reported before is skipped unless a message newer than the one
 		// last judged has arrived: that is new information, and it is judged again
 		// (a request recorded without a last-received time is reported once only).
-		if prior, ok := seen[it.Request.Label()]; ok {
+		if prior, ok := seen[label]; ok {
 			if prior.LastReceived.IsZero() || !it.Request.LastReceived.After(prior.LastReceived) {
-				continue
+				handling = HandledReported
+			} else {
+				handling = HandledUpdate
+				it.Update, it.Prior = true, prior
 			}
-			it.Update, it.Prior = true, prior
 		}
-		items = append(items, it)
+		for _, m := range mine {
+			if !m.Received.Before(since) {
+				out.Read = append(out.Read, row(m, label, handling))
+			}
+		}
+		if handling != HandledReported {
+			out.Items = append(out.Items, it)
+		}
 	}
-	return items, automatic, nil
+	return out, nil
 }
 
 func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) (Item, error) {
@@ -375,4 +430,43 @@ func Requests(outs []Outcome) []Request {
 		out = append(out, o.Request)
 	}
 	return out
+}
+
+// Annotate fills in what each message of the list came to, from the finished
+// outcomes: the verdict for a request judged now, a plain note for one reported
+// earlier, one that could not be filed, or a machine sender. It returns a new
+// slice, newest message first.
+func Annotate(rows []MailRow, outs []Outcome) []MailRow {
+	by := map[string]Outcome{}
+	for _, o := range outs {
+		by[o.Request.Label()] = o
+	}
+	res := make([]MailRow, len(rows))
+	copy(res, rows)
+	for i := range res {
+		r := &res[i]
+		switch r.Handling {
+		case HandledAutomatic:
+			r.Result = "Left out: automatic message from the mail filter"
+			continue
+		case HandledReported:
+			r.Result = "Reported earlier, nothing new"
+			continue
+		}
+		o, ok := by[r.Label]
+		switch {
+		case !ok:
+			r.Result = "Not judged"
+		case o.Err != "":
+			r.Result = "Could not be filed, will be tried again"
+		case o.Update && !o.Changed:
+			r.Result = "New reply, judgement unchanged (" + strings.ToLower(VerdictLabel(o.Request.Decision.Verdict)) + ")"
+		case o.Update:
+			r.Result = "Updated: " + strings.ToLower(VerdictLabel(o.Request.Decision.Verdict))
+		default:
+			r.Result = VerdictLabel(o.Request.Decision.Verdict)
+		}
+	}
+	sort.SliceStable(res, func(i, j int) bool { return res[i].Received.After(res[j].Received) })
+	return res
 }

@@ -91,6 +91,18 @@ func plural(n int, one, many string) string {
 // many messages from the fleet's own machine senders were left out, said in a
 // line so nothing is skipped silently; it does not by itself make a digest.
 func Digest(reqs []Request, org string, day time.Time, board, boardName string, automatic int) (b Block, ok bool) {
+	return DigestRead(reqs, org, day, board, boardName, automatic, nil)
+}
+
+// maxRead is how many messages the list of emails read shows; the rest are
+// counted in a line under it.
+const maxRead = 60
+
+// DigestRead is Digest with the list of emails read: every message the lane
+// looked at in the window and what came of it, as the daily digest lists the
+// subjects its ingest pass read. read is shown newest first (see Annotate); an
+// empty list leaves the section out.
+func DigestRead(reqs []Request, org string, day time.Time, board, boardName string, automatic int, read []MailRow) (b Block, ok bool) {
 	if len(reqs) == 0 {
 		return Block{}, false
 	}
@@ -187,6 +199,10 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 		fmt.Fprintf(&t, "  Sent by %s, %s\n\n", oneLine(r.From, 80), r.Received.UTC().Format("2006-01-02"))
 	}
 
+	if len(read) > 0 {
+		t.WriteString(readText(read))
+	}
+
 	// HTML.
 	var h strings.Builder
 	emailkit.Open(&h, subject, org, "Supplier requests", dateStr)
@@ -245,6 +261,9 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 		emailkit.Card(&h, rt, title, lines.String())
 	}
 	emailkit.BodyClose(&h)
+	if len(read) > 0 {
+		h.WriteString(readHTML(read))
+	}
 	if autoLine != "" {
 		emailkit.Note(&h, e(autoLine))
 	}
@@ -254,7 +273,67 @@ func Digest(reqs []Request, org string, day time.Time, board, boardName string, 
 	return Block{Subject: subject, Text: t.String(), HTML: h.String()}, true
 }
 
-// changeLine says what changed for an updated request.
+// readHeading is the list's heading: how many messages, in how many requests.
+func readHeading(read []MailRow) string {
+	labels := map[string]bool{}
+	for _, r := range read {
+		if r.Label != "" {
+			labels[r.Label] = true
+		}
+	}
+	return fmt.Sprintf("Emails read this run - %d %s in %d %s",
+		len(read), plural(len(read), "message", "messages"),
+		len(labels), plural(len(labels), "request", "requests"))
+}
+
+func readText(read []MailRow) string {
+	var t strings.Builder
+	t.WriteString(strings.ToUpper(readHeading(read)) + "\n")
+	for i, r := range read {
+		if i == maxRead {
+			fmt.Fprintf(&t, "+%d more in the lane's log\n", len(read)-maxRead)
+			break
+		}
+		fmt.Fprintf(&t, "  %s  %s  %s  [%s]\n", r.Received.UTC().Format("2006-01-02 15:04"),
+			oneLine(r.From, 40), oneLine(r.Subject, 100), r.Result)
+	}
+	t.WriteString("\n")
+	return t.String()
+}
+
+// readHTML is the list as a table: result, when, sender and subject. Sender and
+// subject come from the mail, so both go through e().
+func readHTML(read []MailRow) string {
+	var b strings.Builder
+	rows := read
+	if len(rows) > maxRead {
+		rows = rows[:maxRead]
+	}
+	for _, r := range rows {
+		colour := emailkit.Soft
+		switch {
+		case strings.HasPrefix(r.Result, "Critical"), strings.HasPrefix(r.Result, "Updated: critical"):
+			colour = emailkit.Red.Fg
+		case strings.HasPrefix(r.Result, "Unsure"), strings.HasPrefix(r.Result, "Updated: unsure"):
+			colour = emailkit.Amber.Fg
+		}
+		fmt.Fprintf(&b, `<tr><td style="padding:3px 10px 3px 0;white-space:nowrap;vertical-align:top;font-weight:700;color:%s">%s</td>`+
+			`<td style="padding:3px 10px 3px 0;white-space:nowrap;vertical-align:top;color:%s">%s</td>`+
+			`<td style="padding:3px 0;color:%s">%s<br><span style="color:%s">%s</span></td></tr>`,
+			colour, e(r.Result), emailkit.Soft, r.Received.UTC().Format("2006-01-02 15:04"),
+			emailkit.Ink, e(oneLine(r.Subject, 100)), emailkit.Soft, e(oneLine(r.From, 60)))
+	}
+	more := ""
+	if len(read) > maxRead {
+		more = fmt.Sprintf(`<div style="color:%s;margin-top:6px">+%d more in the lane's log</div>`, emailkit.Soft, len(read)-maxRead)
+	}
+	return fmt.Sprintf(`
+  <tr><td style="padding:4px 20px 18px 20px;border-top:1px solid %s">
+    <div style="font:700 12px %s;color:%s;margin:12px 0 8px 0;letter-spacing:.5px">%s</div>
+    <table cellpadding="0" cellspacing="0" role="presentation" style="font:400 12px/1.5 %s">%s</table>%s
+  </td></tr>`, emailkit.Rule, emailkit.Font, emailkit.Soft, e(strings.ToUpper(readHeading(read))), emailkit.Font, b.String(), more)
+}
+
 // orgName is the organisation for the fallback credit line.
 func orgName(org string) string {
 	if org = strings.TrimSpace(org); org != "" {
@@ -263,6 +342,7 @@ func orgName(org string) string {
 	return "security team"
 }
 
+// changeLine says what changed for an updated request.
 func changeLine(r Request) string {
 	if r.PriorVerdict != "" && r.PriorVerdict != r.Decision.Verdict {
 		return fmt.Sprintf("Was %s, now %s.", strings.ToLower(VerdictLabel(r.PriorVerdict)), strings.ToLower(VerdictLabel(r.Decision.Verdict)))

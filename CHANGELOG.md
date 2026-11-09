@@ -35,6 +35,28 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
+
+### Changed
+
+- **The supplier digest lists every email the lane read**, like the daily
+  digest's "emails read this run": newest first, each with the time, sender,
+  subject and what came of it (Critical, Unsure, Not critical, Set aside,
+  updated, reported earlier with nothing new, or left out as an automatic
+  message). The list is capped at 60 rows, the rest counted. It shows only on a
+  day a digest is sent, since a day with nothing new still sends nothing.
+- **The orchestrator knows the supplier and VM-scan lanes.** Its lane table and
+  handle list lacked both, so its first look at the new
+  `cti-agent-supplier.timer` read as an unknown unit and it asked the operator
+  to confirm it. Both are now listed, the supplier timer marked as intended.
+- **The orchestrator is told what its Bash guard refuses.** A beat's escalation
+  text with a semicolon or a tilde in it was refused and cost a turn before it
+  was reworded.
+
+---
+
 ## 1.6 — 2026-11-08
 
 **Upgrade:** `sudo cti-agent-update --for-real`, then open a new shell for the

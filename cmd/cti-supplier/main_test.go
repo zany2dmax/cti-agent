@@ -25,7 +25,7 @@ func twoItems() []supplier.Item {
 func setup(t *testing.T, items []supplier.Item) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := writeItems(dir, items, 0); err != nil {
+	if err := writeItems(dir, supplier.Collected{Items: items}); err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"SUPPLIER_JIRA_PROJECT", "SUPPLIER_BOARD_URL", "SUPPLIER_TECH_TERMS", "FLEET_ORG"} {
@@ -36,7 +36,7 @@ func setup(t *testing.T, items []supplier.Item) string {
 
 func TestCollectWritesOneInputPerRequestPrivately(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeItems(dir, twoItems(), 0); err != nil {
+	if err := writeItems(dir, supplier.Collected{Items: twoItems()}); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"requests.json", "000.input.txt", "001.input.txt"} {
@@ -163,7 +163,7 @@ func TestTheOperatorsTechWordListReplacesTheDefault(t *testing.T) {
 
 func TestTheAutomaticCountReachesTheDigest(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeItems(dir, twoItems(), 3); err != nil {
+	if err := writeItems(dir, supplier.Collected{Items: twoItems(), Automatic: 3}); err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"SUPPLIER_JIRA_PROJECT", "SUPPLIER_BOARD_URL", "SUPPLIER_TECH_TERMS", "FLEET_ORG"} {
@@ -175,6 +175,33 @@ func TestTheAutomaticCountReachesTheDigest(t *testing.T) {
 	txt, _ := os.ReadFile(filepath.Join(dir, "digest.txt"))
 	if !strings.Contains(string(txt), "3 automatic messages from the mail filter left out") {
 		t.Errorf("digest.txt:\n%s", txt)
+	}
+}
+
+func TestTheListOfEmailsReadReachesTheDigestWithWhatCameOfEach(t *testing.T) {
+	dir := t.TempDir()
+	items := twoItems()
+	rows := []supplier.MailRow{
+		{Label: items[0].Request.Label(), Received: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC), From: "a@example.test", Subject: "Cloud Backup Inc", Handling: supplier.HandledNew},
+		{Received: time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC), From: "filter@example.test", Subject: "End User Digest", Handling: supplier.HandledAutomatic},
+		{Label: "fleet-supplier-0000000000000000", Received: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), From: "b@example.test", Subject: "Old one", Handling: supplier.HandledReported},
+	}
+	if err := writeItems(dir, supplier.Collected{Items: items, Read: rows}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"SUPPLIER_JIRA_PROJECT", "SUPPLIER_BOARD_URL", "SUPPLIER_TECH_TERMS", "FLEET_ORG"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("SUPPLIER_JIRA_PROJECT", "CYBR") // a dry run files nothing, but a project means an item could be filed
+	if code := doFinish(dir, false); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	txt, _ := os.ReadFile(filepath.Join(dir, "digest.txt"))
+	for _, want := range []string{"EMAILS READ THIS RUN - 3 MESSAGES IN 2 REQUESTS", "Cloud Backup Inc", "[Unsure]",
+		"[Left out: automatic message from the mail filter]", "[Reported earlier, nothing new]"} {
+		if !strings.Contains(string(txt), want) {
+			t.Errorf("digest.txt lacks %q:\n%s", want, txt)
+		}
 	}
 }
 

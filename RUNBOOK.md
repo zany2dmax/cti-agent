@@ -1268,6 +1268,13 @@ contacts the requester; the items on the board are what prompt whoever runs
 supplier set-up to ask for the rest. The digest repeats it in one line per
 request.
 
+**Emails read.** Under the cards the digest lists every email the lane read in
+the window, newest first: time, sender, subject and what came of it (the verdict
+for a request judged now, "reported earlier, nothing new" for one already on the
+board, "left out" for the mail filter's own messages). Sixty rows at most, the
+rest counted. It answers "what did the lane actually look at?" and appears only
+on a day a digest is sent.
+
 The mail filter's quarantine digest ("End User Digest") also lands on the list. It is left out, using the address already in `MAILBOX_DIGEST_SENDERS` (exact sender and subject, so a person's reply to a digest still counts), and the digest says how many were skipped. Unset, nothing is skipped. No other sender is ever skipped, and nothing a request says can get it skipped.
 
 `SUPPLIER_WINDOW_DAYS` (default 3) is how far back to look for requests with a new message. A conversation is read whole - back a further 21 days - so a request is judged with the message that carries its form, not just the latest reply. For a first trial, set it to 30 to see a realistic batch.

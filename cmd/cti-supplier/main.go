@@ -174,7 +174,7 @@ func doCollect(dir string, window time.Duration) int {
 	if address == "" {
 		// An unset address means the lane does nothing, like every other lane.
 		logf("SUPPLIER_ADDRESS is not set, so the lane does nothing")
-		if err := writeItems(dir, nil, 0); err != nil {
+		if err := writeItems(dir, supplier.Collected{}); err != nil {
 			return die("%s", safelog.Line(err.Error()))
 		}
 		return exitOK
@@ -215,10 +215,11 @@ func doCollect(dir string, window time.Duration) int {
 	// mistaken for one. Unset: nothing is skipped.
 	digestSenders := splitList(cfg.MailboxDigestSenders)
 	automatic := func(from, subject string) bool { return mailbox.QuarantineDigest(from, subject, digestSenders) }
-	items, skipped, err := supplier.Collect(ctx, mail, src, policy(), laneConfig(), seen, cfg.GraphMailbox, time.Now().Add(-window), automatic)
+	col, err := supplier.CollectRead(ctx, mail, src, policy(), laneConfig(), seen, cfg.GraphMailbox, time.Now().Add(-window), automatic)
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
+	items, skipped := col.Items, col.Automatic
 	for _, it := range items {
 		r := it.Request
 		again := ""
@@ -228,7 +229,7 @@ func doCollect(dir string, window time.Duration) int {
 		logf("found  : %s (form %s, %d file(s) left unopened%s)", safelog.Line(r.Name()), r.State, len(r.Skipped), again)
 	}
 	logf("collect: %d new request(s) in the last %s, %d already reported, %d automatic message(s) left out", len(items), window, len(seen), skipped)
-	if err := writeItems(dir, items, skipped); err != nil {
+	if err := writeItems(dir, col); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	return exitOK
@@ -242,18 +243,20 @@ func resultPath(dir string, i int) string {
 	return filepath.Join(dir, fmt.Sprintf("%03d.result.json", i))
 }
 
-// collected is requests.json: the new requests and how many automatic messages
-// were left out, which the digest says.
+// collected is requests.json: the new requests, how many automatic messages
+// were left out, and every message read in the window, which the digest lists.
 type collected struct {
-	Items            []supplier.Item `json:"items"`
-	AutomaticSkipped int             `json:"automatic_skipped"`
+	Items            []supplier.Item    `json:"items"`
+	AutomaticSkipped int                `json:"automatic_skipped"`
+	Read             []supplier.MailRow `json:"read,omitempty"`
 }
 
-func writeItems(dir string, items []supplier.Item, automatic int) error {
+func writeItems(dir string, c supplier.Collected) error {
+	items := c.Items
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(collected{Items: items, AutomaticSkipped: automatic}, "", "  ")
+	b, err := json.MarshalIndent(collected{Items: items, AutomaticSkipped: c.Automatic, Read: c.Read}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -315,8 +318,9 @@ func doFinish(dir string, fileJira bool) int {
 		}
 	}
 
-	block, ok := supplier.Digest(supplier.Requests(outcomes), emailkit.Org(), time.Now(),
-		env("SUPPLIER_BOARD_URL"), env("SUPPLIER_BOARD_NAME"), col.AutomaticSkipped)
+	block, ok := supplier.DigestRead(supplier.Requests(outcomes), emailkit.Org(), time.Now(),
+		env("SUPPLIER_BOARD_URL"), env("SUPPLIER_BOARD_NAME"), col.AutomaticSkipped,
+		supplier.Annotate(col.Read, outcomes))
 	if ok {
 		for name, body := range map[string]string{"digest.html": block.HTML, "digest.txt": block.Text, "digest.subject": block.Subject + "\n"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
