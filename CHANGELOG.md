@@ -35,6 +35,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## 1.6.2 — 2026-11-09
+
+**Upgrade:** nothing. Documentation only: the 1.6.1 tag was cut before this
+changelog was dated and before the architecture, lanes, runbook and fleet-kit
+notes described the supplier cleanup and the emails-read list. The code is the
+same as 1.6.1.
+
+---
+
 ## 1.6.1 — 2026-11-09
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing is required. Two things
