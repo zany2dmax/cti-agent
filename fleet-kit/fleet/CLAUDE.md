@@ -40,7 +40,8 @@ Write the reason in plain words. Every Bash call you make passes a guard that
 refuses shell syntax. It refuses a less-than or greater-than sign, a pipe, a
 semicolon, an ampersand, a backtick and a newline anywhere in the command. It
 also refuses a dollar sign, asterisk, question mark, open square bracket and
-tilde unless the span is in single quotes. Use "and" or a full stop instead of a semicolon, and
+tilde unless the span is in single quotes (double quotes do not count), and a
+backslash or an unmatched quote outside single quotes. Use "and" or a full stop instead of a semicolon, and
 write "about" or "approx" instead of a tilde. A refused call costs a turn.
 
 `cti-alert` is the only command you have that sends mail, and that is

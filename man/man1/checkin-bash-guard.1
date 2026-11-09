@@ -1,4 +1,4 @@
-.TH CHECKIN-BASH-GUARD 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.TH CHECKIN-BASH-GUARD 1 "2026-11-09" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 checkin-bash-guard \- refuse shell syntax on the orchestrator heartbeat's Bash calls
 .SH SYNOPSIS
@@ -61,7 +61,14 @@ prefix is blocked too, since that changes what a granted command reads.
 Single-quoted text is literal to bash and is not checked for the second set, so a
 pattern such as
 .B 'cti\-agent\-*'
-stays usable. The beat types absolute paths and never
+stays usable. The hook finds those spans by reading quotes the way bash
+does: a
+.B '
+inside double quotes is an ordinary character, and double-quoted text is
+checked like unquoted text, since bash expands
+.B $
+there. A backslash outside single quotes and an unbalanced quote are blocked,
+because either one moves where bash thinks a quote ends. The beat types absolute paths and never
 .BR $FLEET_CODE .
 Other tools pass untouched. Blocking is exit status 2 with the reason on
 standard error, which Claude Code returns to the model so that it can reword

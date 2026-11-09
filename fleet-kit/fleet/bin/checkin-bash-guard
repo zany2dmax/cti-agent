@@ -19,7 +19,9 @@ board, and `cti-alert --reason $QUALYS_PASSWORD` would mail one. Globs and
 ~ are refused for the same reason (they list paths Read is not granted),
 and so is a leading NAME=value, which changes what a granted command reads.
 Single-quoted text is literal to bash, so patterns such as 'cti-agent-*'
-stay usable there. The grants are absolute paths, so nothing legitimate
+stay usable there. Double-quoted text is checked like the rest, because bash
+expands $ inside it. A backslash outside single quotes and an unbalanced
+quote are refused: either one moves where bash thinks a quote ends. The grants are absolute paths, so nothing legitimate
 needs a variable. Exit 2 blocks the call and the message goes
 back to the model. ANY failure here - unreadable input, a crash - also exits
 2: a guard that fails open is not a guard.
@@ -39,11 +41,41 @@ FORBIDDEN_UNQUOTED = set("$*?[~")
 ASSIGNMENT = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def unquoted(cmd):
-    """The command with single-quoted spans removed - what bash expands.
+def expandable(cmd):
+    """The characters bash would read outside single quotes, or an error.
 
-    An unbalanced quote leaves the rest in, so it is judged, not skipped."""
-    return re.sub(r"'[^']*'", "''", cmd)
+    This walks the command the way bash reads quotes, because a regex for
+    single-quoted spans did not: it took the ' inside "'" (a double-quoted
+    span) or \\' (an escaped quote) as the start of a single-quoted span, so
+    `fleet-board say @all INFO "'" $(id) "'"` hid $(id) between two of them
+    and bash ran it as the service account (PrimeSec attack vector 10969091).
+
+    A ' inside double quotes is a literal character, so it does not open a
+    span here either. Double-quoted text is still checked, since bash expands
+    $ there. A backslash outside single quotes is refused rather than
+    interpreted: nothing a beat writes needs one, and every rule about what
+    it escapes is a place for this walk and bash to disagree. An unbalanced
+    quote is refused too, since its end is wherever bash decides."""
+    seen = []
+    quote = None
+    for c in cmd:
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            return seen, "a backslash outside single quotes"
+        elif quote == '"':
+            if c == '"':
+                quote = None
+            else:
+                seen.append(c)
+        elif c in "'\"":
+            quote = c
+        else:
+            seen.append(c)
+    if quote is not None:
+        return seen, "an unbalanced quote"
+    return seen, None
 
 
 def verdict(event):
@@ -56,7 +88,10 @@ def verdict(event):
     if not isinstance(cmd, str):
         return "Bash call has no command string"
     bad = sorted(FORBIDDEN_ANYWHERE.intersection(cmd))
-    bad += sorted(FORBIDDEN_UNQUOTED.intersection(unquoted(cmd)))
+    seen, problem = expandable(cmd)
+    bad += sorted(FORBIDDEN_UNQUOTED.intersection(seen))
+    if problem:
+        bad.append(problem)
     if ASSIGNMENT.match(cmd):
         bad.append("NAME=value prefix")
     if bad:

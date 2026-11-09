@@ -2699,6 +2699,9 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             '/opt/cti-agent/bin/fleet-db remember checkin "quiet beat, 0 findings"',
             "/opt/cti-agent/bin/cti-budget status",
             "/opt/cti-agent/bin/fleet-board say @all INFO 'costs $5? [maybe] ~later'",
+            # An apostrophe inside double quotes is a literal, not a quote.
+            '/opt/cti-agent/bin/fleet-db remember checkin "the digest didn\'t run"',
+            "/opt/cti-agent/bin/fleet-board say @all INFO 'say \"hi\" here'",
         ):
             with self.subTest(allowed=cmd):
                 r = bash(cmd)
@@ -2721,6 +2724,15 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             '/opt/cti-agent/bin/cti-alert --reason "$QUALYS_PASSWORD"',
             "$FLEET_CODE/bin/cti-budget status",
             "/opt/cti-agent/bin/fleet-board say @all INFO $'\\x41'",
+            # PrimeSec 10969091: a ' that is not a single quote to bash (in
+            # double quotes, or escaped) hid what lay between two of them.
+            "/opt/cti-agent/bin/fleet-board say @all INFO \"'\" $(id) \"'\"",
+            "/opt/cti-agent/bin/fleet-board say @all INFO \"'\" $CLIENT_SECRET \"'\"",
+            "/opt/cti-agent/bin/fleet-board say @all INFO \\' $(id) \\'",
+            "/opt/cti-agent/bin/fleet-board say @all INFO \"it's\" $(id) \"it's\"",
+            '/opt/cti-agent/bin/cti-alert --reason "a\\"b $(id) c"',
+            "/opt/cti-agent/bin/fleet-board say @all INFO \\$HOME",
+            '/opt/cti-agent/bin/fleet-board say @all INFO "unclosed',
             "/opt/cti-agent/bin/fleet-board say @all INFO /etc/cti-agent/*",
             "/opt/cti-agent/bin/fleet-board say @all INFO ~root",
             "/opt/cti-agent/bin/fleet-board say @all INFO x?",

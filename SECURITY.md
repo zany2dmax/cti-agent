@@ -657,7 +657,10 @@ fleet no longer depends on it. `checkin-bash-guard` (`python3 -I`) is a
 PreToolUse hook on Bash in the root-owned settings file, and exits 2 on any
 command containing `<`, `>`, `|`, `;`, `&`, a backtick, a newline or CR, and,
 outside single quotes, `$` (any expansion), `*`, `?`, `[` or `~`, or starting
-with a `NAME=value` prefix; it also exits 2 on any input it cannot read: it
+with a `NAME=value` prefix. It finds the single-quoted spans by reading quotes
+the way bash does, so a `'` inside double quotes is not mistaken for one, and it
+refuses a backslash outside single quotes and an unbalanced quote, either of
+which moves where bash thinks a quote ends. It also exits 2 on any input it cannot read: it
 fails closed. `$` is refused even as plain `$NAME`, because the beat's
 environment carries the `fleet.env` secrets, so `$CLIENT_SECRET` could reach the
 board or a `cti-alert` mail. Single-quoted text is literal, so `'cti-agent-*'`

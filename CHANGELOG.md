@@ -70,6 +70,34 @@ time.
   CVE-to-product map, `state/products.json`, so a ticket whose CVE is not in
   today's mail still gets its name.
 
+### Security
+
+- **Fixed issues found by PrimeSec AI:**
+  - Attack vector 10969091 (Medium) - heartbeat model runs `$(...)` through a
+    granted command via a quote-stripping bypass in `checkin-bash-guard`.
+    Fixed by the `checkin-bash-guard` entry below.
+  - Attack vector 10786537 (Medium) - prompt-injected command substitution
+    through run-checkin's prefix-matched Bash allowlist. The guard has
+    refused `$(...)` since 1.5; the same entry closes the quote bypass that
+    still got it through.
+
+- **`checkin-bash-guard` reads quotes the way bash does.** It found the
+  single-quoted spans with a regex, which also took the `'` inside a
+  double-quoted `"'"`, or an escaped `\'`, as the start of one. Two of them
+  hid whatever lay between, so `fleet-board say @all INFO "'" $(id) "'"`
+  passed the guard and bash ran `id` as the service account, with
+  `fleet.env` in its environment. A plain `$CLIENT_SECRET` got through the
+  same way. The guard now walks the command one character at a time:
+  - a `'` inside double quotes is an ordinary character;
+  - double-quoted text is checked like unquoted text, since bash expands `$`
+    there;
+  - a backslash outside single quotes is refused, and so is an unbalanced
+    quote.
+
+  Text the beat writes legitimately is unaffected: an apostrophe inside
+  double quotes (`"the digest didn't run"`) still passes. The fix comes with test cases, and the guard's man page,
+  SECURITY.md and the orchestrator's CLAUDE.md describe the new rule.
+
 ---
 
 ## 1.6.2 — 2026-11-09
