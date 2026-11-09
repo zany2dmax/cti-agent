@@ -102,6 +102,19 @@ Every fleet ticket carries the label
 and the search for it is scoped to the project but not to status, so a
 closed ticket still counts as filed and is never duplicated.
 .TP
+.B An unverified source is labelled, not held
+A CVE that no trusted sender mentioned (only mail from other senders did)
+is still filed when the scanner confirms it, but its ticket carries the label
+.B cti\-unverified\-source
+and opens with an "Unverified source" line. A trusted sender is one the fleet
+reads (Qualys, or
+.BR MAILBOX_FEED_SENDERS )
+whom Exchange Online authenticated. The judgement comes from the raw
+report's Mail Source column, through
+.BR enrich.py 's
+.BR mail_source ;
+a finding without one (an older report) is not labelled.
+.TP
 .B The digest cannot be broken
 After the configuration loads,
 .B \-\-from\-enriched

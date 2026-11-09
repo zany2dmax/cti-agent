@@ -80,6 +80,14 @@ func main() {
 	// Reporting one number made "Emails inspected: 14" read as "14 emails
 	// brought new CVE information", when it meant "14 emails arrived".
 	cves := map[string]bool{}
+	// trusted is the CVEs at least one trusted sender mentioned: a sender the
+	// fleet reads (Qualys, or MAILBOX_FEED_SENDERS) whom Exchange Online
+	// authenticated. Anyone can mail the mailbox a real CVE, and a critical
+	// one present in the estate used to earn a Jira ticket on that alone
+	// (PrimeSec attack vector 10786589). The ticket is still filed; cti-jira
+	// labels one with no trusted source so a person can see it was not.
+	trusted := map[string]bool{}
+	feed := splitList(cfg.MailboxFeedSenders)
 	withCVEs := 0
 	selfSent := 0
 	subjects := make([]report.ScannedEmail, 0, len(messages))
@@ -123,8 +131,12 @@ func main() {
 		if len(found) > 0 {
 			withCVEs++
 		}
+		fromFeed := trustedSource(msg, feed)
 		for _, cve := range found {
 			cves[cve] = true
+			if fromFeed {
+				trusted[cve] = true
+			}
 		}
 		subjects = append(subjects, report.ScannedEmail{
 			Subject:  msg.Subject,
@@ -250,6 +262,7 @@ func main() {
 		Held:      held,
 		CatchUp:   catchUp,
 		Lookback:  cfg.GraphLookback,
+		Trusted:   trusted,
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		// #nosec G706 -- sanitised by safelog.Line(), as at the manifest warning
@@ -344,4 +357,27 @@ func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
 	default:
 		return nil, fmt.Errorf("unsupported LOOKUP_PROVIDER %q", cfg.LookupProvider)
 	}
+}
+
+// splitList splits a comma-separated setting, dropping blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, a := range strings.Split(s, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// trustedSource reports a message from a sender the fleet reads (Qualys, or
+// MAILBOX_FEED_SENDERS) whom the receiving server authenticated. Both: an
+// allowlisted From can be forged, and an authenticated sender can be anyone
+// with a domain of their own.
+func trustedSource(msg graph.Message, feed []string) bool {
+	if !mailbox.FleetSender(msg.From, feed) {
+		return false
+	}
+	ok, _ := msg.VouchedFor()
+	return ok
 }

@@ -40,6 +40,9 @@ type enrichedRow struct {
 	Published string `json:"published"`
 	LastSeen  string `json:"last_seen"`
 	Desc      string `json:"description"`
+	// MailSource is "trusted", "unverified" or "" (not judged: an older
+	// report, or a CVE that came from somewhere other than the mailbox).
+	MailSource string `json:"mail_source"`
 }
 
 type enrichedFile struct {
@@ -142,6 +145,8 @@ func (r enrichedRow) toFinding() jira.Finding {
 		Title:     strings.TrimSpace(r.KEVName),
 		Product:   strings.TrimSpace(r.Product),
 		HostCount: r.HostCount,
+		// Only the exact word. "" (not judged) labels nothing.
+		UnverifiedSource: strings.EqualFold(strings.TrimSpace(r.MailSource), "unverified"),
 	}
 	if f.Title == "" {
 		f.Title = firstSentence(r.Desc)

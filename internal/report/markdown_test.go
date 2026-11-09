@@ -284,10 +284,10 @@ func TestNothingHeldAddsNothingToTheReport(t *testing.T) {
 	}
 }
 
-// The detection titles are the last column, so enrich.py can name the
+// The detection titles follow Reason, so enrich.py can name the
 // product a finding is about, and a pipe or semicolon in a title cannot
 // split a cell or a title.
-func TestDetectionTitlesAreTheLastColumn(t *testing.T) {
+func TestDetectionTitlesFollowReason(t *testing.T) {
 	t.Setenv("REPORT_HOSTNAMES", "full")
 	path := filepath.Join(t.TempDir(), "report.md")
 	r := sampleResults()
@@ -306,5 +306,45 @@ func TestDetectionTitlesAreTheLastColumn(t *testing.T) {
 	want := "| Example Browser Prior to 1.2 / Multiple, Vulnerabilities ; Example Second Title |"
 	if !strings.Contains(s, want) {
 		t.Errorf("row does not end with the cleaned titles %q:\n%s", want, s)
+	}
+}
+
+// PrimeSec 10786589: the Mail Source column says whether a trusted sender
+// mentioned the CVE. Without a judgement it is empty, never "unverified".
+func TestMailSourceIsTheLastColumn(t *testing.T) {
+	t.Setenv("REPORT_HOSTNAMES", "full")
+	r := sampleResults()
+	write := func(trusted map[string]bool) string {
+		path := filepath.Join(t.TempDir(), "report.md")
+		if err := WriteMarkdownScan(path, "x@example.com", time.Now(),
+			Scan{Messages: 1, Trusted: trusted}, "qualys", r); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	row := func(s, cve string) string {
+		for _, l := range strings.Split(s, "\n") {
+			if strings.HasPrefix(l, "| "+cve+" |") {
+				return l
+			}
+		}
+		return ""
+	}
+	s := write(map[string]bool{r[0].CVE: true})
+	if !strings.Contains(s, "| Detection Titles | Mail Source |") {
+		t.Error("header has no Mail Source column after Detection Titles")
+	}
+	if got := row(s, r[0].CVE); !strings.HasSuffix(got, "| trusted |") {
+		t.Errorf("trusted CVE row: %q", got)
+	}
+	if got := row(s, r[1].CVE); !strings.HasSuffix(got, "| unverified |") {
+		t.Errorf("untrusted CVE row: %q", got)
+	}
+	if got := row(write(nil), r[0].CVE); strings.Contains(got, "unverified") || strings.Contains(got, "trusted") {
+		t.Errorf("no judgement still labelled the row: %q", got)
 	}
 }

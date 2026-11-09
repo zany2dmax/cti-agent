@@ -63,7 +63,18 @@ type Finding struct {
 	// CountIsFloor means the scanner truncated, so HostCount is a lower
 	// bound and the names in Hosts are incomplete.
 	CountIsFloor bool
+
+	// UnverifiedSource means no trusted sender mentioned the CVE in the mail
+	// that put it in the digest. "Trusted" is a sender the fleet reads (Qualys,
+	// or MAILBOX_FEED_SENDERS) whom the receiving server authenticated. Anyone
+	// can mail the mailbox a real CVE, so a ticket whose only source was such
+	// a message is still filed, since the scanner confirmed the exposure, but
+	// it is labelled and says so (PrimeSec attack vector 10786589).
+	UnverifiedSource bool
 }
+
+// UnverifiedSourceLabel marks a ticket whose CVE no trusted sender mentioned.
+const UnverifiedSourceLabel = "cti-unverified-source"
 
 // Count is the number to print. Always this, never len(f.Hosts).
 func (f Finding) Count() int {
@@ -111,6 +122,9 @@ func Labels(f Finding) []string {
 		out = append(out, "cvss-critical")
 	}
 	out = append(out, fmt.Sprintf("sev%d", f.Severity))
+	if f.UnverifiedSource {
+		out = append(out, UnverifiedSourceLabel)
+	}
 	return out
 }
 
@@ -206,6 +220,11 @@ func Description(f Finding, now time.Time, csvName string) string {
 
 	b.WriteString("Filed automatically by the CTI agent from confirmed scanner detections. ")
 	b.WriteString("Host counts are from Qualys Host Detection, not inferred from a CVE mapping.\n\n")
+	if f.UnverifiedSource {
+		b.WriteString("*Unverified source:* no sender the fleet trusts mentioned this CVE; " +
+			"only mail from other senders did. The scanner's detections above are " +
+			"real, but check why the CVE was raised before treating it as advised.\n\n")
+	}
 
 	b.WriteString("||Field||Value||\n")
 	b.WriteString(row("CVE", f.CVE))

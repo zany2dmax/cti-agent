@@ -1513,6 +1513,20 @@ class ProductName(unittest.TestCase):
                 fh.write(REPORT)
             got = enrich.parse_report(path)
         self.assertTrue(all(f["detection_titles"] == [] for f in got.values()))
+        self.assertTrue(all(f["mail_source"] == "" for f in got.values()))
+
+    def test_the_report_mail_source_column_is_read(self):
+        """PrimeSec 10786589: whether a trusted sender mentioned the CVE.
+        Only the agent's two words count; anything else is unknown."""
+        base = "| CVE-2026-00%02d | PRESENT | qualys | 1 | 3 | 90 | 2026-11-01 | host-a | | t | %s |\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "raw.md")
+            with open(path, "w") as fh:
+                for i, cell in enumerate(["trusted", "unverified", "Unverified", "", "maybe"]):
+                    fh.write(base % (i + 1, cell))
+            got = enrich.parse_report(path)
+        self.assertEqual([got["CVE-2026-00%02d" % i]["mail_source"] for i in range(1, 6)],
+                         ["trusted", "unverified", "unverified", "", ""])
 
     def finding(self, **kw):
         f = {"cve": "CVE-2026-9", "priority": "Sev5", "status": "PRESENT",

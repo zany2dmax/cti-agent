@@ -315,3 +315,16 @@ func TestTheProductReachesTheFinding(t *testing.T) {
 		t.Errorf("Product = %q", f.Product)
 	}
 }
+
+// PrimeSec 10786589: the enriched row's mail_source reaches the finding.
+// Only "unverified" sets it; "" (not judged) and "trusted" do not.
+func TestTheMailSourceReachesTheFinding(t *testing.T) {
+	for src, want := range map[string]bool{
+		"unverified": true, " Unverified ": true, "trusted": false, "": false, "maybe": false,
+	} {
+		r := enrichedRow{CVE: "CVE-1", Priority: "Sev5", MailSource: src}
+		if got := r.toFinding().UnverifiedSource; got != want {
+			t.Errorf("mail_source %q: UnverifiedSource = %v, want %v", src, got, want)
+		}
+	}
+}

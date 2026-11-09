@@ -96,6 +96,23 @@ time.
   - Attack vector 10786562 (Medium) - Qualys sender identity is derived from
     an unauthenticated `From` value. Fixed by the sender authentication entry
     below.
+  - Attack vector 10786589 (Medium) - unauthenticated mailbox CVE injection
+    can trigger automatic Jira filing. Fixed by the unverified-source entry
+    below.
+
+- **A fleet ticket says when no trusted sender raised its CVE.** Anyone can
+  mail the mailbox a real CVE, and a critical one present in the estate
+  earned a Jira ticket on that alone. Ingest now records whether each CVE was
+  mentioned by a trusted sender: one the fleet reads (Qualys, or
+  `MAILBOX_FEED_SENDERS`) whom Exchange Online authenticated. The raw report
+  gains a last column, Mail Source (`trusted` or `unverified`), and
+  `enrich.py` carries it as `mail_source`.
+  - `cti-jira` still files a confirmed finding, so nothing waits on a person.
+    If no trusted sender mentioned it, the ticket gets the label
+    `cti-unverified-source` and opens with an "Unverified source" line.
+  - Older reports have no column and nothing is labelled.
+  - **Set `MAILBOX_FEED_SENDERS`** to your threat-intel feeds. Unset, only
+    Qualys counts as trusted, so every newsletter-sourced ticket is labelled.
 
 - **Partly mitigated: PrimeSec attack vector 10786495 (Medium).** Prompt
   injection through intel-mailbox subject lines into the orchestrator

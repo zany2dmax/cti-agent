@@ -133,14 +133,27 @@ def save_cache(path, data):
 
 # ---------------------------------------------------------------- input parsing
 
+def mail_source(cell):
+    """The Mail Source cell as "trusted", "unverified" or "" (unknown).
+
+    Only the two words the agent writes count. Anything else is unknown, so
+    an unexpected cell can neither clear nor set the unverified label.
+    """
+    v = (cell or "").strip().lower()
+    return v if v in ("trusted", "unverified") else ""
+
+
 def parse_report(path):
     """Parse the Go agent's markdown table.
 
     Columns: CVE | Status | Provider | External IDs | Host Count | Max Score |
-             Last Seen | Sample Hosts | Reason | Detection Titles
+             Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source
 
     Detection Titles (the scanner's own names for the detections, joined
-    with " ; ") was added last, so a report without it still parses.
+    with " ; ") and Mail Source ("trusted" or "unverified": whether a sender
+    the fleet reads, authenticated by the receiving server, mentioned the
+    CVE) were added last, so a report without them still parses. A missing
+    or empty Mail Source is "", unknown, and cti-jira labels nothing.
     Cells are split on unescaped pipes: the agent writes a pipe inside a
     cell as \\|, and a plain split would shift every column after it.
 
@@ -190,6 +203,7 @@ def parse_report(path):
                 "detection_titles": [t.strip() for t in
                                      (cells[9] if len(cells) >= 10 else "").split(" ; ")
                                      if t.strip()],
+                "mail_source": mail_source(cells[10] if len(cells) >= 11 else ""),
             }
     return findings
 

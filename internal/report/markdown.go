@@ -120,6 +120,23 @@ type Scan struct {
 	// enrich lane and the row count in run-digest ignore it, and a human
 	// reading the attachment can still see every ID.
 	Held map[string]string
+
+	// Trusted is the CVEs a trusted sender mentioned: a sender the fleet
+	// reads, authenticated by the receiving server. Nil means the caller did
+	// not judge provenance, and the Mail Source column is left empty rather
+	// than calling every CVE unverified.
+	Trusted map[string]bool
+}
+
+// mailSource is the Mail Source cell for cve.
+func (s Scan) mailSource(cve string) string {
+	switch {
+	case s.Trusted == nil:
+		return ""
+	case s.Trusted[cve]:
+		return "trusted"
+	}
+	return "unverified"
 }
 
 // ScannedEmail is one message the pass looked at.
@@ -199,10 +216,15 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 	// Detection Titles is last so a reader of an older report, which stops at
 	// Reason, still parses. Titles are joined with " ; " and cleaned of the
 	// separators by cleanTitles.
-	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason | Detection Titles |\n")
-	b.WriteString("|---|---|---|---|---:|---:|---|---|---|---|\n")
+	//
+	// Mail Source comes after it for the same reason: "trusted" when a sender
+	// the fleet reads, authenticated by the receiving server, mentioned the
+	// CVE; "unverified" when only other senders did. cti-jira labels a
+	// ticket for an unverified one.
+	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source |\n")
+	b.WriteString("|---|---|---|---|---:|---:|---|---|---|---|---|\n")
 	for _, r := range results {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s | %s | %s |\n",
 			r.CVE,
 			r.Status,
 			r.Source,
@@ -213,6 +235,7 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 			escape(redactHosts(r.SampleHosts, mode, salt)),
 			escape(r.Reason),
 			cleanTitles(r.Titles),
+			scan.mailSource(r.CVE),
 		)
 	}
 

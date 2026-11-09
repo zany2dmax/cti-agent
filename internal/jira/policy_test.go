@@ -458,3 +458,25 @@ func TestNoProductLeavesTheSummaryAsItWas(t *testing.T) {
 		t.Errorf("description has an empty Product row:\n%s", d)
 	}
 }
+
+// PrimeSec 10786589: a ticket whose CVE no trusted sender mentioned is
+// still filed, but labelled and says so; a trusted one is unchanged.
+func TestAnUnverifiedSourceIsLabelledAndSaidInTheTicket(t *testing.T) {
+	f := kev85880()
+	f.UnverifiedSource = true
+	if l := strings.Join(Labels(f), " "); !strings.Contains(l, UnverifiedSourceLabel) {
+		t.Errorf("labels %q lack %s", l, UnverifiedSourceLabel)
+	}
+	if d := Description(f, now, ""); !strings.Contains(d, "Unverified source") {
+		t.Error("the description does not say the source was unverified")
+	}
+	if !ShouldFile(f) {
+		t.Error("an unverified source stopped a confirmed KEV from being filed")
+	}
+
+	g := kev85880()
+	if strings.Contains(strings.Join(Labels(g), " "), UnverifiedSourceLabel) ||
+		strings.Contains(Description(g, now, ""), "Unverified source") {
+		t.Error("a trusted finding was labelled unverified")
+	}
+}
