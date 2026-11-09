@@ -35,9 +35,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.1 — 2026-11-09
 
-**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing is required. Two things
+to know: the daily mailbox cleanup now also files supplier requests away once the
+supplier lane has dealt with them (see below), and new supplier items are filed
+as To Do. Optional: `SUPPLIER_OWNER_EMAIL` decides who new items are assigned to,
+and `SUPPLIER_JIRA_STATUS` (default To Do) which status they are moved to.
 
 ### Changed
 

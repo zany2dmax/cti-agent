@@ -1054,7 +1054,7 @@ message was never read.
 it broke, a credential expired, the mailbox went quiet — is a day to file
 nothing away. A day it read only out-of-office replies does not count either.
 A day with no CVE does: whether the feeds named a CVE says nothing about
-whether the fleet is working, and until the fix in the Unreleased CHANGELOG
+whether the fleet is working, and until the fix in the 1.6 CHANGELOG
 that check held every archive on every quiet day. Since 1.3.2 the auto-replies themselves are still
 deleted that day: skipping whole days is how they piled up, and deleting one
 needs no fleet health.
@@ -1076,7 +1076,11 @@ The rules run in this order and the order is the safety property:
 3. Read by the lane that **owns** it → **archive** after the grace. The digest
    owns what it took a CVE from; the AppSec lane owns the Qualys WAS notices
    its weekly reported on, recorded by `cti-appscan --commit-seen` only after a
-   real send (`state/processed-appscan.json`).
+   real send (`state/processed-appscan.json`); the VM scan lane owns the "Scan
+   Results" notices its weekly combined (`state/processed-vmscan.json`); the
+   supplier lane owns the supplier requests it dismissed as not critical or filed
+   a Kanban item for, recorded by `cti-supplier --commit-owned`
+   (`state/processed-supplier.json`).
 4. Anything else → **leave**.
 
 Auto-replies moved above the processed rule on the operator's instruction

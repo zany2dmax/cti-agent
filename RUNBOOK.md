@@ -444,6 +444,7 @@ nobody watching. Treat the rollout accordingly.
 | The digest read it and took a CVE from it | **Archive**, after the grace |
 | A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
 | A Qualys VM "Scan Results" notice the VM scan weekly combined and sent | **Archive**, after the grace |
+| A supplier request the supplier lane judged not critical, or critical or unsure with its Kanban item filed (recorded after every real run in `state/processed-supplier.json`) | **Archive**, after the grace. A thread set aside as not a supplier request, one whose item failed to file, and a reply newer than the judgement are **left** |
 | A companion notice of a run one of those weeklies reported as complete - WAS "Scheduled ... Scan Notification", VM "Scan Completed" and "Completed Vulnerability Scan Notification" - from Qualys and matched to that run | **Deleted Items**, after the grace |
 | Everything else | **Left alone** |
 
