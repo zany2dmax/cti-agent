@@ -3,7 +3,7 @@ Description=Weekly Qualys VM scan report, Monday 08:00 local
 
 [Timer]
 # Monday morning. The two scheduled scans start Thursday and the longer one
-# (REDACTED-SUB/REDACTED-SUB Weekly) runs about a day, so Monday covers both with their results in
+# (North/East Weekly) runs about a day, so Monday covers both with their results in
 # and nothing still in flight. The installer pins the time to FLEET_TIMEZONE
 # with FLEET_VMSCAN_TIME; without a timezone it runs on the system clock.
 OnCalendar=Mon *-*-* 08:00:00

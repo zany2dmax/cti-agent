@@ -146,7 +146,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   **Upgrade:** re-run the
   installer and set `VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO` in
   `fleet.env`, then enable
-  `cti-agent-vmscan.timer`. For the North/East scan's notices to reach the mailbox,
+  `cti-agent-vmscan.timer`. Set `VMSCAN_SCANS` to the two schedules' Qualys titles;
+  the built-in titles are examples. For the North/East scan's notices to reach the mailbox,
   reassign that schedule to the scan service account and set its notification From
   Address to `qualys@qualys.net` (see RUNBOOK).
 

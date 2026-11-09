@@ -288,8 +288,8 @@ lists the networks no scan reaches.
 
 Four decisions are worth copying.
 
-- **Compare by address, not by name.** The scans call a place "REDACTED-SUB Jax
-  (Anyoldstone)" and the spreadsheet calls it "REDACTED-SUB Jacksonville - FL". Names were
+- **Compare by address, not by name.** The scans call a place "North Site 5
+  (Building 2)" and the spreadsheet calls it "North Springfield - ST". Names were
   never going to match, so the check merges address ranges and asks whether each
   corporate network is inside the scanned ones. Names are only for display.
 - **Say "not scanned" and nothing more.** Why a network is unscanned differs from

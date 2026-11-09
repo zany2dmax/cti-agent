@@ -5,7 +5,7 @@
 #
 # Reads the "Qualys: Scan Results" notices that arrived in the CTI mailbox over
 # the last week, takes the newest result for each scheduled scan (VMSCAN_SCANS,
-# by default "Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly"),
+# by default "Weekly Scheduled Scan for Main Sites" and "North/East Weekly"),
 # renders one report with the scans kept separate, and mails it through
 # cti-mailer --lane vmscan. A scheduled scan with no result is the first thing
 # the report says.

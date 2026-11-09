@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="680" height="1220" viewBox="0 0 680 1220" role="img" aria-labelledby="flow-title flow-desc">
 <title id="flow-title">cti-agent delivery pipeline: laptop to production</title>
-<desc id="flow-desc">An update is two commands: task ship on the Mac, then sudo cti-agent-update --for-real on the Fedora server. A MacBook Pro runs task ship, a gated sequence ending in git push to the public GitHub repo zany2dmax/cti-agent. On a Fedora server in Azure, sudo cti-agent-update --for-real pulls the kit from that repo and then runs fleet-kit/install-fedora.sh from it; the installer pulls the Go source itself and is idempotent. GitHub Actions polls the public repo for new tags and copies each new release to the private company repo REDACTED-ORG/cti-agent, which is protected by PrimeSec AI code scan and the task ship gates.</desc>
+<desc id="flow-desc">An update is two commands: task ship on the Mac, then sudo cti-agent-update --for-real on the Fedora server. A MacBook Pro runs task ship, a gated sequence ending in git push to the public GitHub repo zany2dmax/cti-agent. On a Fedora server in Azure, sudo cti-agent-update --for-real pulls the kit from that repo and then runs fleet-kit/install-fedora.sh from it; the installer pulls the Go source itself and is idempotent. GitHub Actions polls the public repo for new tags and copies each new release to the private company repo company-org/cti-agent, which is protected by PrimeSec AI code scan and the task ship gates.</desc>
 <style>
 .hw{font-family:'Marker Felt','Segoe Print','Bradley Hand','Comic Sans MS','Chalkboard SE',cursive}
 .t{font-size:14px}
@@ -153,8 +153,8 @@
 <rect x="450" y="770" width="215" height="86" rx="8" fill="none" stroke="#D62828" stroke-width="2.6"/>
 <rect x="451.5" y="771" width="215" height="86" rx="8" fill="none" stroke="#D62828" stroke-width="1.2" opacity="0.5" transform="rotate(0.5 557 813)"/>
 <text class="th hw" x="557" y="798" text-anchor="middle" style="fill:#D62828">Company repo (private)</text>
-<text class="ts hw" x="557" y="820" text-anchor="middle" style="fill:#333">REDACTED-ORG</text>
-<text class="ts hw" x="557" y="839" text-anchor="middle" style="fill:#333">salesforce/cti-agent</text>
+<text class="ts hw" x="557" y="820" text-anchor="middle" style="fill:#333">company-org/</text>
+<text class="ts hw" x="557" y="839" text-anchor="middle" style="fill:#333">cti-agent</text>
 
 <path d="M557 860 L557 882" fill="none" stroke="#D62828" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
 

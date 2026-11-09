@@ -11,7 +11,7 @@ import (
 // results reads the real-shaped results notice and gives it an invented title.
 func results(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("../../internal/vmscan/testdata/results-umi-trj.html")
+	b, err := os.ReadFile("../../internal/vmscan/testdata/results-north-east.html")
 	if err != nil {
 		t.Fatal(err)
 	}
