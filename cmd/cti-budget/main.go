@@ -99,8 +99,8 @@ func storeFromEnv() *budget.Store {
 	}
 	lim := budget.DefaultLimits()
 	lim.Window = envDuration("FLEET_BUDGET_WINDOW_HOURS", lim.Window)
-	lim.WindowBeats = envInt("FLEET_BUDGET_WINDOW_BEATS", lim.WindowBeats)
-	lim.DailyBeats = envInt("FLEET_BUDGET_DAILY_BEATS", lim.DailyBeats)
+	lim.WindowBeats = envInt("FLEET_BUDGET_WINDOW_BEATS", lim.WindowBeats, maxWindowBeats)
+	lim.DailyBeats = envInt("FLEET_BUDGET_DAILY_BEATS", lim.DailyBeats, maxDailyBeats)
 	lim.BackoffBase = envDuration("FLEET_BUDGET_BACKOFF_BASE_HOURS", lim.BackoffBase)
 	lim.BackoffMax = envDuration("FLEET_BUDGET_BACKOFF_MAX_HOURS", lim.BackoffMax)
 
@@ -111,9 +111,24 @@ func storeFromEnv() *budget.Store {
 	return budget.NewStore(path, lim)
 }
 
-func envInt(key string, def int) int {
+// maxWindowBeats and maxDailyBeats are hard ceilings on the configured
+// ceilings. A value such as FLEET_BUDGET_DAILY_BEATS=999999 left the brake
+// running but holding nothing (PrimeSec attack vector 10786557). 48 a day is a
+// beat every half hour, three times the shipped schedule; anything above it
+// is a typo or a disabled brake.
+const (
+	maxWindowBeats = 24
+	maxDailyBeats  = 48
+)
+
+func envInt(key string, def, max int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > max {
+				_, _ = fmt.Fprintf(os.Stderr, "cti-budget: %s=%d is above the hard ceiling, using %d\n",
+					key, n, max)
+				return max
+			}
 			return n
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "cti-budget: ignoring %s=%q, want a positive integer\n", key, v)
@@ -184,10 +199,9 @@ func cmdCheck(args []string, stdout, stderr *os.File) int {
 		}
 		if _, err := fmt.Fprintln(stdout, alertWord); err != nil {
 			// Report it, but still return exitDenied. run-checkin treats any
-			// code other than 3 as "the check itself failed, proceed with the
-			// beat" - so returning a usage or error code here would defeat the
-			// rate limiter in order to complain about a lost print. The brake
-			// matters more than the alert. run-checkin folds stderr into the
+			// other non-zero code as "the check itself failed" and fails the
+			// unit, so an error code here would turn a working brake into an
+			// alert about a broken one over a lost print. run-checkin folds stderr into the
 			// text it posts to the board, so the lost flag is visible there.
 			_, _ = fmt.Fprintf(stderr,
 				"cti-budget: DENIED but could not write the alert flag (%q) to "+

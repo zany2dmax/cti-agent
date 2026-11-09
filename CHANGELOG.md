@@ -89,6 +89,20 @@ time.
   - Attack vector 10969084 (Medium) - apex sp= override on locked-down
     domains lets forged subdomain mail pass DMARC enforcement while the tool
     reports the domain as locked down. Fixed by the DMARC `sp=` entry below.
+  - Attack vector 10786557 (Medium) - prompt injection can disable heartbeat
+    budget enforcement. The beat has been unable to write `fleet.env` or its
+    ledger since 1.5. The budget entry below closes the two fail-open paths
+    that were left.
+
+- **The heartbeat's budget brake fails closed.**
+  - When `cti-budget check` itself failed (an unreadable ledger, say),
+    `run-checkin` logged "proceeding" and ran the beat with no rate limit.
+    It now refuses to start and exits 1, and the unit's failure alert mails
+    you. A corrupt ledger is unchanged: it is read as empty, and the beat
+    runs.
+  - `FLEET_BUDGET_WINDOW_BEATS` and `FLEET_BUDGET_DAILY_BEATS` have hard
+    ceilings of 24 and 48. A larger value, such as `999999`, is cut to the
+    ceiling with a warning instead of turning the brake off in effect.
 
 - **`cti-domains` checks DMARC `sp=` on a locked-down domain's own record.**
   A domain that sends no mail passed with `p=reject; sp=none`, though `sp=`

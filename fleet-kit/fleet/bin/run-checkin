@@ -487,7 +487,14 @@ if [ -x "$BUDGET" ]; then
     # OnFailure= and email a second time about the fleet behaving correctly.
     exit 0
   elif [ "$budget_rc" -ne 0 ]; then
-    echo "[run-checkin] cti-budget check failed (rc=$budget_rc), proceeding: $budget_out" >&2
+    # Fail closed. This used to say "proceeding", so a brake that could not
+    # read its ledger let every beat through, and anything that could break
+    # the check (an unreadable ledger, a bad flag) disabled the rate limit
+    # (PrimeSec attack vector 10786557). A corrupt ledger is not this case:
+    # cti-budget reads it as empty and allows. Exit 1 marks the unit failed,
+    # and OnFailure= mails the operator once per failed beat.
+    echo "[run-checkin] REFUSING to start: cti-budget check failed (rc=$budget_rc): $budget_out" >&2
+    exit 1
   else
     echo "[run-checkin $(date '+%F %H:%M:%S')] $budget_out"
   fi

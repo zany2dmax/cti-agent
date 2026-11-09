@@ -37,3 +37,25 @@ func TestAnUnreadableLedgerFailsClosed(t *testing.T) {
 		t.Error("record replaced a ledger it could not read")
 	}
 }
+
+// TestTheConfiguredCeilingsHaveAHardCeiling: PrimeSec 10786557. A huge
+// FLEET_BUDGET_*_BEATS left the brake running but holding nothing.
+func TestTheConfiguredCeilingsHaveAHardCeiling(t *testing.T) {
+	t.Setenv("FLEET_HOME", t.TempDir())
+	t.Setenv("FLEET_BUDGET_WINDOW_BEATS", "999999")
+	t.Setenv("FLEET_BUDGET_DAILY_BEATS", "999999")
+	s := storeFromEnv()
+	if got := s.Limits.WindowBeats; got != maxWindowBeats {
+		t.Errorf("WindowBeats = %d, want the hard ceiling %d", got, maxWindowBeats)
+	}
+	if got := s.Limits.DailyBeats; got != maxDailyBeats {
+		t.Errorf("DailyBeats = %d, want the hard ceiling %d", got, maxDailyBeats)
+	}
+
+	t.Setenv("FLEET_BUDGET_WINDOW_BEATS", "6")
+	t.Setenv("FLEET_BUDGET_DAILY_BEATS", "20")
+	s = storeFromEnv()
+	if s.Limits.WindowBeats != 6 || s.Limits.DailyBeats != 20 {
+		t.Errorf("a raise within the ceiling was not honoured: %+v", s.Limits)
+	}
+}
