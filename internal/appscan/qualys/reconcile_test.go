@@ -205,3 +205,32 @@ func TestNoPortalMeansNoBuiltLink(t *testing.T) {
 		t.Errorf("a link was built with no portal configured: %q", got[0].PortalURL)
 	}
 }
+
+func TestTheApiCanMarkANotifiedScanIncomplete(t *testing.T) {
+	// PrimeSec 10969075: a notice's "Finished : OK" is mail text. When the
+	// list says the run with that reference was cancelled, the result is not
+	// presented as a complete measurement; a run still in flight changes
+	// nothing, and the API never upgrades an incomplete notice.
+	cases := []struct {
+		listStatus, results string
+		mailComplete, want  bool
+	}{
+		{"CANCELED", "", true, false},
+		{"FINISHED", "TIME_LIMIT_EXCEEDED", true, false},
+		{"FINISHED", "SUCCESSFUL", true, true},
+		{"RUNNING", "", true, true},
+		{"FINISHED", "SUCCESSFUL", false, false},
+	}
+	for _, c := range cases {
+		m := fromMail("was/7.1", "ExPortal")
+		m.Complete = c.mailComplete
+		s := listScan(7, "was/7.1", "VULNERABILITY", "SCHEDULED", "9007",
+			"Example Portal", "", c.listStatus, "", day(1))
+		s.ResultsStatus = c.results
+		got, _ := Reconcile([]appscan.ScanResult{m}, []Scan{s}, window, "")
+		if got[0].Complete != c.want {
+			t.Errorf("list %s/%s, mail complete %v: Complete = %v, want %v",
+				c.listStatus, c.results, c.mailComplete, got[0].Complete, c.want)
+		}
+	}
+}

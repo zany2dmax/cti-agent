@@ -123,9 +123,19 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time, port
 	return out, rec
 }
 
-// applyScan takes the API's identity and any authentication failure onto a
-// notified result.
+// applyScan takes the API's identity, any authentication failure and any
+// incomplete run onto a notified result.
 func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
+	if r.Complete && !s.InFlight() && !s.Complete() {
+		// Only ever worse, like the login status below. The notice's Scan
+		// Status is text anyone who can mail the mailbox can write; a forged
+		// "Finished : OK" on a real reference whose run was cancelled or
+		// errored would otherwise present a partial crawl as a full
+		// measurement (PrimeSec attack vector 10969075). A run the list still
+		// shows in flight says nothing either way, so it is left alone.
+		r.Complete = false
+		r.Status = "Not complete per the Qualys WAS scan list (" + s.Status + ")"
+	}
 	r.AppID = s.WebAppID
 	r.ScanType = s.Type
 	if s.WebAppName != "" {

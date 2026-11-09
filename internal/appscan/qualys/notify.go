@@ -228,8 +228,12 @@ func (p Provider) Parse(body string) (appscan.ScanResult, []string) {
 	// "Finished : OK" is the healthy value. Anything else - cancelled, time
 	// limit exceeded, finished with errors - produced a partial crawl, and its
 	// counts describe a measurement that was never completed.
-	r.Complete = strings.Contains(strings.ToLower(r.Status), "finished") &&
-		strings.Contains(strings.ToUpper(r.Status), "OK")
+	//
+	// Exactly that value, spaces aside. Two substring tests used to decide it,
+	// so "Not Finished : OK" or "Finished with errors (see OK.log)" counted as
+	// complete, and a forged notice could pass a partial crawl off as a whole
+	// one (PrimeSec attack vector 10969075).
+	r.Complete = scanStatusOK(r.Status)
 
 	r.Started = parseQualysTime(field("Start Date"))
 	r.Finished = parseQualysTime(field("End Date"))
@@ -418,6 +422,12 @@ func notNone(s string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+// scanStatusOK reports the one healthy Scan Status, "Finished : OK", with
+// any spacing and case.
+func scanStatusOK(status string) bool {
+	return strings.EqualFold(strings.Join(strings.Fields(status), ""), "finished:ok")
 }
 
 // parseQualysTime reads "10/04/2026 at 00:02:43 (GMT +0000)".

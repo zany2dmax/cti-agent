@@ -255,6 +255,10 @@ func TestAnIncompleteScanIsNotPresentedAsAResult(t *testing.T) {
 		"Scan Status : Canceled",
 		"Scan Status : Finished : Time Limit Exceeded",
 		"Scan Status : Error",
+		// PrimeSec 10969075: both substrings, neither the healthy value.
+		"Scan Status : Not Finished : OK",
+		"Scan Status : Finished with errors : OK",
+		"Scan Status : Finished : OK, partial",
 	} {
 		body := strings.Replace(deepScan, "Scan Status : Finished : OK ", status+" ", 1)
 		r, _ := Provider{}.Parse(body)

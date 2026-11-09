@@ -83,6 +83,19 @@ time.
   - Attack vector 10969069 (Medium) - externally sent mail with a spoofed
     Auto-Submitted header is moved to Deleted Items by the mailbox cleanup
     lane. Fixed by the auto-reply entry below.
+  - Attack vector 10969075 (Medium) - forged Qualys scan notice with a "not
+    finished: OK" status is accepted as a complete scan. Fixed by the scan
+    status entry below.
+
+- **A Qualys scan counts as complete only on "Finished : OK", and only if
+  the scan list agrees.** The notice parser tested the Scan Status for the
+  substrings "finished" and "OK", so "Not Finished : OK" counted as a
+  complete measurement. It now accepts exactly `Finished : OK`, ignoring
+  spacing and case. Reconcile also takes the list's word when it is worse:
+  if the run with that reference was cancelled or did not finish
+  successfully, the result is marked incomplete. The list never marks an
+  incomplete notice complete, and a run it still shows in flight is left
+  alone.
 
 - **A header-declared auto-reply gets the same two checks as a subject
   match.** `Auto-Submitted: auto-replied` sent a message to Deleted Items on
