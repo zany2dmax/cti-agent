@@ -239,6 +239,33 @@ is real, not before. Finished work moves out of this file into
   reports, ticket files, previews and KB cache that build up in `state/`.
   Problems and growth trends reported through the existing alert path or the
   check-in. Noted only, not designed
+- **Split `fleet.env` and take the secrets out of the environment** (noted
+  2026-11-09, not designed). The file has grown to about 90 settings, and every
+  unit loads all of it through `EnvironmentFile=`, so every lane carries every
+  secret. That includes the check-in beat, which reads untrusted text;
+  `checkin-bash-guard` refuses `$NAME` expansion largely because of this. In
+  order:
+  1. **`fleet-config check`** (cheapest, touches no secrets): reports unknown
+     keys (typos), settings equal to their default, required settings that are
+     missing, and which lane reads each one. Never prints a value. Shows how
+     much of the file can simply go. Goes in `commands.manifest`
+  2. **Secrets as systemd credentials**: the ~10 secrets (`CLIENT_SECRET`,
+     `QUALYS_PASSWORD`, `GODADDY_PAT`, `POD_API_TOKEN`, `JIRA_API_TOKEN`,
+     `NVD_API_KEY`, the Claude token, `REPORT_REDACTION_SALT`) encrypted with
+     `systemd-creds` (TPM-bound on Fedora) and granted per unit with
+     `LoadCredentialEncrypted=`, so each lane gets only its own and the values
+     reach the process as files under `$CREDENTIALS_DIRECTORY`, not as
+     environment its children inherit. A `Secret(name)` helper in
+     `internal/fleetenv` (and its twins in `mailer.py` and the shell runners)
+     reads the credential and falls back to the environment during the move.
+     Start with the check-in, then one lane at a time
+  3. **Settings split per lane**: `/etc/cti-agent/fleet.d/00-core.env` plus one
+     file per lane; each unit loads core and its own. Goes with step 2
+  4. **1Password as the source of truth for secrets**: one field per secret
+     instead of a pasted copy of the whole file, and a committed `fleet.env.tpl`
+     of `op://` references rendered with `op inject` on the operator's Mac at
+     setup or rotation and fed to `systemd-creds encrypt` on the box. No
+     1Password service-account token on the server
 - Orchestrator asks in plain English: when the orchestrator escalates or asks
   the operator something (a board ERROR, a check-in question, an alert), it
   opens with two or three lines saying in plain English what it is asking and
