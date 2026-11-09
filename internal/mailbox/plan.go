@@ -286,6 +286,8 @@ func ownedBy(owner string) string {
 		return "a scan notification the application-security weekly reported on"
 	case OwnerVMScan:
 		return "a vulnerability-scan result the VM scan weekly combined and sent"
+	case OwnerSupplier:
+		return "a supplier request the supplier-request lane judged and either dismissed as not critical or filed a Kanban item for"
 	default:
 		return "read by the " + owner + " lane, which owns it"
 	}

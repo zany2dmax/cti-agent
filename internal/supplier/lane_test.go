@@ -691,3 +691,83 @@ func TestAnnotateSaysWhatCameOfEachMessage(t *testing.T) {
 		t.Error("Annotate changed the slice it was given")
 	}
 }
+
+func TestOnlyDealtWithRequestsAreSettled(t *testing.T) {
+	for _, c := range []struct {
+		verdict, ticket string
+		want            bool
+	}{
+		{No, "", true},
+		{Yes, "CYBR-1", true},
+		{Unsure, "CYBR-2", true},
+		{Yes, "", false},    // no item: it could not be filed, so a person has nothing to work from
+		{Unsure, "", false}, // same
+		{NotRequest, "", false},
+		{"", "CYBR-3", false}, // a record with no verdict is not trusted
+	} {
+		if got := settled(c.verdict, c.ticket); got != c.want {
+			t.Errorf("settled(%q, %q) = %v, want %v", c.verdict, c.ticket, got, c.want)
+		}
+	}
+}
+
+func TestOwnedRefsHandOverOnlyTheMessagesOfSettledRequests(t *testing.T) {
+	ref := func(id string) []MsgRef { return []MsgRef{{ID: id + "-1"}, {ID: id + "-2"}} }
+	items := []Item{{Messages: ref("no")}, {Messages: ref("item")}, {Messages: ref("aside")}, {Messages: ref("failed")}, {Messages: ref("noitem")}}
+	out := func(v, ticket, err string) Outcome {
+		return Outcome{Request: Request{Decision: Decision{Verdict: v}, TicketKey: ticket}, Err: err}
+	}
+	outs := []Outcome{out(No, "", ""), out(Unsure, "CYBR-9", ""), out(NotRequest, "", ""), out(Unsure, "CYBR-10", "jira down"), out(Yes, "", "")}
+	var got []string
+	for _, r := range OwnedRefs(items, outs) {
+		got = append(got, r.ID)
+	}
+	if strings.Join(got, ",") != "no-1,no-2,item-1,item-2" {
+		t.Errorf("handed over %v: want only the not-critical request and the one with an item", got)
+	}
+}
+
+func TestMessagesOfARequestReportedAndSettledEarlierAreHandedOver(t *testing.T) {
+	settledReq := Request{ConversationID: "cs"}
+	asideReq := Request{ConversationID: "ca"}
+	legacyReq := Request{ConversationID: "cl"}
+	seenAt := time.Date(2026, 11, 5, 23, 0, 0, 0, time.UTC)
+	seen := Seen{
+		settledReq.Label(): {LastReceived: seenAt, Verdict: Unsure, Ticket: "CYBR-1"},
+		asideReq.Label():   {LastReceived: seenAt, Verdict: NotRequest},
+		legacyReq.Label():  {LastReceived: seenAt},
+	}
+	mail := fakeMail{[]graph.AddressedMessage{
+		msg("s1", "cs", "new supplier", "a@example.test", "gravel", 9, false),
+		msg("s2", "cs", "Re: new supplier", "b@example.test", "ok", 10, false),
+		msg("a1", "ca", "is Terracon approved", "c@example.test", "question", 9, false),
+		msg("l1", "cl", "old record", "d@example.test", "x", 9, false),
+	}}
+	c, err := CollectRead(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range c.Settled {
+		got = append(got, r.ID)
+	}
+	if strings.Join(got, ",") != "s1,s2" {
+		t.Errorf("settled %v: a set-aside thread and a record with no verdict must stay in the inbox", got)
+	}
+}
+
+func TestAReplyNewerThanTheJudgementIsNotHandedOver(t *testing.T) {
+	req := Request{ConversationID: "c1"}
+	seen := Seen{req.Label(): {LastReceived: time.Date(2026, 11, 5, 9, 30, 0, 0, time.UTC), Verdict: No}}
+	mail := fakeMail{[]graph.AddressedMessage{
+		msg("m1", "c1", "new supplier", "a@example.test", "gravel", 9, false),
+		msg("m2", "c1", "Re: new supplier", "a@example.test", "one more thing", 12, false), // after the judgement
+	}}
+	c, err := CollectRead(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Settled) != 0 || len(c.Items) != 1 {
+		t.Errorf("settled %v, items %d: a thread with a newer message is judged again, not filed away", c.Settled, len(c.Items))
+	}
+}

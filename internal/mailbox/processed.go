@@ -118,6 +118,12 @@ const OwnerAppScan = "appscan"
 // results notices its weekly combined and sent.
 const OwnerVMScan = "vmscan"
 
+// OwnerSupplier is the supplier-request lane's name in Processed.Owner: the
+// messages of a supplier request it judged and either dismissed as not critical
+// or filed a Kanban item for. A request set aside as not a supplier request is
+// never recorded: that thread is left for a person.
+const OwnerSupplier = "supplier"
+
 // OwnerLogPath is where a lane other than the digest records the mail it
 // owns: $FLEET_HOME/state/processed-<owner>.json, "" without FLEET_HOME.
 //

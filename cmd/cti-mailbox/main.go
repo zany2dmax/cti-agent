@@ -2,7 +2,8 @@
 //
 // Mail a lane owns and has read goes to Archive: CTI advisories the digest
 // took a CVE from, Qualys WAS notifications the application-security weekly
-// reported on. Automatic replies go to Deleted Items, read or not. Anything
+// reported on, and supplier requests the supplier-request lane dismissed as not
+// critical or filed a Kanban item for. Automatic replies go to Deleted Items, read or not. Anything
 // else is left exactly where it is, and counted.
 //
 //	cti-mailbox --dry-run       show what would happen, move nothing
@@ -129,7 +130,7 @@ func run() int {
 	// not run yet, or is not installed); corrupt is the same hard stop as the
 	// digest's log, for the same reason.
 	var owned []*mailbox.Log
-	for _, owner := range []string{mailbox.OwnerAppScan, mailbox.OwnerVMScan} {
+	for _, owner := range []string{mailbox.OwnerAppScan, mailbox.OwnerVMScan, mailbox.OwnerSupplier} {
 		p := mailbox.OwnerLogPath(owner)
 		ol, err := mailbox.NewStore(p).Load()
 		if err != nil {

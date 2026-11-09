@@ -1208,7 +1208,17 @@ It **never opens the W-9 or bank attachments**: only `.xlsx` files are read, and
 a name containing w9, bank, routing, void, tax, irs or ach is refused whatever
 its type. A form shared as a link in the message instead of attached is not
 opened; that request is Unsure, with the reason on the item. It never replies to
-the requester and never moves their mail.
+the requester, and it never moves mail itself.
+
+**Filing the mail away.** Once a request is dealt with - judged not critical, or
+critical or unsure with its Kanban item filed - the lane records its messages in
+`state/processed-supplier.json` (`cti-supplier --commit-owned`, after every real
+run), and the daily mailbox cleanup moves them to Archive after its usual grace.
+A request set aside as not a supplier request stays in the inbox for a person,
+and so does one whose item could not be filed. A reply that arrives after the
+judgement is not recorded: it is judged again, and its mail is filed away then.
+The first run after the upgrade also hands over mail settled earlier, as long as
+the cleanup's window still reaches it (`MAILBOX_LOOKBACK_HOURS`, 14 days).
 
 A fourth answer, **Set aside**, is for a thread that is not a request to set up a
 supplier at all: staff changing an account number, merging duplicate vendor

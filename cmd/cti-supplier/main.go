@@ -6,13 +6,16 @@
 //	  (the runner shows each NNN.input.txt to the no-tools model and saves NNN.result.json)
 //	cti-supplier --dry-run|--for-real --finish DIR       judge, write DIR/digest.*; --for-real also files the Kanban items
 //	cti-supplier --for-real --commit-seen DIR/seen.json  after the send: do not report these requests again
+//	cti-supplier --for-real --commit-owned DIR/owned.json  after the send: let the mailbox cleanup file away the mail of requests dealt with
 //
 // Like every command that changes something, it must be told how to run:
 // --dry-run reads the mailbox and writes only its own work directory;
 // --for-real files the Kanban items and records what was reported.
 //
 // It sends nothing: run-supplier hands the digest to cti-mailer. It changes
-// nothing in the mailbox, never replies to a requester, and never opens the
+// nothing in the mailbox itself - it only records which messages it has dealt
+// with, and the daily cleanup (cti-mailbox) files those in Archive after its
+// usual grace. It never replies to a requester, and never opens the
 // tax or bank attachments (internal/supplier is the only path to attachment
 // bytes, and it refuses them by type and by name).
 //
@@ -64,25 +67,26 @@ func run() int {
 	dryRun := flag.Bool("dry-run", false, "read and judge, say what would be filed, and write nothing to Jira or the record of what was reported")
 	forReal := flag.Bool("for-real", false, "with --finish: file the Kanban items; with --commit-seen: record the requests as reported")
 	commitSeen := flag.String("commit-seen", "", "record a seen.json from --finish, so the same requests are not reported again; then exit")
+	commitOwned := flag.String("commit-owned", "", "record an owned.json from --finish, so the mailbox cleanup may file away the mail of requests dealt with; then exit")
 	window := flag.Duration("since", 0, "how far back to look for requests (default SUPPLIER_WINDOW_DAYS days, else 3)")
 	flag.Parse()
 
 	mode, msg := cli.Resolve("cti-supplier", *dryRun, *forReal, false, false, cli.Words{
 		DryRun:  "read the mailbox and judge, file nothing in Jira and record nothing as reported",
-		ForReal: "file the Kanban items (--finish) or record requests as reported (--commit-seen)",
+		ForReal: "file the Kanban items (--finish) or record requests as reported or owned (--commit-seen, --commit-owned)",
 	})
 	if msg != "" {
 		fmt.Fprintln(os.Stderr, msg)
 		return 2
 	}
 	n := 0
-	for _, s := range []string{*collectDir, *finishDir, *commitSeen} {
+	for _, s := range []string{*collectDir, *finishDir, *commitSeen, *commitOwned} {
 		if s != "" {
 			n++
 		}
 	}
 	if n != 1 {
-		return die("give exactly one of --collect DIR, --finish DIR, --commit-seen FILE")
+		return die("give exactly one of --collect DIR, --finish DIR, --commit-seen FILE, --commit-owned FILE")
 	}
 
 	fleetenv.Load()
@@ -93,6 +97,12 @@ func run() int {
 			return exitOK
 		}
 		return doCommitSeen(*commitSeen)
+	case *commitOwned != "":
+		if !mode.ForReal {
+			logf("dry run - nothing recorded for the mailbox cleanup")
+			return exitOK
+		}
+		return doCommitOwned(*commitOwned)
 	case *collectDir != "":
 		return doCollect(*collectDir, *window)
 	default:
@@ -249,6 +259,7 @@ type collected struct {
 	Items            []supplier.Item    `json:"items"`
 	AutomaticSkipped int                `json:"automatic_skipped"`
 	Read             []supplier.MailRow `json:"read,omitempty"`
+	Settled          []supplier.MsgRef  `json:"settled,omitempty"`
 }
 
 func writeItems(dir string, c supplier.Collected) error {
@@ -256,11 +267,17 @@ func writeItems(dir string, c supplier.Collected) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(collected{Items: items, AutomaticSkipped: c.Automatic, Read: c.Read}, "", "  ")
+	b, err := json.MarshalIndent(collected{Items: items, AutomaticSkipped: c.Automatic, Read: c.Read, Settled: c.Settled}, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(itemsPath(dir), b, 0o600); err != nil {
+		return err
+	}
+	// What the cleanup may file away: requests already dealt with and reported.
+	// Written now so a day with nothing new still records it; --finish adds this
+	// run's own.
+	if err := writeOwned(dir, c.Settled); err != nil {
 		return err
 	}
 	for i, it := range items {
@@ -269,6 +286,28 @@ func writeItems(dir string, c supplier.Collected) error {
 		}
 	}
 	return nil
+}
+
+// ownedPath is owned.json: the messages of requests dealt with, as the log the
+// mailbox cleanup reads.
+func ownedPath(dir string) string { return filepath.Join(dir, "owned.json") }
+
+func writeOwned(dir string, refs []supplier.MsgRef) error {
+	log := mailbox.Log{Entries: []mailbox.Processed{}}
+	seen := map[string]bool{}
+	for _, r := range refs {
+		if strings.TrimSpace(r.ID) == "" || seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		log.Entries = append(log.Entries, mailbox.Processed{ID: r.ID, Subject: safelog.LineMax(r.Subject, 100),
+			Received: r.Received, Owner: mailbox.OwnerSupplier})
+	}
+	b, err := json.MarshalIndent(log, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(ownedPath(dir), append(b, '\n'), 0o600)
 }
 
 // ── finish ──────────────────────────────────────────────────────────────────
@@ -307,6 +346,12 @@ func doFinish(dir string, fileJira bool) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	outcomes := supplier.Finish(ctx, items, results, cfg, tickets, project, fileJira)
+
+	// The messages of the requests this run dealt with, with those of earlier
+	// requests already settled, for the mailbox cleanup.
+	if err := writeOwned(dir, append(append([]supplier.MsgRef(nil), col.Settled...), supplier.OwnedRefs(items, outcomes)...)); err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
 
 	var problems []string
 	for _, o := range outcomes {
@@ -372,6 +417,38 @@ func doCommitSeen(path string) int {
 		return die("saving %s: %s", safelog.Line(dest), safelog.Line(err.Error()))
 	}
 	logf("seen   : %d request(s) recorded as reported", len(records))
+	return exitOK
+}
+
+// doCommitOwned merges an owned.json into the supplier lane's processed log,
+// which the mailbox cleanup reads: mail recorded here is filed in Archive after
+// the cleanup's usual grace. Entries expire with the log's retention.
+func doCommitOwned(path string) int {
+	dest := mailbox.OwnerLogPath(mailbox.OwnerSupplier)
+	if dest == "" {
+		return die("FLEET_HOME is not set, so there is no state directory to record in")
+	}
+	b, err := os.ReadFile(path) // #nosec G304 -- the runner's own owned.json
+	if err != nil {
+		return die("reading %s: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	var pending mailbox.Log
+	if err := json.Unmarshal(b, &pending); err != nil {
+		return die("%s does not parse: %s", safelog.Line(path), safelog.Line(err.Error()))
+	}
+	store := mailbox.NewStore(dest)
+	l, err := store.Load()
+	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	for i := range pending.Entries {
+		pending.Entries[i].Owner = mailbox.OwnerSupplier
+	}
+	store.Record(l, pending.Entries)
+	if err := store.Save(l); err != nil {
+		return die("saving %s: %s", safelog.Line(dest), safelog.Line(err.Error()))
+	}
+	logf("owned  : %d message(s) recorded for the mailbox cleanup to file away", len(pending.Entries))
 	return exitOK
 }
 

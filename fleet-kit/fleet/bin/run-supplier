@@ -71,6 +71,33 @@ MAILER="$FLEET_CODE/bin/cti-mailer"
 [ -x "$SUPPLIER" ] || fail "cti-supplier not found at $SUPPLIER - rerun the installer"
 [ -x "$MAILER" ] || fail "cti-mailer not found at $MAILER - rerun the installer"
 
+# Record what this run settled, after the digest (if there was one) went out.
+# Real runs only, and both are non-fatal - the worst case is a request listed
+# once more or mail filed a day late.
+#
+#   record_seen   the requests as reported, so they are not listed again. Only
+#                 when a digest was sent: a day whose only news is threads set
+#                 aside sends none, and recording them then would drop them from
+#                 every later digest, which is where they are listed.
+#   record_owned  the messages of the requests dealt with, so the daily mailbox
+#                 cleanup (cti-mailbox) files them in Archive after its grace.
+#                 Every real run, including a day with nothing new: mail settled
+#                 earlier must still be handed over.
+record_seen() {
+  [ -z "$DRY" ] && [ -z "$TODEV" ] || return 0
+  if [ -s "$WORK/seen.json" ]; then
+    "$SUPPLIER" --for-real --commit-seen "$WORK/seen.json" \
+      || log "warn: could not record the requests as reported; they may be listed again tomorrow"
+  fi
+}
+record_owned() {
+  [ -z "$DRY" ] && [ -z "$TODEV" ] || return 0
+  if [ -s "$WORK/owned.json" ]; then
+    "$SUPPLIER" --for-real --commit-owned "$WORK/owned.json" \
+      || log "warn: could not record the settled mail for the mailbox cleanup; it will be filed away later"
+  fi
+}
+
 # cti-supplier needs a mode too. Only --for-real files items and records the
 # requests as reported; a dry run and a test send do neither.
 if [ -n "$REAL" ]; then SMODE="--for-real"; else SMODE="--dry-run"; fi
@@ -92,6 +119,7 @@ INPUTS=("$WORK"/*.input.txt)
 shopt -u nullglob
 if [ "${#INPUTS[@]}" -eq 0 ]; then
   log "no new supplier requests - nothing to judge or send"
+  record_owned
   rm -rf "$WORK"
   log "done"
   exit 0
@@ -163,18 +191,12 @@ if [ -s "$WORK/digest.subject" ]; then
     # shellcheck disable=SC2086
     "$MAILER" --lane supplier --html "$WORK/digest.html" --text "$WORK/digest.txt" --subject "$SUBJECT" "${DRY:---for-real}" \
       || fail "send failed - if SUPPLIER_TO or SUPPLIER_ALLOW_TO is unset the mailer refuses by design"
-    # Sent: record the requests as reported so tomorrow's digest does not list
-    # them again. Non-fatal - the digest is out, and the worst case is that a
-    # request is listed once more (the Kanban item is found by its label, never
-    # filed twice).
-    if [ -z "$DRY" ] && [ -s "$WORK/seen.json" ]; then
-      "$SUPPLIER" --for-real --commit-seen "$WORK/seen.json" \
-        || log "warn: could not record the requests as reported; they may be listed again tomorrow"
-    fi
+    record_seen
   fi
 else
   log "no digest to send"
 fi
+record_owned
 
 if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
   log "nothing was filed or recorded. The work is in $WORK (it holds request text - delete it when done)"

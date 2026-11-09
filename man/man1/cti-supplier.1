@@ -101,13 +101,21 @@ as reported, in
 which holds, per request, a label, dates, the verdict and the Kanban item's key, and no supplier name or request text. Run by
 .BR run\-supplier (1)
 after a real send.
+.SS \-\-commit\-owned
+Records the messages of the requests dealt with (judged not critical, or critical or unsure with a Kanban item) in
+.BR state/processed\-supplier.json ,
+the log
+.BR cti\-mailbox (1)
+reads. That lane files those messages in Archive after its usual grace. A request set aside as not a supplier request, and one whose item could not be filed, are never recorded. Run by
+.BR run\-supplier (1)
+after every real run.
 .SH OPTIONS
 .TP
 .B \-\-dry\-run
 Read and judge, say what would be filed, write nothing to Jira or the record of what was reported.
 .TP
 .B \-\-for\-real
-With \-\-finish, file the Kanban items. With \-\-commit\-seen, record the requests as reported.
+With \-\-finish, file the Kanban items. With \-\-commit\-seen, record the requests as reported. With \-\-commit\-owned, record the settled mail for the mailbox cleanup.
 .TP
 .BI \-\-collect " DIR"
 Find new supplier requests and write what the model needs into this directory.
@@ -117,6 +125,9 @@ Judge the requests in this directory, file the items and write the digest.
 .TP
 .BI \-\-commit\-seen " FILE"
 Record a seen.json so the same requests are not reported again, then exit.
+.TP
+.BI \-\-commit\-owned " FILE"
+Record an owned.json so the mailbox cleanup files the mail of requests dealt with, then exit.
 .TP
 .BI \-\-since " DURATION"
 How far back to look for requests (default

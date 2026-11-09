@@ -105,12 +105,16 @@ request can therefore make the lane ask a person; they cannot make it say No.
 The attachments the lane may open are `.xlsx` forms only, by a policy that
 refuses names like w9, bank, routing, void, tax, irs and ach, so the scanned tax
 and bank files are never fetched. The lane never replies to a requester and
-never moves their mail.
+never moves mail itself. It records the messages of a request it has dealt with
+(judged not critical, or critical or unsure with its Kanban item filed) in its
+own log, and the daily mailbox cleanup files those in Archive after its usual
+grace, as it does for the other lanes' mail. A request set aside as not a
+supplier request is never recorded, so a person's question to the team stays in
+the inbox, and so does a request whose item could not be filed.
 
-Not verified here: the `claude` flags above were checked against the installed
-CLI's `--help`, not exercised against the API, so run
-`sudo cti-agent run-supplier --dry-run` with `SUPPLIER_MODEL` set before
-enabling the timer.
+The `claude` flags above were exercised against the real CLI in a dry run on the
+box (20 requests judged, none failed), and the model evaluation (`task
+eval:supplier`) runs the same arguments.
 
 ## AI triage: untrusted input reaching a model with tools
 

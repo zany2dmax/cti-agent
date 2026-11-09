@@ -228,11 +228,13 @@ modes: --dry-run --for-real
 risk: --collect safe
 risk: --finish changes
 risk: --commit-seen writes
+risk: --commit-owned writes
 flag: --dry-run | read and judge, say what would be filed, write nothing to Jira or the record of what was reported
-flag: --for-real | with --finish: file the Kanban items; with --commit-seen: record the requests as reported
+flag: --for-real | with --finish: file the Kanban items; with --commit-seen: record the requests as reported; with --commit-owned: record the settled mail for the mailbox cleanup
 flag: --collect DIR | find new supplier requests and write what the model needs into this directory
 flag: --finish DIR | judge the requests in this directory, file the Kanban items and write the digest
 flag: --commit-seen FILE | record a seen.json from --finish so the same requests are not reported again, then exit
+flag: --commit-owned FILE | record an owned.json from --finish in the processed log the mailbox cleanup reads, so the mail of requests dealt with is filed in Archive; then exit
 flag: --since DURATION | how far back to look for requests (default SUPPLIER_WINDOW_DAYS days, else 3)
 
 command: cti-vmscan
@@ -418,7 +420,7 @@ about: Supplier-request lane: judge each new supplier request, file a Kanban ite
 runs: effect
 modes: --dry-run --for-real --to-dev
 flag: --dry-run | judge and render, file and send nothing, record nothing
-flag: --for-real | judge, file the Kanban items, send the digest, record the requests as reported
+flag: --for-real | judge, file the Kanban items, send the digest, record the requests as reported and their mail for the cleanup
 flag: --to-dev | test send of the digest to FLEET_DEV_EMAIL only; no items filed
 
 command: run-vmscan

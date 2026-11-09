@@ -3747,10 +3747,12 @@ while [ $# -gt 0 ]; do
 done
 if [ "$MODE" = collect ]; then
   for (( i = 0; i < %d; i++ )); do printf 'REQUEST %%s' "$i" > "$DIR/00$i.input.txt"; done
+  echo '{"entries":[{"id":"settled-earlier"}]}' > "$DIR/owned.json"
 fi
 if [ "$MODE" = finish ]; then
   %s
   echo '["fleet-supplier-x"]' > "$DIR/seen.json"
+  echo '{"entries":[{"id":"settled-earlier"},{"id":"settled-now"}]}' > "$DIR/owned.json"
   printf '%%s' "%s" > "$DIR/problems.txt"
 fi
 """ % (self.requests, digest_cmds, self.problems))
@@ -3775,15 +3777,39 @@ fi
         self.assertTrue(any(x.startswith("supplier --for-real --finish ") for x in c), c)
         self.assertTrue(any(x.startswith("mailer --lane supplier ") and x.endswith("--for-real") for x in c), c)
         self.assertTrue(any(x.startswith("supplier --for-real --commit-seen ") for x in c), c)
+        self.assertTrue(any(x.startswith("supplier --for-real --commit-owned ") for x in c),
+                        "the settled mail must be handed to the mailbox cleanup")
         self.assertEqual(list((self.home / "state").glob("supplier-work-*")), [],
                          "the work directory holds request text and must not be left behind")
+
+    def test_settled_mail_is_handed_over_on_a_day_with_nothing_new(self):
+        # Mail dealt with earlier must still reach the cleanup when there is no
+        # new request to judge, or the first backlog would never be filed away.
+        self.requests = 0
+        self.write_supplier()
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.calls()
+        self.assertTrue(any(x.startswith("supplier --for-real --commit-owned ") for x in c), c)
+        self.assertFalse(any("--finish" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x for x in c), c)
+
+    def test_a_day_with_no_digest_hands_over_mail_but_does_not_record_reported(self):
+        # Threads set aside are listed only when a digest goes out; recording
+        # them as reported on a day with none would drop them for good.
+        self.write_supplier(digest=False)
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.calls()
+        self.assertTrue(any("--commit-owned" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x for x in c), c)
 
     def test_a_dry_run_files_nothing_sends_nothing_and_records_nothing(self):
         r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
         self.assertEqual(r.returncode, 0, r.stderr)
         c = self.calls()
         self.assertFalse(any(x.startswith("supplier") and "--for-real" in x for x in c), c)
-        self.assertFalse(any("--commit-seen" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x or "--commit-owned" in x for x in c), c)
         self.assertTrue(any(x.startswith("supplier --dry-run --finish") for x in c), c)
         self.assertTrue(any(x.startswith("mailer --lane supplier") and x.endswith("--dry-run") for x in c), c)
 
@@ -3794,7 +3820,7 @@ fi
         self.assertTrue(any(x.startswith("mailer --to-dev ") for x in c), c)
         self.assertFalse(any("--lane" in x for x in c), c)
         self.assertFalse(any(x.startswith("supplier") and "--for-real" in x for x in c), c)
-        self.assertFalse(any("--commit-seen" in x for x in c), c)
+        self.assertFalse(any("--commit-seen" in x or "--commit-owned" in x for x in c), c)
 
     def test_the_model_is_given_no_tools_and_the_request_on_stdin(self):
         self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})

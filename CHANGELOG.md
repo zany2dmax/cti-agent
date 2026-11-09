@@ -47,6 +47,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   updated, reported earlier with nothing new, or left out as an automatic
   message). The list is capped at 60 rows, the rest counted. It shows only on a
   day a digest is sent, since a day with nothing new still sends nothing.
+- **The mailbox cleanup files supplier requests away once they are dealt with.**
+  The supplier lane now records the messages of every request it judged not
+  critical, or critical or unsure with its Kanban item filed, in
+  `state/processed-supplier.json` (new `cti-supplier --commit-owned`, called by
+  `run-supplier` after every real run, including a day with nothing new), and
+  `cti-mailbox` archives them after its usual grace. A request set aside as not a
+  supplier request, a request whose item could not be filed, and a reply newer
+  than the judgement all stay in the inbox. The lane still never replies to a
+  requester and never moves mail itself; the digest and item footers say so.
+  Mail dealt with before this change is handed over on the first real run, while
+  the cleanup's 14-day window still reaches it.
 - **Supplier items are filed as To Do.** Jira creates every issue in the
   workflow's first status, here Open, which the board has no column for, so the
   first items landed in the assignee's backlog and not on the board. The lane

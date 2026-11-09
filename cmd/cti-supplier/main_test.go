@@ -211,3 +211,26 @@ func TestSplitListDropsEmpties(t *testing.T) {
 		t.Errorf("%#v", got)
 	}
 }
+
+func TestCommitOwnedRecordsSettledMailForTheCleanupUnderTheSupplierOwner(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("FLEET_HOME", home)
+	t.Setenv("FLEET_PROCESSED_LOG", "")
+	dir := t.TempDir()
+	at := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	refs := []supplier.MsgRef{{ID: "m1", Subject: "new supplier\nforged line", Received: at}, {ID: "m1", Received: at}, {ID: "", Received: at}}
+	if err := writeOwned(dir, refs); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "owned.json"))
+	if strings.Count(string(b), `"id"`) != 1 || strings.Contains(string(b), "\\n") {
+		t.Errorf("owned.json should hold one entry, deduplicated, with no newline in the subject:\n%s", b)
+	}
+	if code := doCommitOwned(filepath.Join(dir, "owned.json")); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	got, _ := os.ReadFile(filepath.Join(home, "state", "processed-supplier.json"))
+	if !strings.Contains(string(got), `"owner": "supplier"`) || !strings.Contains(string(got), `"m1"`) {
+		t.Errorf("processed-supplier.json:\n%s", got)
+	}
+}

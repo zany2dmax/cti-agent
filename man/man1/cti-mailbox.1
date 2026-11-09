@@ -43,7 +43,11 @@ its own
 .RI ( state/processed\-appscan.json ,
 written by
 .B cti\-appscan \-\-commit\-seen
-after the application-security weekly is sent). A missing log counts as
+after the application-security weekly is sent, and
+.IR state/processed\-supplier.json ,
+written by
+.B cti\-supplier \-\-commit\-owned
+for the supplier requests it dismissed as not critical or filed an item for). A missing log counts as
 empty. A log that does not parse, or no way to locate the digest's (neither
 .B FLEET_HOME
 nor

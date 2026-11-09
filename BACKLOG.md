@@ -80,7 +80,7 @@ is real, not before. Finished work moves out of this file into
   with reasons from the name and notes, through the no-tools triage agent
   pattern, for the security team only. It must never open the W-9 and bank
   attachments (tax ids and account numbers; the PDFs are scanned anyway), never
-  reply to the requester and never move their mail. Sampled 2026-11-02: only
+  reply to the requester and never move mail itself (the daily cleanup files away what the lane has dealt with). Sampled 2026-11-02: only
   about 4 of 10 threads were real new-supplier requests (the rest were credit
   applications, approvals and intercompany accounts), and at least one
   technology supplier arrived with no form at all, so it must also read the

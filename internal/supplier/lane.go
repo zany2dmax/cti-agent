@@ -35,7 +35,44 @@ type Item struct {
 	Input string `json:"input"`
 	// Source is the untrusted text, kept so evidence can be checked at finish.
 	Source string `json:"source"`
+	// Messages are the thread's messages the lane read, for the record the
+	// mailbox cleanup uses (see OwnedRefs).
+	Messages []MsgRef `json:"messages,omitempty"`
 }
+
+// MsgRef names one message, enough for the cleanup lane's record of mail the
+// supplier lane owns.
+type MsgRef struct {
+	ID       string    `json:"id"`
+	Subject  string    `json:"subject"`
+	Received time.Time `json:"received"`
+}
+
+func refs(t thread) []MsgRef {
+	out := make([]MsgRef, 0, len(t))
+	for _, m := range t {
+		out = append(out, MsgRef{ID: m.ID, Subject: oneLine(m.Subject, 100), Received: m.Received})
+	}
+	return out
+}
+
+// settled says whether a request has been dealt with, so its mail may be filed
+// away: it was judged not critical, or it is critical or unsure and has its
+// Kanban item. A request set aside as not being a supplier request is not
+// settled: that thread is for a person, and stays in the inbox. Nothing unknown
+// (an old record with no verdict, an item that failed to file) is settled.
+func settled(verdict, ticket string) bool {
+	switch verdict {
+	case No:
+		return true
+	case Yes, Unsure:
+		return strings.TrimSpace(ticket) != ""
+	}
+	return false
+}
+
+// SettledEntry is settled for a remembered request.
+func SettledEntry(e SeenEntry) bool { return settled(e.Verdict, e.Ticket) }
 
 // linkRE finds a form that was shared as a link instead of attached.
 var linkRE = regexp.MustCompile(`(?i)(sharepoint\.com|onedrive|1drv\.ms)`)
@@ -116,6 +153,9 @@ type Collected struct {
 	// the automatic ones and the ones already reported, so the digest can answer
 	// "what did it actually read?".
 	Read []MailRow
+	// Settled holds the messages of requests reported earlier that were dealt
+	// with (see settled) and have nothing newer: the cleanup may file them away.
+	Settled []MsgRef
 }
 
 // Collect finds the new supplier requests: see CollectRead. It returns the items
@@ -183,6 +223,9 @@ func CollectRead(ctx context.Context, mail Mail, src Source, p Policy, cfg Confi
 		if prior, ok := seen[label]; ok {
 			if prior.LastReceived.IsZero() || !it.Request.LastReceived.After(prior.LastReceived) {
 				handling = HandledReported
+				if SettledEntry(prior) {
+					out.Settled = append(out.Settled, refs(mine)...)
+				}
 			} else {
 				handling = HandledUpdate
 				it.Update, it.Prior = true, prior
@@ -277,7 +320,7 @@ func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) 
 	}
 	in := Input{MessageID: req.MessageID, Received: req.Received.UTC().Format(time.RFC3339),
 		Sender: req.From, Subject: req.Subject, Body: body, State: req.State, Form: req.Form}
-	return Item{Request: req, Input: Render(in, cfg), Source: in.Source()}, nil
+	return Item{Request: req, Input: Render(in, cfg), Source: in.Source(), Messages: refs(t)}, nil
 }
 
 // Tickets is what the lane needs from Jira.
@@ -418,6 +461,23 @@ func SeenRecords(outs []Outcome) []SeenRecord {
 // model was shown, which Collect stored, rather than a rebuild of it.
 func judgeAgainst(raw []byte, in Input, source string, cfg Config) Decision {
 	return judge(raw, in, source, cfg)
+}
+
+// OwnedRefs returns the messages of the requests this run dealt with, for the
+// mailbox cleanup to file away: a request judged not critical, or critical or
+// unsure with its item in hand, and not one that failed to file or was set
+// aside. outs is Finish's result for items, in the same order.
+func OwnedRefs(items []Item, outs []Outcome) []MsgRef {
+	var out []MsgRef
+	for i, o := range outs {
+		if i >= len(items) || o.Err != "" {
+			continue
+		}
+		if settled(o.Request.Decision.Verdict, o.Request.TicketKey) {
+			out = append(out, items[i].Messages...)
+		}
+	}
+	return out
 }
 
 // Requests returns the requests of a set of outcomes, for the digest.

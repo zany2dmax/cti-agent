@@ -218,7 +218,7 @@ func TicketDescription(r Request, cfg Config, board string) string {
 	}
 
 	b.WriteString("Filed automatically by the supplier-request lane. It reads the request and the form only; ")
-	b.WriteString("it never replies to the requester, never moves their mail and never opens the tax or bank attachments. ")
+	b.WriteString("it never replies to the requester and never opens the tax or bank attachments. ")
 	b.WriteString("Close this item when the " + cfg.tprm() + " is done, or when you decide the supplier is not critical.\n")
 	return b.String()
 }
