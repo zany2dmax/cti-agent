@@ -192,3 +192,11 @@ func TestSetAsideThreadsAreListedLastWhenADigestGoesOutAnyway(t *testing.T) {
 		t.Errorf("text: %s", b.Text)
 	}
 }
+func TestTheFooterCarriesTheConfiguredAttribution(t *testing.T) {
+	t.Setenv("FLEET_ATTRIBUTION", "Built by Example Security")
+	r := Request{Subject: "X", From: "a@example.test", Received: time.Now(), Decision: Decision{Verdict: Unsure, Reason: "r"}}
+	b, ok := Digest([]Request{r}, "Org", time.Now(), "", "", 0)
+	if !ok || !strings.Contains(b.HTML, "Built by Example Security") || !strings.Contains(b.Text, "Built by Example Security") {
+		t.Fatalf("ok=%v\nhtml tail: %s\ntext tail: %s", ok, b.HTML[len(b.HTML)-400:], b.Text[len(b.Text)-120:])
+	}
+}
