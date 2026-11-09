@@ -47,6 +47,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   updated, reported earlier with nothing new, or left out as an automatic
   message). The list is capped at 60 rows, the rest counted. It shows only on a
   day a digest is sent, since a day with nothing new still sends nothing.
+- **Supplier items are filed as To Do.** Jira creates every issue in the
+  workflow's first status, here Open, which the board has no column for, so the
+  first items landed in the assignee's backlog and not on the board. The lane
+  now moves each new item to `SUPPLIER_JIRA_STATUS` (default To Do) by the one
+  transition that leads there, and only that: no resolution, no comment. A move
+  that fails logs a warning with the key, since the item exists and filing it
+  again would duplicate it. Items filed before this change stay in Open until
+  someone moves them.
 - **The orchestrator knows the supplier and VM-scan lanes.** Its lane table and
   handle list lacked both, so its first look at the new
   `cti-agent-supplier.timer` read as an unknown unit and it asked the operator

@@ -146,6 +146,57 @@ func (c *Client) Close(ctx context.Context, key string, ch CloseChoice, comment 
 	return c.do(ctx, http.MethodPost, "/rest/api/2/issue/"+url.PathEscape(key)+"/transitions", body, nil)
 }
 
+// ChooseStatus picks the transition whose destination status is named name
+// (case-insensitive). Jira creates every issue in its workflow's first status,
+// which may be one the team's board has no column for; this is how a caller
+// that files an item moves it to the status the team works from. Exactly one
+// transition must lead there, and it must not need a field the fleet cannot
+// fill: otherwise the answer is an error and the issue stays where it is.
+func ChooseStatus(ts []Transition, name string) (Transition, error) {
+	var cands []Transition
+	for _, t := range ts {
+		if strings.EqualFold(strings.TrimSpace(t.To.Name), strings.TrimSpace(name)) {
+			cands = append(cands, t)
+		}
+	}
+	switch len(cands) {
+	case 0:
+		return Transition{}, fmt.Errorf("no transition leads to the status %q from the issue's current status", name)
+	case 1:
+	default:
+		return Transition{}, fmt.Errorf("%d transitions lead to the status %q; the fleet will not guess between them", len(cands), name)
+	}
+	t := cands[0]
+	var blockers []string
+	for f, spec := range t.Fields {
+		if spec.Required && !spec.HasDefaultValue {
+			blockers = append(blockers, f)
+		}
+	}
+	if len(blockers) > 0 {
+		sort.Strings(blockers)
+		return Transition{}, fmt.Errorf("the transition to %q needs field(s) the fleet cannot fill: %s", name, strings.Join(blockers, ", "))
+	}
+	return t, nil
+}
+
+// MoveTo moves an issue to the status named name by the one transition that
+// leads there (see ChooseStatus). It sets no resolution and adds no comment, so
+// it is for moving between working statuses, never for closing. Needs the
+// "Transition issues" permission.
+func (c *Client) MoveTo(ctx context.Context, key, name string) error {
+	ts, err := c.Transitions(ctx, key)
+	if err != nil {
+		return err
+	}
+	t, err := ChooseStatus(ts, name)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"transition": map[string]string{"id": t.ID}}
+	return c.do(ctx, http.MethodPost, "/rest/api/2/issue/"+url.PathEscape(key)+"/transitions", body, nil)
+}
+
 // CheckCloseAllowed is the gate for closing, the same shape as CheckAllowed
 // and a separate list: allowing the fleet to file tickets does not allow it to
 // close them.

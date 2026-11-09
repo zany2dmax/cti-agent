@@ -149,3 +149,49 @@ func TestTransitionsReadsScreenFields(t *testing.T) {
 		t.Fatalf("got %+v, %v", ts, err)
 	}
 }
+
+func TestChooseStatusFindsTheOneTransitionByDestinationName(t *testing.T) {
+	ts := []Transition{
+		tr("2", "Open", "Open", "new", nil),
+		tr("3", "To Do", "To Do", "indeterminate", nil),
+	}
+	got, err := ChooseStatus(ts, " to do ")
+	if err != nil || got.ID != "3" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if _, err := ChooseStatus(ts, "Backlog"); err == nil {
+		t.Error("a status nothing leads to must be an error")
+	}
+	dup := append(ts, tr("9", "Reset", "To Do", "indeterminate", nil))
+	if _, err := ChooseStatus(dup, "To Do"); err == nil {
+		t.Error("two transitions to one status must not be guessed between")
+	}
+	need := []Transition{tr("3", "To Do", "To Do", "indeterminate", map[string]TransitionField{"customfield_1": {Required: true}})}
+	if _, err := ChooseStatus(need, "To Do"); err == nil {
+		t.Error("a transition that needs a field the fleet cannot fill must be refused")
+	}
+}
+
+func TestMoveToPostsOnlyTheTransitionIDAndNothingElse(t *testing.T) {
+	var posted map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"transitions":[{"id":"2","name":"Open","to":{"name":"Open"}},{"id":"3","name":"To Do","to":{"name":"To Do"}}]}`))
+			return
+		}
+		if r.URL.Path != "/rest/api/2/issue/CYBR-1/transitions" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &posted)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "a@example.com", "tok")
+	if err := c.MoveTo(context.Background(), "CYBR-1", "To Do"); err != nil {
+		t.Fatal(err)
+	}
+	if len(posted) != 1 || posted["transition"].(map[string]any)["id"] != "3" {
+		t.Errorf("posted %v: want only the transition id, no resolution or comment", posted)
+	}
+}

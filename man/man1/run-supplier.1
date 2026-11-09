@@ -105,6 +105,11 @@ The project for the Kanban items; it must also be in
 .B SUPPLIER_JIRA_TYPE
 The issue type (default Task).
 .TP
+.B SUPPLIER_JIRA_STATUS
+The status a new item is moved to after it is filed (default To Do), so it
+shows on the board and not in a person's backlog. Set and empty leaves it in
+the workflow's first status. A move that fails is a warning: the item exists.
+.TP
 .B SUPPLIER_OWNER_EMAIL
 The Jira user the items are assigned to. An unknown user leaves them unassigned.
 .TP

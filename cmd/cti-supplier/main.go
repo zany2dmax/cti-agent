@@ -393,6 +393,9 @@ type jiraTickets struct {
 	project   string
 	issueType string
 	assignee  string
+	// status is where a new item is moved after filing; "" leaves it in the
+	// workflow's first status.
+	status string
 }
 
 func (j jiraTickets) Find(ctx context.Context, jql string) (string, string, bool, error) {
@@ -425,6 +428,17 @@ func (j jiraTickets) Create(ctx context.Context, summary, description string, la
 	if err != nil {
 		return "", "", err
 	}
+	// Jira creates every issue in the workflow's first status, "Open" here, which
+	// the team's board has no column for: the item lands in a person's backlog
+	// instead. Move it to the status the board shows. The item exists either way,
+	// so a failed move is a warning with the key, never a failed filing (which
+	// would be filed again as a duplicate).
+	if j.status != "" {
+		if err := j.c.MoveTo(ctx, res.Key, j.status); err != nil {
+			logf("warn   : %s was filed but could not be moved to %q, so it is in Jira's first status and may not show on the board: %s",
+				safelog.Line(res.Key), safelog.Line(j.status), safelog.Line(err.Error()))
+		}
+	}
 	return res.Key, j.c.BrowseURL(res.Key), nil
 }
 
@@ -456,7 +470,12 @@ func newTickets(project string, fileJira bool) supplier.Tickets {
 		}
 		c.APIBase = gw
 	}
-	t := jiraTickets{c: c, project: project, issueType: env("SUPPLIER_JIRA_TYPE")}
+	t := jiraTickets{c: c, project: project, issueType: env("SUPPLIER_JIRA_TYPE"), status: "To Do"}
+	// Unset: To Do. Set to a name: that status. Set and empty: leave the item in
+	// the workflow's first status.
+	if v, ok := os.LookupEnv("SUPPLIER_JIRA_STATUS"); ok {
+		t.status = strings.TrimSpace(v)
+	}
 	if t.issueType == "" {
 		t.issueType = "Task"
 	}
