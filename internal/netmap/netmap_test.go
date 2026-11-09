@@ -24,8 +24,8 @@ var sample = [][]string{
 	{"corp", "10.5.30.0/24", "vlan1"},
 	{"Zeta Site - 10.6.0.0/16"},
 	{"corp", "10.2.30.0/24", "vlan1"},
-	{"Eta Site - 10.7.0.0/16"},
-	{"inside", "REDACTED-IP/24", "vlan30"},
+	{"Eta Site - 10.17.0.0/16"},
+	{"inside", "10.17.30.0/24", "vlan30"},
 }
 
 func TestParsesTheLayoutPeopleWriteNotATable(t *testing.T) {
@@ -144,7 +144,7 @@ func TestAnOperatorRuleAnswersTheQuestion(t *testing.T) {
 	for _, c := range corp {
 		have[c.Subnet.Prefix.String()] = true
 	}
-	if !have["REDACTED-IP/24"] {
+	if !have["10.17.30.0/24"] {
 		t.Errorf("the rule did not make 'inside' count: %v", have)
 	}
 	for _, q := range qs {

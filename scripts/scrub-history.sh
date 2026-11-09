@@ -11,8 +11,14 @@
 # WHAT THIS DOES
 #   1. Makes a full backup clone next to the repo (nothing destructive first).
 #   2. Runs git filter-repo to remove the report paths from every commit.
-#   3. Applies text replacements for hostnames referenced inline elsewhere.
+#   3. Applies the replacements in scripts/scrub-patterns.txt to every file,
+#      and to every commit and tag message.
 #   4. Verifies nothing sensitive survives, then STOPS.
+#
+#   Each rule is checked with Perl-compatible regexes (git grep -P, perl), the
+#   same flavour filter-repo applies, so (?i) and \b mean what they say. The
+#   check used to be git grep -E: on macOS that has no \b and rejects (?i), the
+#   error was discarded, and such a rule always counted zero hits.
 #
 # WHAT THIS DOES NOT DO
 #   It does not force-push. Rewriting published history changes every commit
@@ -45,7 +51,26 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short | sed 's/^/    /'
   exit 1
 fi
+# The verification below depends on PCRE. A git built without it would make
+# every rule count zero hits, so refuse rather than report a false "clean".
+# The probe must match (this script says "scrub"); 1 would mean \b or (?i) is
+# not understood, and anything higher that -P is not supported at all.
+probe=0
+git grep -q -P '(?i)\bscrub\b' HEAD -- "scripts/scrub-history.sh" 2>/dev/null || probe=$?
+if [ "$probe" != "0" ]; then
+  echo "  git grep -P does not work here (exit $probe); the check could not see"
+  printf '%s\n' '  (?i) or \b rules. Install a git built with PCRE (brew install git).'
+  exit 1
+fi
+command -v perl >/dev/null 2>&1 || { echo "  perl not found; it checks commit messages."; exit 1; }
+
+# Remember where the rewrite will go, before filter-repo removes 'origin', and
+# which branches are already published there: only those are pushed back.
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+ORIGIN_HEADS="$(git ls-remote --heads origin 2>/dev/null | sed 's#.*refs/heads/##' | tr '\n' ' ' || true)"
 echo "  repo:   $REPO"
+echo "  origin: ${ORIGIN_URL:-none}"
+echo "  published branches: ${ORIGIN_HEADS:-unknown (could not reach origin)}"
 echo "  branch: $(git rev-parse --abbrev-ref HEAD)"
 echo "  commits: $(git rev-list --all --count)"
 
@@ -107,6 +132,10 @@ PATHS=(
   "cti-vuln-report.md"
   "fleet-kit/sample-report.md"
   "fleet-kit/sample-digest.html"
+  # A build of cti-appreport committed by mistake (b8e3994, untracked in
+  # eabcd23). The text rules cannot clean it - filter-repo leaves binary files
+  # alone - and a binary has no place in history anyway.
+  "cti-appreport"
 )
 bold "Paths to purge from all history"
 for p in "${PATHS[@]}"; do
@@ -132,13 +161,18 @@ if [ ! -f "$PATTERNS" ]; then
   echo "  Continuing with path deletion only (no text replacement)."
   REPLACE_ARGS=()
 else
-  grep -vE '^\s*(#|$)' "$PATTERNS" > /tmp/scrub-replacements.txt
-  n=$(wc -l < /tmp/scrub-replacements.txt | tr -d ' ')
-  echo "  $n rule(s) from scripts/scrub-patterns.txt"
+  # The rules list what is being scrubbed, so they go to a private temp file,
+  # not a fixed world-readable path in /tmp, and are removed on exit.
+  RULES="$(mktemp "${TMPDIR:-/tmp}/scrub-replacements.XXXXXX")"
+  chmod 600 "$RULES"
+  trap 'rm -f "$RULES"' EXIT
+  grep -vE '^\s*(#|$)' "$PATTERNS" > "$RULES"
+  n=$(wc -l < "$RULES" | tr -d ' ')
+  echo "  $n rule(s) from scripts/scrub-patterns.txt, for file contents and messages"
   # Show only the replacement side, so running this in a shared terminal or
   # pasting the output somewhere does not re-disclose what you are scrubbing.
-  awk -F'==>' '{print "    <pattern> ==> " $2}' /tmp/scrub-replacements.txt | sort -u
-  REPLACE_ARGS=(--replace-text /tmp/scrub-replacements.txt)
+  awk -F'==>' '{print "    <pattern> ==> " $2}' "$RULES" | sort -u
+  REPLACE_ARGS=(--replace-text "$RULES" --replace-message "$RULES")
 fi
 
 read -r -p "
@@ -166,62 +200,103 @@ done
 # Verify against the same rules we just applied, derived from the pattern file
 # rather than hardcoded - so this list can never drift from the rules, and no
 # internal name is baked into a tracked file.
-if [ -s /tmp/scrub-replacements.txt ]; then
+#
+# Every file in every commit is checked with git grep -P, and every commit and
+# tag message with perl: both Perl-compatible, like the rewrite itself. git grep
+# exits 0 on a hit and 1 on none (none is the SUCCESS case); anything else is an
+# error, and an error is a failure here, never a zero. Discarding it is how a
+# rule git could not parse used to count as clean.
+if [ -s "${RULES:-}" ]; then
   ALL_COMMITS=$(git rev-list --all)
+  MESSAGES="$(mktemp "${TMPDIR:-/tmp}/scrub-messages.XXXXXX")"
+  chmod 600 "$MESSAGES"
+  trap 'rm -f "$RULES" "$MESSAGES"' EXIT
+  { git log --all --format='%B'; git for-each-ref refs/tags --format='%(contents)'; } > "$MESSAGES"
+  i=0
   while IFS= read -r rule; do
+    i=$((i + 1))
     pat="${rule%%==>*}"
     pat="${pat#regex:}"
-    # `|| true` on the git grep, because it exits 1 when it finds nothing -
-    # and finding nothing is the SUCCESS case here. Under `set -o pipefail`
-    # that 1 propagated to the assignment and `set -e` ended the script, so a
-    # fully scrubbed history aborted this check instead of reporting "clean".
-    # The failure mode was invisible: the loop just stopped.
-    hits=$({ git grep -l -E "$pat" $ALL_COMMITS -- 2>/dev/null || true; } | wc -l | tr -d ' ')
+    lit=""
+    if [ "$pat" = "${rule%%==>*}" ]; then
+      # A literal rule: match it literally. PCRE takes \Q...\E; perl gets
+      # the flag and quotes it itself, since \Q is not a regex escape there.
+      lit=1
+      pat="\\Q${pat}\\E"
+    fi
+    # shellcheck disable=SC2086 # one argument per commit, on purpose
+    hits=$(git grep -l -P "$pat" $ALL_COMMITS -- 2>/dev/null | wc -l | tr -d ' ') || true
+    grc=0
+    # shellcheck disable=SC2086
+    git grep -q -P "$pat" $ALL_COMMITS -- 2>/dev/null || grc=$?
+    if [ "$grc" -gt 1 ]; then
+      warn "rule $i could not be checked (git grep exit $grc) - fix the rule"
+      FAIL=1
+      continue
+    fi
     if [ "$hits" != "0" ]; then
-      # This script itself will match its own rules if the pattern file was
-      # ever committed. It is gitignored, so a hit here is a real finding.
-      warn "a pattern still matches $hits blob(s) - inspect before pushing"
+      # The pattern file is gitignored, so a hit here is a real finding.
+      warn "rule $i still matches $hits file version(s) - inspect before pushing"
       FAIL=1
     fi
-  done < /tmp/scrub-replacements.txt
-  [ "$FAIL" = "0" ] && echo "  clean: all $(wc -l < /tmp/scrub-replacements.txt | tr -d ' ') replacement rule(s)"
+    mrc=0
+    raw="${rule%%==>*}"
+    PAT="${raw#regex:}" LIT="$lit" perl -ne 'BEGIN { $p = $ENV{LIT} ? quotemeta($ENV{PAT}) : $ENV{PAT}; $p = qr/$p/ } $n++ if /$p/; END { exit($n ? 0 : 1) }' "$MESSAGES" || mrc=$?
+    if [ "$mrc" = "0" ]; then
+      warn "rule $i still matches a commit or tag message - inspect before pushing"
+      FAIL=1
+    elif [ "$mrc" != "1" ]; then
+      warn "rule $i could not be checked against messages (perl exit $mrc)"
+      FAIL=1
+    fi
+  done < "$RULES"
+  [ "$FAIL" = "0" ] && echo "  clean: all $i replacement rule(s), in files and messages"
 fi
 echo "  commits after rewrite: $(git rev-list --all --count)"
 [ "$FAIL" = "0" ] || { echo; warn "Verification FAILED - do not push. Restore from $BACKUP."; exit 1; }
 
 # ── 6. next steps ────────────────────────────────────────────────────────────
+# Push back only the branches that were already published: --all would also
+# publish every local branch that was never meant to leave this machine.
+PUSH_BRANCHES=""
+for b in $ORIGIN_HEADS; do
+  if git show-ref --verify --quiet "refs/heads/$b"; then PUSH_BRANCHES="$PUSH_BRANCHES $b"; fi
+done
+LOCAL_ONLY=""
+for b in $(git for-each-ref refs/heads --format='%(refname:short)'); do
+  case " $ORIGIN_HEADS " in *" $b "*) : ;; *) LOCAL_ONLY="$LOCAL_ONLY $b" ;; esac
+done
+
 cat <<NEXT
 
 $(printf '\033[1mVerified clean. Nothing has been pushed.\033[0m')
 
 filter-repo removed the 'origin' remote on purpose, so you cannot force-push by
-accident. When you are ready:
+accident. Check the result first (task test lint vet), then:
 
-  git remote add origin git@github.com:zany2dmax/cti-qualys-agent.git
-  git push --force --all
-  git push --force --tags
+  git remote add origin ${ORIGIN_URL:-<the repository URL>}
+  git push --force origin${PUSH_BRANCHES:- <the branches that were published>}
+  git push --force origin --tags
+
+Local-only branches, not pushed:${LOCAL_ONLY:- none}
 
 Then finish the job - the rewrite alone is not remediation:
 
-  1. GitHub still caches old blobs. Open a Support ticket asking them to purge
-     cached views and stale refs for this repo, citing the SHAs you removed.
-  2. Check for forks and network clones before you assume it is contained:
-     https://github.com/zany2dmax/cti-qualys-agent/network/members
-  3. Anyone who cloned before the rewrite still has the data. Treat the 65
-     hostnames and 16 PRESENT CVEs as disclosed, not recalled.
-  4. Prioritize patching what was public - CVE-2020-1472 (Zerologon, 4 hosts)
-     and the high-host-count items first.
-  5. Rotate anything that leaked alongside it. Check for a committed .env or
-     client secret:  git log --all --diff-filter=A --name-only | sort -u | grep -i env
-  6. Consider making the repo private until the fleet code stabilizes.
-  7. Delete the backup mirrors once the force-push is verified. They hold the
-     unscrubbed history, so leaving them around defeats the scrub locally:
-       ls -d "${REPO}".backup-*
-       rm -rf "${REPO}".backup-*
-     If this repo is in a cloud-synced folder, also purge the provider's
-     version history for those paths, or they persist server-side.
-
-Reports will not come back: internal/report/markdown.go now redacts hostnames
-unless REPORT_HOSTNAMES=full, and .gitignore excludes generated reports.
+  1. GitHub still serves old commits by SHA. Ask GitHub Support to remove
+     cached views and stale refs (including pull request refs), listing the old
+     SHAs. The backup mirror can list them:
+       git -C "$BACKUP" log --all --format=%H -- <affected paths>
+  2. Check forks and other clones. A fork made before the leak does not hold
+     it; one made after does, and only its owner or GitHub can remove it.
+  3. Anyone who cloned before the rewrite still has the data. Treat what was
+     public as disclosed, not recalled, and act on that (rotate, patch, MFA).
+  4. Every other checkout has the old history: re-clone it or reset it to the
+     new branch. One old clone pushed back restores everything. A deployed kit
+     that only fast-forwards needs one fetch --force --tags and reset --hard.
+  5. Delete the backup mirror once the force-push is verified. It holds the
+     unscrubbed history:
+       rm -rf "$BACKUP"
+     If it is in a cloud-synced folder, the provider's version history keeps
+     a copy too.
 
 NEXT
