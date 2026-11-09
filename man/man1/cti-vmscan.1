@@ -100,6 +100,17 @@ A message with the results subject that did not come from Qualys is not read.
 It is logged with a pointer to the usual cause, a schedule whose notification
 From Address is set to this mailbox. Set it to qualys@qualys.net.
 .PP
+A message from Qualys's address is read only when Exchange Online
+authenticated the sender: its own
+.B Authentication\-Results
+header records
+.B compauth=pass
+or
+.B dmarc=pass
+for the From domain. Anything else is logged as a problem and not read, and its
+companion notices are not claimed. See
+.BR FLEET_SENDER_AUTH .
+.PP
 Only the results notices of the expected scans are recorded as used, for the
 mailbox cleanup to archive. For a scan that finished, its
 .B Scan Completed
@@ -161,6 +172,13 @@ does this only after a real send.
 .TP
 .B VMSCAN_SCANS
 The scans to combine, by title, comma separated.
+.TP
+.B FLEET_SENDER_AUTH
+Set to
+.B off
+to read a notice on its From address alone, without the sender
+authentication check. Only for a tenant whose inbound gateway hides the real
+sender from Exchange Online, which makes every genuine notice fail.
 .TP
 .B SUBNETS_DRIVE_ID
 .TQ

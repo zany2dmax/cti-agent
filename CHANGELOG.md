@@ -93,6 +93,25 @@ time.
     budget enforcement. The beat has been unable to write `fleet.env` or its
     ledger since 1.5. The budget entry below closes the two fail-open paths
     that were left.
+  - Attack vector 10786562 (Medium) - Qualys sender identity is derived from
+    an unauthenticated `From` value. Fixed by the sender authentication entry
+    below.
+
+- **Qualys notices are read only when Exchange Online authenticated the
+  sender.** `cti-appscan` and `cti-vmscan` trusted a notice whose From
+  address was on qualys.com or qualys.net, and anyone can write a From
+  address. They now also read the receiving server's own
+  `Authentication-Results` header (the first one, which Exchange Online
+  prepends; copies below it came with the message). They require
+  `compauth=pass`, or `dmarc=pass` for the From domain.
+  - A notice that fails is reported as a problem, with the reason, and left
+    in the inbox. Its scheduled-scan and companion notices are not claimed
+    for deletion.
+  - **Check the first weekly after upgrading.** If every genuine notice is
+    reported this way, mail reaches Exchange Online through a gateway that
+    hides the sender. Fix the inbound connector (enhanced filtering for
+    connectors), or set `FLEET_SENDER_AUTH=off` in `fleet.env` to go back to
+    trusting the From address.
 
 - **The heartbeat's budget brake fails closed.**
   - When `cti-budget check` itself failed (an unreadable ledger, say),

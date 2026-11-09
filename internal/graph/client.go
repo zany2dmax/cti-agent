@@ -81,6 +81,12 @@ type Message struct {
 	// deleted, which is not.
 	AutoSubmitted        string
 	AutoResponseSuppress string
+
+	// AuthenticationResults is the FIRST Authentication-Results header: the
+	// one Exchange Online prepends when it accepts the message. Any copies
+	// below it came with the message and are the sender's to write, so they
+	// are ignored. See SenderAuthenticated.
+	AuthenticationResults string
 }
 
 // IsAutoReply reports whether the sending system declared this an automatic
@@ -358,6 +364,10 @@ func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, sin
 			}
 			for _, h := range m.InternetMessageHeaders {
 				switch strings.ToLower(strings.TrimSpace(h.Name)) {
+				case "authentication-results":
+					if msg.AuthenticationResults == "" {
+						msg.AuthenticationResults = h.Value
+					}
 				case "auto-submitted":
 					msg.AutoSubmitted = h.Value
 				case "x-auto-response-suppress":

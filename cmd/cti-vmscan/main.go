@@ -266,6 +266,16 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 		if m.SelfSent || !p.Recognises(m.From, m.Subject) {
 			continue
 		}
+		// The From address is the sender's claim; read the notice only when
+		// the receiving server authenticated it (PrimeSec 10786562).
+		if ok, why := m.VouchedFor(); !ok {
+			problems = append(problems, fmt.Sprintf(
+				"%q claims to come from %s, but %s, so it was not read. If every genuine "+
+					"notice says this, mail reaches Exchange Online through a gateway that "+
+					"hides the sender; fix the connector, or set %s=off",
+				short(m.Subject), safelog.Line(m.From), why, graph.SenderAuthEnv))
+			continue
+		}
 		body := m.BodyHTML
 		if body == "" {
 			body = m.BodyText
@@ -297,6 +307,10 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 	// must match a claimed run (vmscan.Companion.Matches).
 	for _, m := range msgs {
 		if m.SelfSent || !p.RecognisesCompanion(m.From, m.Subject) {
+			continue
+		}
+		// Claiming one deletes it, so the same sender check applies.
+		if ok, _ := m.VouchedFor(); !ok {
 			continue
 		}
 		body := m.BodyHTML

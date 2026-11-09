@@ -40,16 +40,16 @@ func completed(ref string) string {
 func TestCompanionsOfAReportedRunAreClaimedForDeletion(t *testing.T) {
 	body := results(t)
 	msgs := []graph.Message{
-		{ID: "res", From: "qualys@qualys.net", Subject: "Qualys: Scan Results", BodyHTML: body},
-		{ID: "done", From: "qualys@qualys.net", Subject: "Qualys: Scan Completed",
+		{ID: "res", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Results", BodyHTML: body},
+		{ID: "done", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Completed",
 			BodyHTML: completed("1793275220.51060")},
-		{ID: "task", From: "qualys@qualys.net", Subject: "Qualys: Completed Vulnerability Scan Notification",
+		{ID: "task", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Completed Vulnerability Scan Notification",
 			BodyHTML: "<pre>Title : Example Weekly\nLaunch Time : " + fixtureStart + "\n</pre>"},
 		// Same subject from the team mailbox: a lookalike, never deleted.
 		{ID: "fake", From: "team@example.com", Subject: "Qualys: Scan Completed",
 			BodyHTML: completed("1793275220.51060")},
 		// Another run of the same scan.
-		{ID: "other", From: "qualys@qualys.net", Subject: "Qualys: Scan Completed",
+		{ID: "other", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Completed",
 			BodyHTML: completed("1793999999.99999")},
 	}
 	_, seen, _ := collect(msgs, []string{"Example Weekly"})
@@ -75,8 +75,8 @@ func TestCompanionsOfAReportedRunAreClaimedForDeletion(t *testing.T) {
 func TestAnUnfinishedRunKeepsItsCompanions(t *testing.T) {
 	body := strings.Replace(results(t), ": Finished", ": Canceled", 1)
 	msgs := []graph.Message{
-		{ID: "res", From: "qualys@qualys.net", Subject: "Qualys: Scan Results", BodyHTML: body},
-		{ID: "done", From: "qualys@qualys.net", Subject: "Qualys: Scan Completed",
+		{ID: "res", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Results", BodyHTML: body},
+		{ID: "done", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Completed",
 			BodyHTML: completed("1793275220.51060")},
 	}
 	scans, seen, _ := collect(msgs, []string{"Example Weekly"})
@@ -94,3 +94,7 @@ func TestAnUnfinishedRunKeepsItsCompanions(t *testing.T) {
 		t.Error("the results notice should still be claimed - only its companions stay")
 	}
 }
+
+// qualysAuth is Exchange Online's verdict on a genuine notice (synthetic).
+const qualysAuth = "spf=pass smtp.mailfrom=qualys.net; dkim=pass header.d=qualys.net;" +
+	"dmarc=pass action=none header.from=qualys.net;compauth=pass reason=100"

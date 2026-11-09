@@ -320,6 +320,19 @@ Microsoft Graph, to read the mailbox. Required.
 .I fleet.env
 section 1.
 .TP
+.B FLEET_SENDER_AUTH
+A notice from the scanner's address is read only when Exchange Online's own
+.B Authentication\-Results
+header records
+.B compauth=pass
+or
+.B dmarc=pass
+for its From domain; anything else is a problem line, and the notice stays in
+the inbox. Set to
+.B off
+to trust the From address alone, for a tenant whose inbound gateway hides the
+real sender.
+.TP
 .B GRAPH_FOLDER
 Folder to read. Default:\~\fBinbox\fR. Section 1.
 .TP

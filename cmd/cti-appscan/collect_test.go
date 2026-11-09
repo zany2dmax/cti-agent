@@ -51,12 +51,12 @@ func scheduledNotice(title, launch string) string {
 
 func TestTheScheduledNoticeOfAReportedRunIsClaimedForDeletion(t *testing.T) {
 	msgs := []graph.Message{
-		{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject, BodyHTML: wasNotice("Finished : OK")},
-		{ID: "sched", From: "qualys@qualys.net", Subject: scheduledSubject,
+		{ID: "res", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: noticeSubject, BodyHTML: wasNotice("Finished : OK")},
+		{ID: "sched", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
-		{ID: "lastweek", From: "qualys@qualys.net", Subject: scheduledSubject,
+		{ID: "lastweek", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/01/2026 at 01:27:00 (GMT +0000)")},
-		{ID: "otherapp", From: "qualys@qualys.net", Subject: scheduledSubject,
+		{ID: "otherapp", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Portal", "11/08/2026 at 01:27:00 (GMT +0000)")},
 		{ID: "fake", From: "team@example.com", Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
@@ -81,8 +81,8 @@ func TestTheScheduledNoticeOfAReportedRunIsClaimedForDeletion(t *testing.T) {
 
 func TestAFaultyRunKeepsItsScheduledNotice(t *testing.T) {
 	msgs := []graph.Message{
-		{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject, BodyHTML: wasNotice("Time Limit Exceeded")},
-		{ID: "sched", From: "qualys@qualys.net", Subject: scheduledSubject,
+		{ID: "res", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: noticeSubject, BodyHTML: wasNotice("Time Limit Exceeded")},
+		{ID: "sched", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
 	}
 	_, seen, _ := collect(msgs)
@@ -95,5 +95,30 @@ func TestAFaultyRunKeepsItsScheduledNotice(t *testing.T) {
 	}
 	if !claimedResults {
 		t.Error("the results notice should still be claimed")
+	}
+}
+
+// qualysAuth is Exchange Online's verdict on a genuine notice (synthetic).
+const qualysAuth = "spf=pass smtp.mailfrom=qualys.net; dkim=pass header.d=qualys.net;" +
+	"dmarc=pass action=none header.from=qualys.net;compauth=pass reason=100"
+
+// PrimeSec 10786562: the From address is the sender's claim. A notice the
+// receiving server did not authenticate is neither parsed nor claimed, and
+// says why; FLEET_SENDER_AUTH=off restores the old behaviour.
+func TestAnUnauthenticatedNoticeIsReportedNotRead(t *testing.T) {
+	forged := graph.Message{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject,
+		BodyHTML:              wasNotice("Finished : OK"),
+		AuthenticationResults: "spf=fail smtp.mailfrom=qualys.net;dmarc=fail action=none header.from=qualys.net;compauth=fail reason=000"}
+	scans, seen, problems := collect([]graph.Message{forged})
+	if len(scans) != 0 || len(seen) != 0 {
+		t.Errorf("a forged notice was parsed (%d) or claimed (%d)", len(scans), len(seen))
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "compauth=fail") {
+		t.Errorf("problems = %v", problems)
+	}
+
+	t.Setenv(graph.SenderAuthEnv, "off")
+	if scans, _, _ := collect([]graph.Message{forged}); len(scans) != 1 {
+		t.Errorf("%s=off did not restore reading it: %d scans", graph.SenderAuthEnv, len(scans))
 	}
 }

@@ -470,6 +470,13 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			if !p.Recognises(m.From, m.Subject) {
 				continue
 			}
+			// The From address is the sender's claim. A notice is read only
+			// when the receiving server authenticated it (PrimeSec 10786562),
+			// and an unauthenticated one stays in the inbox for a person.
+			if ok, why := m.VouchedFor(); !ok {
+				problems = append(problems, unvouched(m, why))
+				break
+			}
 			body := m.BodyHTML
 			if body == "" {
 				body = m.BodyText
@@ -524,6 +531,12 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			if !ok || !r.RecognisesScheduled(m.From, m.Subject) {
 				continue
 			}
+			if vouched, _ := m.VouchedFor(); !vouched {
+				// Not claimed, so not deleted. One problem line per message
+				// is enough, and the results loop has the reason already
+				// when it matters; a scheduled notice changes no count.
+				break
+			}
 			body := m.BodyHTML
 			if body == "" {
 				body = m.BodyText
@@ -564,6 +577,16 @@ func lookalike(m graph.Message) string {
 			shortSubject(m.Subject), p.Name(), safelog.Line(m.From))
 	}
 	return ""
+}
+
+// unvouched explains a notice from a scanner's address that the receiving
+// server did not authenticate. Not parsed and not claimed, so it stays in the
+// inbox for a person.
+func unvouched(m graph.Message, why string) string {
+	return fmt.Sprintf("%s: claims to come from %s, but %s, so it was not read. "+
+		"If every genuine notice says this, mail reaches Exchange Online through "+
+		"a gateway that hides the sender; fix the connector, or set %s=off",
+		shortSubject(m.Subject), safelog.Line(m.From), why, graph.SenderAuthEnv)
 }
 
 // writeSeen writes the notices a report covered, 0600: subject lines from a
