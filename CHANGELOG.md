@@ -69,6 +69,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   14; 0 turns traces off) and `CHECKIN_TRACE_MAX_MB` (default 20) in
   `fleet.env`.
 
+- **Every fleet email carries `FLEET_ATTRIBUTION`.** The supplier digest footer
+  ignored it; it now uses the shared credit line. `mailer.py`, which every send
+  passes through, also adds a credit line when a body lacks the configured text
+  (and says so in its log), so a new lane that forgets it still sends it.
+
 - **The supplier-request lane: judge each new supplier request and point the
   security team at their Kanban board.** `run-supplier` (timer
   `cti-agent-supplier`, daily 07:45, `FLEET_SUPPLIER_TIME`, off until enabled;

@@ -620,6 +620,23 @@ class MailerGate(unittest.TestCase):
             f.write("<html><body>d</body></html>")
         self.assertEqual(self.run_mailer("--html", f.name, "--subject", "s"), 0)
 
+    def test_every_email_carries_the_attribution_even_when_a_lane_forgot(self):
+        os.environ["FLEET_ATTRIBUTION"] = "Sent by the Example <fleet>"
+        out = mailer.with_attribution("<html><body><p>report</p></body></html>")
+        self.assertIn("Sent by the Example &lt;fleet&gt;", out)
+        self.assertTrue(out.endswith("</div></body></html>"))
+        # A body that already has it, escaped or not, is left alone.
+        once = out
+        self.assertEqual(mailer.with_attribution(once), once)
+        plain = "<body>Sent by the Example <fleet></body>"
+        os.environ["FLEET_ATTRIBUTION"] = "Sent by the Example <fleet>"
+        self.assertEqual(mailer.with_attribution(plain), plain)
+        # Unset adds nothing, and a body with no closing tag still gets it.
+        del os.environ["FLEET_ATTRIBUTION"]
+        self.assertEqual(mailer.with_attribution("<p>x</p>"), "<p>x</p>")
+        os.environ["FLEET_ATTRIBUTION"] = "Credit"
+        self.assertIn("Credit", mailer.with_attribution("<p>x</p>"))
+
     def test_the_self_header_matches_the_go_signature(self):
         # Golden value from internal/graph/selfsign.go selfMAC with the same
         # inputs. If either side changes, cti-mailbox stops archiving our reports.

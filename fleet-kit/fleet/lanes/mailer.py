@@ -45,6 +45,7 @@ refuses to guess who should receive security findings.
 import argparse
 import hashlib
 import hmac
+import html as htmllib
 import json
 import os
 import re
@@ -318,6 +319,28 @@ def check(tok, mailbox):
     return 0 if ok else 1
 
 
+def with_attribution(body):
+    """Make sure the credit line (FLEET_ATTRIBUTION) is on the email.
+
+    Every lane builds its own footer and each is meant to carry the credit, but
+    this is the one place every fleet email passes through, so it is the net
+    under all of them: if the configured text is not in the body, a plain credit
+    line is added before the closing body tag. Unset means nothing is added.
+    A lane that already carries it (escaped or not) is left alone.
+    """
+    text = (os.environ.get("FLEET_ATTRIBUTION") or "").strip()
+    if not text:
+        return body
+    esc = htmllib.escape(text)
+    if text in body or esc in body:
+        return body
+    log("attribution: the body lacked FLEET_ATTRIBUTION, a credit line was added")
+    line = ('<div style="font:400 11px/1.6 Arial,sans-serif;color:#6b7280;'
+            'padding:8px 20px 14px 20px">' + esc + "</div>")
+    i = body.lower().rfind("</body>")
+    return body[:i] + line + body[i:] if i >= 0 else body + line
+
+
 def escalation_html(message, board_id=None):
     """Minimal HTML for a short escalation.
 
@@ -499,6 +522,7 @@ def main():
             body = f.read()
     else:
         body = escalation_html(args.message, args.board_id)
+    body = with_attribution(body)
     subject = args.subject or f"CTI Brief {datetime.now().strftime('%Y-%m-%d')}"
     if args.message and args.board_id and f"[FLEET {args.board_id}]" not in subject:
         subject = f"[FLEET {args.board_id}] {subject}"
