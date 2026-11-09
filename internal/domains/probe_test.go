@@ -372,3 +372,26 @@ func TestFirstRunFailuresAreNotReportedAsChanges(t *testing.T) {
 		t.Errorf("a real MX change after unknown was missed:\n%s", d)
 	}
 }
+
+func TestANonSenderWithAWeakSubdomainPolicyIsNotLockedDown(t *testing.T) {
+	// PrimeSec 10969084: p=reject; sp=none reads as locked down, but every
+	// subdomain of the apex can still be forged.
+	for _, c := range []struct {
+		rec  string
+		want bool
+	}{
+		{"v=DMARC1; p=reject; sp=none", true},
+		{"v=DMARC1; p=reject; sp=quarantine", true},
+		{"v=DMARC1; p=reject; sp=reject", false},
+		{"v=DMARC1; p=reject", false},
+	} {
+		dns := fakeDNS{txt: map[string][]string{
+			"example.net":        {"v=spf1 -all"},
+			"_dmarc.example.net": {c.rec},
+		}}
+		s := texts(run(t, dns, okWeb("CA", now), []Entry{{Name: "example.net"}}, nil))
+		if got := strings.Contains(s, "lets mail forged from any subdomain"); got != c.want {
+			t.Errorf("%q: flagged = %v, want %v:\n%s", c.rec, got, c.want, s)
+		}
+	}
+}

@@ -192,3 +192,17 @@ func TestAnMXValueIsSplitForTheRegistrarForm(t *testing.T) {
 		t.Errorf("the host should read @ with no apostrophe:\n%s", csv)
 	}
 }
+
+func TestALockedDomainsWeakSubdomainPolicyIsRewritten(t *testing.T) {
+	// PrimeSec 10969084: the rewrite drops sp=none so subdomains take reject.
+	m := mailOf("done.example", []string{"v=spf1 -all"},
+		[]string{"v=DMARC1; p=reject; sp=none; rua=mailto:d@example.com"}, []string{"."})
+	got := byHost(Actions([]Result{{Entry: Entry{Name: "done.example"}, Mail: m}}, ""))
+	a, ok := got["TXT _dmarc"]
+	if !ok {
+		t.Fatal("p=reject; sp=none needed no action")
+	}
+	if a.Set != "v=DMARC1; p=reject; rua=mailto:d@example.com" {
+		t.Errorf("DMARC rewrite = %q", a.Set)
+	}
+}

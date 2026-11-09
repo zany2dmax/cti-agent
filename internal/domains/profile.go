@@ -195,7 +195,11 @@ func actionsFor(r Result, rua string) []Action {
 					"more than one DMARC record: receivers ignore them all")
 			default:
 				pol := ParseDMARC(m.DMARC.Values[0])
-				if pol.Effective(!own) != "reject" || (own && pol.PCT < 100) {
+				// An sp= weaker than reject on the domain's own record lets
+				// every subdomain be forged while p=reject reads as locked
+				// down (PrimeSec attack vector 10969084).
+				if pol.Effective(!own) != "reject" || (own && pol.PCT < 100) ||
+					(own && pol.SP != "" && pol.SP != "reject") {
 					old := ""
 					if own {
 						old = m.DMARC.Values[0]
@@ -287,6 +291,12 @@ func dmarcRecord(existing, policy, rua string) string {
 			// pct below 100 applies the policy to part of the mail only;
 			// a rewritten record applies it to all of it.
 			continue
+		case "sp":
+			// Without sp= subdomains take p=. Under a reject rewrite a kept
+			// sp=none would leave every subdomain forgeable.
+			if policy == "reject" {
+				continue
+			}
 		case "rua":
 			hasRUA = true
 		}

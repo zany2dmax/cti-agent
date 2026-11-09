@@ -397,6 +397,13 @@ func evalNonSender(d string, m Mail, add adder) {
 			}
 			add(d, Medium, "mail", "does not send, so DMARC should be p=reject; it is %q%s", eff, src)
 		}
+		// The domain's own record also sets what its subdomains get. p=reject
+		// with sp=none reads as locked down while every subdomain can be
+		// forged (PrimeSec attack vector 10969084).
+		if pol := ParseDMARC(m.DMARC.Values[0]); !inherited && pol.SP != "" && pol.SP != "reject" {
+			add(d, Medium, "mail", "DMARC sp=%s lets mail forged from any subdomain through - "+
+				"set sp=reject or remove the sp tag", pol.SP)
+		}
 	default:
 		add(d, Medium, "mail", "%d DMARC records - receivers ignore them all", len(m.DMARC.Values))
 	}

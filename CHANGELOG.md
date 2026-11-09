@@ -86,6 +86,17 @@ time.
   - Attack vector 10969075 (Medium) - forged Qualys scan notice with a "not
     finished: OK" status is accepted as a complete scan. Fixed by the scan
     status entry below.
+  - Attack vector 10969084 (Medium) - apex sp= override on locked-down
+    domains lets forged subdomain mail pass DMARC enforcement while the tool
+    reports the domain as locked down. Fixed by the DMARC `sp=` entry below.
+
+- **`cti-domains` checks DMARC `sp=` on a locked-down domain's own record.**
+  A domain that sends no mail passed with `p=reject; sp=none`, though `sp=`
+  is what its subdomains get, so mail forged from any of them was not
+  refused. The evaluation now flags any `sp=` other than `reject` on the
+  domain's own record. The suggested DNS change drops the tag, so subdomains
+  take `p=reject`. A subdomain that inherits its parent's record was already
+  judged by the parent's `sp=`, and still is.
 
 - **A Qualys scan counts as complete only on "Finished : OK", and only if
   the scan list agrees.** The notice parser tested the Scan Status for the
