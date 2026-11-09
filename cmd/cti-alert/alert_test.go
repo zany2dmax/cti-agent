@@ -207,3 +207,31 @@ func TestOnlyTheFleetsOwnUnitsAreAccepted(t *testing.T) {
 		}
 	}
 }
+
+// PrimeSec 10786495: the orchestrator writes the reason and reads outside
+// mail. Links are defanged, the length is capped, and the email says so.
+func TestAnEscalationReasonIsDefangedCappedAndLabelled(t *testing.T) {
+	got := escalationReason("see https://evil.example/login and HTTP://x.example and Http://y.example")
+	for _, live := range []string{"https://", "HTTP://", "Http://"} {
+		if strings.Contains(got, live) {
+			t.Errorf("%q left a live %s link", got, live)
+		}
+	}
+	if !strings.Contains(got, "hxxps://evil.example/login") {
+		t.Errorf("defanged link not kept readable: %q", got)
+	}
+	long := escalationReason(strings.Repeat("a", 5000))
+	if n := len([]rune(long)); n > maxEscalationReason+80 {
+		t.Errorf("reason not capped: %d characters", n)
+	}
+	if !strings.Contains(long, "[cut:") {
+		t.Error("a cut reason does not say it was cut")
+	}
+	f := escalation()
+	if !strings.Contains(renderHTML(f), "wrote this reason itself") {
+		t.Error("the HTML escalation does not say the model wrote the reason")
+	}
+	if escalationReason("3 KEV-listed CVEs PRESENT and overdue") != "3 KEV-listed CVEs PRESENT and overdue" {
+		t.Error("an ordinary reason was changed")
+	}
+}

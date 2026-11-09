@@ -193,7 +193,13 @@ board line. When a
 alert is turned into
 .B TEST
 and no reason was given, a standard "manual test of the alert path" reason
-is supplied.
+is supplied. On an
+.B ESCALATION
+the orchestrator wrote the reason, so links in it are defanged
+.RB ( https://
+becomes
+.BR hxxps:// ),
+it is cut at 600 characters, and the email says the model wrote it.
 Default:\~empty.
 .TP
 .B \-\-dry\-run

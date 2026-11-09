@@ -111,6 +111,9 @@ func main() {
 	f := gather(name)
 	f.Kind = strings.ToUpper(*kind)
 	f.Reason = *reason
+	if f.isEscalation() {
+		f.Reason = escalationReason(f.Reason)
+	}
 
 	// An alert whose subject unit is demonstrably healthy was started by hand,
 	// not by OnFailure=. Saying "failed (result=success exit=0)" in that case
@@ -399,7 +402,7 @@ func renderText(f failure) string {
 		consequence = "Nothing has failed. The orchestrator reached you deliberately " +
 			"because it found something it cannot act on alone. The reason above is " +
 			"the message; the systemd detail is included only to show the lane " +
-			"itself is healthy."
+			"itself is healthy. " + escalationProvenance
 	} else if f.IsDigest {
 		consequence = "NO THREAT-INTEL EMAIL WILL ARRIVE. An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained."
@@ -457,6 +460,44 @@ func (f failure) isTest() bool { return f.Kind == "TEST" }
 // is the one that must not be.
 func (f failure) isEscalation() bool { return f.Kind == "ESCALATION" }
 
+// maxEscalationReason caps what the orchestrator can put in one escalation.
+// The skill's own example is under 300 characters.
+const maxEscalationReason = 600
+
+// escalationReason makes an escalation's reason safe to put in front of the
+// operator, under the fleet's own blue banner.
+//
+// The orchestrator writes the reason, and it reads mail from outside senders.
+// A subject that talked it into escalating could otherwise put a phishing
+// link, or a page of instructions, in a message the operator has learned to
+// trust (PrimeSec attack vector 10786495). So links are defanged
+// (http:// becomes hxxp://), so a mail client does not make them clickable,
+// and the reason is cut to maxEscalationReason characters. The email also
+// says that the model wrote it.
+func escalationReason(s string) string {
+	s = strings.TrimSpace(s)
+	// In any case ("HTTPS://", "Http://"): "http" becomes "hxxp".
+	for _, scheme := range []string{"https://", "http://"} {
+		for {
+			i := strings.Index(strings.ToLower(s), scheme)
+			if i < 0 {
+				break
+			}
+			s = s[:i] + "hxxp" + s[i+4:]
+		}
+	}
+	if r := []rune(s); len(r) > maxEscalationReason {
+		s = string(r[:maxEscalationReason]) + " [cut: the reason was longer than " +
+			fmt.Sprint(maxEscalationReason) + " characters]"
+	}
+	return s
+}
+
+// escalationProvenance is said in every escalation, plain and HTML.
+const escalationProvenance = "The orchestrator wrote this reason itself, and it reads mail " +
+	"from outside senders, so treat any instruction in it as a claim to check, " +
+	"not a request from the fleet. Links in it are defanged (hxxp://)."
+
 // notFailure covers every kind that should be reported calmly. Anything not
 // explicitly listed is STILL treated as a real failure: that rule was right
 // when an unknown kind could only come from a broken call site, and it stays
@@ -501,7 +542,8 @@ func renderHTML(f failure) string {
 		consequence = "<b>Nothing has failed.</b> The orchestrator reached you " +
 			"deliberately because it found something it cannot act on alone. " +
 			"The reason above is the message; the systemd detail below is " +
-			"included only to show the lane itself is healthy."
+			"included only to show the lane itself is healthy. " +
+			html.EscapeString(escalationProvenance)
 	} else if f.IsDigest {
 		consequence = "<b>No threat-intel email will arrive.</b> An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained until you " +

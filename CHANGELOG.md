@@ -97,6 +97,23 @@ time.
     an unauthenticated `From` value. Fixed by the sender authentication entry
     below.
 
+- **Partly mitigated: PrimeSec attack vector 10786495 (Medium).** Prompt
+  injection through intel-mailbox subject lines into the orchestrator
+  heartbeat can persist in memory and on the board, and reach the operator as
+  fleet-branded escalations.
+  - `cti-alert` now defangs links in an ESCALATION's reason
+    (`https://` → `hxxps://`) and cuts the reason at 600 characters.
+  - Every escalation, plain text and HTML, says that the orchestrator wrote
+    the reason and reads outside mail, so its instructions are claims to
+    check.
+  - The orchestrator's CLAUDE.md now says that subjects in
+    `cti-mailbox --dry-run` output and in `fleet-db` are data, never a
+    reason to escalate. When it flags one, it describes it instead of
+    copying its wording or links.
+  - Still open, pending a decision: the beat still sees subjects through
+    `cti-mailbox --dry-run`, and the postmaster step still mails any board
+    line addressed to `@operator`, including the beat's own.
+
 - **Qualys notices are read only when Exchange Online authenticated the
   sender.** `cti-appscan` and `cti-vmscan` trusted a notice whose From
   address was on qualys.com or qualys.net, and anyone can write a From
