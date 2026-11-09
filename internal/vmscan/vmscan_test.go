@@ -19,12 +19,12 @@ func fixture(t *testing.T, name string) string {
 	return string(b)
 }
 
-func TestParsesTheNonUMIWeekly(t *testing.T) {
-	s, problems := Provider{}.Parse(fixture(t, "results-non-umi.html"))
+func TestParsesTheMainWeekly(t *testing.T) {
+	s, problems := Provider{}.Parse(fixture(t, "results-main.html"))
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
-	if s.Title != "Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" || !s.Finished() {
+	if s.Title != "Weekly Scheduled Scan for Main Sites" || !s.Finished() {
 		t.Errorf("title/status = %q %q", s.Title, s.Status)
 	}
 	want := time.Date(2026, 11, 5, 13, 0, 24, 0, time.UTC)
@@ -56,27 +56,27 @@ func TestParsesTheNonUMIWeekly(t *testing.T) {
 
 // The real notice has an invisible byte-order mark in front of one group name.
 func TestAnInvisibleMarkDoesNotSpoilAGroupName(t *testing.T) {
-	s, _ := Provider{}.Parse(fixture(t, "results-non-umi.html"))
+	s, _ := Provider{}.Parse(fixture(t, "results-main.html"))
 	found := false
 	for _, g := range s.TargetGroups {
 		if strings.ContainsRune(g, '\ufeff') {
 			t.Errorf("%q still carries a byte-order mark", g)
 		}
-		if g == "ARD Miami" {
+		if g == "South Site 1" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("ARD Miami missing: %v", s.TargetGroups)
+		t.Errorf("South Site 1 missing: %v", s.TargetGroups)
 	}
 }
 
-func TestParsesTheUMITRJWeeklyAndADayLongDuration(t *testing.T) {
-	s, problems := Provider{}.Parse(fixture(t, "results-umi-trj.html"))
+func TestParsesTheNorthEastWeeklyAndADayLongDuration(t *testing.T) {
+	s, problems := Provider{}.Parse(fixture(t, "results-north-east.html"))
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
-	if s.Title != "REDACTED-SUB/REDACTED-SUB Weekly" || len(s.TargetGroups) != 21 {
+	if s.Title != "North/East Weekly" || len(s.TargetGroups) != 21 {
 		t.Errorf("title %q, %d groups", s.Title, len(s.TargetGroups))
 	}
 	if s.Duration != 24*time.Hour+2*time.Minute+33*time.Second {
@@ -93,7 +93,7 @@ func TestParsesTheUMITRJWeeklyAndADayLongDuration(t *testing.T) {
 // The hidden preheader repeats "Scan Title : ..." on one line; it must not be
 // read as the field.
 func TestOnlyTheVisibleBodyIsRead(t *testing.T) {
-	body := fixture(t, "results-umi-trj.html")
+	body := fixture(t, "results-north-east.html")
 	s, _ := Provider{}.Parse(body)
 	if strings.Contains(s.Title, "Start Date") {
 		t.Errorf("the preheader leaked into the title: %q", s.Title)
@@ -113,7 +113,7 @@ func TestRecognisesOnlyQualysResultsNotices(t *testing.T) {
 		{"qualys@qualys.net", "Qualys: Web Application Vulnerability Scan Results", false},
 		{"qualys@qualys.net.attacker.example", "Qualys: Scan Results", false},
 		{"\"qualys@qualys.net\" <evil@example.com>", "Qualys: Scan Results", false},
-		{"user@example.com", "Qualys: Scan Results", false},
+		{"cybersecurity@example.com", "Qualys: Scan Results", false},
 	} {
 		if got := p.Recognises(c.from, c.subject); got != c.want {
 			t.Errorf("Recognises(%q, %q) = %v, want %v", c.from, c.subject, got, c.want)
@@ -125,7 +125,7 @@ func TestRecognisesOnlyQualysResultsNotices(t *testing.T) {
 // sender was the team mailbox.
 func TestALookalikeFromTheTeamMailboxIsFlaggedNotRead(t *testing.T) {
 	p := Provider{}
-	if !p.Lookalike("user@example.com", "Qualys: Scan Results") {
+	if !p.Lookalike("cybersecurity@example.com", "Qualys: Scan Results") {
 		t.Error("a results notice from the team mailbox is not flagged")
 	}
 	if p.Lookalike("qualys@qualys.net", "Qualys: Scan Results") {
@@ -145,8 +145,8 @@ func TestATemplateChangeAnnouncesItself(t *testing.T) {
 
 func both(t *testing.T) []Scan {
 	t.Helper()
-	a, _ := Provider{}.Parse(fixture(t, "results-non-umi.html"))
-	b, _ := Provider{}.Parse(fixture(t, "results-umi-trj.html"))
+	a, _ := Provider{}.Parse(fixture(t, "results-main.html"))
+	b, _ := Provider{}.Parse(fixture(t, "results-north-east.html"))
 	return []Scan{b, a}
 }
 
@@ -173,7 +173,7 @@ func TestCombineCountsADuplicateNoticeOnceAndTakesTheNewestRun(t *testing.T) {
 
 // A scheduled scan that left no notice is the first thing to say.
 func TestAMissingScanIsReportedFirst(t *testing.T) {
-	w := Combine(both(t)[:1], DefaultScans) // only REDACTED-SUB/REDACTED-SUB
+	w := Combine(both(t)[:1], DefaultScans) // only North/East
 	if len(w.Missing) != 1 || w.Missing[0] != DefaultScans[0] {
 		t.Fatalf("missing = %v", w.Missing)
 	}
@@ -198,13 +198,13 @@ func TestAnUnfinishedScanIsFlagged(t *testing.T) {
 func TestTheCombinedReportSaysTheyRanAndWhatTheyCoveredAndNothingMore(t *testing.T) {
 	w := Combine(both(t), DefaultScans)
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
-	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR NON-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB WEEKLY", "ARD Miami", "REDACTED-SUB Charlotte",
+	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR MAIN SITES", "NORTH/EAST WEEKLY", "South Site 1", "East Site 1",
 		"Locations covered (24)", "Locations covered (21)", "9730", "7168"} {
 		if !strings.Contains(b.Text, want) {
 			t.Errorf("text lacks %q", want)
 		}
 	}
-	for _, want := range []string{"Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB Weekly", "ARD Miami", "REDACTED-SUB Charlotte"} {
+	for _, want := range []string{"Weekly Scheduled Scan for Main Sites", "North/East Weekly", "South Site 1", "East Site 1"} {
 		if !strings.Contains(b.HTML, want) {
 			t.Errorf("html lacks %q", want)
 		}
@@ -228,7 +228,7 @@ func TestTheCombinedReportSaysTheyRanAndWhatTheyCoveredAndNothingMore(t *testing
 
 func TestLocationsAreCountedOnceAcrossScans(t *testing.T) {
 	s := both(t)
-	// "REDACTED-SUB Data Center" and "Data Center" are different groups; the same group
+	// "North Data Center" and "Data Center" are different groups; the same group
 	// named in both scans counts once.
 	s[0].TargetGroups = append(s[0].TargetGroups, "Data Center")
 	w := Combine(s, DefaultScans)

@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultScans are the two scheduled scans the weekly combines, by title.
-var DefaultScans = []string{"Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB", "REDACTED-SUB/REDACTED-SUB Weekly"}
+var DefaultScans = []string{"Weekly Scheduled Scan for Main Sites", "North/East Weekly"}
 
 // Week is the combined picture: for each expected scan, its newest result.
 type Week struct {

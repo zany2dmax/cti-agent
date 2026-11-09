@@ -90,7 +90,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   still needed (the form, blank required fields, what the supplier provides), in
   fixed wording. A request whose item could not be filed is no longer recorded as
   reported, so the next run files it.
-  `task eval:supplier` runs the real model on 26 invented requests (by hand,
+  `task eval:supplier` runs the real model on 42 invented requests (by hand,
   never in ship) and reports how often its verdict is the one wanted, failing
   only when a supplier would have been waved through.
   The mail filter's quarantine digest, which also lands on the list, is left
@@ -110,7 +110,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 - **The weekly Qualys VM scan report: the two scheduled scans in one email.**
   `run-vmscan` (timer `cti-agent-vmscan`, Mondays 08:00, `FLEET_VMSCAN_TIME`)
   reads the "Qualys: Scan Results" notices for "Weekly Scheduled Scan for
-  non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly" from the CTI mailbox and sends one email to
+  Main Sites" and "North/East Weekly" from the CTI mailbox and sends one email to
   `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO` (no fallback; set both to
   `$VM_ALLOW_TO` to reuse the VM audience - a lane's recipient list may now
   reference another list the way an allowlist always could), with the two scans in separate
@@ -146,8 +146,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   **Upgrade:** re-run the
   installer and set `VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO` in
   `fleet.env`, then enable
-  `cti-agent-vmscan.timer`. For the REDACTED-SUB/REDACTED-SUB scan's notices to reach the mailbox,
-  reassign that schedule to the `REDACTED-USER` account and set its notification From
+  `cti-agent-vmscan.timer`. For the North/East scan's notices to reach the mailbox,
+  reassign that schedule to the scan service account and set its notification From
   Address to `qualys@qualys.net` (see RUNBOOK).
 
 - **Ask the CLI instead of remembering it: a command list, usage and TAB

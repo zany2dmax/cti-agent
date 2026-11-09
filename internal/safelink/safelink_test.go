@@ -12,11 +12,11 @@ import (
 const (
 	// Dictionary "Iw" decodes to "#", so the single * is a fragment marker.
 	qualysWrapped = "https://urldefense.com/v3/__https://qualysguard.qg3.apps.qualys.com" +
-		"/was/*/reports/online-reports/email-report/scan/25080057__;Iw!!REDACTED-TOKEN!x$"
+		"/was/*/reports/online-reports/email-report/scan/25080057__;Iw!!A!x$"
 
 	// Dictionary "JSUlJSU" decodes to "%%%%%", so every * is a percent sign.
 	azureWrapped = "https://urldefense.com/v3/__https://eur.safelink.emails.azure.net" +
-		"/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view&p=abc__;JSUlJSU!!REDACTED-TOKEN!y$"
+		"/redirect/?destination=https*3A*2F*2Fportal.azure.com*2F*23view&p=abc__;JSUlJSU!!A!y$"
 )
 
 func TestTheSubstitutionDictionaryIsDecodedNotAssumed(t *testing.T) {

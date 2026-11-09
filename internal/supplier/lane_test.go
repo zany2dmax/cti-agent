@@ -349,11 +349,11 @@ func TestAMessageIsNeverSkippedForWhatItSays(t *testing.T) {
 
 func TestReplyPrefixesAreNotPartOfTheTitle(t *testing.T) {
 	for in, want := range map[string]string{
-		"Fw: New Vendor - JARRELL CO.": "New Vendor - JARRELL CO.",
-		"RE: Re: FWD: Livingstone":     "Livingstone",
-		"Re:Boards":                    "Boards",
-		"Regarding Re: nothing":        "Regarding Re: nothing",
-		"":                             "",
+		"Fw: New Vendor - ACME SUPPLY CO.": "New Vendor - ACME SUPPLY CO.",
+		"RE: Re: FWD: Livingstone":         "Livingstone",
+		"Re:Boards":                        "Boards",
+		"Regarding Re: nothing":            "Regarding Re: nothing",
+		"":                                 "",
 	} {
 		if got := (Request{Subject: in}).Name(); got != want {
 			t.Errorf("Name(%q) = %q, want %q", in, got, want)

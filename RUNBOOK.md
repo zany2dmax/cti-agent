@@ -1108,7 +1108,7 @@ map of where to look, and it is handled like the VM reports for that reason.
 ### The weekly VM scan report (run-vmscan)
 
 `cti-agent-vmscan.timer`, Mondays 08:00, runner `run-vmscan`. The two scheduled
-Qualys VM scans ("Weekly Scheduled Scan for non-REDACTED-SUB/REDACTED-SUB" and "REDACTED-SUB/REDACTED-SUB Weekly")
+Qualys VM scans ("Weekly Scheduled Scan for Main Sites" and "North/East Weekly")
 each email a "Qualys: Scan Results" notice when they finish. This lane reads
 those notices from the CTI mailbox and sends **one** email with both scans, kept
 in separate sections: that it ran, when and for how long, addresses scanned and
@@ -1133,7 +1133,7 @@ did not finish, otherwise how many scans ran and how many locations they covered
 **Getting the notices into the mailbox.** Qualys sends them to the people on
 each schedule's notification list and, for the owner-only notice, to the scan's
 owner. A schedule owned by a user whose email is not `cybersecurity@` does not
-reach this mailbox. Reassign the schedule to the `REDACTED-USER` service account, add
+reach this mailbox. Reassign the schedule to the scan service account, add
 `cybersecurity@` to its notification recipients, and set the notification From
 Address to `qualys@qualys.net`: a notice that looks as if it came from
 `cybersecurity@` is treated as the fleet's own mail, and the lane logs it and
@@ -1265,7 +1265,7 @@ The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` a
 words that stop a No from standing (a supplier whose name, subject or notes hold
 one is Unsure, not No).
 
-**Testing the judgement.** `task eval:supplier` runs the real model on 26 invented
+**Testing the judgement.** `task eval:supplier` runs the real model on 42 invented
 requests (clear materials, clear technology, blank and vague forms, linked and
 unreadable forms, and hostile ones: injected instructions, a request that tries
 to close the untrusted block, fake authority, bait to fabricate a quote), calls it
