@@ -1232,11 +1232,29 @@ request text, so delete it), then `--to-dev`, then enable the timer. The
 installer builds `cti-supplier` and puts the model's instructions at
 `/opt/cti-agent/agents/supplier/CLAUDE.md`, root-owned.
 
-A request is reported once (`state/supplier-seen.json` holds a label and a date,
-no names), and its Kanban item is found again by a label rather than filed twice,
-so a rerun after a failure is safe. If an item cannot be filed (the project is
-not in `JIRA_ALLOW_CREATE`, Jira is down) the digest still goes out and the run
-fails after it, so the failure alert fires and the request is not lost.
+A request is reported once. `state/supplier-seen.json` remembers, per request, a
+label, dates, the verdict and the Kanban item's key (no names, no text from the
+request), and the item is found again by its label rather than filed twice. If an
+item cannot be filed (the project is not in `JIRA_ALLOW_CREATE`, Jira is down)
+the digest still goes out and the run fails after it, so the failure alert
+fires; that request is **not** recorded, so the next run collects it again and
+files it then.
+
+**New information.** When a request already reported gets a newer message in
+its email thread (the requester sends the website, or the form arrives), it is
+judged again. If the verdict changed, or the form was unreadable and is now
+read, the lane adds a **comment** to the item it already has saying what
+changed, and the digest lists the request under "Updated". If nothing changed
+it stays quiet. The lane **never closes, reopens or edits an item**: when a
+request turns out not critical, the comment says a person can close it.
+
+**Information still needed.** Each Yes or Unsure item lists what is missing,
+worked out by code: the form (not attached, linked, or not the form), required
+fields left blank, and what the supplier will provide when the notes are empty.
+The wording is fixed, so nothing a requester wrote reaches it. The lane never
+contacts the requester; the items on the board are what prompt whoever runs
+supplier set-up to ask for the rest. The digest repeats it in one line per
+request.
 
 The mail filter's quarantine digest ("End User Digest") also lands on the list. It is left out, using the address already in `MAILBOX_DIGEST_SENDERS` (exact sender and subject, so a person's reply to a digest still counts), and the digest says how many were skipped. Unset, nothing is skipped. No other sender is ever skipped, and nothing a request says can get it skipped.
 

@@ -76,7 +76,15 @@ which must be in
 .BR JIRA_ALLOW_CREATE .
 The item carries the business fields of the form and the reason, and no address,
 contact or remittance detail. A failure to file one item is recorded and does not
-stop the others or the digest. Writes
+stop the others or the digest, and a request that failed is not recorded as
+reported, so the next run tries again.
+.PP
+A request reported before is judged again when its thread has a newer message.
+If the verdict changed, or the form is now read, a comment is added to its
+existing item saying what changed; if nothing changed it is quiet. The lane never
+closes, reopens or edits an item. Each Yes or Unsure item lists what is still
+needed (the form, blank required fields, what the supplier will provide), in
+fixed wording, since the lane never contacts the requester. Writes
 .BR digest.html ,
 .BR digest.txt ,
 .BR digest.subject ,
@@ -88,7 +96,7 @@ Records the requests in a
 .B seen.json
 as reported, in
 .BR state/supplier\-seen.json ,
-which holds a label and a date and no supplier name. Run by
+which holds, per request, a label, dates, the verdict and the Kanban item's key, and no supplier name or request text. Run by
 .BR run\-supplier (1)
 after a real send.
 .SH OPTIONS

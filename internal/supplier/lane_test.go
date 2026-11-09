@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestSeenRequestsAndTheFleetsOwnMailAreNotCollected(t *testing.T) {
 		msg("m3", "c3", "our report", mailbox, "digest", 11, false),
 	}}
 	old := Request{ConversationID: "c1"}
-	seen := map[string]bool{old.Label(): true}
+	seen := Seen{old.Label(): SeenEntry{Reported: epoch, LastReceived: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)}}
 	items, _, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, Config{}, seen, mailbox, epoch, nil)
 	if err != nil || len(items) != 1 || items[0].Request.MessageID != "m2" {
 		t.Fatalf("%+v %v", items, err)
@@ -125,9 +126,19 @@ func TestSeenRequestsAndTheFleetsOwnMailAreNotCollected(t *testing.T) {
 }
 
 type fakeTickets struct {
-	existing map[string]string // label substring -> key
-	created  []string
-	failOn   string
+	existing   map[string]string // label substring -> key
+	created    []string
+	failOn     string
+	comments   []string // "KEY: text"
+	commentErr string
+}
+
+func (f *fakeTickets) Comment(_ context.Context, key, text string) error {
+	if f.commentErr != "" {
+		return errors.New(f.commentErr)
+	}
+	f.comments = append(f.comments, key+": "+text)
+	return nil
 }
 
 func (f *fakeTickets) Find(_ context.Context, jql string) (string, string, bool, error) {
@@ -347,5 +358,225 @@ func TestReplyPrefixesAreNotPartOfTheTitle(t *testing.T) {
 		if got := (Request{Subject: in}).Name(); got != want {
 			t.Errorf("Name(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// ---- updates: a reported request that gets a newer message --------------------
+
+func reportedAt(h int) SeenEntry {
+	return SeenEntry{Reported: epoch, LastReceived: time.Date(2026, 11, 5, h, 0, 0, 0, time.UTC),
+		Verdict: Unsure, FormState: StateNone, Ticket: "CYBR-7", TicketURL: "https://example.test/browse/CYBR-7"}
+}
+
+func TestAReplyToAReportedThreadIsJudgedAgainButQuietOnesAreNot(t *testing.T) {
+	first := msg("m1", "c1", "new supplier", "a@example.test", "gravel", 9, false)
+	reply := msg("m2", "c1", "Re: new supplier", "a@example.test", "our website is example.test", 15, false)
+	label := (Request{ConversationID: "c1"}).Label()
+
+	// Reported at 09:00; a reply at 15:00 is new information.
+	items, _, err := Collect(context.Background(), fakeMail{[]graph.AddressedMessage{first, reply}}, &perMessage{}, Policy{}, Config{}, Seen{label: reportedAt(9)}, mailbox, epoch, nil)
+	if err != nil || len(items) != 1 || !items[0].Update || items[0].Prior.Ticket != "CYBR-7" {
+		t.Fatalf("%+v %v", items, err)
+	}
+	// Reported after the reply: nothing new.
+	items, _, _ = Collect(context.Background(), fakeMail{[]graph.AddressedMessage{first, reply}}, &perMessage{}, Policy{}, Config{}, Seen{label: reportedAt(15)}, mailbox, epoch, nil)
+	if len(items) != 0 {
+		t.Errorf("a thread with nothing new was collected: %d", len(items))
+	}
+	// An entry from the first version of the record has no last-received time:
+	// reported once, never judged again.
+	legacy := SeenEntry{Reported: epoch}
+	items, _, _ = Collect(context.Background(), fakeMail{[]graph.AddressedMessage{first, reply}}, &perMessage{}, Policy{}, Config{}, Seen{label: legacy}, mailbox, epoch, nil)
+	if len(items) != 0 {
+		t.Errorf("a legacy entry was judged again: %d", len(items))
+	}
+}
+
+func updateItem(id string, prior SeenEntry) Item {
+	it := itemFor(id, "Cloud Backup Inc")
+	it.Update, it.Prior = true, prior
+	it.Request.LastReceived = time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	return it
+}
+
+func TestAChangedJudgementCommentsOnTheExistingItemAndFilesNothing(t *testing.T) {
+	it := updateItem("a", reportedAt(9)) // was Unsure
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{it}, map[int][]byte{0: yes("a")}, Config{}, tk, "CYBR", true)
+	o := out[0]
+	if o.Ticket != "commented" || !o.Changed || !o.Request.Updated || o.Request.TicketKey != "CYBR-7" {
+		t.Fatalf("%+v", o)
+	}
+	if len(tk.created) != 0 || len(tk.comments) != 1 || !strings.HasPrefix(tk.comments[0], "CYBR-7: ") {
+		t.Fatalf("created %v comments %v", tk.created, tk.comments)
+	}
+	for _, want := range []string{"changed from *Unsure* to *Critical*", "never closes items"} {
+		if want == "never closes items" {
+			continue // only said for a No
+		}
+		if !strings.Contains(tk.comments[0], want) {
+			t.Errorf("the comment lacks %q:\n%s", want, tk.comments[0])
+		}
+	}
+	if !o.Reported() {
+		t.Error("a changed update must be in the digest")
+	}
+}
+
+func TestAnUnchangedJudgementIsQuietAndOnlyAdvancesTheRecord(t *testing.T) {
+	prior := reportedAt(9)
+	prior.Verdict, prior.FormState = Yes, StateRead
+	it := updateItem("a", prior) // was Yes with the form read, still Yes
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{it}, map[int][]byte{0: yes("a")}, Config{}, tk, "CYBR", true)
+	o := out[0]
+	if o.Ticket != "unchanged" || o.Changed || o.Reported() || len(tk.comments)+len(tk.created) != 0 {
+		t.Fatalf("%+v comments %v", o, tk.comments)
+	}
+	if len(Requests(out)) != 0 {
+		t.Error("an unchanged update reached the digest")
+	}
+	recs := SeenRecords(out)
+	if len(recs) != 1 || !recs[0].Entry.LastReceived.Equal(it.Request.LastReceived) || recs[0].Entry.Ticket != "CYBR-7" {
+		t.Errorf("the record was not advanced: %+v", recs)
+	}
+}
+
+func TestTheFormBeingReadAfterwardsCountsAsAChange(t *testing.T) {
+	prior := reportedAt(9) // Unsure, form none
+	it := updateItem("a", prior)
+	it.Request.State = StateRead
+	unsureNow := []byte(`{"schema":"cti-supplier/1","message_id":"a","verdict":"unsure","reason":"still unclear"}`)
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{it}, map[int][]byte{0: unsureNow}, Config{}, tk, "CYBR", true)
+	if !out[0].Changed || out[0].Ticket != "commented" || !strings.Contains(tk.comments[0], "form was not read before and has now been read") {
+		t.Fatalf("%+v %v", out[0], tk.comments)
+	}
+}
+
+func TestACommentOnANoSaysAPersonCanCloseItAndNothingIsClosed(t *testing.T) {
+	it := updateItem("a", reportedAt(9))
+	it.Request.Form.Name = "Gravel Co" // no technology word in the name
+	no := []byte(`{"schema":"cti-supplier/1","message_id":"a","verdict":"no","reason":"gravel","evidence":["SUBJECT: New supplier request"]}`)
+	tk := &fakeTickets{}
+	Finish(context.Background(), []Item{it}, map[int][]byte{0: no}, Config{}, tk, "CYBR", true)
+	if len(tk.comments) != 1 || !strings.Contains(tk.comments[0], "never closes items") {
+		t.Fatalf("%v", tk.comments)
+	}
+}
+
+func TestAnUpdateWhoseEarlierJudgementWasNoGetsAnItemWhenItBecomesCritical(t *testing.T) {
+	prior := SeenEntry{Reported: epoch, LastReceived: reportedAt(9).LastReceived, Verdict: No, FormState: StateRead} // no item
+	it := updateItem("a", prior)
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{it}, map[int][]byte{0: yes("a")}, Config{}, tk, "CYBR", true)
+	if out[0].Ticket != "created" || len(tk.created) != 1 || len(tk.comments) != 0 || !out[0].Request.Updated {
+		t.Fatalf("%+v created %v comments %v", out[0], tk.created, tk.comments)
+	}
+}
+
+func TestADryRunOfAnUpdateWritesNothing(t *testing.T) {
+	tk := &fakeTickets{}
+	out := Finish(context.Background(), []Item{updateItem("a", reportedAt(9))}, map[int][]byte{0: yes("a")}, Config{}, tk, "CYBR", false)
+	if out[0].Ticket != "would-comment" || len(tk.comments) != 0 {
+		t.Errorf("%+v", out[0])
+	}
+}
+
+func TestAFailedFilingOrCommentIsNotRecordedSoTheNextRunTriesAgain(t *testing.T) {
+	items := []Item{itemFor("a", "Cloud Backup Inc"), itemFor("b", "Network Gear Co"), updateItem("c", reportedAt(9))}
+	tk := &fakeTickets{failOn: "Cloud Backup", commentErr: "jira said no"}
+	out := Finish(context.Background(), items, map[int][]byte{0: yes("a"), 1: yes("b"), 2: yes("c")}, Config{}, tk, "CYBR", true)
+	if out[0].Err == "" || out[2].Err == "" || out[1].Err != "" {
+		t.Fatalf("errs: %q %q %q", out[0].Err, out[1].Err, out[2].Err)
+	}
+	recs := SeenRecords(out)
+	if len(recs) != 1 || recs[0].Label != out[1].Request.Label() {
+		t.Errorf("only the item that was filed may be recorded: %+v", recs)
+	}
+	if recs[0].Entry.Ticket == "" || recs[0].Entry.Verdict != Yes {
+		t.Errorf("the record lacks the ticket or verdict: %+v", recs[0].Entry)
+	}
+}
+
+func TestTheOldRecordFormatStillLoadsAndKeepsFirstReportedDate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	if err := os.WriteFile(path, []byte(`{"fleet-supplier-old":"2026-11-01T09:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSeen(path)
+	if err != nil || !s.Has("fleet-supplier-old") || !s["fleet-supplier-old"].LastReceived.IsZero() {
+		t.Fatalf("%v %v", s, err)
+	}
+	first := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
+	s.RecordEntry("fleet-supplier-old", SeenEntry{Verdict: Yes, LastReceived: now}, now)
+	if !s["fleet-supplier-old"].Reported.Equal(first) || s["fleet-supplier-old"].Verdict != Yes {
+		t.Errorf("first-reported date lost: %+v", s["fleet-supplier-old"])
+	}
+}
+
+func TestNeedsListsWhatCodeFoundMissingAndNothingForANo(t *testing.T) {
+	has := func(r Request, sub string) bool {
+		for _, n := range r.Needs() {
+			if strings.Contains(n, sub) {
+				return true
+			}
+		}
+		return false
+	}
+	base := sampleRequest(Unsure)
+	linked := base
+	linked.State, linked.Form = StateLinked, nil
+	unreadable := base
+	unreadable.State, unreadable.Form = StateUnreadable, nil
+	none := base
+	none.State, none.Form = StateNone, nil
+	blank := base
+	blank.Form = &Form{Name: "x", Notes: "  ", Missing: []string{"ERP", "Branch(es)/Markets Using Supplier"}}
+	complete := sampleRequest(Unsure)
+	if !has(linked, "Attach the supplier request form") || !has(unreadable, "not that form") || !has(none, "None was attached") {
+		t.Error("a missing form was not asked for")
+	}
+	if !has(blank, "ERP, Branch(es)/Markets Using Supplier") || !has(blank, "goods or services") {
+		t.Errorf("blank fields were not asked for: %v", blank.Needs())
+	}
+	if len(complete.Needs()) != 0 {
+		t.Errorf("a complete form needs nothing: %v", complete.Needs())
+	}
+	if n := sampleRequest(No); len(n.Needs()) != 0 {
+		t.Error("a No was asked for more")
+	}
+	none.Decision.Verdict = No
+	if len(none.Needs()) != 0 {
+		t.Error("a No with no form was asked for more")
+	}
+}
+
+func TestTheItemAndTheCommentSayWhatIsStillNeededAndEscapeEverything(t *testing.T) {
+	r := sampleRequest(Unsure)
+	r.State, r.Form = StateLinked, nil
+	d := TicketDescription(r, Config{}, "CYBR")
+	for _, want := range []string{"h3. Information still needed", "Attach the supplier request form", "never contacts the requester", "judges the request again"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the item lacks %q:\n%s", want, d)
+		}
+	}
+	r.Decision.Reason = "see {code} and [link|http://evil.example] !img.png!"
+	c := UpdateComment(r, reportedAt(9), Config{})
+	// Take out every backslash-escaped character: whatever is left of the reason
+	// line must hold none of the characters that mean something in Jira markup.
+	var why string
+	for _, line := range strings.Split(c, "\n") {
+		if strings.HasPrefix(line, "see ") {
+			why = line
+		}
+	}
+	if why == "" {
+		t.Fatalf("the reason line is missing:\n%s", c)
+	}
+	left := regexp.MustCompile(`\\.`).ReplaceAllString(why, "")
+	if strings.ContainsAny(left, "{}[]|!") {
+		t.Errorf("an unescaped markup character survived in %q (left: %q)", why, left)
 	}
 }

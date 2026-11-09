@@ -3830,7 +3830,7 @@ fi
         self.assertIn("jira said no", r.stderr)
         c = self.calls()
         self.assertTrue(any(x.startswith("mailer --lane supplier") for x in c), "the digest must still go out")
-        self.assertTrue(any("--commit-seen" in x for x in c), "and the requests be recorded as reported")
+        self.assertTrue(any("--commit-seen" in x for x in c), "and what was filed be recorded as reported")
 
     def test_unknown_arguments_are_refused(self):
         r = self.run_it("--for-real", "--file-jira")

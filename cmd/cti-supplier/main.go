@@ -205,13 +205,17 @@ func doCollect(dir string, window time.Duration) int {
 	// mistaken for one. Unset: nothing is skipped.
 	digestSenders := splitList(cfg.MailboxDigestSenders)
 	automatic := func(from, subject string) bool { return mailbox.QuarantineDigest(from, subject, digestSenders) }
-	items, skipped, err := supplier.Collect(ctx, mail, src, policy(), laneConfig(), seen.Set(), cfg.GraphMailbox, time.Now().Add(-window), automatic)
+	items, skipped, err := supplier.Collect(ctx, mail, src, policy(), laneConfig(), seen, cfg.GraphMailbox, time.Now().Add(-window), automatic)
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	for _, it := range items {
 		r := it.Request
-		logf("found  : %s (form %s, %d file(s) left unopened)", safelog.Line(r.Name()), r.State, len(r.Skipped))
+		again := ""
+		if it.Update {
+			again = ", reported before: new message"
+		}
+		logf("found  : %s (form %s, %d file(s) left unopened%s)", safelog.Line(r.Name()), r.State, len(r.Skipped), again)
 	}
 	logf("collect: %d new request(s) in the last %s, %d already reported, %d automatic message(s) left out", len(items), window, len(seen), skipped)
 	if err := writeItems(dir, items, skipped); err != nil {
@@ -310,11 +314,9 @@ func doFinish(dir string, fileJira bool) int {
 			}
 		}
 	}
-	var labels []string
-	for _, o := range outcomes {
-		labels = append(labels, o.Request.Label())
-	}
-	sb, _ := json.Marshal(labels)
+	// Only what did not fail is recorded as reported: a request whose item could
+	// not be filed is collected again next run and filed then.
+	sb, _ := json.Marshal(supplier.SeenRecords(outcomes))
 	if err := os.WriteFile(filepath.Join(dir, "seen.json"), sb, 0o600); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
@@ -337,22 +339,25 @@ func doCommitSeen(path string) int {
 	if err != nil {
 		return die("reading %s: %s", safelog.Line(path), safelog.Line(err.Error()))
 	}
-	var labels []string
-	if err := json.Unmarshal(b, &labels); err != nil {
+	var records []supplier.SeenRecord
+	if err := json.Unmarshal(b, &records); err != nil {
 		return die("%s does not parse: %s", safelog.Line(path), safelog.Line(err.Error()))
 	}
 	seen, err := supplier.LoadSeen(dest)
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
-	seen.Record(labels, time.Now())
+	now := time.Now()
+	for _, r := range records {
+		seen.RecordEntry(r.Label, r.Entry, now)
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	if err := seen.Save(dest); err != nil {
 		return die("saving %s: %s", safelog.Line(dest), safelog.Line(err.Error()))
 	}
-	logf("seen   : %d request(s) recorded as reported", len(labels))
+	logf("seen   : %d request(s) recorded as reported", len(records))
 	return exitOK
 }
 
@@ -367,6 +372,7 @@ func (c closedTickets) Find(context.Context, string) (string, string, bool, erro
 func (c closedTickets) Create(context.Context, string, string, []string) (string, string, error) {
 	return "", "", errors.New(c.why)
 }
+func (c closedTickets) Comment(context.Context, string, string) error { return errors.New(c.why) }
 
 type jiraTickets struct {
 	c         *jira.Client
@@ -384,6 +390,12 @@ func (j jiraTickets) Find(ctx context.Context, jql string) (string, string, bool
 		return "", "", false, nil
 	}
 	return issues[0].Key, j.c.BrowseURL(issues[0].Key), true, nil
+}
+
+// Comment adds a comment to an item. The lane has no call that closes, reopens
+// or edits one: that stays with a person.
+func (j jiraTickets) Comment(ctx context.Context, key, text string) error {
+	return j.c.AddComment(ctx, key, text)
 }
 
 func (j jiraTickets) Create(ctx context.Context, summary, description string, labels []string) (string, string, error) {

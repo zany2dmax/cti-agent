@@ -83,6 +83,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   digest email to `SUPPLIER_TO`, checked against `SUPPLIER_ALLOW_TO` (no
   fallback), links the board; a day with no new requests sends nothing. A form
   shared as a link is not opened - that request is Unsure, with the reason.
+  A request already reported that gets a newer message in its thread is judged
+  again; if the verdict changed (or the form is now read) a comment is added to
+  its existing item and the digest lists it as updated - the lane never closes,
+  reopens or edits an item. Each Yes or Unsure item says what information is
+  still needed (the form, blank required fields, what the supplier provides), in
+  fixed wording. A request whose item could not be filed is no longer recorded as
+  reported, so the next run files it.
   The mail filter's quarantine digest, which also lands on the list, is left
   out (the address already in `MAILBOX_DIGEST_SENDERS`, exact sender and
   subject) and counted in the digest; nothing else is skipped.

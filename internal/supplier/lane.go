@@ -27,6 +27,10 @@ type Mail interface {
 // establish it, and the input the model is shown.
 type Item struct {
 	Request Request `json:"request"`
+	// Update is true when the request was reported before and has a newer
+	// message now; Prior is what was remembered about it.
+	Update bool      `json:"update,omitempty"`
+	Prior  SeenEntry `json:"prior,omitempty"`
 	// Input is the rendered file for the model.
 	Input string `json:"input"`
 	// Source is the untrusted text, kept so evidence can be checked at finish.
@@ -94,7 +98,7 @@ const contextLookback = 21 * 24 * time.Hour
 // left out, and the second result counts those inside the window so the digest
 // can say how many were skipped. It decides by sender address and subject only,
 // never by what a message says, so nothing a requester writes can use it.
-func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen map[string]bool, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) ([]Item, int, error) {
+func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, seen Seen, mailbox string, since time.Time, isAutomatic func(from, subject string) bool) ([]Item, int, error) {
 	msgs, err := mail.Addressed(ctx, since.Add(-contextLookback))
 	if err != nil {
 		return nil, 0, fmt.Errorf("reading the mailbox: %w", err)
@@ -127,8 +131,14 @@ func Collect(ctx context.Context, mail Mail, src Source, p Policy, cfg Config, s
 		if err != nil {
 			return nil, 0, err
 		}
-		if seen[it.Request.Label()] {
-			continue
+		// A request reported before is skipped unless a message newer than the one
+		// last judged has arrived: that is new information, and it is judged again
+		// (a request recorded without a last-received time is reported once only).
+		if prior, ok := seen[it.Request.Label()]; ok {
+			if prior.LastReceived.IsZero() || !it.Request.LastReceived.After(prior.LastReceived) {
+				continue
+			}
+			it.Update, it.Prior = true, prior
 		}
 		items = append(items, it)
 	}
@@ -196,6 +206,7 @@ func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) 
 	}
 
 	req.MessageID, req.Subject, req.From, req.Received = primary.ID, primary.Subject, primary.From, primary.Received
+	req.LastReceived = t[len(t)-1].Received
 	req.Skipped = skipped
 
 	body := primary.BodyText
@@ -220,24 +231,39 @@ type Tickets interface {
 	Find(ctx context.Context, jql string) (key, url string, found bool, err error)
 	// Create files one item and returns its key and link.
 	Create(ctx context.Context, summary, description string, labels []string) (key, url string, err error)
+	// Comment adds a comment to an existing item. The lane never closes,
+	// reopens or edits an item: that stays with a person.
+	Comment(ctx context.Context, key, text string) error
 }
 
 // Outcome is one request after judgement, with what happened to its item.
 type Outcome struct {
 	Request Request
-	// Ticket is "" (none needed), "found", "created", "would-create" or "error".
+	// Ticket is "" (none needed), "found", "created", "commented", "unchanged",
+	// "would-create", "would-comment" or "error".
 	Ticket string
-	// Err is the reason an item could not be filed.
+	// Err is the reason an item could not be filed or updated.
 	Err string
+	// Update is true for a request reported before; Changed is true when the new
+	// judgement or form state differs from the last, which is what is acted on.
+	Update, Changed bool
 }
 
-// Finish judges every item and files the Kanban items that need filing.
+// Reported says whether the digest should list this outcome: every new request,
+// and an update only when something changed.
+func (o Outcome) Reported() bool { return !o.Update || o.Changed }
+
+// Finish judges every item and files or updates the Kanban items that need it.
 //
 // results holds the model's raw output by item index; an item with none is
 // Unsure, so a model that is down turns every request into a to-do for a
 // person. tickets may be nil (no Jira configured) and fileJira false (a dry
-// run) - either way nothing is written. A failure to file one item is recorded
-// on that item and does not stop the others or the digest.
+// run) - either way nothing is written. A failure on one item is recorded on
+// that item and does not stop the others or the digest.
+//
+// A request reported before (an Update) is acted on only when its judgement or
+// its form state changed: a comment is added to the item it already has, saying
+// what changed. Nothing is ever closed, reopened or edited.
 func Finish(ctx context.Context, items []Item, results map[int][]byte, cfg Config, tickets Tickets, project string, fileJira bool) []Outcome {
 	out := make([]Outcome, 0, len(items))
 	for i, it := range items {
@@ -252,33 +278,83 @@ func Finish(ctx context.Context, items []Item, results map[int][]byte, cfg Confi
 			req.Decision = judgeAgainst(raw, in, it.Source, cfg)
 		}
 
-		o := Outcome{Request: req}
-		if req.NeedsTicket(false) {
+		o := Outcome{Request: req, Update: it.Update}
+		if it.Update {
+			o.Changed = it.Prior.Verdict != req.Decision.Verdict ||
+				(it.Prior.FormState != StateRead && req.State == StateRead)
+			o.Request.PriorVerdict = it.Prior.Verdict
+			o.Request.TicketKey, o.Request.TicketURL = it.Prior.Ticket, it.Prior.TicketURL
+		}
+		switch {
+		case it.Update && !o.Changed:
+			o.Ticket = "unchanged"
+		case it.Update && it.Prior.Ticket != "":
+			o.Request.Updated = true
 			switch {
 			case tickets == nil || project == "":
 				o.Ticket, o.Err = "error", "no Jira project is set for this lane (SUPPLIER_JIRA_PROJECT)"
 			case !fileJira:
-				o.Ticket = "would-create"
+				o.Ticket = "would-comment"
 			default:
-				key, url, found, err := tickets.Find(ctx, FindJQL(project, req))
-				switch {
-				case err != nil:
-					o.Ticket, o.Err = "error", "looking for an existing item: "+err.Error()
-				case found:
-					o.Ticket = "found"
-					o.Request.TicketKey, o.Request.TicketURL = key, url
-				default:
-					key, url, err := tickets.Create(ctx, TicketSummary(req), TicketDescription(req, cfg, project), req.Labels())
-					if err != nil {
-						o.Ticket, o.Err = "error", "creating the item: "+err.Error()
-					} else {
-						o.Ticket = "created"
-						o.Request.TicketKey, o.Request.TicketURL = key, url
-					}
+				if err := tickets.Comment(ctx, it.Prior.Ticket, UpdateComment(o.Request, it.Prior, cfg)); err != nil {
+					o.Ticket, o.Err = "error", "commenting on "+it.Prior.Ticket+": "+err.Error()
+				} else {
+					o.Ticket = "commented"
 				}
+			}
+		default:
+			o.Request.Updated = it.Update
+			if req.NeedsTicket(false) {
+				o.fileTicket(ctx, tickets, project, fileJira, cfg)
 			}
 		}
 		out = append(out, o)
+	}
+	return out
+}
+
+// fileTicket finds the item already filed for the request or files one.
+func (o *Outcome) fileTicket(ctx context.Context, tickets Tickets, project string, fileJira bool, cfg Config) {
+	req := o.Request
+	switch {
+	case tickets == nil || project == "":
+		o.Ticket, o.Err = "error", "no Jira project is set for this lane (SUPPLIER_JIRA_PROJECT)"
+	case !fileJira:
+		o.Ticket = "would-create"
+	default:
+		key, url, found, err := tickets.Find(ctx, FindJQL(project, req))
+		switch {
+		case err != nil:
+			o.Ticket, o.Err = "error", "looking for an existing item: "+err.Error()
+		case found:
+			o.Ticket = "found"
+			o.Request.TicketKey, o.Request.TicketURL = key, url
+		default:
+			key, url, err := tickets.Create(ctx, TicketSummary(req), TicketDescription(req, cfg, project), req.Labels())
+			if err != nil {
+				o.Ticket, o.Err = "error", "creating the item: "+err.Error()
+			} else {
+				o.Ticket = "created"
+				o.Request.TicketKey, o.Request.TicketURL = key, url
+			}
+		}
+	}
+}
+
+// SeenRecords is what to remember after a send: every outcome that did not
+// fail. One whose item could not be filed or commented is left out, so the next
+// run collects it again and tries again instead of the lane believing it done.
+func SeenRecords(outs []Outcome) []SeenRecord {
+	out := []SeenRecord{}
+	for _, o := range outs {
+		if o.Err != "" {
+			continue
+		}
+		r := o.Request
+		out = append(out, SeenRecord{Label: r.Label(), Entry: SeenEntry{
+			LastReceived: r.LastReceived, Verdict: r.Decision.Verdict, FormState: r.State,
+			Ticket: r.TicketKey, TicketURL: r.TicketURL,
+		}})
 	}
 	return out
 }
@@ -290,10 +366,13 @@ func judgeAgainst(raw []byte, in Input, source string, cfg Config) Decision {
 }
 
 // Requests returns the requests of a set of outcomes, for the digest.
-func Requests(os []Outcome) []Request {
-	out := make([]Request, len(os))
-	for i, o := range os {
-		out[i] = o.Request
+func Requests(outs []Outcome) []Request {
+	out := make([]Request, 0, len(outs))
+	for _, o := range outs {
+		if !o.Reported() {
+			continue
+		}
+		out = append(out, o.Request)
 	}
 	return out
 }

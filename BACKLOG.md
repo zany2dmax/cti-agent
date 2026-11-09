@@ -133,8 +133,23 @@ is real, not before. Finished work moves out of this file into
   run against the real mailbox, Jira and the API - the `claude` flags were
   checked against `--help` only and the runner tests use stubs. Next: a
   `--dry-run` with `SUPPLIER_MODEL` set, then `--to-dev`, then enable the timer.
-  Still open: a single shared model-lane runner (H4) now that there are two
-  model uses, and whether to widen the form reader if the form changes.
+  **Dry run on the real mailbox (2026-11-08):** the model step worked end to end
+  (the no-tools flags are accepted; 20 requests judged, none failed), which
+  also showed that a window cutting a conversation hid its form message (fixed:
+  threads are read whole) and that the quarantine digest was filed as a request
+  (fixed: skipped by `MAILBOX_DIGEST_SENDERS`, counted). **Re-judging built:**
+  a reported request with a newer message is judged again and, if the verdict or
+  form state changed, commented on its existing item and listed as updated; each
+  Yes or Unsure item lists what is still needed; a request whose item failed is
+  no longer recorded as reported. Many open Unsure items are accepted on purpose:
+  the board is what prompts the requester to be asked for more.
+  **Waiting on the TPRM owner's final question wording**, to be added to the
+  supplier request form itself (website, what is supplied, data and system
+  access, security contact): then the form reader learns those fields, a
+  requester's Yes becomes a Yes, a blank becomes "still needed", and the website
+  gives a safe place to start a lookup done by code, not by the model.
+  Not done: an eval set to tune the instructions and compare models (above in
+  this entry's plan), the lookup by code, and a shared model-lane runner (H4).
   **Framing and shape (added 2026-11-06):** a Yes to the question means the
   supplier is *critical* - it touches company data, systems or networks, or
   provides technology (hardware, software or connected equipment) - and a

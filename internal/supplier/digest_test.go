@@ -101,3 +101,62 @@ func TestTheDigestSaysHowManyAutomaticMessagesWereLeftOut(t *testing.T) {
 		t.Error("a day of only automatic messages sent a digest")
 	}
 }
+
+func updatedReq(name, was, now string) Request {
+	r := named(name, now, 9)
+	r.Updated, r.PriorVerdict = true, was
+	r.TicketKey, r.TicketURL = "CYBR-7", "https://example.test/browse/CYBR-7"
+	return r
+}
+
+func TestAnUpdatedRequestIsListedWithWhatChanged(t *testing.T) {
+	reqs := []Request{named("New Co", Unsure, 8), updatedReq("Arctiq Co", Unsure, Yes)}
+	b, ok := Digest(reqs, "Org", day, "https://example.test/board", "the CYBR board", 0)
+	if !ok {
+		t.Fatal("no digest")
+	}
+	for _, want := range []string{
+		"1 supplier request came in. 1 has a to-do on the CYBR board. 1 earlier request got new information.",
+		"UPDATED, CRITICAL - Arctiq Co (CYBR-7)", "Was unsure, now critical.",
+	} {
+		if !strings.Contains(b.Text, want) {
+			t.Errorf("text lacks %q:\n%s", want, b.Text)
+		}
+	}
+	if !strings.HasSuffix(b.Subject, "(1 updated)") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+	if !strings.Contains(b.HTML, "Updated - Critical: Arctiq Co") || !strings.Contains(b.HTML, "Was unsure, now critical.") {
+		t.Error("the HTML does not show the update")
+	}
+}
+
+func TestADayOfOnlyUpdatesSaysSoAndStillLinksTheBoard(t *testing.T) {
+	b, ok := Digest([]Request{updatedReq("Arctiq Co", Unsure, Yes)}, "", day, "https://example.test/board", "", 0)
+	if !ok || !strings.HasPrefix(b.Text, "1 earlier supplier request got new information and was judged again.") ||
+		!strings.Contains(b.Text, "Board: https://example.test/board") {
+		t.Errorf("text:\n%s", b.Text)
+	}
+}
+
+func TestAnUpdateWithTheSameVerdictSaysTheJudgementIsUnchanged(t *testing.T) {
+	r := updatedReq("Arctiq Co", Unsure, Unsure)
+	b, _ := Digest([]Request{r}, "", day, "", "", 0)
+	if !strings.Contains(b.Text, "New information arrived; the judgement is unchanged.") {
+		t.Errorf("text:\n%s", b.Text)
+	}
+}
+
+func TestTheDigestSaysWhatIsStillNeeded(t *testing.T) {
+	r := named("Mystery LLC", Unsure, 9)
+	r.State, r.Form = StateLinked, nil
+	b, _ := Digest([]Request{r}, "", day, "", "", 0)
+	if !strings.Contains(b.Text, "Still needed: Attach the supplier request form") || !strings.Contains(b.HTML, "Still needed: Attach the supplier request form") {
+		t.Errorf("text:\n%s", b.Text)
+	}
+	ok := named("Gravel Co", No, 9)
+	b, _ = Digest([]Request{ok}, "", day, "", "", 0)
+	if strings.Contains(b.Text, "Still needed") {
+		t.Error("a No was asked for more")
+	}
+}

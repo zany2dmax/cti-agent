@@ -77,10 +77,12 @@ func TestFinishWithNoModelMakesEveryRequestUnsureAndStillWritesTheDigest(t *test
 	if !strings.Contains(string(txt), "No judgement was available") {
 		t.Errorf("the digest does not say why:\n%s", txt)
 	}
-	var labels []string
+	// No project is set, so each Unsure needed an item and none could be filed:
+	// nothing is recorded as reported, so the next run tries again.
+	var recs []supplier.SeenRecord
 	sb, _ := os.ReadFile(filepath.Join(dir, "seen.json"))
-	if err := json.Unmarshal(sb, &labels); err != nil || len(labels) != 2 {
-		t.Errorf("seen.json = %s (%v)", sb, err)
+	if err := json.Unmarshal(sb, &recs); err != nil || len(recs) != 0 {
+		t.Errorf("seen.json = %s (%v): a request whose item failed must not be recorded", sb, err)
 	}
 	// No project set: each Unsure needed an item and none could be filed, so the
 	// runner has a problem to report after the digest goes out.
@@ -102,6 +104,12 @@ func TestFinishUsesTheModelsJudgementWhenItIsThere(t *testing.T) {
 	if !strings.Contains(string(subj), "0 critical, 1 unsure, 1 not critical") {
 		t.Errorf("subject = %q", subj)
 	}
+	// The No needs no item, so it is recorded; the Unsure could not be filed.
+	var recs []supplier.SeenRecord
+	sb, _ := os.ReadFile(filepath.Join(dir, "seen.json"))
+	if err := json.Unmarshal(sb, &recs); err != nil || len(recs) != 1 || recs[0].Entry.Verdict != "no" {
+		t.Errorf("seen.json = %s (%v)", sb, err)
+	}
 }
 
 func TestNoRequestsWritesNoDigest(t *testing.T) {
@@ -119,14 +127,15 @@ func TestCommitSeenRecordsLabelsAndRefusesNoStateDir(t *testing.T) {
 	t.Setenv("SUPPLIER_SEEN_FILE", "")
 	t.Setenv("FLEET_HOME", home)
 	f := filepath.Join(t.TempDir(), "seen.json")
-	if err := os.WriteFile(f, []byte(`["fleet-supplier-abc"]`), 0o600); err != nil {
+	rec := `[{"label":"fleet-supplier-abc","entry":{"last_received":"2026-11-05T09:00:00Z","verdict":"unsure","ticket":"CYBR-7"}}]`
+	if err := os.WriteFile(f, []byte(rec), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if code := doCommitSeen(f); code != exitOK {
 		t.Fatalf("exit %d", code)
 	}
 	s, err := supplier.LoadSeen(filepath.Join(home, "state", "supplier-seen.json"))
-	if err != nil || !s.Has("fleet-supplier-abc") {
+	if err != nil || !s.Has("fleet-supplier-abc") || s["fleet-supplier-abc"].Ticket != "CYBR-7" || s["fleet-supplier-abc"].Verdict != "unsure" {
 		t.Errorf("%v %v", s, err)
 	}
 	t.Setenv("FLEET_HOME", "")

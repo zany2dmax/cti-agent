@@ -25,6 +25,15 @@ type Request struct {
 	Skipped  []Skipped
 	Decision Decision
 
+	// LastReceived is the newest message of the conversation when it was judged.
+	LastReceived time.Time
+
+	// Updated is true when this is a request reported before that has a newer
+	// message, and the new judgement differs from the last; PriorVerdict is what
+	// it was. The digest lists it under "Updated".
+	Updated      bool
+	PriorVerdict string
+
 	// TicketKey and TicketURL are filled in by the lane once the Jira item
 	// exists, so the digest can point at it. Empty when there is none.
 	TicketKey string
@@ -168,6 +177,7 @@ func TicketDescription(r Request, cfg Config, board string) string {
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(needsSection(r))
 
 	b.WriteString("h3. The request\n||Field||Value||\n")
 	b.WriteString(row("Supplier", r.Name()))
@@ -208,5 +218,90 @@ func TicketDescription(r Request, cfg Config, board string) string {
 	b.WriteString("Filed automatically by the supplier-request lane. It reads the request and the form only; ")
 	b.WriteString("it never replies to the requester, never moves their mail and never opens the tax or bank attachments. ")
 	b.WriteString("Close this item when the " + cfg.tprm() + " is done, or when you decide the supplier is not critical.\n")
+	return b.String()
+}
+
+// Needs lists what is missing from a request that a person could get from the
+// requester: the form, its blank required fields, a description of what the
+// supplier will provide. It is built by code from what the lane found, and the
+// wording is fixed, so nothing a requester wrote reaches it. A No needs nothing.
+func (r Request) Needs() []string {
+	if r.Decision.Verdict == No {
+		return nil
+	}
+	var out []string
+	switch r.State {
+	case StateLinked:
+		out = append(out, "Attach the supplier request form to the request. It arrived as a link, which the lane does not open.")
+	case StateUnreadable:
+		out = append(out, "Send the supplier request form. The attachment that came with the request is not that form.")
+	case StateNone:
+		out = append(out, "Send the completed supplier request form. None was attached.")
+	case StateRead:
+		if f := r.Form; f != nil {
+			if len(f.Missing) > 0 {
+				out = append(out, "Complete the required fields left blank on the form: "+strings.Join(f.Missing, ", ")+".")
+			}
+			if strings.TrimSpace(f.Notes) == "" {
+				out = append(out, "Say what goods or services the supplier will provide. The notes on the form are blank.")
+			}
+		}
+	}
+	return out
+}
+
+func needsSection(r Request) string {
+	needs := r.Needs()
+	if len(needs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("h3. Information still needed\n")
+	for _, n := range needs {
+		b.WriteString("* " + n + "\n")
+	}
+	b.WriteString("\nThe lane never contacts the requester. Ask them, through whoever runs supplier set-up, and when they answer in the same email thread the lane judges the request again and adds a comment here.\n\n")
+	return b.String()
+}
+
+// UpdateComment is the comment added to an existing item when a request that was
+// reported before has new information and its judgement or form state changed.
+// It is Jira wiki markup; everything from the request is escaped.
+func UpdateComment(r Request, prior SeenEntry, cfg Config) string {
+	var b strings.Builder
+	b.WriteString("New information arrived in the request thread (latest message " + r.LastReceived.UTC().Format("2006-01-02") + ").\n\n")
+	if prior.Verdict != r.Decision.Verdict {
+		fmt.Fprintf(&b, "The judgement changed from *%s* to *%s*.\n", VerdictLabel(prior.Verdict), VerdictLabel(r.Decision.Verdict))
+	}
+	if prior.FormState != StateRead && r.State == StateRead {
+		b.WriteString("The supplier request form was not read before and has now been read.\n")
+	}
+	b.WriteString("\n")
+	switch r.Decision.Verdict {
+	case Yes:
+		fmt.Fprintf(&b, "This supplier now looks critical, so it has to go through the %s.\n\n", cfg.tprm())
+	case No:
+		b.WriteString("The lane now judges this supplier not critical. A person can close this item if they agree; the lane never closes items.\n\n")
+	default:
+		b.WriteString("Still unsure: it is treated as critical until a person decides.\n\n")
+	}
+	if r.Decision.Reason != "" {
+		b.WriteString("h3. Why\n" + wiki(r.Decision.Reason) + "\n\n")
+	}
+	if len(r.Decision.Evidence) > 0 {
+		b.WriteString("h3. What the request says\n")
+		for _, q := range r.Decision.Evidence {
+			b.WriteString("* " + wiki(oneLine(q, 300)) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Decision.Notes) > 0 {
+		b.WriteString("h3. What to be careful about\n")
+		for _, n := range r.Decision.Notes {
+			b.WriteString("* " + wiki(oneLine(n, 300)) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(needsSection(r))
 	return b.String()
 }
