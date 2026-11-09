@@ -195,10 +195,14 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 	// meant a diagnostic sentence ("No Qualys KnowledgeBase CVE-to-QID mapping
 	// found") landed in the hosts field and got rendered downstream as though
 	// it were a machine name.
-	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason |\n")
-	b.WriteString("|---|---|---|---|---:|---:|---|---|---|\n")
+	//
+	// Detection Titles is last so a reader of an older report, which stops at
+	// Reason, still parses. Titles are joined with " ; " and cleaned of the
+	// separators by cleanTitles.
+	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason | Detection Titles |\n")
+	b.WriteString("|---|---|---|---|---:|---:|---|---|---|---|\n")
 	for _, r := range results {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s | %s |\n",
 			r.CVE,
 			r.Status,
 			r.Source,
@@ -208,6 +212,7 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 			r.LastSeen,
 			escape(redactHosts(r.SampleHosts, mode, salt)),
 			escape(r.Reason),
+			cleanTitles(r.Titles),
 		)
 	}
 
@@ -273,6 +278,20 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 	// The mode is the control that matters here and it is deliberately 0600;
 	// see the package comment.
 	return os.WriteFile(path, []byte(b.String()), 0600)
+}
+
+// cleanTitles joins detection titles for the report's last column. A pipe
+// would end the cell and a ";" would split a title, so both are replaced;
+// the titles are names, and "/" and "," read the same.
+func cleanTitles(titles []string) string {
+	out := make([]string, 0, len(titles))
+	for _, t := range titles {
+		t = strings.NewReplacer("|", "/", ";", ",").Replace(t)
+		if t = strings.Join(strings.Fields(t), " "); t != "" {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, " ; ")
 }
 
 func escape(s string) string {

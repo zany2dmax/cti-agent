@@ -18,6 +18,11 @@ type Result struct {
 	Status      string
 	Source      string
 	ExternalIDs []string
+	// Titles is the provider's own name for the detections in ExternalIDs,
+	// e.g. "Google Chrome Prior to 131.0 Multiple Vulnerabilities". The
+	// digest names the product a finding is about from it when CISA KEV and
+	// NVD cannot. Nil when the provider has none.
+	Titles []string
 
 	// HostCount is the number of distinct MACHINES affected: the union across
 	// this CVE's detection IDs, not the sum of their host counts. A CVE

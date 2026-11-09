@@ -40,7 +40,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The first
 digest after the upgrade re-reads NVD once for every CVE in its cache and the
 KEV catalog once, to pick up the product data the old cache dropped, so that
-run is slower (about 6.5 seconds a CVE without `NVD_API_KEY`).
+run is slower (about 6.5 seconds a CVE without `NVD_API_KEY`). It also
+downloads the whole Qualys KnowledgeBase once (a few minutes, as on a first
+install) to record each QID's title in `<QUALYS_KB_CACHE>.titles.json`. If that
+download fails, the run carries on with the cache it has and tries again next
+time.
 
 ### Added
 
@@ -56,7 +60,13 @@ run is slower (about 6.5 seconds a CVE without `NVD_API_KEY`).
 
   The name comes from the CISA KEV catalog's vendor and product first, then
   from NVD's CPE data (vulnerable entries only, so a Chrome bug never names
-  Windows). Nothing guesses one from the description. `enrich.py` keeps a
+  Windows), then from the scanner's own detection title, cut down to the
+  product ("Google Chrome Prior to 131.0 Multiple Vulnerabilities" → Google
+  Chrome; "Red Hat Update for kernel" → kernel (Red Hat)). The card says which
+  source it used when you hover over the name. Nothing guesses one from the
+  description. For the titles, the Qualys client now keeps each QID's
+  KnowledgeBase title, and the raw report gains a last column, Detection
+  Titles; older reports still parse. `enrich.py` keeps a
   CVE-to-product map, `state/products.json`, so a ticket whose CVE is not in
   today's mail still gets its name.
 

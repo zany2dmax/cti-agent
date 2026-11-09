@@ -137,7 +137,12 @@ def parse_report(path):
     """Parse the Go agent's markdown table.
 
     Columns: CVE | Status | Provider | External IDs | Host Count | Max Score |
-             Last Seen | Sample Hosts | Reason
+             Last Seen | Sample Hosts | Reason | Detection Titles
+
+    Detection Titles (the scanner's own names for the detections, joined
+    with " ; ") was added last, so a report without it still parses.
+    Cells are split on unescaped pipes: the agent writes a pipe inside a
+    cell as \\|, and a plain split would shift every column after it.
 
     Older reports combined the last two into "Sample Hosts / Reason", so a
     diagnostic sentence could end up in the hosts field. Both layouts are
@@ -150,7 +155,9 @@ def parse_report(path):
             line = line.strip()
             if not line.startswith("|") or line.startswith("|---") or "| CVE |" in line:
                 continue
-            cells = [c.strip() for c in line.strip("|").split("|")]
+            body = line[1:-1] if line.endswith("|") and not line.endswith("\\|") else line[1:]
+            cells = [c.strip().replace("\\|", "|")
+                     for c in re.split(r"(?<!\\)\|", body)]
             if len(cells) < 8 or not CVE_RE.fullmatch(cells[0]):
                 continue
             cve = cells[0].upper()
@@ -180,6 +187,9 @@ def parse_report(path):
                 "last_seen": cells[6],
                 "sample_hosts": hosts,
                 "provider_reason": reason,
+                "detection_titles": [t.strip() for t in
+                                     (cells[9] if len(cells) >= 10 else "").split(" ; ")
+                                     if t.strip()],
             }
     return findings
 
@@ -296,13 +306,16 @@ def fetch_nvd(cves):
 # --------------------------------------------------------------- product name
 #
 # "Which product is this about?" - Chrome, Safari, PHP - on every finding and
-# fleet ticket. Two sources the lane already downloads, in order of trust:
+# fleet ticket. Three sources the fleet already has, in order of trust:
 #
 #   1. The CISA KEV catalog's vendorProject and product: one clean name,
 #      written by a person, e.g. "Google" / "Chromium V8".
 #   2. NVD's CPE configuration: the vulnerable products as vendor:product
 #      pairs, e.g. cpe:2.3:a:google:chrome. Missing for a CVE NVD has not
 #      analysed yet, which is common in its first weeks.
+#   3. The scanner's own detection titles, from the report's last column:
+#      "Google Chrome Prior to 131.0 Multiple Vulnerabilities". The scanner's
+#      name for what is installed here, cut down to the product.
 #
 # When neither has an answer the product is "" and the email says "product
 # not identified". Nothing guesses one from the description text.
@@ -375,8 +388,53 @@ def cpe_products(nvd_cve):
     return out
 
 
+# A scanner title names the product, then says what is wrong with it:
+#   "Google Chrome Prior to 131.0 Multiple Vulnerabilities"
+#   "PHP Multiple Vulnerabilities (8.3.14)"
+#   "Red Hat Update for kernel (RHSA-2026:1234)"
+#   "Microsoft Windows Security Update for November 2026"
+# The product is the part before the first of these words. A title that does
+# not split cleanly gives no name rather than a long or odd one.
+_TITLE_FOR = re.compile(
+    r"^(?P<who>.+?)\s+(?:Security\s+)?(?:Updates?|Notification|Advisory|Patch)"
+    r"\s+for\s+(?P<what>.+)$", re.I)
+_TITLE_CUT = re.compile(
+    r"\s+(?:Prior\s+to\b|Before\b|Versions?\b|Multiple\b|Remote\b|Security\b|"
+    r"Cumulative\b|Critical\b|Denial\b|Information\b|Privilege\b|Elevation\b|"
+    r"Arbitrary\b|Cross[- ]Site\b|SQL\s+Injection\b|Buffer\b|Heap\b|Stack\b|"
+    r"Use[- ]After[- ]Free\b|Out[- ]of[- ]Bounds\b|Type\s+Confusion\b|Integer\b|"
+    r"Command\s+Injection\b|Path\s+Traversal\b|Authentication\b|Unspecified\b|"
+    r"Vulnerabilit|Update\b|Patch\b|\(|-\s|:)", re.I)
+_DATEISH = re.compile(r"^(?:January|February|March|April|May|June|July|August|"
+                      r"September|October|November|December|\d)", re.I)
+TITLE_PRODUCT_MAX = 60
+
+
+def product_from_title(title):
+    """The product named in a scanner detection title, or ""."""
+    t = " ".join(str(title or "").split())
+    if not t:
+        return ""
+    m = _TITLE_FOR.match(t)
+    if m:
+        who, what = m.group("who").strip(), _TITLE_CUT.split(m.group("what"), 1)[0].strip()
+        # "Red Hat Update for kernel" is about the kernel, as Red Hat ships
+        # it; "Microsoft Windows Security Update for November 2026" is about
+        # Windows.
+        name = who if (not what or _DATEISH.match(what)) else f"{what} ({who})"
+    else:
+        name = _TITLE_CUT.split(t, 1)[0].strip()
+    name = name.strip(" -,:")
+    if len(name) < 2 or len(name) > TITLE_PRODUCT_MAX or _DATEISH.match(name):
+        return ""
+    return name
+
+
 def product_for(f):
-    """(product, source) for an enriched finding; ("", "") when unknown."""
+    """(product, source) for an enriched finding; ("", "") when unknown.
+
+    CISA KEV, then NVD, then the scanner's detection titles.
+    """
     name = product_name(f.get("kev_vendor"), f.get("kev_product"))
     if name:
         return name, "CISA KEV"
@@ -387,12 +445,20 @@ def product_for(f):
         n = product_name(_cpe_words(pair[0]), _cpe_words(pair[1]))
         if n and n not in names:
             names.append(n)
+    source = "NVD"
+    if not names:
+        for t in f.get("detection_titles") or []:
+            n = product_from_title(t)
+            if n and n not in names:
+                names.append(n)
+        prov = str(f.get("provider") or "").strip()
+        source = "Qualys" if prov.lower() == "qualys" else (prov or "scanner")
     if not names:
         return "", ""
     shown = ", ".join(names[:PRODUCT_MAX])
     if len(names) > PRODUCT_MAX:
         shown += f" +{len(names) - PRODUCT_MAX} more"
-    return shown, "NVD"
+    return shown, source
 
 
 def save_products(findings, kev, path):

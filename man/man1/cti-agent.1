@@ -359,6 +359,11 @@ directory, which under
 is
 .BR $CTI_AGENT_DIR ;
 keep it absolute.
+Each QID's KnowledgeBase title is kept beside it in
+.IR <path>.titles.json ,
+also 0600; a cache without one is rebuilt in full once to create it.
+The titles fill the report's Detection Titles column, from which the
+digest names the product a finding is about.
 Default:\~\fI./qualys_kb_cache.json\fR. Section 3.
 .TP
 .B QUALYS_KB_MAX_AGE_HOURS

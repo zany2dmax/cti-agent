@@ -8,6 +8,7 @@ board.md
 __pycache__/
 *.pyc
 qualys_kb_cache.json
+qualys_kb_cache.json.titles.json
 nvd-cache.json
 kev-cache.json
 products.json

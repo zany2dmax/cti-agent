@@ -182,7 +182,7 @@ unconfigured install read that mailbox instead of refusing to start.
 | `QUALYS_BASE_URL` | Qualys API base URL, required when `LOOKUP_PROVIDER=qualys` |
 | `QUALYS_USERNAME` | Qualys username, same condition |
 | `QUALYS_PASSWORD` | Qualys password, same condition |
-| `QUALYS_KB_CACHE` | Local JSON cache path for the CVE→QID map |
+| `QUALYS_KB_CACHE` | Local JSON cache path for the CVE→QID map. QID titles live beside it in `<path>.titles.json` |
 | `QUALYS_KB_MAX_AGE_HOURS` | Hours before the cache refreshes, default 168 |
 
 A command only fails on the credentials it actually uses: `cti-mailbox` never

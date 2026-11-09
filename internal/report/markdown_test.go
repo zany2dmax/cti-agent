@@ -283,3 +283,28 @@ func TestNothingHeldAddsNothingToTheReport(t *testing.T) {
 		t.Errorf("a report with nothing held mentioned holding:\n%s", b)
 	}
 }
+
+// The detection titles are the last column, so enrich.py can name the
+// product a finding is about, and a pipe or semicolon in a title cannot
+// split a cell or a title.
+func TestDetectionTitlesAreTheLastColumn(t *testing.T) {
+	t.Setenv("REPORT_HOSTNAMES", "full")
+	path := filepath.Join(t.TempDir(), "report.md")
+	r := sampleResults()
+	r[0].Titles = []string{"Example Browser Prior to 1.2 | Multiple; Vulnerabilities", "Example Second Title"}
+	if err := WriteMarkdown(path, "x@example.com", time.Now(), 1, "qualys", r); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "| Reason | Detection Titles |") {
+		t.Error("header has no Detection Titles column after Reason")
+	}
+	want := "| Example Browser Prior to 1.2 / Multiple, Vulnerabilities ; Example Second Title |"
+	if !strings.Contains(s, want) {
+		t.Errorf("row does not end with the cleaned titles %q:\n%s", want, s)
+	}
+}

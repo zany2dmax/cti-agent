@@ -1468,6 +1468,52 @@ class ProductName(unittest.TestCase):
                 d = json.load(fh)
         self.assertTrue(all("product" in f for f in d["findings"]))
 
+    TITLES = {
+        "Google Chrome Prior to 131.0.6778.69 Multiple Vulnerabilities": "Google Chrome",
+        "PHP Multiple Vulnerabilities (8.3.14)": "PHP",
+        "Red Hat Update for kernel (RHSA-2026:1234)": "kernel (Red Hat)",
+        "Microsoft Windows Security Update for November 2026": "Microsoft Windows",
+        "Oracle Java SE Critical Patch Update - October 2026": "Oracle Java SE",
+        "Microsoft Exchange Server Remote Code Execution Vulnerability": "Microsoft Exchange Server",
+        "November 2026 Cumulative Update": "",
+        "": "",
+    }
+
+    def test_a_scanner_title_is_cut_to_the_product(self):
+        for title, want in self.TITLES.items():
+            with self.subTest(title=title):
+                self.assertEqual(enrich.product_from_title(title), want)
+
+    def test_scanner_titles_are_the_last_resort(self):
+        f = {"provider": "qualys", "detection_titles": [
+            "Apple Safari Prior to 18.1 Multiple Vulnerabilities",
+            "Apple Safari Prior to 18.0 Multiple Vulnerabilities"]}
+        self.assertEqual(enrich.product_for(f), ("Apple Safari", "Qualys"))
+        f["cpe_products"] = [["apple", "webkit"]]
+        self.assertEqual(enrich.product_for(f), ("Apple Webkit", "NVD"))
+
+    def test_the_report_titles_column_is_read(self):
+        row = ("| CVE-2026-0007 | PRESENT | qualys | 1,2 | 3 | 90 | 2026-11-01 | host-a | "
+               "a \\| b | Google Chrome Prior to 1.0 Multiple Vulnerabilities ; PHP Multiple "
+               "Vulnerabilities (8.3) |\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "raw.md")
+            with open(path, "w") as fh:
+                fh.write(row)
+            got = enrich.parse_report(path)["CVE-2026-0007"]
+        self.assertEqual(got["provider_reason"], "a | b")
+        self.assertEqual(got["detection_titles"], [
+            "Google Chrome Prior to 1.0 Multiple Vulnerabilities", "PHP Multiple Vulnerabilities (8.3)"])
+        self.assertEqual(enrich.product_for(got), ("Google Chrome, PHP", "Qualys"))
+
+    def test_an_old_report_has_no_titles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "raw.md")
+            with open(path, "w") as fh:
+                fh.write(REPORT)
+            got = enrich.parse_report(path)
+        self.assertTrue(all(f["detection_titles"] == [] for f in got.values()))
+
     def finding(self, **kw):
         f = {"cve": "CVE-2026-9", "priority": "Sev5", "status": "PRESENT",
              "host_count": 3, "rationale": "r"}

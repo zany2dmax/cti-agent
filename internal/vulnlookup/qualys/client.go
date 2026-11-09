@@ -34,6 +34,16 @@ type Client struct {
 	kbCache KBCache
 	kbAge   time.Duration
 	kbStale bool
+
+	// kbTitles is the KnowledgeBase's own name for each QID that has a CVE
+	// ("Google Chrome Prior to 131.0 Multiple Vulnerabilities"), kept in a
+	// sidecar beside the cache. The digest names the product a finding is
+	// about from it when neither CISA KEV nor NVD can. nil means the sidecar
+	// does not exist yet, which triggers one full rebuild to create it.
+	kbTitles KBTitles
+	// builtTitles carries the titles out of BuildKBCache, whose exported
+	// signature returns only the CVE map.
+	builtTitles KBTitles
 }
 
 type DetectionSummary struct {
@@ -78,6 +88,36 @@ const (
 )
 
 type KBCache map[string][]int
+
+// KBTitles maps a QID to its KnowledgeBase title.
+type KBTitles map[int]string
+
+// titlesPath is where the titles sidecar lives: beside the cache, so the two
+// are configured, backed up and deleted together.
+func titlesPath(cachePath string) string { return cachePath + ".titles.json" }
+
+// maxTitlesPerCVE bounds the titles one lookup carries. A cumulative update
+// can map to dozens of QIDs with near-identical titles; three is enough to
+// say what the product is.
+const maxTitlesPerCVE = 3
+
+// titlesFor returns the titles of these QIDs, in QID order, without repeats.
+func (c *Client) titlesFor(qids []int) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, q := range qids {
+		t := strings.Join(strings.Fields(c.kbTitles[q]), " ")
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+		if len(out) == maxTitlesPerCVE {
+			break
+		}
+	}
+	return out
+}
 
 func New(baseURL, username, password, kbCachePath string, kbMaxAge time.Duration) *Client {
 	return &Client{
@@ -132,6 +172,7 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 			CVE:         cve,
 			Source:      c.Name(),
 			ExternalIDs: qidStrings(qids),
+			Titles:      c.titlesFor(qids),
 			Status:      vulnlookup.StatusUnknown,
 			Reason:      fmt.Sprintf("Qualys detection lookup failed: %v", err),
 		}, err
@@ -141,6 +182,7 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 		CVE:         cve,
 		Source:      c.Name(),
 		ExternalIDs: qidStrings(qids),
+		Titles:      c.titlesFor(qids),
 		Status:      vulnlookup.StatusNotPresent,
 	}
 	// Hosts are UNIONED across the CVE's QIDs, not summed.
@@ -248,11 +290,42 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 		}
 	}
 
+	c.kbTitles = loadKBTitles(titlesPath(cachePath))
+	// A cache from before the titles sidecar existed gets one full rebuild,
+	// so every QID has its title at once. An incremental top-up would only
+	// title the QIDs Qualys changed since, and writing that partial sidecar
+	// would stop the rebuild from ever happening.
+	needTitles := haveCache && c.kbTitles == nil
+
 	switch {
-	case haveCache && age <= c.kbMaxAge:
+	case haveCache && age <= c.kbMaxAge && !needTitles:
 		log.Printf("Qualys KB cache: %d CVEs, %s old (fresh)", len(existing), formatAge(age))
 		c.kbCache, c.kbAge, c.kbStale = existing, age, false
 		return existing, nil
+
+	case needTitles:
+		log.Printf("Qualys KB cache: %d CVEs, %s old, no QID titles yet (%s) - "+
+			"one full rebuild to add them", len(existing), formatAge(age), titlesPath(cachePath))
+		fresh, err := c.BuildKBCache(ctx)
+		if err == nil {
+			err = checkPlausibleRebuild(existing, fresh)
+		}
+		if err != nil {
+			// Titles are a nicety. The cache we have is as good as it was;
+			// only mark it stale if it was already past its age.
+			stale := age > c.kbMaxAge
+			log.Printf("Qualys KB rebuild for titles failed (%v) - keeping the %s-old cache "+
+				"without titles", err, formatAge(age))
+			c.kbCache, c.kbAge, c.kbStale = existing, age, stale
+			return existing, nil
+		}
+		if err := writeKBCache(cachePath, fresh); err != nil {
+			log.Printf("Qualys KB cache: could not write %s: %v", cachePath, err)
+		}
+		c.kbTitles = c.builtTitles
+		c.saveTitles(cachePath)
+		c.kbCache, c.kbAge, c.kbStale = fresh, 0, false
+		return fresh, nil
 
 	case haveCache:
 		// Try an incremental top-up before falling back to a full rebuild:
@@ -266,6 +339,7 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 			if err := writeKBCache(cachePath, existing); err != nil {
 				log.Printf("Qualys KB cache: could not write %s: %v", cachePath, err)
 			}
+			c.saveTitles(cachePath)
 			c.kbCache, c.kbAge, c.kbStale = existing, 0, false
 			return existing, nil
 		}
@@ -290,6 +364,8 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 		if err := writeKBCache(cachePath, fresh); err != nil {
 			log.Printf("Qualys KB cache: could not write %s: %v", cachePath, err)
 		}
+		c.kbTitles = c.builtTitles
+		c.saveTitles(cachePath)
 		c.kbCache, c.kbAge, c.kbStale = fresh, 0, false
 		return fresh, nil
 
@@ -309,6 +385,8 @@ func (c *Client) LoadOrBuildKBCache(ctx context.Context, cachePath string) (KBCa
 			return nil, err
 		}
 		log.Printf("Qualys KB cache: built %d CVE mappings", len(fresh))
+		c.kbTitles = c.builtTitles
+		c.saveTitles(cachePath)
 		c.kbCache, c.kbAge, c.kbStale = fresh, 0, false
 		return fresh, nil
 	}
@@ -331,9 +409,15 @@ func (c *Client) refreshKBCacheSince(ctx context.Context, cache KBCache, since t
 	if !complete {
 		return 0, fmt.Errorf("incremental refresh: not every page of the KnowledgeBase could be read")
 	}
-	partial, err := parseKB(pages...)
+	partial, titles, err := parseKBFull(pages...)
 	if err != nil {
 		return 0, err
+	}
+	if c.kbTitles == nil {
+		c.kbTitles = KBTitles{}
+	}
+	for q, t := range titles {
+		c.kbTitles[q] = t
 	}
 	if len(partial) == 0 {
 		return 0, fmt.Errorf("incremental refresh returned no vulnerabilities")
@@ -447,25 +531,80 @@ func (c *Client) BuildKBCache(ctx context.Context) (KBCache, error) {
 		// failure. Refuse it; the caller keeps the cache it has.
 		return nil, fmt.Errorf("not every page of the KnowledgeBase could be read")
 	}
-	return parseKB(pages...)
+	cache, titles, err := parseKBFull(pages...)
+	if err != nil {
+		return nil, err
+	}
+	c.builtTitles = titles
+	return cache, nil
 }
 
 // parseKB turns KnowledgeBase XML responses - one per page - into a
 // CVE->QID map.
 func parseKB(bodies ...[]byte) (KBCache, error) {
+	cache, _, err := parseKBFull(bodies...)
+	return cache, err
+}
+
+// parseKBFull is parseKB plus each QID's title, for the QIDs that have a
+// CVE (the only ones a finding can name). One pass: the KnowledgeBase is a
+// large download and parsing it twice would double the cost.
+func parseKBFull(bodies ...[]byte) (KBCache, KBTitles, error) {
 	cache := KBCache{}
+	titles := KBTitles{}
 	for _, body := range bodies {
 		var parsed kbPage
 		if err := xml.Unmarshal(body, &parsed); err != nil {
-			return nil, fmt.Errorf("failed to parse Qualys KB XML: %w", err)
+			return nil, nil, fmt.Errorf("failed to parse Qualys KB XML: %w", err)
 		}
 		addKB(cache, parsed.Vulns)
+		for _, v := range parsed.Vulns {
+			t := strings.Join(strings.Fields(v.Title), " ")
+			if v.QID != 0 && t != "" && len(v.CVEList.CVEs) > 0 {
+				titles[v.QID] = t
+			}
+		}
 	}
 	for cve := range cache {
 		sort.Ints(cache[cve])
 		cache[cve] = dedupeInts(cache[cve])
 	}
-	return cache, nil
+	return cache, titles, nil
+}
+
+// loadKBTitles reads the sidecar; nil when it is missing or unreadable, which
+// LoadOrBuildKBCache takes as "build it".
+func loadKBTitles(path string) KBTitles {
+	// #nosec G304 -- QUALYS_KB_CACHE plus a fixed suffix, from the service
+	// configuration, written by this same process.
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	var t KBTitles
+	if err := json.Unmarshal(b, &t); err != nil || len(t) == 0 {
+		return nil
+	}
+	return t
+}
+
+// saveTitles writes the sidecar atomically at 0600, like the cache. A failure
+// is logged and costs product names, nothing else.
+func (c *Client) saveTitles(cachePath string) {
+	if len(c.kbTitles) == 0 {
+		return
+	}
+	path := titlesPath(cachePath)
+	b, err := json.Marshal(c.kbTitles)
+	if err == nil {
+		tmp := path + ".tmp"
+		if err = os.WriteFile(tmp, b, 0600); err == nil {
+			err = os.Rename(tmp, path)
+		}
+	}
+	if err != nil {
+		log.Printf("Qualys KB titles: could not write %s: %v", path, err)
+	}
 }
 
 // kbPage is one page of a KnowledgeBase list response.
@@ -474,7 +613,8 @@ type kbPage struct {
 }
 
 type kbVuln struct {
-	QID     int `xml:"QID"`
+	QID     int    `xml:"QID"`
+	Title   string `xml:"TITLE"`
 	CVEList struct {
 		CVEs []struct {
 			ID string `xml:"ID"`

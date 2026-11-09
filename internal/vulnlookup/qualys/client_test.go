@@ -19,6 +19,8 @@ const kbXML = `<?xml version="1.0" encoding="UTF-8"?>
     <VULN_LIST>
       <VULN>
         <QID>92272</QID>
+        <TITLE>Google Chrome Prior to 131.0
+          Multiple Vulnerabilities</TITLE>
         <CVE_LIST>
           <CVE><ID>CVE-2026-83549</ID></CVE>
           <CVE><ID>cve-2026-83548</ID></CVE>
@@ -102,6 +104,11 @@ func writeCache(t *testing.T, dir string, cache KBCache, age time.Duration) stri
 	}
 	when := time.Now().Add(-age)
 	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+	// A titles sidecar, as every cache written since titles were added has.
+	// Without one the load does a full rebuild to create it (tested below).
+	if err := os.WriteFile(titlesPath(path), []byte(`{"111":"Example Product Title"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -431,4 +438,79 @@ func grow(src KBCache, n int) KBCache {
 		out[fmt.Sprintf("CVE-2027-%05d", i)] = []int{i}
 	}
 	return out
+}
+
+func TestParseKBKeepsTitlesOfQIDsWithACVE(t *testing.T) {
+	_, titles, err := parseKBFull([]byte(kbXML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titles[92272]; got != "Google Chrome Prior to 131.0 Multiple Vulnerabilities" {
+		t.Errorf("title = %q (whitespace should be collapsed)", got)
+	}
+	if _, ok := titles[92275]; ok {
+		t.Error("a QID with no TITLE got one")
+	}
+}
+
+// A cache from before titles existed has no sidecar. The next load does one
+// FULL rebuild, not an incremental top-up, so every QID gets its title; a
+// partial sidecar would stop the rebuild from ever happening.
+func TestACacheWithoutTitlesIsRebuiltOnceInFull(t *testing.T) {
+	var incremental bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("last_modified_after") != "" {
+			incremental = true
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		_, _ = w.Write([]byte(kbXML))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := writeCache(t, dir, KBCache{"CVE-2026-83549": {92272}}, time.Hour)
+	if err := os.Remove(titlesPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	c := New(srv.URL, "u", "p", path, 168*time.Hour)
+	if _, err := c.LoadOrBuildKBCache(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	if incremental {
+		t.Error("the titles rebuild must be a full download, not an incremental one")
+	}
+	if got := loadKBTitles(titlesPath(path)); got[92272] == "" {
+		t.Errorf("titles sidecar not written: %v", got)
+	}
+	if got := c.titlesFor([]int{92275, 92272, 92272}); len(got) != 1 || !strings.HasPrefix(got[0], "Google Chrome") {
+		t.Errorf("titlesFor = %q", got)
+	}
+}
+
+func TestAFailedTitlesRebuildKeepsAFreshCacheFresh(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := writeCache(t, dir, KBCache{"CVE-2026-1": {111}}, time.Hour)
+	if err := os.Remove(titlesPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	c := New(srv.URL, "u", "p", path, 168*time.Hour)
+	cache, err := c.LoadOrBuildKBCache(context.Background(), path)
+	if err != nil {
+		t.Fatalf("a titles rebuild failure must not fail the load: %v", err)
+	}
+	if len(cache["CVE-2026-1"]) != 1 || c.kbStale {
+		t.Errorf("cache = %v, stale = %v: want the fresh cache, not stale", cache, c.kbStale)
+	}
+}
+
+func TestTitlesAreCappedPerCVE(t *testing.T) {
+	c := &Client{kbTitles: KBTitles{1: "a", 2: "b", 3: "c", 4: "d"}}
+	if got := c.titlesFor([]int{1, 2, 3, 4}); len(got) != maxTitlesPerCVE {
+		t.Errorf("titlesFor = %q", got)
+	}
 }
