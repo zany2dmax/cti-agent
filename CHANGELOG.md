@@ -97,6 +97,18 @@ defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 
 ### Fixed
 
+- **Qualys's new scan notice format counted every scan as unfinished.** From
+  WAS 10.21.2 (seen on scans from 9 November) the notice reads `Scan Status :
+  Finished`, with a separate `Triggered By : Success` line, where it used to
+  read `Finished : OK`. Only the exact old text counts as complete (the
+  PrimeSec 10969075 fix: notice text is anyone's to write), so the owner lane
+  held every new scan as "did not finish (Finished)", and Friday's AppSec
+  weekly would have marked each one `[INCOMPLETE]`. A bare `Finished` now
+  counts only when the Qualys WAS scan list - the API, not the mail - confirms
+  that reference `FINISHED` with `SUCCESSFUL` results; that is the one case the
+  API may upgrade a notice, and every other status still only ever gets worse.
+  Unconfirmed (the list unreachable, or no matching run), the scan is held with
+  that reason, not "did not finish".
 - **The owner lane could not start.** `run-appowners` asks `cti-mailer --lane
   owner --armed` whether the lane has an allowed domain before every real or
   dry run, and `cti-mailer` refused it with "say how to run it": only `--check`

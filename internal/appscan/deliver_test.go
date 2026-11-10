@@ -34,6 +34,7 @@ func TestBuildDeliveriesHoldsWhatWouldMislead(t *testing.T) {
 		{App: "Email Only", Reference: "was/1.7", Complete: true},
 		{App: "Sent Already", AppID: "106", Reference: "was/1.8", Complete: true},
 		{App: "From The List", AppID: "101", Reference: "was/1.9", Complete: true, NoNotification: true, Started: fin},
+		{App: "Unconfirmed", AppID: "107", Reference: "was/1.10", Complete: false, Status: "Finished"},
 	}
 	done := DeliveredLog{"id:106": {Ref: "was/1.8"}}
 	f := BuildDeliveries(scans, deliverOwners(t), done, fin)
@@ -47,7 +48,8 @@ func TestBuildDeliveriesHoldsWhatWouldMislead(t *testing.T) {
 	for app, want := range map[string]string{
 		"Good App": "", "Name Only App": "", "Unowned": "no owner",
 		"Cut Short": "did not finish", "Login Broke": "login failed", "Dark": "no host answered",
-		"Email Only": "no web app id",
+		"Email Only":  "no web app id",
+		"Unconfirmed": "scan list did not confirm",
 	} {
 		d, ok := got[app]
 		if !ok {

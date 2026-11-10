@@ -136,6 +136,18 @@ func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
 		r.Complete = false
 		r.Status = "Not complete per the Qualys WAS scan list (" + s.Status + ")"
 	}
+	if !r.Complete && BareFinished(r.Status) && s.Complete() {
+		// The one upgrade. From WAS 10.21.2 (November 2026) the notice reads
+		// "Scan Status : Finished" with a separate "Triggered By : Success"
+		// line, where it used to read "Finished : OK". The bare word is not
+		// accepted from the mail on its own (PrimeSec 10969075: mail text is
+		// anyone's to write), but the scan list is the API, not mail: when it
+		// says this reference FINISHED with SUCCESSFUL results, that is a
+		// better source than the old ": OK" ever was. Every other status keeps
+		// the rule above - the API can make a scan worse, never better.
+		r.Complete = true
+		r.Status = "Finished (confirmed by the Qualys WAS scan list)"
+	}
 	r.AppID = s.WebAppID
 	r.ScanType = s.Type
 	if s.WebAppName != "" {

@@ -430,6 +430,13 @@ func scanStatusOK(status string) bool {
 	return strings.EqualFold(strings.Join(strings.Fields(status), ""), "finished:ok")
 }
 
+// BareFinished is the WAS 10.21.2 notice's "Scan Status : Finished", with no
+// ": OK" after it - exactly that word, spaces aside. It is not complete on its
+// own: Reconcile accepts it only when the scan list confirms the run.
+func BareFinished(status string) bool {
+	return strings.EqualFold(strings.Join(strings.Fields(status), ""), "finished")
+}
+
 // parseQualysTime reads "10/04/2026 at 00:02:43 (GMT +0000)".
 //
 // An unreadable timestamp is left zero rather than guessed; the caller falls

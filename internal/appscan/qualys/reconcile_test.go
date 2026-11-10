@@ -234,3 +234,41 @@ func TestTheApiCanMarkANotifiedScanIncomplete(t *testing.T) {
 		}
 	}
 }
+
+func TestABareFinishedNoticeNeedsTheListToConfirmIt(t *testing.T) {
+	// WAS 10.21.2 notices say "Scan Status : Finished" with no ": OK". The
+	// parser leaves that incomplete; the scan list alone can confirm it.
+	// Any other incomplete status is never upgraded.
+	cases := []struct {
+		mailStatus, listStatus, results string
+		want                            bool
+	}{
+		{"Finished", "FINISHED", "SUCCESSFUL", true},
+		{"  finished ", "FINISHED", "", true},
+		{"Finished", "FINISHED", "TIME_LIMIT_EXCEEDED", false},
+		{"Finished", "CANCELED", "", false},
+		{"Finished", "RUNNING", "", false},
+		{"Finished : Time Limit Exceeded", "FINISHED", "SUCCESSFUL", false},
+		{"Not Finished", "FINISHED", "SUCCESSFUL", false},
+		{"Finished with errors", "FINISHED", "SUCCESSFUL", false},
+	}
+	for _, c := range cases {
+		m := fromMail("was/8.1", "ExPortal")
+		m.Complete, m.Status = false, c.mailStatus
+		s := listScan(8, "was/8.1", "VULNERABILITY", "SCHEDULED", "9008",
+			"Example Portal", "", c.listStatus, "", day(1))
+		s.ResultsStatus = c.results
+		got, _ := Reconcile([]appscan.ScanResult{m}, []Scan{s}, window, "")
+		if got[0].Complete != c.want {
+			t.Errorf("mail %q, list %s/%s: Complete = %v, want %v",
+				c.mailStatus, c.listStatus, c.results, got[0].Complete, c.want)
+		}
+	}
+	// No matching run in the list: it stays as the mail left it.
+	m := fromMail("was/8.2", "ExPortal")
+	m.Complete, m.Status = false, "Finished"
+	got, _ := Reconcile([]appscan.ScanResult{m}, nil, window, "")
+	if got[0].Complete {
+		t.Error("a bare Finished with no scan list entry was counted complete")
+	}
+}

@@ -271,6 +271,29 @@ func TestAnIncompleteScanIsNotPresentedAsAResult(t *testing.T) {
 	}
 }
 
+func TestTheWAS1021_2NoticeParsesAndWaitsForTheList(t *testing.T) {
+	// From WAS 10.21.2 (November 2026) the real notice reads
+	//   <div>Triggered By : Success</div><div>Scan Status : Finished</div>
+	// where it used to read "Scan Status : Finished : OK". Everything else
+	// still parses; the status alone does not make it complete - Reconcile
+	// needs the scan list to confirm it (TestABareFinishedNoticeNeedsTheListToConfirmIt).
+	body := strings.Replace(deepScan, "<div>Scan Status : Finished : OK </div>",
+		"<div>Triggered By : Success</div><div>Scan Status : Finished</div>", 1)
+	r, err := Provider{}.Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Complete {
+		t.Error("a bare Finished was counted complete from the mail alone")
+	}
+	if !BareFinished(r.Status) {
+		t.Errorf("Status = %q, want the bare Finished the list can confirm", r.Status)
+	}
+	if r.App != "Example Portal" || r.Reference != "was/3333333333333.44444444" {
+		t.Errorf("the rest of the notice did not parse: app %q, ref %q", r.App, r.Reference)
+	}
+}
+
 func TestAHealthyAuthenticatedScanWithNoChangesIsQuiet(t *testing.T) {
 	// The other direction. If everything warrants attention, nothing does.
 	body := strings.Replace(deepScan,

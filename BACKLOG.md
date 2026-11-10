@@ -328,3 +328,10 @@ is real, not before. Finished work moves out of this file into
     beat weighting in `cti-budget`, which counts beats today, not cost;
     tests for the gate's refusals; and the orchestrator CLAUDE.md telling a
     beat when to ask.
+- AppSec: delete the "scan scheduled" notice for a run whose result notice is
+  in the WAS 10.21.2 format (bare `Scan Status : Finished`). `cti-appscan`
+  pairs scheduled notices with finished runs (`done`, cmd/cti-appscan/main.go)
+  from the parser's `Complete`, before `reconcile()` has the scan list to
+  confirm a bare Finished, so those notices are kept, not deleted - the safe
+  direction, but they pile up in the inbox. Fix: do the pairing after
+  reconciliation, keyed on the reference. Found in review, 2026-11-10

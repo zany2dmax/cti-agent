@@ -111,6 +111,12 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 			ScanRef: ref, Finished: s.Finished, AuthLabel: s.Auth.Label(), NoNotice: s.NoNotification,
 			Active: s.AppState.Active, ScanCounts: s.ScanCounts, FirstScan: s.FirstScan}
 		switch {
+		case !s.Complete && strings.EqualFold(strings.Join(strings.Fields(s.Status), ""), "finished"):
+			// The newer notice format, which needs the scan list to confirm
+			// it - and the list did not (unreachable, or no matching run).
+			// The same test as qualys.BareFinished, which this package cannot
+			// import (qualys imports appscan).
+			d.Hold = "the notice says Finished, but the Qualys scan list did not confirm the run - not counted as complete"
 		case !s.Complete:
 			d.Hold = "the scan did not finish (" + orUnknown(s.Status) + ")"
 		case s.Auth.Failed():
