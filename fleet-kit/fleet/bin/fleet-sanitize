@@ -82,7 +82,8 @@ def log(source, events):
             kind = "cut" if cut else "stripped"
             syslog.syslog(syslog.LOG_WARNING,
                           f"{source}: line {line} {kind} ({removed} characters): {excerpt!r}")
-    except Exception:  # noqa: BLE001  # nosec B110 - best-effort log; the cleaning does not depend on it
+    # Best-effort log: the cleaning does not depend on it, so a logging error is swallowed.
+    except Exception:  # noqa: BLE001  # nosec B110
         pass
 
 
