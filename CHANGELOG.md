@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.3 — 2026-11-10
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The first
 digest after the upgrade re-reads NVD once for every CVE in its cache and the
