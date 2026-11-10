@@ -59,7 +59,7 @@ type Delivery struct {
 	// Counts from the notice, for the covering email. Unknown (and not
 	// shown) when the scanner sent no notice.
 	NoNotice   bool   `json:"noNotice,omitempty"`
-	Active     Counts `json:"active"`
+	Open       Counts `json:"open"` // New + Reopened + Active (Lifecycle.Open)
 	ScanCounts Counts `json:"scanCounts"`
 	FirstScan  bool   `json:"firstScan,omitempty"`
 }
@@ -109,7 +109,7 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 		}
 		d := Delivery{Key: key, AppID: strings.TrimSpace(s.AppID), App: s.App, ScanTitle: s.ScanTitle,
 			ScanRef: ref, Finished: s.Finished, AuthLabel: s.Auth.Label(), NoNotice: s.NoNotification,
-			Active: s.AppState.Active, ScanCounts: s.ScanCounts, FirstScan: s.FirstScan}
+			Open: s.AppState.Open(), ScanCounts: s.ScanCounts, FirstScan: s.FirstScan}
 		switch {
 		case !s.Complete && strings.EqualFold(strings.Join(strings.Fields(s.Status), ""), "finished"):
 			// The newer notice format, which needs the scan list to confirm
@@ -320,11 +320,11 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	switch {
 	case d.NoNotice:
 		lead = emailkit.Blue
-	case d.Active.Urgent > 0:
+	case d.Open.Urgent > 0:
 		lead = emailkit.Red
-	case d.Active.Crit > 0:
+	case d.Open.Crit > 0:
 		lead = emailkit.Amber
-	case d.Active.Total() > 0:
+	case d.Open.Total() > 0:
 		lead = emailkit.Blue
 	}
 
@@ -334,18 +334,18 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 		e(d.App), e(finished), e(d.AuthLabel)))
 
 	if !d.NoNotice {
-		more := fmt.Sprintf(`<b>Open findings in the application:</b> %s`, e(ownerCounts(d.Active)))
+		more := fmt.Sprintf(`<b>Open findings in the application:</b> %s`, e(ownerCounts(d.Open)))
 		if d.FirstScan {
 			more += `<br>This is the first scan of the application, so nothing is compared with an earlier one.`
 		} else {
 			more += fmt.Sprintf(`<br><b>Found by this scan:</b> %s`, e(ownerCounts(d.ScanCounts)))
 		}
 		emailkit.Tiles(&b, []emailkit.Tile{
-			{Label: "Urgent", N: d.Active.Urgent, Tone: emailkit.Red},
-			{Label: "Critical", N: d.Active.Crit, Tone: emailkit.Amber},
-			{Label: "Serious", N: d.Active.Serious, Tone: emailkit.Yellow},
-			{Label: "Medium", N: d.Active.Medium, Tone: emailkit.Blue},
-			{Label: "Minimal", N: d.Active.Minimal, Tone: emailkit.Grey},
+			{Label: "Urgent", N: d.Open.Urgent, Tone: emailkit.Red},
+			{Label: "Critical", N: d.Open.Crit, Tone: emailkit.Amber},
+			{Label: "Serious", N: d.Open.Serious, Tone: emailkit.Yellow},
+			{Label: "Medium", N: d.Open.Medium, Tone: emailkit.Blue},
+			{Label: "Minimal", N: d.Open.Minimal, Tone: emailkit.Grey},
 		}, more)
 	}
 

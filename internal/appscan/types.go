@@ -81,8 +81,14 @@ func (c Counts) Worst() Severity {
 
 // Lifecycle is where an application's findings stand after a scan.
 //
-// Active is the only field that describes current exposure. Total includes
-// everything the application has ever had, and Fixed is usually most of it.
+// The five states are disjoint - they add up to Total - and three of them are
+// open: New, Reopened and Active ("open, and seen before"). Open() is current
+// exposure. Active alone is not: a finding that came back is Reopened, not
+// Active, so counting Active alone dropped it. A real notice of 9 November
+// 2026 had Urgent "0 New, 1 Reopened, 0 Active, 1 Fixed", and the
+// owner email's tiles read zero Urgent above "Found by this scan: 1 Urgent".
+// Total includes everything the application has ever had, and Fixed is
+// usually most of it.
 type Lifecycle struct {
 	Total    Counts
 	New      Counts
@@ -90,6 +96,18 @@ type Lifecycle struct {
 	Active   Counts
 	Fixed    Counts
 	Ignored  Counts
+}
+
+// Open is what is open in the application now: New + Reopened + Active, the
+// same three states the open-findings query asks the scanner for.
+func (l Lifecycle) Open() Counts {
+	return Counts{
+		Urgent:  l.New.Urgent + l.Reopened.Urgent + l.Active.Urgent,
+		Crit:    l.New.Crit + l.Reopened.Crit + l.Active.Crit,
+		Serious: l.New.Serious + l.Reopened.Serious + l.Active.Serious,
+		Medium:  l.New.Medium + l.Reopened.Medium + l.Active.Medium,
+		Minimal: l.New.Minimal + l.Reopened.Minimal + l.Active.Minimal,
+	}
 }
 
 // Auth is what the scanner was able to authenticate as.

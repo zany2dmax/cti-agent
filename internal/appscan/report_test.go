@@ -328,8 +328,10 @@ func TestLowSeveritiesAreCountedNotLedWith(t *testing.T) {
 	// 67 Minimal dominated the line in the first draft, pushing the one
 	// number that matters off to the right. They are a tail now - present,
 	// because silence and zero must not look the same, but not prominent.
+	// +74: 2 Medium and 72 Minimal open - the 67 Active plus the 5 Reopened,
+	// which are open too (Lifecycle.Open).
 	b := render(t, publicScan())
-	if !strings.Contains(b.Text, "+69 lower") {
+	if !strings.Contains(b.Text, "+74 lower") {
 		t.Errorf("lower severities were not summarised:\n%s", b.Text)
 	}
 	if strings.Contains(b.Text, "67 Minimal") {

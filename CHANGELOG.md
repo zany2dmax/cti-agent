@@ -97,6 +97,16 @@ defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 
 ### Fixed
 
+- **AppSec open counts left out findings that had come back.** Qualys's
+  notice splits an application's findings into New, Reopened, Active, Fixed
+  and Ignored, which add up to the total; three of them are open. The lane
+  counted Active alone, so a Reopened finding vanished from the owner email's
+  tiles and "Open findings" line, and from the weekly's tiles, Urgent totals
+  and per-application lines - in the case that found it, 0 Urgent shown above
+  "Found by this scan: 1 Urgent". Open is now New + Reopened + Active
+  (`Lifecycle.Open`), the same three states the open-findings query asks the
+  scanner for. Expect higher numbers in the next weekly and owner emails:
+  they are the real ones.
 - **Qualys's new scan notice format counted every scan as unfinished.** From
   WAS 10.21.2 (seen on scans from 9 November) the notice reads `Scan Status :
   Finished`, with a separate `Triggered By : Success` line, where it used to

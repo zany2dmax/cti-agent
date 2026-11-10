@@ -293,7 +293,7 @@ func (r *report) subject() string {
 
 	urgent, apps := 0, 0
 	for _, s := range r.counted {
-		if n := s.AppState.Active.Urgent; n > 0 {
+		if n := s.AppState.Open().Urgent; n > 0 {
 			urgent += n
 			apps++
 		}
@@ -347,7 +347,7 @@ func (r *report) leadLine() string {
 	}
 	urgent := 0
 	for _, s := range r.counted {
-		urgent += s.AppState.Active.Urgent
+		urgent += s.AppState.Open().Urgent
 	}
 	blind := ""
 	if n := len(r.unnotified); n > 0 {
@@ -615,7 +615,7 @@ func lowerOnlyNote(n int) string {
 func (r *report) tiles() Counts {
 	var c Counts
 	for _, s := range r.counted {
-		a := s.AppState.Active
+		a := s.AppState.Open()
 		c.Urgent += a.Urgent
 		c.Crit += a.Crit
 		c.Serious += a.Serious
@@ -696,7 +696,7 @@ func (r *report) text() string {
 		// 24, not 22: "[authentication FAILED]" is 23 characters, so a 22-wide
 		// column pushed the counts out by one on exactly the row a reader is
 		// most likely to be comparing against the others.
-		fmt.Fprintf(&b, "  %-28s %-24s %s\n", s.App, openLabel(s), lead(s.AppState.Active))
+		fmt.Fprintf(&b, "  %-28s %-24s %s\n", s.App, openLabel(s), lead(s.AppState.Open()))
 		for _, n := range rowNotes(s) {
 			fmt.Fprintf(&b, "      note: %s\n", n)
 		}
@@ -835,7 +835,7 @@ func (r *report) html() string {
                          color:#718096;font-size:11px;white-space:nowrap">%s</td>
               <td align="right" style="padding:6px 0 6px 8px;
                          border-bottom:1px solid #edf2f7;color:#1a202c">%s</td></tr>`,
-			e(s.App), linkHTML(s), e(s.Auth.Label()), e(lead(s.AppState.Active)))
+			e(s.App), linkHTML(s), e(s.Auth.Label()), e(lead(s.AppState.Open())))
 		for _, n := range rowNotes(s) {
 			fmt.Fprintf(&b, `
           <tr><td colspan="3" style="padding:0 0 6px 12px;border-bottom:1px solid #edf2f7;
@@ -1007,7 +1007,7 @@ func sortScans(s []ScanResult) {
 		if a.Attention() != b.Attention() {
 			return a.Attention()
 		}
-		if x, y := a.AppState.Active.Worst(), b.AppState.Active.Worst(); x != y {
+		if x, y := a.AppState.Open().Worst(), b.AppState.Open().Worst(); x != y {
 			return x > y
 		}
 		return a.App < b.App

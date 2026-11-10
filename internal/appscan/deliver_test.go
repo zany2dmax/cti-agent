@@ -167,7 +167,7 @@ func TestRedactReportRefuses(t *testing.T) {
 
 func TestRenderOwnerMail(t *testing.T) {
 	d := Delivery{App: `<script>Shop</script>`, Finished: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
-		AuthLabel: "unauthenticated scan", Active: Counts{Urgent: 2, Medium: 1}, ScanCounts: Counts{Crit: 1}}
+		AuthLabel: "unauthenticated scan", Open: Counts{Urgent: 2, Medium: 1}, ScanCounts: Counts{Crit: 1}}
 	m := RenderOwnerMail(d, "shop-scan-report-2026-11-02.html", "")
 	if strings.Contains(m.HTML, "<script>") {
 		t.Error("application name not escaped")
@@ -199,7 +199,7 @@ func TestTheOwnerMailLooksLikeTheFleetsOtherEmails(t *testing.T) {
 	t.Setenv("FLEET_ATTRIBUTION", "")
 	t.Setenv("FLEET_REPO_URL", "")
 	d := Delivery{App: "Shop", Finished: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
-		AuthLabel: "authenticated scan", Active: Counts{Urgent: 2, Medium: 1}, ScanCounts: Counts{Crit: 1}}
+		AuthLabel: "authenticated scan", Open: Counts{Urgent: 2, Medium: 1}, ScanCounts: Counts{Crit: 1}}
 	h := RenderOwnerMail(d, "r.html", "").HTML
 	for _, want := range []string{
 		"background:#12203a", // the navy header band
@@ -215,11 +215,11 @@ func TestTheOwnerMailLooksLikeTheFleetsOtherEmails(t *testing.T) {
 		}
 	}
 	// Lead colour follows the worst band.
-	d.Active = Counts{Crit: 1}
+	d.Open = Counts{Crit: 1}
 	if h := RenderOwnerMail(d, "r.html", "").HTML; !strings.Contains(h, "border-left:4px solid #b25000") {
 		t.Error("Critical should lead amber")
 	}
-	d.Active = Counts{}
+	d.Open = Counts{}
 	if h := RenderOwnerMail(d, "r.html", "").HTML; !strings.Contains(h, "border-left:4px solid #2f855a") {
 		t.Error("a clean scan should lead green")
 	}
@@ -240,5 +240,32 @@ func TestTheOwnerMailCarriesTheFleetAttribution(t *testing.T) {
 	t.Setenv("FLEET_REPO_URL", "https://example.test/fleet")
 	if h := RenderOwnerMail(Delivery{App: "Shop", NoNotice: true}, "r.html", "").HTML; !strings.Contains(h, `href="https://example.test/fleet"`) {
 		t.Error("a configured FLEET_REPO_URL should link the credit")
+	}
+}
+
+func TestAReopenedFindingIsOpenInTheOwnerEmail(t *testing.T) {
+	// A real notice's counts, 9 November 2026: Urgent "0 New, 1 Reopened,
+	// 0 Active", Medium "0 New, 8 Reopened, 9 Active". The tiles read
+	// 0 Urgent / 9 Medium above "Found by this scan: 1 Urgent, 17 Medium",
+	// because they counted Active alone. A finding that came back is open.
+	fin := time.Date(2026, 11, 9, 23, 46, 0, 0, time.UTC)
+	s := ScanResult{App: "Good App", AppID: "101", Reference: "was/1.1",
+		Complete: true, Finished: fin, ScanCounts: Counts{Urgent: 1, Medium: 17},
+		AppState: Lifecycle{
+			Reopened: Counts{Urgent: 1, Medium: 8},
+			Active:   Counts{Medium: 9},
+			Fixed:    Counts{Urgent: 1, Crit: 1, Serious: 93, Medium: 13, Minimal: 5},
+		}}
+	f := BuildDeliveries([]ScanResult{s}, deliverOwners(t), DeliveredLog{}, fin)
+	if len(f.Deliveries) != 1 {
+		t.Fatalf("deliveries: %+v", f.Deliveries)
+	}
+	d := f.Deliveries[0]
+	if want := (Counts{Urgent: 1, Medium: 17}); d.Open != want {
+		t.Errorf("open = %+v, want %+v (New + Reopened + Active)", d.Open, want)
+	}
+	if got := (Lifecycle{New: Counts{Crit: 2}, Reopened: Counts{Crit: 1}, Active: Counts{Crit: 3},
+		Fixed: Counts{Crit: 9}, Ignored: Counts{Crit: 4}}).Open(); got.Crit != 6 {
+		t.Errorf("Open() = %d Critical, want 6: Fixed and Ignored are not open", got.Crit)
 	}
 }
