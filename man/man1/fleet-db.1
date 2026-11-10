@@ -116,6 +116,17 @@ are joined with single spaces, so quoting is optional.
 .PP
 .B fleet\-db
 sends no mail and makes no network calls.
+.PP
+Inside a heartbeat (when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1))
+what every command prints output is passed through
+.BR fleet\-sanitize (1):
+control characters, bidirectional and zero\-width characters are removed and
+over\-long lines are cut with a
+.B [cut N chars]
+marker. Outside a heartbeat the output is untouched.
 .SH COMMANDS
 .TP
 .B init

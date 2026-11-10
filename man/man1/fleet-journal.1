@@ -57,6 +57,17 @@ runs: a usage line goes to standard error and the exit status is 2. The
 operator, who has a shell, uses
 .B journalctl
 directly.
+.PP
+Inside a heartbeat (when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1))
+what it prints output is passed through
+.BR fleet\-sanitize (1):
+control characters, bidirectional and zero\-width characters are removed and
+over\-long lines are cut with a
+.B [cut N chars]
+marker. Outside a heartbeat the output is untouched.
 .SH OPTIONS
 At least one
 .B \-u

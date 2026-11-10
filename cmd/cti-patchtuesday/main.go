@@ -48,10 +48,16 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
+	"github.com/zany2dmax/cti-agent/internal/sanitize"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
 
 func main() {
+	// Inside a heartbeat the output is cleaned before the model reads it: see
+	// internal/sanitize.
+	if sanitize.ForBeat() {
+		os.Exit(sanitize.Child("cti-patchtuesday"))
+	}
 	month := flag.String("month", "",
 		"YYYY-MM to report on; default is the most recent release. Use this to "+
 			"replay a past month and check the lane against an email you already sent")

@@ -7,7 +7,7 @@
   fleet-db task add <title> | done <id> | list
   fleet-db mail send <agent> <kind> <body> | inbox <agent> | ack <id>
   fleet-db finding upsert <json>      persist an enriched finding
-  fleet-db findings [--priority Sev5] [--stale-days N]
+  fleet-db findings [--priority Sev5] [--status UNKNOWN] [--stale-days N]
   fleet-db sent <date> <s5> <s4> <s3> <s2> <s1> <message_id>
   fleet-db note <cve> <text>          record who is handling a finding
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
@@ -257,6 +257,11 @@ def main(argv):
         if "--priority" in args:
             q += " AND priority=?"
             p.append(args[args.index("--priority") + 1])
+        if "--status" in args:
+            # The flag was accepted and ignored: a beat asking for UNKNOWN
+            # findings got every finding and believed it had filtered.
+            q += " AND status=?"
+            p.append(args[args.index("--status") + 1])
         if "--stale-days" in args:
             # datetime(updated), not updated.
             #
@@ -391,5 +396,37 @@ def main(argv):
     return 0
 
 
+def beat_main(argv):
+    """Inside a heartbeat (CHECKIN_BEAT_ID, set by run-checkin) everything this
+    prints is cleaned before the model reads it: memories, findings and mail
+    hold text from advisories and feeds (Scenario-222). The output is captured,
+    passed through fleet-sanitize and written; if that cannot run the beat gets
+    nothing. Outside a beat main() runs as it always did, so the lanes that
+    parse this output are untouched."""
+    import io
+    import subprocess
+    san = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet-sanitize")
+    if not os.access(san, os.X_OK):
+        print("fleet-db: fleet-sanitize is missing", file=sys.stderr)
+        return 2
+    real, buf = sys.stdout, io.StringIO()
+    sys.stdout = buf
+    try:
+        code = main(argv)
+    finally:
+        sys.stdout = real
+    r = subprocess.run(["/usr/bin/python3", "-I", san, "--source", "fleet-db"],
+                       input=buf.getvalue().encode("utf-8", "replace"),
+                       capture_output=True, check=False)
+    if r.returncode != 0:
+        print("fleet-db: could not clean the output", file=sys.stderr)
+        return 2
+    sys.stdout.write(r.stdout.decode("utf-8", "replace"))
+    sys.stdout.flush()
+    return code
+
+
 if __name__ == "__main__":
+    if os.environ.get("CHECKIN_BEAT_ID"):
+        sys.exit(beat_main(sys.argv[1:]))
     sys.exit(main(sys.argv[1:]))

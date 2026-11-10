@@ -23,6 +23,20 @@ ARCHIVE="$FLEET_HOME/archive/board-archive.md"
 LOCK="$FLEET_HOME/.board.lock"
 LOCK_TIMEOUT="${LOCK_TIMEOUT:-10}"
 
+# Inside a heartbeat (CHECKIN_BEAT_ID, set by run-checkin) what `read` and
+# `tail` print is cleaned before the model reads it: board lines can carry text
+# from mail and feeds (Scenario-222). Anywhere else it is passed through.
+# If the cleaner is missing the beat gets nothing rather than raw text.
+beat_clean() {
+  if [ -n "${CHECKIN_BEAT_ID:-}" ]; then
+    local san; san="$(dirname "$0")/fleet-sanitize"
+    [ -x "$san" ] || { echo "fleet-board: fleet-sanitize is missing" >&2; return 2; }
+    /usr/bin/python3 -I "$san" --source fleet-board
+  else
+    cat
+  fi
+}
+
 mkdir -p "$FLEET_HOME/archive"
 touch "$BOARD" "$ARCHIVE"
 
@@ -133,7 +147,7 @@ case "$cmd" in
     case "$handle" in @?*) ;; *) echo "fleet-board: read takes an @name handle" >&2; exit 2 ;; esac
     case "$handle" in *[!@A-Za-z0-9._-]*)
       echo "fleet-board: handles are @name ([A-Za-z0-9._-])" >&2; exit 2 ;; esac
-    grep -E -- "-> +(${handle}|@all) " "$BOARD" 2>/dev/null || echo "(nothing for ${handle})"
+    { grep -E -- "-> +(${handle}|@all) " "$BOARD" 2>/dev/null || echo "(nothing for ${handle})"; } | beat_clean
     ;;
   resolve)
     # The heartbeat's pruning: one question and its answers, by board id.
@@ -168,6 +182,6 @@ case "$cmd" in
     mv "$tmp" "$BOARD"
     echo "pruned lines matching: $pattern"
     ;;
-  tail) tail -n "${1:-20}" "$BOARD" ;;
+  tail) tail -n "${1:-20}" "$BOARD" | beat_clean ;;
   *) echo "usage: fleet-board {post|say|read|resolve|expire|prune|tail}" >&2; exit 2 ;;
 esac

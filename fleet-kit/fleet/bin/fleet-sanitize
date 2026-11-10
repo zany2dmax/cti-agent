@@ -1,0 +1,106 @@
+#!/usr/bin/python3 -I
+"""fleet-sanitize - clean text before the orchestrator's model reads it.
+
+    some-command | fleet-sanitize --source NAME
+
+PrimeSec design review 39260, Scenario-222. A heartbeat reads the journal, the
+board and the memory database, and most of that text started in somebody
+else's mail or feed. This removes control characters (other than newline and
+tab), C1 controls, bidirectional overrides and zero-width characters; cuts any
+line over 1024 characters and says so; cuts the whole output at 64 KB; and
+logs every line it changed to the journal under the cti-sanitize tag. It never
+logs to stderr, because stderr goes back into the model.
+
+The wrappers call it only inside a heartbeat (CHECKIN_BEAT_ID set, by
+run-checkin), so a lane that parses the same command's output is unaffected.
+internal/sanitize is the Go twin; both read the same cases from
+internal/sanitize/testdata/sanitize-cases.json, so they cannot drift.
+
+If this cannot run, the wrapper that calls it prints nothing: raw output is
+not an option inside a beat.
+"""
+import re
+import sys
+import syslog
+import unicodedata
+
+MAX_LINE = 1024
+MAX_TOTAL = 64 * 1024
+MAX_LOGGED = 20
+EXCERPT = 80
+
+
+def removable(ch):
+    """Control characters (not newline or tab), format characters, line and
+    paragraph separators, the variation selectors supplement and the Hangul
+    fillers. internal/sanitize.removable is the Go twin."""
+    if ch in "\n\t":
+        return False
+    o = ord(ch)
+    if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp"):
+        return True
+    return 0xE0100 <= o <= 0xE01EF or o in (0x115F, 0x1160, 0x3164, 0xFFA0)
+
+
+def clean(text):
+    """Return (cleaned text, [(line number, removed, cut, excerpt)])."""
+    events = []
+    out = []
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.endswith("\r"):
+            line = line[:-1]
+        kept = "".join(ch for ch in line if not removable(ch))
+        removed = len(line) - len(kept)
+        cut = False
+        if len(kept) > MAX_LINE:
+            n = len(kept)
+            kept = kept[:MAX_LINE] + f" [cut {n - MAX_LINE} chars]"
+            removed += n - MAX_LINE
+            cut = True
+        if removed:
+            events.append((i + 1, removed, cut, kept[:EXCERPT]))
+        out.append(kept)
+    res = "\n".join(out)
+    if len(res.encode("utf-8")) > MAX_TOTAL:
+        res = res.encode("utf-8")[:MAX_TOTAL].decode("utf-8", "ignore")
+        res += f"\n[output cut: more than {MAX_TOTAL} bytes]\n"
+        events.append((0, 0, True, "total output over the cap"))
+    return res, events
+
+
+def log(source, events):
+    if not events:
+        return
+    try:
+        syslog.openlog("cti-sanitize", 0, syslog.LOG_AUTH)
+        for n, (line, removed, cut, excerpt) in enumerate(events):
+            if n == MAX_LOGGED:
+                syslog.syslog(syslog.LOG_WARNING, f"{source}: "
+                              f"{len(events) - MAX_LOGGED} more changed line(s) not listed")
+                break
+            kind = "cut" if cut else "stripped"
+            syslog.syslog(syslog.LOG_WARNING,
+                          f"{source}: line {line} {kind} ({removed} characters): {excerpt!r}")
+    except Exception:  # noqa: BLE001 - the cleaning does not depend on the log
+        pass
+
+
+def main(argv):
+    source = "unknown"
+    if argv and argv[0] == "--source" and len(argv) >= 2:
+        source = "".join(c for c in argv[1] if c.isalnum() or c in "-_.")[:40] or "unknown"
+    elif argv:
+        print("usage: fleet-sanitize [--source NAME]   (reads stdin)", file=sys.stderr)
+        return 2
+    raw = sys.stdin.buffer.read()
+    # A run of invalid bytes becomes ONE replacement character, as in the Go twin.
+    text, events = clean(re.sub("\ufffd+", "\ufffd", raw.decode("utf-8", "replace")))
+    log(source, events)
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

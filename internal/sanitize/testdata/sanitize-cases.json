@@ -1,0 +1,104 @@
+[
+ {
+  "name": "plain text is untouched",
+  "input": "hello\nworld\n",
+  "output": "hello\nworld\n",
+  "changed": 0
+ },
+ {
+  "name": "tab is kept",
+  "input": "a\tb\n",
+  "output": "a\tb\n",
+  "changed": 0
+ },
+ {
+  "name": "an escape sequence loses its escape",
+  "input": "ok \u001b[2Jhidden\n",
+  "output": "ok [2Jhidden\n",
+  "changed": 1
+ },
+ {
+  "name": "a carriage return mid-line cannot overwrite",
+  "input": "safe\rEVIL\n",
+  "output": "safeEVIL\n",
+  "changed": 1
+ },
+ {
+  "name": "a CRLF line end is not an attack",
+  "input": "a\r\nb\n",
+  "output": "a\nb\n",
+  "changed": 0
+ },
+ {
+  "name": "NUL and DEL go",
+  "input": "a\u0000b\u007fc\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "C1 controls go",
+  "input": "a\u009bb\n",
+  "output": "ab\n",
+  "changed": 1
+ },
+ {
+  "name": "a bidi override goes",
+  "input": "a\u202eb\n",
+  "output": "ab\n",
+  "changed": 1
+ },
+ {
+  "name": "zero width characters go",
+  "input": "a\u200bb\ufeffc\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "a long line is cut and says so",
+  "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nnext\n",
+  "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx [cut 6 chars]\nnext\n",
+  "changed": 1
+ },
+ {
+  "name": "non-ASCII text is kept",
+  "input": "caf\u00e9 \u2014 ok\n",
+  "output": "caf\u00e9 \u2014 ok\n",
+  "changed": 0
+ },
+ {
+  "name": "unicode tag characters go",
+  "input": "a\udb40\udc41\udb40\udc42b\n",
+  "output": "ab\n",
+  "changed": 1
+ },
+ {
+  "name": "line and paragraph separators go",
+  "input": "a\u2028b\u2029c\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "soft hyphen and Arabic letter mark go",
+  "input": "a\u00adb\u061cc\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "interlinear annotation goes",
+  "input": "a\ufff9b\ufffbc\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "Hangul fillers go",
+  "input": "a\u3164b\u115fc\n",
+  "output": "abc\n",
+  "changed": 1
+ },
+ {
+  "name": "an emoji with its variation selector is kept",
+  "input": "ok \u2764\ufe0f\n",
+  "output": "ok \u2764\ufe0f\n",
+  "changed": 0
+ }
+]

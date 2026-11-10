@@ -78,6 +78,45 @@ The hook fails closed. Input that is not a JSON object, a
 .B Bash
 event with no command string, or any error in the hook itself also exits 2. A
 guard that fails open is not a guard.
+.PP
+Two more checks follow the syntax rules (PrimeSec design review 39260,
+Scenario\-223 and Scenario\-224). The
+.B argument policy
+is a static table in the guard of what each granted command may take:
+subcommands, flags, values and lengths (a board message at most 400
+characters, memory text 1500, an alert reason 800, printable ASCII only;
+.B cti\-alert
+only with
+.B \-\-unit cti\-agent\-checkin.service
+.BR "\-\-kind ESCALATION" ,
+and exactly one of
+.B \-\-for\-real
+or
+.BR \-\-dry\-run ).
+A command not in the table, an unknown flag or an out\-of\-rule value is
+refused. A test fails if
+.BR run\-checkin 's
+grant and the table differ.
+.PP
+The
+.B per\-beat limits
+count the beat's Bash calls under
+.IR state/checkin\-counts/ID.json ,
+a directory the beat cannot read, where ID is
+.BR CHECKIN_BEAT_ID .
+A call past
+.B CHECKIN_MAX_BASH
+(default 20),
+.B CHECKIN_MAX_ALERTS
+(2),
+.B CHECKIN_MAX_BOARD_WRITES
+(4) or
+.B CHECKIN_MAX_DB_WRITES
+(6) is refused with a message saying it is a safety limit, not an outage, and
+logged to the journal under the tag
+.BR checkin\-bash\-guard .
+With no beat id (a hand run, a test) nothing is counted. A counter that
+cannot be read or written refuses the call.
 .SH OPTIONS
 None. The hook takes no arguments and reads no environment variables; its
 only input is the JSON event on standard input.
@@ -91,7 +130,9 @@ command with none of the forbidden characters and no
 prefix.
 .TP
 .B 2
-The call is blocked. Standard error carries one line beginning
+The call is blocked: forbidden syntax, a command or argument outside the
+argument policy, or a per\-beat limit reached. Standard error carries one
+line beginning
 .BR checkin\-bash\-guard: .
 .SH FILES
 .TP

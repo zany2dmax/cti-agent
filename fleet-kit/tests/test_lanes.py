@@ -2710,11 +2710,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             "/opt/cti-agent/bin/fleet-timers --all",
             "/opt/cti-agent/bin/fleet-journal -u 'cti-agent-*' --since '-3h' --no-pager",
             '/opt/cti-agent/bin/fleet-board say @all INFO "orchestrator up"',
-            '/opt/cti-agent/bin/fleet-db remember checkin "quiet beat, 0 findings"',
+            '/opt/cti-agent/bin/fleet-db remember checkin beat_1 "quiet beat, 0 findings"',
             "/opt/cti-agent/bin/cti-budget status",
             "/opt/cti-agent/bin/fleet-board say @all INFO 'costs $5? [maybe] ~later'",
             # An apostrophe inside double quotes is a literal, not a quote.
-            '/opt/cti-agent/bin/fleet-db remember checkin "the digest didn\'t run"',
+            '/opt/cti-agent/bin/fleet-db remember checkin beat_1 "the digest didn\'t run"',
             "/opt/cti-agent/bin/fleet-board say @all INFO 'say \"hi\" here'",
         ):
             with self.subTest(allowed=cmd):
@@ -2764,6 +2764,212 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             with self.subTest(bad_input=payload):
                 self.assertEqual(run(payload).returncode, 2)
         self.assertEqual(run({"tool_name": "Read", "tool_input": {"file_path": "/x>y"}}).returncode, 0)
+
+
+    def _guard(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        return root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
+
+    def _run_guard(self, cmd, env=None):
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+        e = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
+        e.update(env or {})
+        return subprocess.run([sys.executable, "-I", str(self._guard())], input=payload,
+                              capture_output=True, text=True, check=False, env=e)
+
+    def test_the_guard_holds_each_granted_command_to_its_arguments(self):
+        """PrimeSec design review 39260, Scenario-223: a prefix grant such as
+        cti-alert:* lets any arguments through, so the guard also holds a table
+        of what each granted command may be given."""
+        b = "/opt/cti-agent/bin/"
+        allowed = (
+            b + "fleet-board read", b + "fleet-board read @all", b + "fleet-board tail 6",
+            b + "fleet-board resolve q17", b + "fleet-board expire 7",
+            b + 'fleet-board say @all INFO "braces {ok} and (parens) inside double quotes"',
+            b + "fleet-board say @all INFO 'a #hash and {braces} in single quotes'",
+            b + "fleet-db task done 12", b + "fleet-db mail ack 3",
+            b + 'fleet-board say @all INFO "quiet beat"',
+            b + "fleet-db recent", b + "fleet-db findings --status UNKNOWN",
+            b + "fleet-db findings --priority Sev5 --stale-days 7",
+            b + "fleet-db was-sent 2026-11-10 daily", b + "fleet-db rollup --days 7",
+            b + "fleet-db task list", b + "fleet-db ack 12", b + "fleet-db vacuum",
+            b + "fleet-db mail inbox ingest",
+            b + "cti-budget status", b + "cti-kev --horizon 14", b + "cti-kev",
+            b + "cti-patchtuesday --dry-run --month 2026-11",
+            b + "cti-mailbox --dry-run",
+            b + "fleet-timers --all", b + "fleet-timers 'cti-agent-*'",
+            b + "fleet-journal -u cti-agent-domains.service --since today --no-pager",
+            b + "fleet-journal -u 'cti-agent-*' --since '-3h' -n 200 --no-pager",
+            b + 'cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION '
+                '--reason "Please approve X. If you do nothing it waits. Detail: CVE."',
+            b + "cti-alert --unit cti-agent-checkin.service --dry-run --kind ESCALATION --reason 'x'",
+        )
+        for cmd in allowed:
+            with self.subTest(allowed=cmd):
+                r = self._run_guard(cmd)
+                self.assertEqual(r.returncode, 0, r.stderr)
+        refused = (
+            "/usr/bin/id", "/tmp/fleet-board read", "fleet-board read",
+            b + "fleet-board", b + "fleet-board post @you @operator A x",
+            b + "fleet-board prune .", b + "fleet-board say @attacker INFO x",
+            b + "fleet-board say @all FORGED x", b + "fleet-board say @all INFO",
+            b + "fleet-board say @all INFO " + "x" * 401,
+            b + "fleet-board say @all INFO 'caf\u00e9'",
+            b + "fleet-board tail 99999", b + "fleet-board expire 1",
+            b + "fleet-db sent 2026-11-10 1 2 3 4 5 m", b + "fleet-db finding upsert '{}'",
+            b + "fleet-db note CVE-2026-1 x", b + "fleet-db init",
+            b + "fleet-db remember checkin one", b + "fleet-db remember BAD topic text",
+            b + "fleet-db findings --db /tmp/x", b + "fleet-db recent 1 2",
+            b + "cti-budget record --exit 0", b + "cti-budget",
+            b + "cti-kev --enriched /tmp/e.json", b + "cti-kev --horizon=14",
+            b + "cti-kev --horizon 0", b + "cti-kev --horizon 14 --horizon 15",
+            b + "cti-patchtuesday --mark-sent", b + "cti-patchtuesday --dry-run --out /tmp/x",
+            b + "cti-patchtuesday --dry-run --url-msrc http://example.test",
+            b + "cti-patchtuesday --month 2026-11 --dry-run",
+            b + "cti-mailbox", b + "cti-mailbox --dry-run --for-real",
+            b + "fleet-timers --host=user@box", b + "fleet-timers ssh",
+            b + "fleet-journal -u sshd", b + "fleet-journal --cursor-file x -u cti-agent-x",
+            b + "fleet-journal --since today",
+            b + "cti-alert --unit cti-agent-checkin.service --kind ESCALATION --reason x",
+            b + "cti-alert --unit cti-agent-checkin.service --for-real --dry-run --kind ESCALATION --reason x",
+            b + "cti-alert --unit cti-agent-digest.service --for-real --kind ESCALATION --reason x",
+            b + "cti-alert --unit cti-agent-checkin.service --for-real --kind FAILED --reason x",
+            b + "cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION --reason x --to-dev",
+            b + "cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION --reason " + "'" + "x" * 801 + "'",
+            b + "cti-mailer --lane was", b + "run-digest daily --for-real",
+            # Review of design review 39260: brace expansion, comments, extglob.
+            b + "fleet-board say @all INFO {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}",
+            b + "fleet-db remember checkin t {a,b}{a,b}{a,b}",
+            b + "fleet-board say @all INFO hello #hidden",
+            b + "fleet-board say @all INFO +(a|b)",
+            b + "fleet-db task done abc", b + "fleet-db ack abc", b + "fleet-db mail ack abc",
+        )
+        for cmd in refused:
+            with self.subTest(refused=cmd):
+                r = self._run_guard(cmd)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("checkin-bash-guard:", r.stderr)
+
+    def test_every_command_the_beat_is_granted_has_an_argument_policy(self):
+        """The table in the guard and run-checkin's grant must not drift:
+        a granted command with no row would be refused, and a row with no grant
+        is dead weight that suggests a capability the beat does not have."""
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("checkin_guard", str(self._guard()))
+        spec = importlib.util.spec_from_loader("checkin_guard", loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        root = pathlib.Path(__file__).resolve().parents[2]
+        run = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
+        granted = set()
+        for line in run.splitlines():
+            if "ALLOWED_TOOLS" in line:
+                granted.update(re.findall(r"\$FLEET_CODE/bin/([a-z-]+)", line))
+        self.assertTrue(granted, "found no grants in run-checkin")
+        self.assertEqual(granted, set(mod.POLICY),
+                         "run-checkin's Bash grants and the guard's POLICY table differ")
+
+    def test_the_guard_counts_a_beats_calls_and_refuses_past_the_limit(self):
+        """Scenario-224: per-beat counters, set by run-checkin and kept where
+        the beat cannot read or write them; the Nth+1 call is refused."""
+        import tempfile
+        b = "/opt/cti-agent/bin/"
+        with tempfile.TemporaryDirectory() as home:
+            env = {"CHECKIN_BEAT_ID": "beat-1", "FLEET_HOME": home,
+                   "CHECKIN_MAX_BASH": "5", "CHECKIN_MAX_BOARD_WRITES": "2"}
+            say = b + 'fleet-board say @all INFO "x"'
+            for i in range(2):
+                self.assertEqual(self._run_guard(say, env).returncode, 0)
+            r = self._run_guard(say, env)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("limit for board write", r.stderr)
+            # Reads are not board writes, but every call counts toward the total
+            # (2 writes + 1 refused write so far = 3 of 5).
+            self.assertEqual(self._run_guard(b + "fleet-board read", env).returncode, 0)
+            self.assertEqual(self._run_guard(b + "fleet-board read", env).returncode, 0)
+            r = self._run_guard(b + "fleet-board read", env)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("limit for bash", r.stderr)
+            counts = json.loads((pathlib.Path(home) / "state" / "checkin-counts" / "beat-1.json").read_text())
+            self.assertEqual(sorted(counts["tripped"]), ["bash", "board_write"])
+            self.assertEqual(oct((pathlib.Path(home) / "state" / "checkin-counts").stat().st_mode & 0o777), "0o700")
+            # Another beat starts at zero.
+            env2 = dict(env, CHECKIN_BEAT_ID="beat-2")
+            self.assertEqual(self._run_guard(say, env2).returncode, 0)
+            # A counter that cannot be kept refuses rather than going quiet.
+            bad = dict(env2, FLEET_HOME="/proc/no-such-dir")
+            r = self._run_guard(say, bad)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("counter", r.stderr)
+            # With no beat id (a hand run) nothing is counted.
+            self.assertEqual(self._run_guard(b + "fleet-board read").returncode, 0)
+
+
+    def _bin(self, name):
+        return pathlib.Path(__file__).resolve().parents[1] / "fleet" / "bin" / name
+
+    def test_fleet_sanitize_cleans_by_the_same_cases_as_the_go_twin(self):
+        """Scenario-222. internal/sanitize (Go) and fleet-sanitize (Python) read
+        one file of cases, so the two cannot drift."""
+        cases = json.loads((pathlib.Path(__file__).resolve().parents[2] / "internal" / "sanitize"
+                            / "testdata" / "sanitize-cases.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(cases), 10)
+        for c in cases:
+            with self.subTest(c["name"]):
+                r = subprocess.run([sys.executable, "-I", str(self._bin("fleet-sanitize")),
+                                    "--source", "test"], input=c["input"].encode("utf-8"),
+                                   capture_output=True, check=False)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.decode("utf-8"), c["output"])
+                self.assertEqual(r.stderr, b"", "the cleaner must never write to stderr: that goes to the model")
+
+    def test_a_beat_reads_the_board_and_memory_cleaned_and_a_lane_reads_them_raw(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            board = pathlib.Path(home) / "board.md"
+            board.write_text("[2026-11-10 09:00] @scout -> @you INFO id=x1 ok \x1b[2Jhidden \r EVIL\n"
+                             "[2026-11-10 09:01] @scout -> @you INFO " + "y" * 3000 + "\n", encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
+            env.update({"FLEET_HOME": home})
+            beat = dict(env, CHECKIN_BEAT_ID="b-1")
+
+            def board_read(e):
+                return subprocess.run(["/bin/bash", str(self._bin("fleet-board")), "read"],
+                                      capture_output=True, text=True, check=False, env=e)
+            raw, clean = board_read(env), board_read(beat)
+            self.assertIn("\x1b", raw.stdout)
+            self.assertNotIn("\x1b", clean.stdout)
+            self.assertNotIn("\r", clean.stdout)
+            self.assertIn("[cut ", clean.stdout)
+            self.assertLess(max(len(x) for x in clean.stdout.splitlines()), 1100)
+            # The same for fleet-db: what a memory says reaches the beat cleaned.
+            subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "remember", "scout",
+                            "t1", "note \x1b[31mred\x1b[0m"], check=True, env=env, capture_output=True)
+
+            def db_recent(e):
+                return subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "recent"],
+                                      capture_output=True, text=True, check=False, env=e)
+            self.assertIn("\x1b", db_recent(env).stdout)
+            r = db_recent(beat)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("\x1b", r.stdout)
+            self.assertIn("note [31mred[0m", r.stdout)
+
+    def test_the_runner_gives_each_beat_an_id_and_reads_its_counts_afterwards(self):
+        """Scenario-224: the id and limits are set by run-checkin, which the
+        beat cannot change, and the notice is sent by the runner."""
+        run = self._bin("run-checkin").read_text(encoding="utf-8")
+        self.assertIn('export CHECKIN_BEAT_ID', run)
+        self.assertIn("checkin-counts", run)
+        self.assertIn("checkin-trips", run)
+        # The email is the second trip of a day (once, marked), sent by cti-alert from the runner.
+        self.assertIn('checkin-trips-emailed', run)
+        self.assertIn("--kind HOLD", run)
+        # Every wrapper the beat reads through cleans only inside a beat.
+        for name in ("fleet-journal", "fleet-board", "fleet-db"):
+            with self.subTest(name):
+                self.assertIn("CHECKIN_BEAT_ID", self._bin(name).read_text(encoding="utf-8"))
 
     def test_the_board_takes_one_line_per_post_and_the_beat_cannot_prune_it(self):
         """A newline in a handle or kind wrote a second, forged board line

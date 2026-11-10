@@ -672,6 +672,48 @@ hook at `$FLEET_CODE/bin/checkin-bash-guard`, or if piping a redirect payload
 through the guard does not exit 2. A blocked call appears in the beat's log as a
 `checkin-bash-guard:` line.
 
+**The beat's arguments, reads and call counts are controlled too** (PrimeSec
+design review 39260, Scenarios 222 to 224).
+
+- *Argument policy (223).* A grant such as `cti-alert:*` names a command, so
+  any arguments passed. `checkin-bash-guard` now holds a static table of what
+  each granted command may take: subcommands, flags, values and lengths (board
+  message 400 characters, memory text 1500, alert reason 800, printable ASCII
+  only; `cti-alert` only `--unit cti-agent-checkin.service --kind ESCALATION`
+  and exactly one of `--for-real` or `--dry-run`). A command not in the table,
+  an unknown flag or an out-of-rule value exits 2. Brace expansion,
+  parentheses and an unquoted `#` outside quotes are refused as well (bash and
+  the guard read them differently). A test fails when `run-checkin`'s grant and
+  the table differ.
+- *Sanitizing (222).* Inside a heartbeat only (`CHECKIN_BEAT_ID` set),
+  `fleet-journal`, `fleet-board read` and `tail`, all of `fleet-db`, `cti-kev`,
+  `cti-mailbox`, `cti-patchtuesday` and `cti-alert` pass their output through
+  `fleet-sanitize` (`internal/sanitize`): control characters (not newline or
+  tab), C1 controls, every Unicode format character (bidi, zero-width, tag
+  characters), line and paragraph separators and the Hangul fillers are
+  removed, lines over 1024
+  characters are cut with a `[cut N chars]` marker and output over 64 KB is
+  cut. Each changed line is logged to the journal as `cti-sanitize`, never to
+  stderr, which goes back to the model. Only standard output is cleaned: error
+  text on standard error is not (accepted, as the commands' own error messages
+  already pass `safelog`). Outside a beat nothing changes. If the cleaner is
+  missing the beat gets nothing.
+- *Limits and anomaly notice (224).* Each beat has an id; the guard counts its
+  Bash calls in `state/checkin-counts/<id>.json` (not readable by the beat) and
+  refuses calls past `CHECKIN_MAX_BASH` (20), `CHECKIN_MAX_ALERTS` (2),
+  `CHECKIN_MAX_BOARD_WRITES` (4) and `CHECKIN_MAX_DB_WRITES` (6), logging a trip
+  as `checkin-bash-guard`. After the beat `run-checkin` itself also checks the
+  board's growth (`CHECKIN_MAX_BOARD_GROWTH`, 8 lines). Any trip posts a board
+  line and a journal line; the second trip in a day emails the operator once
+  (`cti-alert --kind HOLD`) and a third sends nothing more that day.
+
+**Accepted gap.** The beat's Read grant on `reports/`, `logs/` and `archive/`
+does not go through the wrappers, so what it reads from files is not cleaned.
+This is accepted (decision of 2026-11-10): the beat has no write tools and no
+mail address of its own, and every action it can take passes the argument
+policy and the per-beat limits, so hostile text in a file can at most waste a
+beat.
+
 **The beat cannot empty the board or forge a line.** The grant was
 `fleet-board:*`, which includes `prune`; `prune .` moves every line to the
 archive, the ERROR lines `cti-alert` and the runners leave for the operator

@@ -25,9 +25,14 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/kev"
+	"github.com/zany2dmax/cti-agent/internal/sanitize"
 )
 
-func main() {
+// Inside a heartbeat the output is cleaned before the model reads it: see
+// internal/sanitize.
+func main() { os.Exit(sanitize.Run("cti-kev", run)) }
+
+func run() int {
 	enriched := flag.String("enriched", "",
 		"path to enriched JSON; default is the newest in $FLEET_HOME/state")
 	horizon := flag.Int("horizon", 14, "\"due soon\" window in days")
@@ -45,7 +50,7 @@ func main() {
 		p, err := confineEnriched(path, os.Getenv("FLEET_HOME"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cti-kev: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		path = p
 	}
@@ -53,7 +58,7 @@ func main() {
 		p, err := newestEnriched()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cti-kev: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		path = p
 	}
@@ -61,7 +66,7 @@ func main() {
 	e, err := kev.Load(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cti-kev: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	r := kev.Analyze(e, time.Now().UTC(), *horizon)
@@ -108,8 +113,9 @@ func main() {
 	}
 
 	if *failIfOverdue && len(r.Overdue) > 0 {
-		os.Exit(2)
+		return 2
 	}
+	return 0
 }
 
 func cves(rows []kev.Dated) []string {

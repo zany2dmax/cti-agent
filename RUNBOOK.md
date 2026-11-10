@@ -609,6 +609,27 @@ lane whose output nobody is missing yet.
 
 ---
 
+### A beat was refused or stopped by a limit
+
+The orchestrator's Bash guard refuses a call past a per-beat limit and says
+"limit" in the message; that is a safety limit, not an outage. Look at:
+
+```bash
+sudo journalctl -t checkin-bash-guard -t cti-sanitize --since today
+sudo cti-agent fleet-board tail 20      # the "went past a safety limit" line
+sudo ls /var/lib/cti-agent/state/checkin-counts/   # one JSON file per beat
+```
+
+`checkin-bash-guard` lines are refusals and limit trips; `cti-sanitize` lines
+are text the cleaner changed (a burst of them means a feed or mail carried
+hidden characters). The first trip of a day posts a board line; the second
+emails the operator once (`cti-alert --kind HOLD`); a third sends nothing more
+that day. The next beat starts fresh. If the limits are too tight for real
+work, raise them in `/etc/cti-agent/fleet.env`: `CHECKIN_MAX_BASH` (20),
+`CHECKIN_MAX_ALERTS` (2), `CHECKIN_MAX_BOARD_WRITES` (4),
+`CHECKIN_MAX_DB_WRITES` (6), `CHECKIN_MAX_BOARD_GROWTH` (8). Counter files
+older than 7 days are deleted by `run-checkin`.
+
 ## 11b. Switching the mailer
 
 `mailer.py` has been ported to `cmd/cti-mailer`. **Both exist**, and the

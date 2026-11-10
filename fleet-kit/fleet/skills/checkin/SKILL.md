@@ -115,6 +115,11 @@ they do nothing, then the detail. Spell out an abbreviation the first time and
 keep it under about 600 characters. The guard in CLAUDE.md lists the characters
 a Bash call may not contain.
 
+The guard also limits arguments and calls per beat: an alert reason is at most
+800 characters of plain ASCII, and a beat gets about 2 alerts and 20 calls. A
+refusal with "limit" in it is a safety limit, not an outage: stop, and let the
+next beat continue.
+
 `cti-alert` is your only mail. It has no `--to`; the operator is the only
 person it can reach, which is the point.
 

@@ -151,6 +151,17 @@ Nothing here can permanently delete mail. The Graph client implements
 move-to-Archive and move-to-Deleted-Items and nothing else; emptying Deleted
 Items is a person's job. Processing records older than 14 days are pruned by
 the digest, after which a message can no longer be moved on their strength.
+.PP
+Inside a heartbeat (when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1))
+what it prints output is passed through
+.BR fleet\-sanitize (1):
+control characters, bidirectional and zero\-width characters are removed and
+over\-long lines are cut with a
+.B [cut N chars]
+marker. Outside a heartbeat the output is untouched.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash
 .RB ( \-dry\-run ),

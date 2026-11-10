@@ -65,6 +65,17 @@ overdue list may only mean the deadlines are missing.
 reads one file and writes only to standard output and standard error.
 It does not contact the scanner, CISA or any mailbox, and does not read
 .IR fleet.env .
+.PP
+Inside a heartbeat (when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1))
+what it prints output is passed through
+.BR fleet\-sanitize (1):
+control characters, bidirectional and zero\-width characters are removed and
+over\-long lines are cut with a
+.B [cut N chars]
+marker. Outside a heartbeat the output is untouched.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash
 .RB ( \-json ),

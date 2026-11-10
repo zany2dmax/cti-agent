@@ -635,6 +635,22 @@ set +e
 # Auto-memory is a CLAUDE.md the model writes for itself, under the account's
 # config dir, and loaded on the next session: persistence by design. Off.
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+
+# PER-BEAT LIMITS (PrimeSec design review 39260, Scenario-224). The Bash guard
+# counts this beat's calls under state/checkin-counts and refuses the ones past
+# CHECKIN_MAX_BASH / _ALERTS / _BOARD_WRITES / _DB_WRITES (defaults 20 / 2 / 4 /
+# 6 in the guard; a busy normal beat makes about 11 calls and 1 write of each
+# kind, measured from the traces). The beat id is what keys the counter, and
+# these variables are set here, on the claude process, which the beat cannot
+# change. After the beat the runner (not the model) reads the counts and the
+# board's growth and tells the operator.
+CHECKIN_BEAT_ID="$(date '+%Y%m%dT%H%M%S')-$$"
+export CHECKIN_BEAT_ID
+BEAT_COUNTS_DIR="$FLEET_HOME/state/checkin-counts"
+BEAT_BOARD="$FLEET_HOME/board.md"
+board_before="$(wc -l < "$BEAT_BOARD" 2>/dev/null | tr -d ' ' || true)"
+board_before="${board_before:-0}"
+find "$BEAT_COUNTS_DIR" -name '*.json' -mtime +7 -delete 2>/dev/null || true
 SETTINGS_ARGS=()
 [ -f "$CHECKIN_SETTINGS" ] && SETTINGS_ARGS=(--settings "$CHECKIN_SETTINGS")
 CLAUDE_ARGS=(-p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default
@@ -681,6 +697,60 @@ else
 fi
 set -e
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
+
+# Did the beat do more than a beat does? Two signals, both read here and not by
+# the model: a limit the guard enforced (the counter file's "tripped" list), and
+# the board growing by more than CHECKIN_MAX_BOARD_GROWTH lines (default 8; a
+# beat that prunes can only shrink it). The first trip of a day is a board line
+# and a journal line; the second sends the operator one email, and a third or
+# fourth sends nothing more, so a stuck beat cannot flood the inbox.
+anomaly=""
+counts_file="$BEAT_COUNTS_DIR/$CHECKIN_BEAT_ID.json"
+if [ -f "$counts_file" ]; then
+  anomaly="$(/usr/bin/python3 -I - "$counts_file" <<'PY' 2>/dev/null || echo "the beat's counter file could not be read"
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    t = [x for x in (d.get("tripped") or []) if isinstance(x, str)]
+    if t:
+        print("limit reached for " + ", ".join(t))
+except Exception:
+    print("the beat's counter file could not be read")
+PY
+)"
+fi
+# A beat that finished but left no counts file means the guard could not keep
+# its counter (and so refused every call): that is not a quiet beat.
+if [ "$rc" -eq 0 ] && [ ! -f "$counts_file" ]; then
+  anomaly="${anomaly:+$anomaly; }no call counts were recorded for this beat"
+fi
+board_after="$(wc -l < "$BEAT_BOARD" 2>/dev/null | tr -d ' ' || true)"
+board_after="${board_after:-0}"
+growth_max="${CHECKIN_MAX_BOARD_GROWTH:-8}"
+case "$growth_max" in ''|*[!0-9]*) growth_max=8 ;; esac
+if [ $((board_after - board_before)) -gt "$growth_max" ]; then
+  anomaly="${anomaly:+$anomaly; }the board grew by $((board_after - board_before)) lines"
+fi
+if [ -n "$anomaly" ]; then
+  echo "[run-checkin $(date '+%F %H:%M:%S')] ANOMALY: $anomaly (beat $CHECKIN_BEAT_ID)"
+  "$FLEET_CODE/bin/fleet-board" post @you @operator INFO \
+    "beat $CHECKIN_BEAT_ID went past a safety limit: $anomaly" 2>/dev/null || true
+  trips="$FLEET_HOME/state/checkin-trips"
+  today="$(date +%F)"
+  echo "$today" >> "$trips" 2>/dev/null || true
+  if [ -f "$trips" ]; then
+    tail -n 100 "$trips" > "$trips.tmp" 2>/dev/null && mv "$trips.tmp" "$trips" 2>/dev/null || true
+    trips_today="$(grep -c "^$today\$" "$trips" 2>/dev/null || true)"
+    emailed_marker="$FLEET_HOME/state/checkin-trips-emailed"
+    if [ "${trips_today:-0}" -ge 2 ] && [ "$(cat "$emailed_marker" 2>/dev/null || true)" != "$today" ] \
+        && [ -x "$FLEET_CODE/bin/cti-alert" ]; then
+      echo "$today" > "$emailed_marker" 2>/dev/null || true
+      "$FLEET_CODE/bin/cti-alert" --unit cti-agent-checkin.service --for-real --kind HOLD \
+        --reason "The orchestrator went past one of its own safety limits twice today ($anomaly). It was stopped from making more calls, and nothing it did leaves the box except what the limits allow. If you do nothing the next beat starts fresh. Detail: the board line from the latest beat, and the journal for checkin-bash-guard." \
+        || true
+    fi
+  fi
+fi
 
 if [ -x "$BUDGET" ]; then
   # Only beats that actually reached the model count against the ceilings.

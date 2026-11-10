@@ -1,0 +1,94 @@
+.TH FLEET-SANITIZE 1 "2026-11-10" "cti-agent 1.6" "CTI Fleet Manual"
+.SH NAME
+fleet-sanitize \- clean text before the orchestrator's model reads it
+.SH SYNOPSIS
+.I command
+|
+.B fleet\-sanitize
+.RB [ \-\-source
+.IR NAME ]
+.SH DESCRIPTION
+.B fleet\-sanitize
+reads standard input and writes it to standard output with the characters a
+model should not be handed removed. Most of what the orchestrator heartbeat
+reads (the journal, the board, the memory database) began in somebody else's
+mail or feed, and hidden characters are a way to smuggle instructions past a
+human reader.
+.PP
+It removes control characters other than newline and tab, C1 controls,
+bidirectional overrides and zero\-width characters. A line over 1024
+characters is cut and ends with a
+.B [cut N chars]
+marker. Output over 64 KB is cut, with a note. Every line it changed is
+logged to the journal under the tag
+.BR cti\-sanitize ;
+it never writes to standard error, because standard error goes back into the
+model.
+.PP
+The wrappers
+.BR fleet\-journal (1),
+.BR fleet\-board (1)
+(read and tail),
+.BR fleet\-db (1),
+.BR cti\-kev (1)
+and
+.BR cti\-mailbox (1)
+call it only inside a heartbeat, that is, when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1).
+Outside a heartbeat their output is untouched, so a lane that parses it is
+unaffected. If the cleaner cannot run, the wrapper prints nothing: raw output
+is not an option inside a beat. The Go twin is
+.IR internal/sanitize ;
+both read the same cases from
+.IR internal/sanitize/testdata/sanitize\-cases.json .
+.PP
+PrimeSec design review 39260, Scenario\-222. The Read grant on
+.IR reports/ ,
+.I logs/
+and
+.I archive/
+does not pass through the wrappers, so file reads are not cleaned; that gap
+is accepted (see SECURITY.md).
+.SH OPTIONS
+.TP
+.BI \-\-source " NAME"
+A label for the journal lines (letters, digits,
+.BR \- ,
+.B _
+and
+.BR . ,
+at most 40 characters). Default:
+.BR unknown .
+.SH ENVIRONMENT
+.TP
+.B CHECKIN_BEAT_ID
+Not read here. The wrappers use it to decide whether to call this tool.
+.SH FILES
+.TP
+.I /opt/cti\-agent/bin/fleet\-sanitize
+The cleaner, root\-owned.
+.SH EXIT STATUS
+.TP
+.B 0
+The text was written.
+.TP
+.B 2
+An argument other than
+.B \-\-source
+was given.
+.SH EXAMPLES
+Clean a file by hand and see what the journal recorded:
+.PP
+.EX
+fleet\-sanitize \-\-source test < advisory.txt
+sudo journalctl \-t cti\-sanitize \-\-since today
+.EE
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR checkin\-bash\-guard (1),
+.BR fleet\-journal (1),
+.BR fleet\-board (1),
+.BR fleet\-db (1),
+.BR cti\-agent (1)

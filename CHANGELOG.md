@@ -35,6 +35,66 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: the
+defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
+
+### Security
+
+- **Fixed issues found by PrimeSec AI:**
+  - Design review 39260, Scenario-222 (Orchestrator Context Window Content Sanitization) - see the entry below
+  - Design review 39260, Scenario-223 (Orchestrator Tool Argument Scope Restriction) - see the entry below
+  - Design review 39260, Scenario-224 (Heartbeat Session Tool Invocation Anomaly Detection) - see the entry below
+
+- **What the orchestrator reads is cleaned first.** The heartbeat reads the
+  journal, the board and its memory, and most of that text began in mail or a
+  feed, so hidden characters could carry instructions the operator never saw.
+  Inside a beat only, `fleet-journal`, `fleet-board read` and `tail`,
+  `fleet-db`, `cti-kev` and `cti-mailbox` now pass their output through
+  `fleet-sanitize` (`internal/sanitize`), as do `cti-patchtuesday` and
+  `cti-alert`: control characters, C1 controls, every Unicode format character
+  (bidi overrides, zero-width and tag characters, soft hyphens), line and
+  paragraph separators and the Hangul fillers are removed, lines over 1024 characters
+  are cut with a `[cut N chars]` marker, output over 64 KB is cut, and each
+  changed line is logged under the tag `cti-sanitize`. If the cleaner is
+  missing the beat gets nothing. Outside a beat output is untouched, so lanes
+  that parse it are unaffected. **Stays:** the Read grant on `reports/`,
+  `logs/` and `archive/` bypasses the wrappers, so file reads are not cleaned,
+  and only standard output is cleaned (error text on standard error is not).
+  Accepted on 2026-11-10: the beat has no write tools, no mail address of its
+  own, and every action it can take passes the argument policy and the
+  per-beat limits.
+- **Each command the orchestrator may run has rules on its arguments.** A
+  grant such as `cti-alert:*` named a command, and any arguments passed.
+  `checkin-bash-guard` now holds a static table of the subcommands, flags,
+  values and lengths each granted command may take (board message 400
+  characters, memory text 1500, alert reason 800, printable ASCII only;
+  `cti-alert` only `--unit cti-agent-checkin.service --kind ESCALATION` with
+  exactly one of `--for-real` or `--dry-run`). A command not in the table, an
+  unknown flag or an out-of-rule value is refused (exit 2). Brace expansion,
+  parentheses and an unquoted `#` outside quotes are refused too, because bash
+  and the guard read them differently (one word of braces expands to thousands,
+  past every length rule). A test fails when `run-checkin`'s grant and the
+  table differ. Found on the way: `fleet-db findings --status` was accepted and
+  ignored, so a beat asking for UNKNOWN findings got all of them; it now
+  filters. **Stays:** the shell-syntax
+  rules and the grants themselves.
+- **A beat that does too much is stopped and the operator is told.**
+  `run-checkin` gives each beat an id and the guard counts its calls in
+  `state/checkin-counts/<id>.json`, a directory the beat cannot read, refusing
+  calls past `CHECKIN_MAX_BASH` (20), `CHECKIN_MAX_ALERTS` (2),
+  `CHECKIN_MAX_BOARD_WRITES` (4) and `CHECKIN_MAX_DB_WRITES` (6). After the
+  beat the runner also checks the board's growth (`CHECKIN_MAX_BOARD_GROWTH`,
+  8 lines), and flags a beat that left no counts at all. Any trip posts a board
+  line and a journal line; the second trip in a day emails the operator once
+  (`cti-alert --kind HOLD`), and later trips that day send nothing more. The defaults come from real beats (a busy normal beat
+  makes about 11 calls and one write, no alerts). Counter files older than 7
+  days are deleted. **Stays:** a refused call is a safety limit, not an
+  outage; the next beat starts fresh.
+
+---
+
 ## 1.6.3 — 2026-11-10
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The first

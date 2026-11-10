@@ -594,6 +594,28 @@ sends a HOLD (section 4).
 .B TMPDIR
 Directory for the beat's output copy.
 Default:\~\fI/tmp\fR (private to the unit).
+.TP
+.B CHECKIN_BEAT_ID
+Set by the script, not by the operator: a unique id for each beat
+(date, time and process id). The Bash guard keys its per\-beat counters on it,
+and the output wrappers clean what the model reads only while it is set.
+.TP
+.BR CHECKIN_MAX_BASH ", " CHECKIN_MAX_ALERTS ", " CHECKIN_MAX_BOARD_WRITES ", " CHECKIN_MAX_DB_WRITES
+How many Bash calls, alerts, board writes and memory\-database writes one beat
+may make. Defaults 20, 2, 4 and 6 (a busy normal beat makes about 11 calls).
+A call past a limit is refused as a safety limit, not an outage, and logged
+under the journal tag
+.BR checkin\-bash\-guard .
+.TP
+.B CHECKIN_MAX_BOARD_GROWTH
+How many lines the board may grow in one beat. Default 8.
+After the beat the script itself (not the model) reads the counts under
+.I state/checkin\-counts
+(files older than 7 days are deleted) and the board's growth. Any trip posts
+one board line and logs a line. The second trip in a day emails the operator
+once
+.RB ( "cti\-alert \-\-kind HOLD" );
+a third or later sends nothing more that day.
 .SH FILES
 .TP
 .I /var/lib/cti\-agent/state/traces/checkin\-*.jsonl

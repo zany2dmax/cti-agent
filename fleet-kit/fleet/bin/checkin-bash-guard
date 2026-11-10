@@ -26,23 +26,52 @@ needs a variable. Exit 2 blocks the call and the message goes
 back to the model. ANY failure here - unreadable input, a crash - also exits
 2: a guard that fails open is not a guard.
 
+Two more checks sit behind the syntax rules, both PrimeSec design review
+39260 (Scenario-223 and Scenario-224):
+
+ - ARGUMENT POLICY. A grant such as `cti-alert:*` names a command, and any
+   arguments pass it. This file also holds, as static data in a root-owned
+   file the beat cannot edit, the arguments each granted command may take:
+   which subcommands, which flags, which values, how long a message may be.
+   A command that is not in the table, a flag that is not in its row, or a
+   value outside its rule is refused. The table lives here rather than in the
+   orchestrator's own checks (its CLAUDE.md and skill are guidance, this is
+   the control), and tests/test_lanes.py fails when a command in run-checkin's
+   grant has no row.
+ - PER-BEAT LIMITS. run-checkin gives each beat an id (CHECKIN_BEAT_ID). The
+   guard counts the beat's Bash calls under $FLEET_HOME/state/checkin-counts
+   (a directory the beat has no Read on) and refuses a call once the beat has
+   made more than its share: all calls, alerts, board writes, database
+   writes. A refused call exits 2 and is logged to the journal; the runner
+   reads the counts after the beat and decides whether to tell the operator.
+   The limits are set from CHECKIN_MAX_* by run-checkin, which the beat
+   cannot change. Without a beat id (a hand run, a test) nothing is counted.
+
 -I: isolated mode (implies -s and -E), so nothing in the cwd, the
 environment or the account's user site-packages can load code into this.
 """
+import fcntl
 import json
+import os
 import re
+import shlex
 import sys
+import syslog
 
 
 # Anywhere in the command, quoted or not.
 FORBIDDEN_ANYWHERE = set("<>|;&`\n\r")
 # Outside single quotes, where bash expands them.
 FORBIDDEN_UNQUOTED = set("$*?[~")
+# Outside every quote, including double quotes (inside them bash leaves these
+# alone): brace expansion, extglob and a comment.
+FORBIDDEN_BARE = set("{}()#")
 ASSIGNMENT = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def expandable(cmd):
-    """The characters bash would read outside single quotes, or an error.
+    """The characters bash would read outside single quotes, the ones it would
+    read outside every quote, or an error.
 
     This walks the command the way bash reads quotes, because a regex for
     single-quoted spans did not: it took the ' inside "'" (a double-quoted
@@ -55,15 +84,20 @@ def expandable(cmd):
     $ there. A backslash outside single quotes is refused rather than
     interpreted: nothing a beat writes needs one, and every rule about what
     it escapes is a place for this walk and bash to disagree. An unbalanced
-    quote is refused too, since its end is wherever bash decides."""
+    quote is refused too, since its end is wherever bash decides.
+
+    The second list is what stands outside every quote: braces (brace
+    expansion turns one word into thousands and slips past every length rule),
+    parentheses (extglob) and # (a comment that bash drops and shlex keeps)."""
     seen = []
+    bare = []
     quote = None
     for c in cmd:
         if quote == "'":
             if c == "'":
                 quote = None
         elif c == "\\":
-            return seen, "a backslash outside single quotes"
+            return seen, bare, "a backslash outside single quotes"
         elif quote == '"':
             if c == '"':
                 quote = None
@@ -73,9 +107,391 @@ def expandable(cmd):
             quote = c
         else:
             seen.append(c)
+            bare.append(c)
     if quote is not None:
-        return seen, "an unbalanced quote"
-    return seen, None
+        return seen, bare, "an unbalanced quote"
+    return seen, bare, None
+
+# --------------------------------------------------------------------------
+# Argument policy (PrimeSec design review 39260, Scenario-223).
+# --------------------------------------------------------------------------
+
+# The commands live in the directory this file is in ($FLEET_CODE/bin) and, on
+# the FHS layout, /opt/cti-agent/bin. Matching the directory as well as the
+# name means a binary of the same name elsewhere is not a granted one.
+BIN_DIRS = {os.path.dirname(os.path.abspath(__file__)), "/opt/cti-agent/bin"}
+
+HANDLES = frozenset((
+    "@all", "@operator", "@you", "@ingest", "@enrich", "@scout", "@brief",
+    "@patchtuesday", "@mailbox", "@appscan", "@domains", "@vmscan", "@supplier"))
+BOARD_KINDS = frozenset(("INFO", "Q", "A", "APPROVE", "P1", "ERROR"))
+MAX_BOARD_MESSAGE = 400
+MAX_MEMORY_CONTENT = 1500
+MAX_REASON = 800          # cti-alert itself cuts a reason at 600
+ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z")
+NUM_ID = re.compile(r"[0-9]{1,9}\Z")
+UNIT_GLOB = re.compile(r"cti-agent-[A-Za-z0-9@._*-]{1,60}\Z")
+PRINTABLE = re.compile(r"[\x20-\x7e]*\Z")
+
+
+def _short(s):
+    s = s if len(s) <= 40 else s[:40] + "..."
+    return repr(s)[1:-1]
+
+
+def _int(lo, hi):
+    def check(v):
+        if not v.isascii() or not v.isdigit() or len(v) > 9:
+            return "is not a number"
+        if not lo <= int(v) <= hi:
+            return f"must be {lo} to {hi}"
+        return None
+    return check
+
+
+def _rx(pattern, what):
+    rx = re.compile(pattern)
+
+    def check(v):
+        return None if rx.match(v) else f"is not {what}"
+    return check
+
+
+def _one_of(*allowed):
+    def check(v):
+        return None if v in allowed else "must be one of " + " ".join(allowed)
+    return check
+
+
+def _text(limit):
+    def check(v):
+        if not v.strip():
+            return "is empty"
+        if len(v) > limit:
+            return f"is too long ({len(v)} characters, at most {limit})"
+        if not PRINTABLE.match(v):
+            return "has characters other than plain printable ASCII"
+        return None
+    return check
+
+
+def _flags(args, spec):
+    """Check `--flag [value]` arguments against spec: {flag: None | checker}.
+    No positional arguments and no --flag=value form: both are places a
+    value hides from the rules."""
+    seen = set()
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a not in spec:
+            return f"{_short(a)} is not an allowed argument here"
+        if a in seen:
+            return f"{a} is given twice"
+        seen.add(a)
+        check = spec[a]
+        if check is None:
+            i += 1
+            continue
+        if i + 1 >= len(args):
+            return f"{a} needs a value"
+        bad = check(args[i + 1])
+        if bad:
+            return f"{a} {bad}"
+        i += 2
+    return None
+
+
+def _none(args):
+    return None if not args else f"takes no arguments (got {_short(args[0])})"
+
+
+def _each(check, args, what):
+    for a in args:
+        bad = check(a)
+        if bad:
+            return f"{what} {_short(a)} {bad}"
+    return None
+
+
+def _pol_board(a):
+    if not a:
+        return "needs a subcommand"
+    sub, rest = a[0], a[1:]
+    if sub == "say":
+        if len(rest) < 3:
+            return "say takes @handle KIND and a message"
+        if rest[0] not in HANDLES:
+            return f"{_short(rest[0])} is not a handle the beat may post to"
+        if rest[1] not in BOARD_KINDS:
+            return "the kind must be one of " + " ".join(sorted(BOARD_KINDS))
+        bad = _text(MAX_BOARD_MESSAGE)(" ".join(rest[2:]))
+        return f"the message {bad}" if bad else None
+    if sub == "read":
+        if len(rest) > 1:
+            return "read takes at most one handle"
+        if rest and rest[0] not in HANDLES:
+            return f"{_short(rest[0])} is not a handle"
+        return None
+    if sub == "tail":
+        if len(rest) > 1:
+            return "tail takes at most one number"
+        bad = _int(1, 200)(rest[0]) if rest else None
+        return f"the line count {bad}" if bad else None
+    if sub == "resolve":
+        if len(rest) != 1 or not ID.match(rest[0]):
+            return "resolve takes one board id"
+        return None
+    if sub == "expire":
+        if len(rest) != 1:
+            return "expire takes one number of days"
+        bad = _int(2, 365)(rest[0])
+        return f"the days {bad}" if bad else None
+    return f"fleet-board {_short(sub)} is not granted"
+
+
+def _pol_db(a):
+    if not a:
+        return "needs a subcommand"
+    sub, rest = a[0], a[1:]
+    if sub == "recent":
+        if len(rest) > 1:
+            return "recent takes at most one number"
+        bad = _int(1, 100)(rest[0]) if rest else None
+        return f"the count {bad}" if bad else None
+    if sub == "findings":
+        return _flags(rest, {"--priority": _rx(r"Sev[1-5]\Z", "Sev1 to Sev5"),
+                             "--stale-days": _int(1, 3650),
+                             "--status": _rx(r"[A-Z_]{1,20}\Z", "a status word")})
+    if sub == "was-sent":
+        if len(rest) != 2:
+            return "was-sent takes a date and a kind"
+        for v, rx, what in ((rest[0], r"\d{4}-\d{2}(-\d{2})?\Z", "a date or month"),
+                            (rest[1], r"[a-z]{1,20}\Z", "a digest kind")):
+            if not re.match(rx, v):
+                return f"{_short(v)} is not {what}"
+        return None
+    if sub == "rollup":
+        return _flags(rest, {"--days": _int(1, 90)})
+    if sub == "remember":
+        if len(rest) != 3:
+            return "remember takes a category, a topic and the text"
+        for v, rx, what in ((rest[0], r"[a-z][a-z0-9_]{0,31}\Z", "a category"),
+                            (rest[1], r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z", "a topic")):
+            if not re.match(rx, v):
+                return f"{_short(v)} is not {what}"
+        bad = _text(MAX_MEMORY_CONTENT)(rest[2])
+        return f"the text {bad}" if bad else None
+    if sub == "task":
+        if rest[:1] == ["list"] and len(rest) == 1:
+            return None
+        if rest[:1] == ["add"] and len(rest) == 2:
+            bad = _text(200)(rest[1])
+            return f"the title {bad}" if bad else None
+        if rest[:1] == ["done"] and len(rest) == 2 and NUM_ID.match(rest[1]):
+            return None
+        return "task takes: list, add TITLE, or done ID"
+    if sub == "ack":
+        return None if len(rest) == 1 and NUM_ID.match(rest[0]) else "ack takes one number"
+    if sub == "mail":
+        if rest[:1] == ["ack"] and len(rest) == 2 and NUM_ID.match(rest[1]):
+            return None
+        if rest[:1] == ["inbox"] and len(rest) == 2 and ID.match(rest[1]):
+            return None
+        if rest[:1] == ["send"] and len(rest) == 4 and ID.match(rest[1]) \
+                and ID.match(rest[2]):
+            bad = _text(MAX_BOARD_MESSAGE)(rest[3])
+            return f"the body {bad}" if bad else None
+        return "mail takes: ack ID, inbox AGENT, or send AGENT KIND BODY"
+    if sub == "vacuum":
+        return _none(rest)
+    return f"fleet-db {_short(sub)} is not granted"
+
+
+def _pol_alert(a):
+    bad = _flags(a, {"--unit": _one_of("cti-agent-checkin.service"),
+                     "--for-real": None, "--dry-run": None,
+                     "--kind": _one_of("ESCALATION"),
+                     "--reason": _text(MAX_REASON)})
+    if bad:
+        return bad
+    if ("--for-real" in a) == ("--dry-run" in a):
+        return "give exactly one of --for-real and --dry-run"
+    for need in ("--unit", "--kind", "--reason"):
+        if need not in a:
+            return f"{need} is required"
+    return None
+
+
+def _pol_kev(a):
+    return _flags(a, {"--horizon": _int(1, 365), "--hosts": None, "--json": None,
+                      "--quiet": None, "--fail-if-overdue": None})
+
+
+def _pol_budget(a):
+    return None if a == ["status"] else "only `status` is granted"
+
+
+def _pol_patchtuesday(a):
+    if not a or a[0] != "--dry-run":
+        return "must start with --dry-run"
+    return _flags(a[1:], {"--month": _rx(r"\d{4}-(0[1-9]|1[0-2])\Z", "YYYY-MM"),
+                          "--subject-only": None, "--max-rows": _int(0, 1000)})
+
+
+def _pol_mailbox(a):
+    return None if a == ["--dry-run"] else "only `--dry-run` is granted"
+
+
+def _pol_journal(a):
+    i = 0
+    units = 0
+    while i < len(a):
+        flag = a[i]
+        if flag == "--no-pager":
+            i += 1
+            continue
+        if i + 1 >= len(a):
+            return f"{_short(flag)} needs a value"
+        v = a[i + 1]
+        if flag in ("-u", "--unit"):
+            if not UNIT_GLOB.match(v):
+                return f"unit {_short(v)} is not one of the fleet's (cti-agent-...)"
+            units += 1
+        elif flag == "--since":
+            if len(v) > 40 or not re.match(r"[A-Za-z0-9 :.+-]+\Z", v):
+                return f"--since {_short(v)} is not a time"
+        elif flag in ("-n", "--lines"):
+            bad = _int(1, 5000)(v)
+            if bad:
+                return f"{flag} {bad}"
+        else:
+            return f"{_short(flag)} is not an allowed argument here"
+        i += 2
+    return None if units else "at least one -u cti-agent-... is required"
+
+
+def _pol_timers(a):
+    return _each(lambda v: None if v in ("--all", "-a") or UNIT_GLOB.match(v)
+                 else "is not --all or a cti-agent pattern", a, "argument")
+
+
+POLICY = {
+    "fleet-board": _pol_board,
+    "fleet-db": _pol_db,
+    "cti-alert": _pol_alert,
+    "cti-kev": _pol_kev,
+    "cti-budget": _pol_budget,
+    "cti-patchtuesday": _pol_patchtuesday,
+    "cti-mailbox": _pol_mailbox,
+    "fleet-journal": _pol_journal,
+    "fleet-timers": _pol_timers,
+}
+
+
+def policy_verdict(cmd):
+    """Return (None, class) to allow - class names which per-beat counter the
+    call belongs to, or "" - or (reason, "") to refuse."""
+    try:
+        tokens = shlex.split(cmd, posix=True)
+    except ValueError:
+        return "could not split the command", ""
+    if not tokens:
+        return "empty command", ""
+    exe, args = tokens[0], tokens[1:]
+    d, name = os.path.split(exe)
+    if d not in BIN_DIRS or name not in POLICY:
+        return f"{_short(exe)} is not a command a beat may run", ""
+    bad = POLICY[name](args)
+    if bad:
+        return f"{name}: {bad}", ""
+    if name == "cti-alert" and "--for-real" in args:
+        return None, "alert"
+    if name == "fleet-board" and args[0] == "say":
+        return None, "board_write"
+    if name == "fleet-db" and args[0] in ("remember", "task", "mail", "ack"):
+        if args[0] == "task" and args[1:] == ["list"]:
+            return None, ""
+        if args[0] == "mail" and args[1] == "inbox":
+            return None, ""
+        return None, "db_write"
+    return None, ""
+
+
+# --------------------------------------------------------------------------
+# Per-beat limits (PrimeSec design review 39260, Scenario-224).
+# --------------------------------------------------------------------------
+
+DEFAULT_LIMITS = {"bash": 20, "alert": 2, "board_write": 4, "db_write": 6}
+LIMIT_ENV = {"bash": "CHECKIN_MAX_BASH", "alert": "CHECKIN_MAX_ALERTS",
+             "board_write": "CHECKIN_MAX_BOARD_WRITES",
+             "db_write": "CHECKIN_MAX_DB_WRITES"}
+BEAT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+
+
+def limits():
+    out = dict(DEFAULT_LIMITS)
+    for key, var in LIMIT_ENV.items():
+        v = os.environ.get(var, "")
+        if v.isascii() and v.isdigit() and 0 < int(v) <= 1000:
+            out[key] = int(v)
+    return out
+
+
+def _log(msg):
+    try:
+        syslog.openlog("checkin-bash-guard", 0, syslog.LOG_AUTH)
+        syslog.syslog(syslog.LOG_WARNING, msg)
+    except Exception:  # noqa: BLE001 - the refusal does not depend on the log
+        pass
+
+
+def count(kind):
+    """Add one to the beat's counter for kind and return a refusal if that is
+    over the limit, or None. No beat id means nothing is counted. A counter
+    that cannot be read or written refuses: a limit that quietly stops
+    counting is not a limit."""
+    beat = os.environ.get("CHECKIN_BEAT_ID", "")
+    if not beat:
+        return None
+    home = os.environ.get("FLEET_HOME", "")
+    if not BEAT_ID.match(beat) or not home:
+        return "the beat's counter is not configured"
+    d = os.path.join(home, "state", "checkin-counts")
+    path = os.path.join(d, beat + ".json")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            raw = f.read()
+            data = json.loads(raw) if raw.strip() else {}
+            if not isinstance(data, dict):
+                raise ValueError("counter file is not an object")
+            n = data.get(kind, 0)
+            if not isinstance(n, int):
+                raise ValueError("counter is not a number")
+            n += 1
+            data[kind] = n
+            cap = limits()[kind]
+            over = n > cap
+            if over:
+                tripped = data.get("tripped", [])
+                if not isinstance(tripped, list):
+                    tripped = []
+                if kind not in tripped:
+                    tripped.append(kind)
+                data["tripped"] = tripped
+            f.seek(0)
+            f.truncate()
+            json.dump(data, f)
+    except (OSError, ValueError) as e:
+        return f"the beat's counter could not be updated ({e.__class__.__name__})"
+    if over:
+        _log(f"beat {beat}: {kind} limit {cap} reached; call refused")
+        return (f"this beat has reached its limit for {kind.replace('_', ' ')} "
+                f"({cap}). It is a safety limit, not an outage: stop and let "
+                "the next beat continue.")
+    return None
 
 
 def verdict(event):
@@ -88,17 +504,27 @@ def verdict(event):
     if not isinstance(cmd, str):
         return "Bash call has no command string"
     bad = sorted(FORBIDDEN_ANYWHERE.intersection(cmd))
-    seen, problem = expandable(cmd)
+    seen, bare, problem = expandable(cmd)
     bad += sorted(FORBIDDEN_UNQUOTED.intersection(seen))
+    bad += sorted(FORBIDDEN_BARE.intersection(bare))
     if problem:
         bad.append(problem)
     if ASSIGNMENT.match(cmd):
         bad.append("NAME=value prefix")
+    over = count("bash")
+    if over:
+        return over
     if bad:
         shown = " ".join(repr(c)[1:-1] for c in bad)
         return (f"shell syntax is not allowed on a beat ({shown}). Run one "
                 "granted command with plain arguments; reword text that "
                 "needs these characters.")
+    why, kind = policy_verdict(cmd)
+    if why:
+        return (f"{why}. A beat may run only the granted commands with the "
+                "arguments their rules allow.")
+    if kind:
+        return count(kind)
     return None
 
 

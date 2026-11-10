@@ -54,6 +54,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
+	"github.com/zany2dmax/cti-agent/internal/sanitize"
 )
 
 const (
@@ -61,7 +62,9 @@ const (
 	exitFailure = 1
 )
 
-func main() { os.Exit(run()) }
+// Inside a heartbeat the output is cleaned before the model reads it (it names
+// the subjects of other people's mail): see internal/sanitize.
+func main() { os.Exit(sanitize.Run("cti-mailbox", run)) }
 
 func run() int {
 	dryRun := flag.Bool("dry-run", false,

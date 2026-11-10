@@ -94,6 +94,17 @@ and touches the board and the archive file.
 sends no mail; reaching the operator by email is
 .BR cti\-alert 's
 job.
+.PP
+Inside a heartbeat (when
+.B CHECKIN_BEAT_ID
+is set by
+.BR run\-checkin (1))
+what \fBread\fR and \fBtail\fR print output is passed through
+.BR fleet\-sanitize (1):
+control characters, bidirectional and zero\-width characters are removed and
+over\-long lines are cut with a
+.B [cut N chars]
+marker. Outside a heartbeat the output is untouched.
 .SH COMMANDS
 With no command,
 .B read

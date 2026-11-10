@@ -39,6 +39,8 @@ config.local.yaml
 # Not output: the owners snapshot both languages' tests read, made from the
 # invented fleet-kit/tests/testdata/app-owners-sample.txt. No real names.
 !internal/appscan/testdata/owners-snapshot.json
+# Not output: the cases both sanitisers (Go and Python) are tested against.
+!internal/sanitize/testdata/sanitize-cases.json
 # Not output: the email palette. internal/emailkit embeds the first (a clean
 # clone does not build without it) and brief.py reads the second.
 !internal/emailkit/tokens.json

@@ -79,4 +79,14 @@ for u in ${units[@]+"${units[@]}"}; do args+=("--unit=$u"); done
 [ -n "$since" ] && args+=("--since=$since")
 [ -n "$lines" ] && args+=("--lines=$lines")
 
+# Inside a heartbeat (CHECKIN_BEAT_ID, set by run-checkin) the journal is text
+# other people's mail and feeds can reach, so it is cleaned before the model
+# reads it (Scenario-222). Anywhere else the output is untouched. If the
+# cleaner is missing the beat gets nothing rather than raw text.
+if [ -n "${CHECKIN_BEAT_ID:-}" ]; then
+  SANITIZER="$(dirname "$0")/fleet-sanitize"
+  [ -x "$SANITIZER" ] || { echo "fleet-journal: fleet-sanitize is missing" >&2; exit 2; }
+  "$JOURNALCTL" "${args[@]}" | /usr/bin/python3 -I "$SANITIZER" --source fleet-journal
+  exit "${PIPESTATUS[0]}"
+fi
 exec "$JOURNALCTL" "${args[@]}"

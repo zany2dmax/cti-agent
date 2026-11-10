@@ -38,6 +38,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/sanitize"
 )
 
 const journalLines = "40"
@@ -61,6 +62,11 @@ const (
 var fleetUnit = regexp.MustCompile(`^cti-agent-[A-Za-z0-9@._-]+$`)
 
 func main() {
+	// Inside a heartbeat the output is cleaned before the model reads it: see
+	// internal/sanitize.
+	if sanitize.ForBeat() {
+		os.Exit(sanitize.Child("cti-alert"))
+	}
 	unit := flag.String("unit", "", "the systemd unit that failed (required)")
 	dryRun := flag.Bool("dry-run", false, "print what would be sent, send nothing")
 	forReal := flag.Bool("for-real", false, "send the alert")
