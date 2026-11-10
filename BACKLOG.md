@@ -335,3 +335,17 @@ is real, not before. Finished work moves out of this file into
   confirm a bare Finished, so those notices are kept, not deleted - the safe
   direction, but they pile up in the inbox. Fix: do the pairing after
   reconciliation, keyed on the reference. Found in review, 2026-11-10
+- **VM lane: Jira tickets for out-of-SLA vulnerabilities** (noted 2026-11-10,
+  not designed). Pull every detection past its remediation SLA for its
+  severity, with the affected hosts, and file Jira tickets for them. Not
+  decided yet, so brainstorm before building:
+  - Ticket granularity: one ticket per QID listing its N hosts, one per host,
+    one per QID per owning team or site, or a rollup per severity.
+  - Where the SLA days per severity are defined, and whether they come from
+    config or from Qualys.
+  - How a ticket stays in step on later runs: hosts added or fixed, closing
+    when none are left, and reopening when one comes back.
+  - Assignment and project. AppSec tickets already want their own project
+    (see #160), and CR is the infrastructure help desk.
+  - It must follow the fleet's rules: a full preview and one labelled test
+    ticket before any real filing, and no real host names in tracked files.
