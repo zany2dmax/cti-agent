@@ -40,7 +40,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: the
 defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 Preview one application with `sudo cti-agent cti-appreport --owner-report <id>
---out-dir /root/r` before the first real owner send.
+--out-dir /var/lib/cti-agent/state/preview` before the first real owner send
+(the service account writes it, so not under `/root`).
 
 ### Security
 

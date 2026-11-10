@@ -1360,7 +1360,7 @@ apply.
 sudo cti-agent run-appowners --dry-run   # plan, check every recipient; fetch and send nothing
 sudo cti-agent run-appowners --to-dev    # every email and report to FLEET_DEV_EMAIL only
 sudo cti-agent run-appowners --for-real  # fetch, redact, send, record
-sudo cti-agent cti-appreport --owner-report 123456 --out-dir /root/r   # preview one app; nothing sent or recorded
+sudo cti-agent cti-appreport --owner-report 123456 --out-dir /var/lib/cti-agent/state/preview   # preview one app; nothing sent or recorded (the service account writes it: not /root)
 ```
 
 Preview one application and read its report before the first `--for-real`
