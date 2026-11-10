@@ -441,7 +441,7 @@ def _log(msg):
     try:
         syslog.openlog("checkin-bash-guard", 0, syslog.LOG_AUTH)
         syslog.syslog(syslog.LOG_WARNING, msg)
-    except Exception:  # noqa: BLE001 - the refusal does not depend on the log
+    except Exception:  # noqa: BLE001  # nosec B110 - best-effort log; the refusal does not depend on it
         pass
 
 

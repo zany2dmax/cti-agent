@@ -415,7 +415,9 @@ def beat_main(argv):
         code = main(argv)
     finally:
         sys.stdout = real
-    r = subprocess.run(["/usr/bin/python3", "-I", san, "--source", "fleet-db"],
+    # nosec B603: a fixed interpreter in isolated mode, the root-owned fleet-sanitize
+    # beside this file, fixed arguments, no shell - nothing a caller chooses.
+    r = subprocess.run(["/usr/bin/python3", "-I", san, "--source", "fleet-db"],  # nosec B603
                        input=buf.getvalue().encode("utf-8", "replace"),
                        capture_output=True, check=False)
     if r.returncode != 0:

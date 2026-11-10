@@ -2879,7 +2879,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             env = {"CHECKIN_BEAT_ID": "beat-1", "FLEET_HOME": home,
                    "CHECKIN_MAX_BASH": "5", "CHECKIN_MAX_BOARD_WRITES": "2"}
             say = b + 'fleet-board say @all INFO "x"'
-            for i in range(2):
+            for _ in range(2):
                 self.assertEqual(self._run_guard(say, env).returncode, 0)
             r = self._run_guard(say, env)
             self.assertEqual(r.returncode, 2, r.stderr)
