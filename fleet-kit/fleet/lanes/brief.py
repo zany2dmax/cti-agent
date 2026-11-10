@@ -830,7 +830,7 @@ def render(data, kind):
                 color:{T['band_text']};letter-spacing:1.2px;text-transform:uppercase">
       {esc(org)}</div>
     <div style="font:700 17px {T['font']};color:#fff">
-      CTI {'Weekly' if kind == 'weekly' else 'Daily'} Brief</div>
+      {'Weekly' if kind == 'weekly' else 'Daily'} Brief</div>
     <div style="font:400 12px {T['font']};
                 color:{T['band_text']};margin-top:3px">{esc(now)}</div></td></tr>
 

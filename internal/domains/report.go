@@ -521,7 +521,7 @@ var font = emailkit.Font
 func (r Report) html() string {
 	var b strings.Builder
 	h, m, c := r.counts()
-	emailkit.Open(&b, r.Subject(), orgName(), "CTI Domains Weekly",
+	emailkit.Open(&b, r.Subject(), orgName(), "Domains Weekly",
 		"Week of "+r.Now.Format("Monday 2 January 2006"))
 
 	invLead := ""

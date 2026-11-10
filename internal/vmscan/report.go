@@ -185,7 +185,7 @@ func (w Week) Text(org string, weekEnding time.Time) string {
 // HTML is the combined email.
 func (w Week) HTML(org string, weekEnding time.Time) string {
 	var b strings.Builder
-	emailkit.Open(&b, w.Subject(org, weekEnding), org, org+" VM Scans Weekly",
+	emailkit.Open(&b, w.Subject(org, weekEnding), org, "VM Scans Weekly",
 		"Week ending "+weekEnding.Format("Monday 2 January 2006"))
 
 	lead := emailkit.Green

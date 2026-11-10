@@ -769,7 +769,7 @@ func (r *report) creditHTML() string {
 
 func (r *report) html() string {
 	var b strings.Builder
-	emailkit.Open(&b, r.subject(), r.org, r.org+" AppSec Weekly",
+	emailkit.Open(&b, r.subject(), r.org, "AppSec Weekly",
 		"Week ending "+r.weekEnding.Format("Monday 2 January 2006"))
 
 	// The lead block. Red when something is broken, green when nothing is -

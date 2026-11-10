@@ -202,6 +202,16 @@ time.
   double quotes (`"the digest didn't run"`) still passes. The fix comes with test cases, and the guard's man page,
   SECURITY.md and the orchestrator's CLAUDE.md describe the new rule.
 
+### Changed
+
+- **Every fleet email has the same two-line header**: the organisation
+  (`FLEET_ORG`) on the first line, the lane's own name on the second. The
+  AppSec weekly and the VM scan weekly repeated the organisation in the second
+  line, the Domains weekly said "CTI Domains Weekly", and the daily and weekly
+  briefs said "CTI Daily Brief". They now read "AppSec Weekly", "VM Scans
+  Weekly", "Domains Weekly", "Daily Brief" and "Weekly Brief". Subjects are
+  unchanged. **Upgrade:** none.
+
 ---
 
 ## 1.6.2 — 2026-11-09
