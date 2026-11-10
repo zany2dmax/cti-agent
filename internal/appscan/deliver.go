@@ -62,6 +62,16 @@ type Delivery struct {
 	Open       Counts `json:"open"` // New + Reopened + Active (Lifecycle.Open)
 	ScanCounts Counts `json:"scanCounts"`
 	FirstScan  bool   `json:"firstScan,omitempty"`
+
+	// What was scanned and how the run went, for the email and the report's
+	// summary. URL is the web app's address from the scanner's API record;
+	// empty when the scan list was not reached.
+	URL          string        `json:"url,omitempty"`
+	Started      time.Time     `json:"started,omitempty"`
+	Duration     time.Duration `json:"duration,omitempty"`
+	LinksCrawled int           `json:"linksCrawled,omitempty"`
+	ScanDelta    Counts        `json:"scanDelta"`
+	Launch       string        `json:"launch,omitempty"`
 }
 
 // MaxMailAttachment is the largest report the owners lane attaches. It is
@@ -109,7 +119,9 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 		}
 		d := Delivery{Key: key, AppID: strings.TrimSpace(s.AppID), App: s.App, ScanTitle: s.ScanTitle,
 			ScanRef: ref, Finished: s.Finished, AuthLabel: s.Auth.Label(), NoNotice: s.NoNotification,
-			Open: s.AppState.Open(), ScanCounts: s.ScanCounts, FirstScan: s.FirstScan}
+			Open: s.AppState.Open(), ScanCounts: s.ScanCounts, FirstScan: s.FirstScan,
+			URL: strings.TrimSpace(s.AppURL), Started: s.Started, Duration: s.Duration,
+			LinksCrawled: s.LinksCrawled, ScanDelta: s.ScanDelta, Launch: s.Launch}
 		switch {
 		case !s.Complete && strings.EqualFold(strings.Join(strings.Fields(s.Status), ""), "finished"):
 			// The newer notice format, which needs the scan list to confirm
@@ -330,8 +342,12 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 
 	var b strings.Builder
 	emailkit.Open(&b, subj, org, "Web application scan results", banner)
-	emailkit.Lead(&b, lead, fmt.Sprintf(`The scheduled security scan of <b>%s</b> %s (%s).`,
-		e(d.App), e(finished), e(d.AuthLabel)))
+	at := ""
+	if u := strings.TrimSpace(d.URL); u != "" {
+		at = fmt.Sprintf(` at <code style="font-family:%s">%s</code>`, emailkit.Mono, e(u))
+	}
+	emailkit.Lead(&b, lead, fmt.Sprintf(`The scheduled security scan of <b>%s</b>%s %s (%s).`,
+		e(d.App), at, e(finished), e(d.AuthLabel)))
 
 	if !d.NoNotice {
 		more := fmt.Sprintf(`<b>Open findings in the application:</b> %s`, e(ownerCounts(d.Open)))
@@ -355,13 +371,13 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	}
 	if attached != "" {
 		emailkit.Callout(&b, emailkit.Grey, fmt.Sprintf(
-			`The scanner's report on the open findings is attached (<code style="font-family:%s">%s</code>), with the request, response and suggested fix for each.`,
+			`The full report is attached (<code style="font-family:%s">%s</code>): every open finding, where it was found, why it matters and how to fix it, with what the scanner sent to prove it.`,
 			emailkit.Mono, e(attached)))
 	} else {
 		emailkit.Callout(&b, emailkit.Grey, fmt.Sprintf(
 			`The scanner's report is not attached: %s. The security team will send it another way.`, e(why)))
 	}
-	emailkit.Note(&b, `This describes unfixed weaknesses in the application. Please keep it to the people working on it and do not forward it further. Session cookies and login headers from the scan have been removed from the report. Questions, or to change who receives this: reply to this email.`)
+	emailkit.Note(&b, `This describes unfixed weaknesses in the application. Please keep it to the people working on it and do not forward it further. Cookie values, session identifiers, tokens and login headers have been removed from the report. Questions, or to change who receives this: reply to this email.`)
 	emailkit.Foot(&b, creditHTML(org))
 	return OwnerMail{Subject: subj, HTML: b.String()}
 }

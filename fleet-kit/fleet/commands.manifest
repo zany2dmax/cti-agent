@@ -50,12 +50,12 @@ flag: --unit STRING | the systemd unit that failed (required)
 flag: --for-real | send the alert and post to the board
 
 command: cti-appreport
-about: Fetch each application's own scanner report for the owner emails
+about: Build each application's report for the owner emails, and fetch the scanner's own report for the tickets
 runs: local
 flag: --app-id STRING | fetch the report for this one web application id (a test)
 flag: --app-name STRING | with --app-id: the name used in messages and the report title
 flag: --check | make one cheap authenticated call, print the scanner's rate-limit position, and exit
-flag: --deliveries STRING | the owners lane: fetch the report for every application in this cti-appscan --deliveries-out file that is not held, redact it, and write each covering email beside it in --out-dir with send.tsv and held.tsv for the runner
+flag: --deliveries STRING | the owners lane: build the owner report from the scanner's API (one finding search per application, one knowledge-base lookup per 1,000 kinds of finding) for every application in this cti-appscan --deliveries-out file that is not held, and write each covering email beside it in --out-dir with send.tsv and held.tsv for the runner
 flag: --dump-request | with --app-id: print the request that creates the report, send nothing
 flag: --keep | leave each report in the scanner instead of deleting it (debugging)
 flag: --list-ids | print the web application id, name and findings of every application in the newest $FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; reads the file only - no scanner calls, no credentials
@@ -63,6 +63,7 @@ flag: --max-reports INT | fetch at most this many reports in one run; the rest a
 flag: --no-fetch | with --deliveries: write the covering emails without fetching any report (a dry run)
 flag: --only-ref STRING | with --tickets: a cti-jira --ref-out preview; fetch only the applications whose ticket would be filed or commented (would-create, would-comment)
 flag: --out-dir STRING | write each report (<label>.zip) and reports.json here, 0600; created 0700 if missing
+flag: --owner-report STRING | build the owner report for this one web application id and write it with its covering email to --out-dir, then exit: a preview of the attachment; nothing is mailed or recorded
 flag: --probe-findings STRING | print the scanner's verbose finding search for this web application id (3 open vulnerabilities), with Cookie, Set-Cookie and Authorization redacted, and exit
 flag: --request-file STRING | send this create-report body instead of the built-in one ({{APP_ID}} and {{NAME}} are filled in) - for correcting a field name while probing, without a rebuild
 flag: --tickets STRING | fetch a report for every application in this cti-appscan --tickets-out file that has findings and was not skipped

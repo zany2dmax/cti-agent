@@ -269,3 +269,13 @@ func TestAReopenedFindingIsOpenInTheOwnerEmail(t *testing.T) {
 		t.Errorf("Open() = %d Critical, want 6: Fixed and Ignored are not open", got.Crit)
 	}
 }
+
+func TestOwnerMailNamesTheURLScanned(t *testing.T) {
+	m := RenderOwnerMail(Delivery{App: "Shop", URL: "https://shop.example.com"}, "shop.html", "")
+	if !strings.Contains(m.HTML, "https://shop.example.com") {
+		t.Error("the email does not say which address was scanned")
+	}
+	if m2 := RenderOwnerMail(Delivery{App: "Shop"}, "shop.html", ""); strings.Contains(m2.HTML, " at <code") {
+		t.Error("an empty URL left a dangling 'at'")
+	}
+}

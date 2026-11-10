@@ -150,6 +150,7 @@ func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
 	}
 	r.AppID = s.WebAppID
 	r.ScanType = s.Type
+	r.AppURL = s.WebAppURL
 	if s.WebAppName != "" {
 		r.App = s.WebAppName
 	}
@@ -180,6 +181,7 @@ func fromScan(s Scan) appscan.ScanResult {
 		ScanTitle:      s.Name,
 		Reference:      s.Reference,
 		Target:         s.WebAppURL,
+		AppURL:         s.WebAppURL,
 		Started:        s.Launched,
 		Status:         s.Status,
 		Complete:       s.Complete(),

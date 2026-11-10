@@ -24,7 +24,12 @@ See <A HREF="https://owasp.example.org/xss">the cheat sheet</A>. <a href="javasc
 func TestRemediesComeFromTheKnowledgeBaseAsPlainText(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
+		// A POST form: a long QID list would not fit in a URL.
+		if r.Method != http.MethodPost {
+			t.Errorf("method %s, want POST", r.Method)
+		}
+		_ = r.ParseForm()
+		gotQuery = r.PostForm.Encode()
 		if r.URL.Path != "/api/4.0/fo/knowledge_base/vuln/" {
 			t.Errorf("path %s", r.URL.Path)
 		}

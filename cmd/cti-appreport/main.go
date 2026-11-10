@@ -8,6 +8,7 @@
 //	cti-appreport --probe-findings 1234 > probe.xml         # verbose finding fields, redacted
 //	cti-appreport --tickets T.json --only-ref P.json --out-dir D   # the weekly run
 //	cti-appreport --deliveries D.json --out-dir R                  # the owners lane, daily
+//	cti-appreport --owner-report 1234 --out-dir /tmp/r      # one owner report, to look at; nothing sent
 //
 // # ONE INTERFACE, ANY SCANNER
 //
@@ -48,6 +49,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"github.com/zany2dmax/cti-agent/internal/appscan/qualys"
 	"github.com/zany2dmax/cti-agent/internal/config"
+	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/qualysrl"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
@@ -105,6 +107,9 @@ func run() int {
 	requestFile := flag.String("request-file", "",
 		"send this create-report body instead of the built-in one ({{APP_ID}} and {{NAME}} "+
 			"are filled in) - for correcting a field name while probing, without a rebuild")
+	ownerReport := flag.String("owner-report", "",
+		"build the owner report for this one web application id from the scanner's API and write it "+
+			"to --out-dir, then exit: a preview of the attachment the owners lane sends; nothing is mailed or recorded")
 	probe := flag.String("probe-findings", "",
 		"print the scanner's verbose finding search for this web application id (3 open "+
 			"vulnerabilities), with Cookie, Set-Cookie and Authorization redacted, and exit")
@@ -113,9 +118,10 @@ func run() int {
 			"$FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; "+
 			"reads the file only - no scanner calls, no credentials")
 	deliveries := flag.String("deliveries", "",
-		"the owners lane: fetch the report for every application in this cti-appscan "+
-			"--deliveries-out file that is not held, redact it, and write each covering "+
-			"email beside it in --out-dir with send.tsv and held.tsv for the runner")
+		"the owners lane: build the owner report from the scanner's API (one finding search per "+
+			"application, one knowledge-base lookup per 1,000 kinds of finding) for every application in this "+
+			"cti-appscan --deliveries-out file that is not held, and write each covering email "+
+			"beside it in --out-dir with send.tsv and held.tsv for the runner")
 	noFetch := flag.Bool("no-fetch", false,
 		"with --deliveries: write the covering emails without fetching any report (a dry run)")
 	flag.Parse()
@@ -128,7 +134,7 @@ func run() int {
 		if *outDir == "" {
 			return die("--deliveries needs --out-dir")
 		}
-		return doDeliveries(context.Background(), nil, *deliveries, *outDir, *maxReports, *keep, *timeout)
+		return doDeliveries(context.Background(), nil, *deliveries, *outDir, *maxReports, *timeout)
 	}
 	// The scanner's settings only: no mailbox, no Jira.
 	cfg, err := config.LoadVulnLookup()
@@ -189,6 +195,38 @@ func run() int {
 		}
 		return exitOK
 
+	case *ownerReport != "":
+		if *outDir == "" {
+			return die("--owner-report needs --out-dir")
+		}
+		src, ok := fetcher.(appscan.OwnerReportSource)
+		if !ok {
+			return die("the %s report provider cannot build the owner report", fetcher.Name())
+		}
+		id := strings.TrimSpace(*ownerReport)
+		name := *appName
+		if name == "" {
+			name = "web app " + id
+		}
+		d := appscan.Delivery{Key: "id:" + id, AppID: id, App: name}
+		df := appscan.DeliveriesFile{Generated: time.Now().UTC(), Deliveries: []appscan.Delivery{d}}
+		plan := filepath.Join(*outDir, "owner-report-plan.json")
+		// #nosec G301 G703 -- owner-only, the operator's --out-dir
+		if err := os.MkdirAll(*outDir, 0o700); err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+		if err := appscan.WriteOwnerFile(*outDir, filepath.Base(plan), df.JSON()); err != nil {
+			return die("%s", safelog.Line(err.Error()))
+		}
+		// The same path as the daily run, so the preview is the attachment.
+		if rc := doDeliveries(ctx, src, plan, *outDir, 1, *timeout); rc != exitOK {
+			return rc
+		}
+		_ = os.Remove(plan) // #nosec G703 -- the file written just above
+		fmt.Printf("owner report for %s: in %s/%s/ (mail.html is the covering email; nothing was sent)\n",
+			safelog.Line(name), *outDir, d.Label())
+		return exitOK
+
 	case *probe != "":
 		p, ok := fetcher.(prober)
 		if !ok {
@@ -225,7 +263,12 @@ func run() int {
 		if *outDir == "" {
 			return die("--deliveries needs --out-dir")
 		}
-		return doDeliveries(ctx, fetcher, *deliveries, *outDir, *maxReports, *keep, *timeout)
+		src, ok := fetcher.(appscan.OwnerReportSource)
+		if !ok {
+			return die("the %s report provider cannot build the owner report (it needs an "+
+				"appscan.OwnerReportSource)", fetcher.Name())
+		}
+		return doDeliveries(ctx, src, *deliveries, *outDir, *maxReports, *timeout)
 
 	case *tickets != "":
 		if *outDir == "" {
@@ -451,13 +494,20 @@ func listIDs(tf appscan.TicketsFile, path string) string {
 }
 
 // doDeliveries prepares the owners lane's mail. For each application to send:
-// the scanner's report, redacted, and the covering email, in a directory of
-// its own; one send.tsv row per application ready to go, and held.tsv for
-// the ones the runner should record as dealt with without sending. A report
-// that could not be fetched or redacted gets no row in either, so tomorrow's
-// run tries it again. f nil means a dry run: no report is fetched.
-func doDeliveries(ctx context.Context, f appscan.ReportFetcher, path, dir string,
-	max int, keep bool, timeout time.Duration) int {
+// the fleet's own report (appscan.RenderOwnerReport, built from the scanner's
+// API) and the covering email, in a directory of its own; one send.tsv row
+// per application ready to go, and held.tsv for the ones the runner should
+// record as dealt with without sending. A report that could not be built
+// gets no row in either, so tomorrow's run tries it again. src nil means a
+// dry run: nothing is fetched.
+//
+// API calls, which share the Qualys budget with the weekly: one finding
+// search per application (all kinds, verbose, paged only past 100 findings),
+// then ONE knowledge-base lookup for every application's findings together
+// (sent as a POST, 1,000 kinds of finding per call, so a run makes one).
+// The scanner's own report used to cost about five calls each.
+func doDeliveries(ctx context.Context, src appscan.OwnerReportSource, path, dir string,
+	max int, timeout time.Duration) int {
 
 	// #nosec G304 G703 -- the runner's own --deliveries-out file
 	b, err := os.ReadFile(path)
@@ -474,13 +524,61 @@ func doDeliveries(ctx context.Context, f appscan.ReportFetcher, path, dir string
 			targets = append(targets, target{key: d.Key, id: d.AppID, name: d.App})
 		}
 	}
-	m := appscan.ReportsManifest{Reports: map[string]appscan.Report{}, Failed: map[string]string{}}
-	if f != nil && len(targets) > 0 {
-		logf("plan   : %d report(s) to fetch for their owners", len(targets))
-		m, _ = fetchAll(ctx, f, dir, targets, max, keep, timeout)
-	} else if err := os.MkdirAll(dir, 0o700); err != nil { // #nosec G301 G703 -- owner-only
+	// #nosec G301 G703 -- owner-only, the operator's --out-dir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
+	_ = os.Chmod(dir, 0o700) // #nosec G302 G703 -- a directory, owner-only
+	found, failed := map[string][]appscan.Finding{}, map[string]string{}
+	rem := map[string]appscan.Remedy{}
+	if src != nil && len(targets) > 0 {
+		logf("plan   : %d report(s) to build for their owners", len(targets))
+		stop := ""
+		for i, t := range targets {
+			switch {
+			case stop != "":
+				failed[t.key] = stop
+				continue
+			case i >= max:
+				failed[t.key] = fmt.Sprintf("over --max-reports %d", max)
+				continue
+			}
+			cctx, cancel := context.WithTimeout(ctx, timeout)
+			fs, err := src.OwnerFindings(cctx, t.id)
+			cancel()
+			if err != nil {
+				failed[t.key] = err.Error()
+				logf("warn   : %s: findings not read - %s", safelog.Line(t.name), safelog.Line(err.Error()))
+				if errors.Is(err, qualysrl.ErrBudget) || ctx.Err() != nil {
+					stop = "not attempted: " + err.Error()
+				}
+				continue
+			}
+			found[t.key] = fs
+		}
+		ids := ownerRemedyIDs(found)
+		if len(ids) > 0 {
+			r, err := src.Remedies(ctx, ids)
+			if err != nil {
+				logf("warn   : knowledge base: %s", safelog.Line(err.Error()))
+			}
+			if err != nil && (errors.Is(err, qualysrl.ErrBudget) || ctx.Err() != nil) {
+				// Out of budget or out of time: a report sent now would go
+				// without its fixes, and a sent scan is never sent again. So
+				// nothing goes today and tomorrow's run tries them all. Any
+				// other knowledge-base error costs only the texts it covered;
+				// those cards say the security team can supply one.
+				for k := range found {
+					failed[k] = "knowledge base not reached: " + err.Error()
+					delete(found, k)
+				}
+			}
+			for k, v := range r {
+				rem[k] = v
+			}
+		}
+	}
+	generated := time.Now()
 
 	var send, held, heldText strings.Builder
 	for _, d := range df.Deliveries {
@@ -494,24 +592,15 @@ func doDeliveries(ctx context.Context, f appscan.ReportFetcher, path, dir string
 		}
 		attached, why := "", "this was a dry run"
 		var body []byte
-		if f != nil {
-			r, ok, err := appscan.LoadReport(dir, d.Key, d.AppID)
-			if err != nil || !ok {
-				why := m.Failed[d.Key]
-				if err != nil {
-					why = err.Error()
-				}
-				logf("warn   : %s: no report, not sent today - %s", name, safelog.Line(why))
+		if src != nil {
+			fs, ok := found[d.Key]
+			if !ok {
+				logf("warn   : %s: no report, not sent today - %s", name, safelog.Line(orText(failed[d.Key], "not fetched")))
 				continue
 			}
-			rname, rbody, err := appscan.RedactReport(r.Body)
-			// The original carries the scan account's session; only the
-			// redacted copy stays.
-			_ = os.Remove(filepath.Join(dir, r.File)) // #nosec G703 -- a name LoadReport checked
-			if err != nil {
-				logf("warn   : %s: report not mailed - %s", name, safelog.Line(err.Error()))
-				continue
-			}
+			rbody := appscan.RenderOwnerReport(appscan.OwnerReportInput{
+				Delivery: d, Findings: fs, Remedies: rem, Org: emailkit.Org(), Generated: generated})
+			rname := "report.html"
 			if len(rbody) > appscan.MaxMailAttachment {
 				why = fmt.Sprintf("it is %.1f MB, over the %d MB email limit", float64(len(rbody))/1e6,
 					appscan.MaxMailAttachment/1_000_000)
@@ -584,4 +673,30 @@ func reportFileName(d appscan.Delivery, redacted string) string {
 		day = d.Finished
 	}
 	return slug + "-scan-report-" + day.Local().Format("2006-01-02") + ext
+}
+
+// ownerRemedyIDs is every finding ID the owner reports explain, across all
+// applications, for one knowledge-base lookup. Information-gathered items
+// are listed by title only, so they need no text.
+func ownerRemedyIDs(found map[string][]appscan.Finding) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, fs := range found {
+		for _, f := range fs {
+			if f.Kind == "INFORMATION_GATHERED" || f.ID == "" || seen[f.ID] {
+				continue
+			}
+			seen[f.ID] = true
+			ids = append(ids, f.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func orText(s, d string) string {
+	if strings.TrimSpace(s) == "" {
+		return d
+	}
+	return s
 }

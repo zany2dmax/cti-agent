@@ -39,6 +39,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: the
 defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
+Preview one application with `sudo cti-agent cti-appreport --owner-report <id>
+--out-dir /root/r` before the first real owner send.
 
 ### Security
 
@@ -128,6 +130,31 @@ defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
   which skips the question, got through. `--armed` is now exempt beside
   `--check` (and in `commands.manifest`), with a test that runs the exact
   question the runner asks.
+
+### Changed
+
+- **The owner email's attachment is the fleet's own report, built from the Qualys API.**
+  The Qualys export was hard to read, repeated the same text for every
+  finding, did not say which URL was scanned, and had to be redacted after
+  the fact. The owners lane now builds one self-contained HTML file with no
+  scripts and no external resources; every value is escaped. It has a
+  summary (application, URL scanned, scan, when and how long, login, links
+  crawled) beside the severity tiles, the worst open finding with its fix,
+  charts by severity, group and OWASP Top 10 (2025), one card per kind of
+  finding (what it is, why it matters, how to fix it, written once) with a
+  table of every place it was found, sensitive content, security weaknesses
+  and the scanner's diagnostics. Request headers are never read. Cookie
+  values, session identifiers, tokens and login headers are removed. The
+  payloads that prove a finding are kept, so developers can reproduce it.
+  The knowledge-base lookup is now a POST, so it takes 1,000 kinds of
+  finding per call instead of 100 (a URL-length limit, not Qualys's).
+  The email now names the URL scanned. The cost is one finding search per
+  application plus one knowledge-base lookup per 1,000 kinds of finding, against
+  about five calls per application before; nothing is created in Qualys, so
+  `--deliveries` no longer uses `--keep`. New `cti-appreport --owner-report
+  <id> --out-dir <dir>` builds one application's report and email as a
+  preview; nothing is mailed or recorded. The weekly ticket attachments
+  (`--tickets`, `--app-id`) are unchanged and still use the Qualys export.
 
 ## 1.6.3 — 2026-11-10
 

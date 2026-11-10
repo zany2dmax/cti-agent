@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +105,7 @@ const maxPages = 40
 // the search returned zero findings, without error, and the report printed
 // "detail not available" for nearly every application.
 func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Time) ([]appscan.Finding, error) {
-	return a.findings(ctx, s, since, false)
+	return a.findings(ctx, s, findQuery{since: since, kinds: kindVuln})
 }
 
 // OpenFindings returns every finding the scanner still holds open for the
@@ -117,10 +119,44 @@ func (a *API) Findings(ctx context.Context, s appscan.ScanResult, since time.Tim
 // Qualys still has it open, and a ticket built from it would be told the
 // finding was fixed. Qualys marks a finding FIXED only after a retest.
 func (a *API) OpenFindings(ctx context.Context, s appscan.ScanResult) ([]appscan.Finding, error) {
-	return a.findings(ctx, s, time.Time{}, true)
+	return a.findings(ctx, s, findQuery{open: true, kinds: kindVuln, verbose: true})
 }
 
-func (a *API) findings(ctx context.Context, s appscan.ScanResult, since time.Time, open bool) ([]appscan.Finding, error) {
+// OwnerFindings is everything open on one web application, for the report
+// its owners receive: vulnerabilities, sensitive content and information
+// gathered, in ONE verbose search - paged only past verbosePageSize, which
+// one application rarely reaches. One endpoint, one pass, all the fields:
+// two narrower searches would spend the shared Qualys API budget twice for
+// the same records (the owner lane runs daily, beside the weekly). The
+// evidence of each record is clipped to an excerpt as it is parsed, so the
+// verbose crawl listings of information-gathered items cost bytes on the
+// wire, not memory or report size.
+func (a *API) OwnerFindings(ctx context.Context, appID string) ([]appscan.Finding, error) {
+	s := appscan.ScanResult{AppID: strings.TrimSpace(appID)}
+	if s.AppID == "" {
+		return nil, fmt.Errorf("qualys WAS: owner report needs a web app id")
+	}
+	return a.findings(ctx, s, findQuery{open: true, verbose: true,
+		kinds: kindVuln + "," + kindSensitive + "," + kindInfo})
+}
+
+// The WAS finding types.
+const (
+	kindVuln      = "VULNERABILITY"
+	kindSensitive = "SENSITIVE_CONTENT"
+	kindInfo      = "INFORMATION_GATHERED"
+)
+
+// findQuery is one finding search: which types, open only or detected since
+// a date, and whether to ask for the verbose record with its evidence.
+type findQuery struct {
+	since   time.Time
+	open    bool
+	kinds   string // one type, or a comma list
+	verbose bool
+}
+
+func (a *API) findings(ctx context.Context, s appscan.ScanResult, q findQuery) ([]appscan.Finding, error) {
 	app := s.App
 	var out []appscan.Finding
 	lastID := 0
@@ -134,7 +170,7 @@ func (a *API) findings(ctx context.Context, s appscan.ScanResult, since time.Tim
 					"list that would read as complete", maxPages, app)
 		}
 
-		body, err := a.search(ctx, s, since, lastID, open)
+		body, err := a.search(ctx, s, q, lastID)
 		if err != nil {
 			return nil, err
 		}
@@ -167,7 +203,7 @@ func (a *API) findings(ctx context.Context, s appscan.ScanResult, since time.Tim
 }
 
 // search POSTs one page of the finding search.
-func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time, afterID int, open bool) ([]byte, error) {
+func (a *API) search(ctx context.Context, s appscan.ScanResult, q findQuery, afterID int) ([]byte, error) {
 	var crit strings.Builder
 	if s.AppID != "" {
 		fmt.Fprintf(&crit, `<Criteria field="webApp.id" operator="EQUALS">%s</Criteria>`,
@@ -176,17 +212,21 @@ func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time,
 		fmt.Fprintf(&crit, `<Criteria field="webApp.name" operator="EQUALS">%s</Criteria>`,
 			xmlEscape(s.App))
 	}
-	// Vulnerabilities only. Verified against the live API. The report never
-	// shows information-gathered or sensitive-content items, and on a real
-	// application those are most of the list - the first unfiltered probe
-	// returned nothing else.
-	crit.WriteString(`<Criteria field="type" operator="EQUALS">VULNERABILITY</Criteria>`)
-	if !since.IsZero() {
+	// The weekly and the tickets ask for vulnerabilities only (verified
+	// against the live API): on a real application information-gathered and
+	// sensitive-content items are most of the list. The owner report asks
+	// for those too, by name.
+	op := "EQUALS"
+	if strings.Contains(q.kinds, ",") {
+		op = "IN"
+	}
+	fmt.Fprintf(&crit, `<Criteria field="type" operator="%s">%s</Criteria>`, op, xmlEscape(q.kinds))
+	if !q.since.IsZero() {
 		fmt.Fprintf(&crit,
 			`<Criteria field="lastDetectedDate" operator="GREATER">%s</Criteria>`,
-			since.UTC().Format("2006-01-02T15:04:05Z"))
+			q.since.UTC().Format("2006-01-02T15:04:05Z"))
 	}
-	if open {
+	if q.open {
 		crit.WriteString(`<Criteria field="status" operator="IN">NEW,ACTIVE,REOPENED</Criteria>`)
 	}
 	if afterID > 0 {
@@ -198,7 +238,7 @@ func (a *API) search(ctx context.Context, s appscan.ScanResult, since time.Time,
 	// in the response (shape confirmed with cti-appreport --probe-findings).
 	// Smaller pages: a verbose finding carries its evidence.
 	prefs := fmt.Sprintf(`<limitResults>%d</limitResults>`, pageSize)
-	if open {
+	if q.verbose {
 		prefs = fmt.Sprintf(`<verbose>true</verbose><limitResults>%d</limitResults>`, verbosePageSize)
 	}
 	payload := fmt.Sprintf(
@@ -253,6 +293,22 @@ func (a *API) get(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return a.fetch(req)
+}
+
+// postForm is get with the parameters in a form body: the KnowledgeBase
+// takes a long QID list that way, where a URL would hit a length limit.
+func (a *API) postForm(ctx context.Context, path string, form url.Values) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path,
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return a.fetch(req)
+}
+
+func (a *API) fetch(req *http.Request) ([]byte, error) {
 	req.SetBasicAuth(a.username, a.password)
 	req.Header.Set("X-Requested-With", "cti-agent")
 	resp, err := a.http.Do(req)
@@ -333,6 +389,21 @@ type wasFinding struct {
 	Param      string `xml:"param"`
 	Potential  bool   `xml:"potential"`
 	Ignored    bool   `xml:"isIgnored"`
+	// Classification, as the element names of a live verbose record
+	// (cti-appreport --probe-findings, 2026-11-10). Each is optional.
+	AppURL string `xml:"webApp>url"`
+	QDS    int    `xml:"detectionScore"`
+	Times  int    `xml:"timesDetected"`
+	CVSS   struct {
+		Base         string `xml:"base"`
+		Temporal     string `xml:"temporal"`
+		AttackVector string `xml:"attackVector"`
+	} `xml:"cvssV3"`
+	CWE   []string `xml:"cwe>list>long"`
+	OWASP []struct {
+		Name string `xml:"name"`
+		Code string `xml:"code"`
+	} `xml:"owasp>list>OWASP"`
 	// Verbose only. Request headers are deliberately not read: they carry
 	// the scan account's cookies, and nothing here needs them.
 	Results []struct {
@@ -363,11 +434,16 @@ func (f wasFinding) evidence() *appscan.Evidence {
 		for _, p := range r.Payloads {
 			e := &appscan.Evidence{
 				Method:        clipRunes(strings.ToUpper(strings.TrimSpace(p.Method)), 16),
-				Link:          clipRunes(appscan.RedactURL(strings.TrimSpace(p.Link)), maxLink),
+				Link:          clipRunes(appscan.RedactURLKeeping(strings.TrimSpace(p.Link), f.Param), maxLink),
 				Authenticated: r.Auth,
 			}
+			// The payload is what the scanner injected - kept, so the
+			// developer can reproduce the flaw. Header and token redaction
+			// still runs (a payload can carry a cookie it read back); the
+			// URL-parameter rule does not, or "key=1' OR '1'='1" would lose
+			// its point.
 			if pl := strings.TrimSpace(p.Payload); pl != "" && !strings.EqualFold(pl, "N/A") {
-				e.Payload = clipRunes(appscan.RedactURL(appscan.Redact(pl)), maxPayload)
+				e.Payload = clipRunes(appscan.Redact(pl), maxPayload)
 			}
 			e.Proof = clipRunes(appscan.RedactURL(appscan.Redact(strings.TrimSpace(maybeBase64(p.Response)))), maxProof)
 			for i, u := range r.AccessPath {
@@ -398,12 +474,53 @@ func clipRunes(s string, n int) string {
 
 const unreadable = "[encoded response removed by cti-agent: not readable text, so it could not be checked for credentials]"
 
+const b64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+
+// minEncodedRun is the length past which an unbroken base64 run in a proof is
+// encoded data, not text: a page does not print 200 characters of it.
+const minEncodedRun = 200
+
+var longB64RE = regexp.MustCompile(`[A-Za-z0-9+/]{200,}={0,2}`)
+
+// longBase64Runs handles a proof that is text with encoded data inside it
+// (or after a truncation marker): each long run is decoded when it decodes
+// to readable text, so Redact sees it in the clear, and removed when not.
+func longBase64Runs(s string) string {
+	return longB64RE.ReplaceAllStringFunc(s, func(run string) string {
+		if pad := len(run) % 4; pad != 0 {
+			if pad == 1 {
+				return unreadable
+			}
+			run += strings.Repeat("=", 4-pad)
+		}
+		dec, err := base64.StdEncoding.DecodeString(run)
+		if err != nil || !utf8.Valid(dec) {
+			return unreadable
+		}
+		for _, r := range string(dec) {
+			if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+				return unreadable
+			}
+		}
+		return string(dec)
+	})
+}
+
 // maybeBase64 decodes s when it is entirely base64 and decodes to readable
 // text - Qualys encodes some response bodies and not others. Anything else
 // is returned as it came.
 func maybeBase64(s string) string {
 	t := strings.Join(strings.Fields(s), "")
-	if len(t) < 16 || len(t)%4 != 0 || strings.Trim(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") != "" {
+	if len(t) < 16 || strings.Trim(t, b64Alphabet) != "" {
+		return longBase64Runs(s)
+	}
+	if len(t)%4 != 0 {
+		// All base64 and long, but cut short: it cannot be decoded, so it
+		// cannot be checked for a cookie. Short runs stay - "deadbeef" in a
+		// page is text.
+		if len(t) >= minEncodedRun {
+			return unreadable
+		}
 		return s
 	}
 	dec, err := base64.StdEncoding.DecodeString(t)
@@ -432,7 +549,7 @@ func (f wasFinding) normalise() appscan.Finding {
 		ID:        id,
 		Title:     strings.TrimSpace(f.Name),
 		Severity:  appscan.Severity(f.Severity),
-		URL:       strings.TrimSpace(f.URL),
+		URL:       clipRunes(appscan.RedactURLKeeping(strings.TrimSpace(f.URL), f.Param), maxLink),
 		Param:     strings.TrimSpace(f.Param),
 		Status:    strings.ToUpper(strings.TrimSpace(f.Status)),
 		FirstSeen: parseQualysAPITime(f.FirstFound),
@@ -440,7 +557,69 @@ func (f wasFinding) normalise() appscan.Finding {
 		Potential: f.Potential,
 		Ignored:   f.Ignored,
 		Evidence:  f.evidence(),
+
+		Kind:         strings.ToUpper(strings.TrimSpace(f.Type)),
+		UniqueID:     strings.TrimSpace(f.UniqueID),
+		QDS:          bounded(f.QDS, 0, 100),
+		Times:        bounded(f.Times, 0, 1_000_000),
+		CVSS:         score(f.CVSS.Base),
+		CVSSTemporal: score(f.CVSS.Temporal),
+		AttackVector: clipRunes(strings.TrimSpace(f.CVSS.AttackVector), 40),
+		CWE:          cwes(f.CWE),
+		OWASP:        owaspRefs(f.OWASP),
+		AppURL:       clipRunes(appscan.RedactURL(strings.TrimSpace(f.AppURL)), maxLink),
 	}
+}
+
+// score reads a CVSS score, 0 when absent or out of range (0.0-10.0).
+func score(s string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v < 0 || v > 10 {
+		return 0
+	}
+	return v
+}
+
+func bounded(n, lo, hi int) int {
+	if n < lo || n > hi {
+		return 0
+	}
+	return n
+}
+
+func cwes(in []string) []int {
+	var out []int
+	for _, s := range in {
+		if n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(s), "CWE-")); err == nil && n > 0 && n < 100000 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// owaspCode is an "A01".."A10" in a name like "A02:2025 Security
+// Misconfiguration", or built from a numeric code.
+var owaspCode = regexp.MustCompile(`\bA(0[1-9]|10)\b`)
+
+func owaspRefs(in []struct {
+	Name string `xml:"name"`
+	Code string `xml:"code"`
+}) []appscan.OWASPRef {
+	var out []appscan.OWASPRef
+	for _, o := range in {
+		name := clipRunes(strings.TrimSpace(o.Name), 120)
+		code := ""
+		if m := owaspCode.FindString(name + " " + o.Code); m != "" {
+			code = m
+		} else if n, err := strconv.Atoi(strings.TrimSpace(o.Code)); err == nil && n >= 1 && n <= 10 {
+			code = fmt.Sprintf("A%02d", n)
+		}
+		if name == "" && code == "" {
+			continue
+		}
+		out = append(out, appscan.OWASPRef{Code: code, Name: name})
+	}
+	return out
 }
 
 // parseQualysAPITime reads the ISO-8601 the QPS API emits.

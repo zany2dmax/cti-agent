@@ -25,12 +25,16 @@ import (
 // research; one that also carries the KnowledgeBase's own solution text is a
 // ticket they can act on.
 //
-// Same host and credentials as the VM lane's KnowledgeBase download, one GET
+// Same host and credentials as the VM lane's KnowledgeBase download, one POST
 // per chunk of QIDs, details=All. The text is HTML; it is reduced to plain
 // text here and bounded, because it goes into Jira and email.
 
-// kbChunk QIDs per request. Well under any URL-length limit.
-const kbChunk = 100
+// kbChunk QIDs per request. The list goes in a POST body, so no URL-length
+// limit applies; 1000 makes one call of every realistic run (the weekly and
+// the owner lane see a few hundred kinds of finding at most), which matters
+// because the KnowledgeBase shares the Qualys API budget. It was 100 while
+// the list went in a GET URL.
+const kbChunk = 1000
 
 // maxRemedyField bounds each field. The KnowledgeBase's own texts are a few
 // paragraphs; anything far longer is pasted reference material that belongs
@@ -82,7 +86,7 @@ func (a *API) kbChunk(ctx context.Context, qids []int) (map[string]appscan.Remed
 	q.Set("action", "list")
 	q.Set("details", "All")
 	q.Set("ids", strings.Join(parts, ","))
-	body, err := a.get(ctx, "/api/4.0/fo/knowledge_base/vuln/?"+q.Encode())
+	body, err := a.postForm(ctx, "/api/4.0/fo/knowledge_base/vuln/", q)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +101,7 @@ type kbVulnDetail struct {
 	Diagnosis   string `xml:"DIAGNOSIS"`
 	Consequence string `xml:"CONSEQUENCE"`
 	Solution    string `xml:"SOLUTION"`
+	Category    string `xml:"CATEGORY"`
 	CVEs        []struct {
 		ID string `xml:"ID"`
 	} `xml:"CVE_LIST>CVE"`
@@ -118,6 +123,7 @@ func parseKBRemedies(body []byte) (map[string]appscan.Remedy, error) {
 			Diagnosis:   bound(htmlToText(v.Diagnosis)),
 			Consequence: bound(htmlToText(v.Consequence)),
 			Solution:    bound(htmlToText(v.Solution)),
+			Category:    clipRunes(strings.TrimSpace(htmlToText(v.Category)), 80),
 		}
 		for _, c := range v.CVEs {
 			if id := strings.ToUpper(strings.TrimSpace(c.ID)); strings.HasPrefix(id, "CVE-") {

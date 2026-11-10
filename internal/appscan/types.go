@@ -257,6 +257,10 @@ type ScanResult struct {
 	Reference string
 	// Target is what was scanned, as the vendor describes it.
 	Target string
+	// AppURL is the web application's own URL, from the scanner's API
+	// record - the address that was scanned. The notice names the
+	// application, not the URL, so this is empty without the scan list.
+	AppURL string
 
 	Started  time.Time
 	Finished time.Time
@@ -382,6 +386,44 @@ type Finding struct {
 	// Evidence is how the scanner found it - the request it sent and what
 	// came back - when the scanner provides it. Already redacted and bounded.
 	Evidence *Evidence
+
+	// The scanner's classification, for the owner report. All optional: a
+	// scanner that does not send one leaves it zero, and the report leaves
+	// the field out rather than printing a zero as if it were a score.
+	//
+	// Kind is VULNERABILITY, SENSITIVE_CONTENT or INFORMATION_GATHERED.
+	Kind string
+	// UniqueID is the scanner's id for this one finding on this one URL.
+	UniqueID string
+	// CVSS is the CVSS v3 base score, CVSSTemporal the temporal one.
+	CVSS, CVSSTemporal float64
+	AttackVector       string
+	// CWE are the CWE numbers, OWASP the OWASP Top 10 entries as the
+	// scanner names them ("A02" style codes where it gives them).
+	CWE   []int
+	OWASP []OWASPRef
+	// QDS is the scanner's detection score (Qualys QDS, 1-100).
+	QDS int
+	// Times is how many scans have detected it.
+	Times int
+	// AppURL is the web application's own address, from the finding's
+	// webApp record - the owner report's fallback when the scan list was
+	// not reached.
+	AppURL string
+}
+
+// OwnerReportSource is a scanner that can supply the owner report: every
+// open finding on one application (all kinds, evidence redacted) and the
+// knowledge base's texts for them.
+type OwnerReportSource interface {
+	OwnerFindings(ctx context.Context, appID string) ([]Finding, error)
+	RemedyFetcher
+}
+
+// OWASPRef is one OWASP Top 10 category a finding maps to.
+type OWASPRef struct {
+	Code string // e.g. "A02", when the scanner gives or implies it
+	Name string // the scanner's own name for it
 }
 
 // Evidence is one detection of a finding: enough for a developer to see it
@@ -404,6 +446,10 @@ type Remedy struct {
 	Consequence string // what an attacker can do with it
 	Solution    string // how to fix it
 	CVEs        []string
+	// Category is the knowledge base's group for the finding (Qualys
+	// CATEGORY), for the owner report's "by group" chart. Empty when the
+	// knowledge base gives none.
+	Category string
 }
 
 // RemedyFetcher is implemented by providers whose knowledge base can be

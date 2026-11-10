@@ -1340,17 +1340,31 @@ real check.
 ### Reports to application owners, by email
 
 `cti-agent-appowners.timer`, daily 07:15, runner `run-appowners`. For every
-scan that finished since the last run, it fetches the scanner's own report of
-the application's open findings, removes the scan account's session from it,
-and mails it to the owner (To) and watchers (Cc) on the application's line in
+scan that finished since the last run, it builds the fleet's own report of the
+application's open findings from the Qualys WAS API and mails it to the owner
+(To) and watchers (Cc) on the application's line in
 `app-owners.txt`. Many owners and watchers are outside the company and not in
 Jira, which is why this is email and not a ticket.
+
+The report is one self-contained HTML file: no scripts, no external resources,
+every value escaped. It costs one finding search per application and one
+knowledge-base lookup per 1,000 kinds of finding. It shows the scan facts and severity tiles, the
+worst open finding with its fix, charts, and one card per kind of finding with
+every place it was found. Request headers are never read. Cookie values,
+session identifiers, tokens and login headers are removed. The payloads that
+prove a finding are kept so developers can reproduce it. The email names the
+URL scanned. `--deliveries` creates nothing in Qualys, so `--keep` does not
+apply.
 
 ```bash
 sudo cti-agent run-appowners --dry-run   # plan, check every recipient; fetch and send nothing
 sudo cti-agent run-appowners --to-dev    # every email and report to FLEET_DEV_EMAIL only
 sudo cti-agent run-appowners --for-real  # fetch, redact, send, record
+sudo cti-agent cti-appreport --owner-report 123456 --out-dir /root/r   # preview one app; nothing sent or recorded
 ```
+
+Preview one application and read its report before the first `--for-real`
+send. The payloads are in it on purpose.
 
 **Who receives it.** `cti-mailer --lane owner` reads the owners itself, from
 `owners.db` (below) or, until that exists, `app-owners.txt`, and sends only to

@@ -1,6 +1,6 @@
 .TH CTI-APPREPORT 1 "2026-10-24" "cti-agent 1.4" "CTI Fleet Manual"
 .SH NAME
-cti-appreport \- fetch the scanner's own report for each web application, zipped, to attach to its AppSec Jira ticket
+cti-appreport \- build the report for each web application: the scanner's own export for AppSec Jira tickets, the fleet's own HTML report for application owners
 .SH SYNOPSIS
 .B cti-appreport \-\-check
 .PP
@@ -35,12 +35,33 @@ cti-appreport \- fetch the scanner's own report for each web application, zipped
 .IR DURATION ]
 .PP
 .B cti-appreport
+.BI \-\-deliveries " FILE"
+.BI \-\-out\-dir " DIR"
+.RB [ \-\-max\-reports
+.IR N ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.RB [ \-\-no\-fetch ]
+.PP
+.B cti-appreport
+.BI \-\-owner\-report " ID"
+.BI \-\-out\-dir " DIR"
+.RB [ \-\-app\-name
+.IR NAME ]
+.PP
+.B cti-appreport
 .BI \-\-probe\-findings " ID"
 .PP
 .B sudo cti\-agent cti\-appreport
 .RI [ options ]
 .SH DESCRIPTION
 .B cti-appreport
+does two jobs.
+.PP
+For the weekly AppSec tickets
+.RB ( \-\-tickets ,
+.BR \-\-app\-id )
+it
 asks the DAST scanner for its own report on a web application (the request
 and response behind each finding, laid out the way the scanner documents
 them) and writes it as a zip file for
@@ -67,7 +88,22 @@ one case in the command's provider switch; nothing in
 .BR cti\-jira (1)
 or the runner changes.
 .PP
-.B Each report carries the scan account's session cookies
+.B \-\-deliveries
+is the owners lane
+.RB ( run\-appowners (1)).
+It does not use the scanner's export. It builds the fleet's own report from
+the Qualys WAS API: one self-contained HTML file with no scripts and no
+external resources, every value escaped. It holds a summary of the scan
+(application, URL scanned, scan, when it ran, login, links crawled) beside
+the severity tiles, charts by severity, by group and by OWASP Top 10 (2025),
+one card per kind of vulnerability (worst first, with what it is, why it
+matters and how to fix it, and a table of every place it was found), any
+sensitive content, the security weaknesses, and the scanner's diagnostics
+folded away at the bottom. Request headers are never read. Cookie values,
+session identifiers, tokens and login headers are removed; the payloads that
+prove a finding are kept, so developers can reproduce it.
+.PP
+.B The weekly ticket reports carry the scan account's session cookies
 (the scanner records the requests it sent). Treat the directory like a
 credential: files are written 0600 in a directory created 0700, the report
 is deleted from the scanner after download (unless
@@ -77,7 +113,9 @@ and
 deletes the directory once the tickets are done.
 .PP
 .B It spends the shared Qualys API budget.
-A report is about five calls. Every response's rate-limit and concurrency
+A ticket report is about five calls. An owner report is one finding search
+per application, plus one KnowledgeBase lookup for the whole run (per 1,000
+kinds of finding). Every response's rate-limit and concurrency
 headers are read (see
 .BR QUALYS_RL_RESERVE ):
 a short refusal is waited out, and the optional report work gives way when
@@ -158,14 +196,22 @@ fetched.
 Default:\~\fB30\fR.
 .TP
 .B \-\-keep
-Leave each report in the scanner instead of deleting it (debugging). Reports
+With
+.B \-\-tickets
+or
+.BR \-\-app\-id :
+leave each report in the scanner instead of deleting it (debugging). Not used by
+.B \-\-deliveries
+or
+.BR \-\-owner\-report ,
+which create nothing in the scanner. Reports
 left behind count against the scanner's report limit; delete them in the
 Qualys console.
 Default:\~off.
 .TP
 .BI \-\-timeout " DURATION"
-Give up on one report after this long, create to download, as a Go
-duration.
+Give up on one report after this long, create to download (for owner
+reports, the finding search), as a Go duration.
 Default:\~\fB10m0s\fR.
 .TP
 .B \-\-dump\-request
@@ -191,36 +237,48 @@ organisation's own application: redirect it to a 0600 file and keep it off
 tickets.
 Default:\~empty.
 .TP
-.BI \-\-deliveries " file"
+.BI \-\-deliveries " FILE"
 The owners lane
 .RB ( run\-appowners (1)):
 for every application in this
 .B "cti\-appscan \-\-deliveries\-out"
-file that is not held, fetch its report, pass every text file in it through
-the same redaction as
-.B \-\-probe\-findings
-(a file type it cannot check is left out), delete the unredacted zip, and
-write the covering email
+file that is not held, build the owner report (see DESCRIPTION) and write
+the covering email
 .RI ( mail.html ,
 .IR subject.txt ,
 .IR app.txt )
 and the attachment into a directory per application under
 .BR \-\-out\-dir .
-Also writes
+The email names the URL scanned and describes the attachment as the full
+report. Also writes
 .I send.tsv
 (one row per email ready),
 .I held.tsv
 (holds to record as dealt with) and
 .I held.txt
-(for the operator's alert). A report over 3\~MB after redaction is not
-attached and the email says so. A report that could not be fetched or
-redacted gets no row, so the next run tries again.
+(for the operator's alert).
+.B \-\-max\-reports
+and
+.B \-\-timeout
+apply per application. A report over 3\~MB is not attached and the email says
+so. A report that could not be built gets no row, so the next run tries
+again.
 .TP
 .B \-\-no\-fetch
 With
 .BR \-\-deliveries :
 write the covering emails without fetching any report, and without
 credentials. For a dry run.
+.TP
+.BI \-\-owner\-report " ID"
+Build one application's owner report and covering email into
+.B \-\-out\-dir
+through the same code as the daily run, as a preview. Nothing is mailed or
+recorded. Needs
+.BR \-\-out\-dir .
+.B \-\-app\-name
+sets the name used in the email.
+Default:\~empty.
 .SH ENVIRONMENT
 .I fleet.env
 is loaded at start from
@@ -304,6 +362,12 @@ Look at the raw finding fields (redacted) in a private file:
 .PP
 .EX
 (umask 077; sudo cti\-agent cti\-appreport \-\-probe\-findings 123456 > /tmp/probe.xml)
+.EE
+.PP
+Preview one application's owner report and email before the first real send:
+.PP
+.EX
+sudo cti\-agent cti\-appreport \-\-owner\-report 123456 \-\-out\-dir /root/r
 .EE
 .SH SEE ALSO
 .BR run\-appscan (1),
