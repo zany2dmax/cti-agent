@@ -197,7 +197,12 @@ func Child(source string) int {
 			env = append(env, kv)
 		}
 	}
-	// #nosec G204 -- the binary re-runs itself with its own arguments
+	// #nosec G204,G702 -- the binary re-runs itself with its own arguments.
+	// Both rules, as in cti-jira/enriched.go: G702 (taint, gosec 2.30) traces
+	// os.Args into exec, G204 flags any variable there. Neither applies: exe is
+	// os.Executable(), not anything a caller names, there is no shell, and the
+	// arguments are the ones this same binary was already started with, so the
+	// child can do nothing the parent could not.
 	cmd := exec.Command(exe, os.Args[1:]...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
