@@ -122,8 +122,11 @@ func run() int {
 	check := flag.Bool("check", false, "verify configuration, token and granted roles")
 	flag.Var(&attach, "attach", "file to attach (repeatable, keep under ~3MB total)")
 	flag.Parse()
-	// --check only reads; anything else sends, so it has to be told how.
-	if !*check {
+	// --check and --armed only read; anything else sends, so it has to be told
+	// how. --armed was missed when this rule came in, and run-appowners asks it
+	// before every real or dry run, so the owner lane could not start except
+	// with --to-dev (which skips the question).
+	if !*check && !*armed {
 		if _, msg := cli.Resolve("cti-mailer", *dryRun, *forReal, *toDev, true, cli.Words{
 			DryRun: "render and validate, send nothing", ForReal: "send the message"}); msg != "" {
 			fmt.Fprintln(os.Stderr, msg)

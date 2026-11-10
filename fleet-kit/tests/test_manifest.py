@@ -219,8 +219,25 @@ class TestEveryEffectCommandMustBeToldHowToRun(unittest.TestCase):
             self.assertIn("say how to run it", py.stderr)
 
     def test_the_read_only_check_flags_need_no_mode(self):
-        for name in ("cti-mailer", "cti-jira"):
-            self.assertEqual(self.cmds[name]["exempt"], ["--check"])
+        self.assertEqual(self.cmds["cti-jira"]["exempt"], ["--check"])
+        self.assertEqual(self.cmds["cti-mailer"]["exempt"], ["--check", "--armed"])
+
+    def test_the_owner_lane_question_runs_without_a_mode(self):
+        """run-appowners asks `cti-mailer --lane owner --armed` before every
+        real or dry run. It only reads, so it must not demand a mode: when it
+        did, the owner lane could not start at all except with --to-dev."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = pathlib.Path(tmp) / "cti-mailer"
+            b = subprocess.run(["go", "build", "-o", str(exe), "./cmd/cti-mailer"], cwd=ROOT,
+                               check=False, capture_output=True, text=True)
+            self.assertEqual(b.returncode, 0, b.stderr)
+            r = subprocess.run([str(exe), "--lane", "owner", "--armed"], check=False,
+                               capture_output=True, text=True,
+                               env={"PATH": "/usr/bin:/bin", "HOME": tmp, "FLEET_HOME": tmp,
+                                    "FLEET_ENV": str(pathlib.Path(tmp) / "none.env")})
+            self.assertNotIn("say how to run it", r.stderr)
+            self.assertNotEqual(r.returncode, 2, r.stdout + r.stderr)
 
 
 class TestCompletionAnswers(unittest.TestCase):

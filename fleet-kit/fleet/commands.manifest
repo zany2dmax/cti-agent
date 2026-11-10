@@ -26,7 +26,7 @@
 #            (--dry-run safe, --to-dev writes, --for-real changes), --check, and
 #            every flag of a read command are classed already; list the rest here.
 #   exempt:  flags that make an effect command read-only, so no mode is needed
-#            (cti-jira --check, cti-mailer --check, mailer.py --check)
+#            (cti-jira --check, cti-mailer --check and --armed, mailer.py --check)
 
 command: brief.py
 about: Render the CTI digest from an enriched file
@@ -165,7 +165,7 @@ command: cti-mailer
 about: Send mail through Graph, or check the sender's credentials
 runs: effect
 modes: --dry-run --for-real --to-dev
-exempt: --check
+exempt: --check --armed
 flag: --app-id STRING | with --lane owner: the scanner's web app id whose app-owners.txt line names the recipients
 flag: --app-name STRING | with --lane owner: the application's name, for an app-owners.txt line keyed by name
 flag: --approve | the operator approved this specific off-cycle send

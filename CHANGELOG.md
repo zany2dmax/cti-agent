@@ -95,6 +95,18 @@ defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 
 ---
 
+### Fixed
+
+- **The owner lane could not start.** `run-appowners` asks `cti-mailer --lane
+  owner --armed` whether the lane has an allowed domain before every real or
+  dry run, and `cti-mailer` refused it with "say how to run it": only `--check`
+  was exempt from the rule that every command names its mode, and `--armed`,
+  which also only reads, was missed. So `--dry-run` and `--for-real` stopped
+  with "cti-mailer could not read the owners (exit 2)", and only `--to-dev`,
+  which skips the question, got through. `--armed` is now exempt beside
+  `--check` (and in `commands.manifest`), with a test that runs the exact
+  question the runner asks.
+
 ## 1.6.3 — 2026-11-10
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The first
