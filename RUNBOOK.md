@@ -201,7 +201,7 @@ regression test.
 | `VM_ALLOW_TO` | Recipient allowlist enforced in code; anything outside it needs `--approve`. Named `FLEET_ALLOW_TO` before 1.3.1; the old name is still read, and both set to different lists refuses to send |
 | `WAS_TO` | Application-security report recipients — the people who own application code, not the people who patch servers. No default |
 | `WAS_ALLOW_TO` | Allowlist for `WAS_TO`. **Fail-closed and separate from `VM_ALLOW_TO`:** with either variable unset, `cti-mailer --lane was` refuses and names the one that is missing. `--approve` does not override an empty list. An allowlist may reference another by name (`PT_ALLOW_TO=$VM_ALLOW_TO,extra@example.com`); wildcards are refused |
-| `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates. Pre-approved |
+| `FLEET_OPERATOR_EMAIL` | Where the orchestrator escalates and where failure alerts go. Pre-approved. Comma-separated for more than one operator (people, not a distribution list); a typo is not caught by the allowlist, because the operator is always allowed |
 | `FLEET_DEV_EMAIL` | Development only: where `--to-dev` sends a test (never CC'd, subject `[DEV TEST] ...`). Accepted by `cti-mailer`, `cti-alert` and the `run-digest`, `run-patchtuesday`, `run-appscan` and `run-domains` runners; a runner test send records nothing, files no tickets and advances no baseline. Nothing scheduled uses it |
 | `CTI_REPLY_MAILBOX` | Mailbox you reply into; defaults to `GRAPH_MAILBOX` |
 | `REPORT_HOSTNAMES` | Hostname disclosure: `full` (default), `redact`, `count`. [Section 13](#13-report-sensitivity) |

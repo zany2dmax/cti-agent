@@ -47,6 +47,7 @@ every owner email (see Added).
 
 ### Changed
 
+- **Docs: `FLEET_OPERATOR_EMAIL` takes more than one address.** RUNBOOK, `fleet.env.example` and the fleet-kit README now say it is comma-separated (the code always split it), for two people acting as operators. The allowlist does not check it, so spell each address carefully.
 - **The AppSec reports' foot no longer says "Agent Fleet" twice.** The organisation
   name (`FLEET_ORG`, for example "CR Agent Fleet") already ends in it, so the owner
   report, the owner email and the weekly said "CR Agent Fleet Agent Fleet AppSec
