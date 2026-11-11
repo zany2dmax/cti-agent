@@ -84,7 +84,7 @@ func TestDeliveriesWriteRedactedMail(t *testing.T) {
 	if err != nil || strings.Contains(string(att), "live-value") {
 		t.Fatalf("attachment not redacted (%v): %s", err, att)
 	}
-	for _, want := range []string{"Web application scan report", "https://shop.example.com", "Set HttpOnly."} {
+	for _, want := range []string{"Web Application Scan Report", "https://shop.example.com", "Set HttpOnly."} {
 		if !strings.Contains(string(att), want) {
 			t.Errorf("attachment lacks %q", want)
 		}

@@ -179,7 +179,7 @@ func RenderOwnerReport(in OwnerReportInput) []byte {
 	kinds := groupKinds(vulns)
 
 	var b strings.Builder
-	title := fmt.Sprintf("%s - web application scan report", oneLineName(d.App))
+	title := fmt.Sprintf("%s - Web Application Scan Report", oneLineName(d.App))
 	fmt.Fprintf(&b, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"+
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>%s</title>\n<style>%s</style>\n</head>\n<body>\n",
 		h(title), reportCSS())
@@ -190,7 +190,7 @@ func RenderOwnerReport(in OwnerReportInput) []byte {
 	}
 	org := strings.TrimSpace(in.Org)
 	fmt.Fprintf(&b, `<div class="band"><div class="wrap"><div class="org">%s</div>`+
-		`<h1>Web application scan report</h1><div class="sub">%s</div></div></div>`+"\n<div class=\"wrap\">\n",
+		`<h1>Web Application Scan Report</h1><div class="sub">%s</div></div></div>`+"\n<div class=\"wrap\">\n",
 		h(strings.TrimSpace(org+" · Security")), h(strings.Trim(oneLineName(d.App)+" · "+when, " ·")))
 
 	writeSummary(&b, d, open, kinds, len(sensitive), len(weak), len(diag), ignored, in.Remedies)

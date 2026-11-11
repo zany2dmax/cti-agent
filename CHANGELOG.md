@@ -56,6 +56,9 @@ every owner email (see Added).
   The organisation is `FLEET_ORG` without its trailing "Agent Fleet" (so "CR Web
   Application Scan Results"; the header band above it still shows the full name).
   **Upgrade:** a mail rule that matches the old subject needs the new one.
+- **The attached HTML report is titled "Web Application Scan Report".** The page
+  heading and the browser tab title were "Web application scan report"; each word
+  now starts with a capital, to match the email's title.
 - **The hold and ticket texts say "no owner on file", not "app-owners.txt".** The
   owners live in the database now, so an alert that named the old file sent
   people looking in the wrong place. Affects the owner lane's hold alert and the
