@@ -76,6 +76,39 @@ The scans to combine, by title.
 .B FLEET_VMSCAN_TIME
 When the installer pins the timer, in
 .BR FLEET_TIMEZONE .
+.SH DRY RUNS AND THE LANE LOCK
+A dry run and a test send
+.RB ( \-\-to\-dev ,
+with or without
+.BR \-\-dry\-run )
+write nothing a real run reads. They work under
+.I $FLEET_HOME/dryrun/
+(0700), emptied at the start of each one; nothing in the fleet reads it.
+Its report, text, subject, findings worksheet and SEEN list go in
+.IR dryrun/vmscan/ ;
+the real run's
+.I state/vmscan\-*\-DATE
+files are neither deleted nor replaced, so a rehearsal cannot take the SEEN
+list a real run needs to hand the notices to the mailbox cleanup.
+.PP
+Each run takes the lane lock,
+.IR state/locks/vmscan.lock ,
+with
+.BR flock (2).
+A dry run or test send that finds it held \- a timer run, or another
+person's rehearsal \- says which process holds it and exits 75 without doing
+anything; it never waits and never runs beside the real run. A real run
+waits for it up to
+.B FLEET_LOCK_WAIT_SECONDS
+(from
+.IR fleet.env ,
+default 600, under the unit's
+.BR TimeoutStartSec ),
+then, if another real run still holds it, fails with exit status 1, so the
+unit fails and it can be rerun; if a rehearsal still holds it, goes ahead
+with a warning, because a rehearsal writes only its own files. The
+kernel drops the lock when the process ends, however it ends, so there is
+no stale lock to clear.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -87,6 +120,10 @@ cti\-vmscan or cti\-mailer failed, or a binary is missing.
 .TP
 .B 2
 No mode was given, or an unknown argument.
+.TP
+.B 75
+A dry run or test send refused because another run of the lane holds
+the lane lock. Nothing was done; run it again when that run has finished.
 .SH EXAMPLES
 Rehearse this week's report:
 .PP

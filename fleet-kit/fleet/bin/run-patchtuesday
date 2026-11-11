@@ -64,14 +64,25 @@ PT="$FLEET_CODE/bin/cti-patchtuesday"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say()  { echo "[run-patchtuesday $(date '+%F %H:%M:%S')] $*"; }
+# A failed DRY run says so on the board, so the orchestrator does not read it
+# as the real send failing.
 fail() { say "FAILED: $*"; [ -n "$TODEV" ] || "$BOARD" post @patchtuesday @you ERROR \
-         "run-patchtuesday failed: $*" 2>/dev/null || true; exit 1; }
+         "${DRY:+DRY RUN }run-patchtuesday failed: $*" 2>/dev/null || true; exit 1; }
 
 if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   say "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"; exit 2
 fi
 
 [ -x "$PT" ] || fail "cti-patchtuesday not found at $PT - rerun the installer"
+
+# One run of this lane at a time, before the already-sent check, so a second
+# real run waits for the first and then finds it recorded. A dry run or test
+# send refuses while a run is active (see fleet_lock in fleet-mode.sh).
+if [ -z "$DRY" ]; then
+  fleet_lock patchtuesday real || fail "another run of run-patchtuesday is still going - this one did not start"
+else
+  fleet_lock patchtuesday dry
+fi
 
 # Which month, resolved here so the filenames and the already-sent guard agree
 # with what the binary reports on.
@@ -90,6 +101,17 @@ TXT="$FLEET_HOME/reports/patchtuesday-$TAG.txt"
 # YYYY-MM.json is the release manifest the daily digest reads. The structured
 # dump used to land on top of it.
 JSON="$FLEET_HOME/reports/patchtuesday-$TAG.json"
+# A DRY RUN OR TEST SEND HAS ITS OWN FILES, under $FLEET_HOME/dryrun/patchtuesday/.
+# The three above are the record of the synopsis that was sent (the JSON
+# gives its PRESENT count), and a rehearsal - a --month replay above all -
+# used to replace them with its own. The manifest was already left alone
+# (--no-manifest).
+if [ -n "$DRY" ]; then
+  OUT="$(fleet_dryrun_dir patchtuesday)" || fail "no rehearsal directory - nothing was run"
+  HTML="$OUT/$(basename "$HTML")"
+  TXT="$OUT/$(basename "$TXT")"
+  JSON="$OUT/$(basename "$JSON")"
+fi
 
 # Do not send twice for the same release. The guard is keyed on the month, so a
 # rerun after a failure is safe and a second timer firing is a no-op.

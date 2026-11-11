@@ -66,12 +66,30 @@ MAILER="$FLEET_CODE/bin/cti-mailer"
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
 
+# One run of this lane at a time; a dry run or test send refuses while a run
+# is active instead of waiting (see fleet_lock in fleet-mode.sh).
+if [ -n "$REAL" ]; then
+  fleet_lock vmscan real || fail "another run of run-vmscan is still going - this one did not start"
+else
+  fleet_lock vmscan dry
+fi
+
+# A DRY RUN OR TEST SEND HAS ITS OWN FILES, under $FLEET_HOME/dryrun/vmscan/.
+# Every file below used to be the real run's for the day, and the run begins
+# by deleting them: a rehearsal on the timer's day deleted its SEEN list (what
+# the mailbox cleanup may archive once the report is out) and replaced its
+# report and findings worksheet.
+OUTDIR="$STATE"
+if [ -z "$REAL" ]; then
+  OUTDIR="$(fleet_dryrun_dir vmscan)" || fail "no rehearsal directory - nothing was run"
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
-HTML="$STATE/vmscan-$STAMP.html"
-TXT="$STATE/vmscan-$STAMP.txt"
-SUBJFILE="$STATE/vmscan-subject-$STAMP.txt"
-SEEN="$STATE/vmscan-seen-$STAMP.json"
-FINDINGS="$STATE/vmscan-findings-$STAMP.csv"
+HTML="$OUTDIR/vmscan-$STAMP.html"
+TXT="$OUTDIR/vmscan-$STAMP.txt"
+SUBJFILE="$OUTDIR/vmscan-subject-$STAMP.txt"
+SEEN="$OUTDIR/vmscan-seen-$STAMP.json"
+FINDINGS="$OUTDIR/vmscan-findings-$STAMP.csv"
 # Mode set before anything is written: the report names which scans found what.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
