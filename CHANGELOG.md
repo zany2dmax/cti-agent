@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.4 — 2026-11-11
 
 **Action required if you run the installer by hand:** `install-fedora.sh` now
 needs `--for-real` (or `--dry-run`); see Changed. `cti-agent-update` passes it for you.
