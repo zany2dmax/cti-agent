@@ -42,6 +42,8 @@ defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 Preview one application with `sudo cti-agent cti-appreport --owner-report <id>
 --out-dir /var/lib/cti-agent/state/preview` before the first real owner send
 (the service account writes it, so not under `/root`).
+Optional: set `WAS_OWNER_CC` in `fleet.env` to the security team to copy it on
+every owner email (see Added).
 
 ### Security
 
@@ -98,6 +100,17 @@ Preview one application with `sudo cti-agent cti-appreport --owner-report <id>
 
 ---
 
+### Added
+
+- **The security team can be copied on every application owner email.** Set
+  `WAS_OWNER_CC` in `fleet.env` (next to `WAS_TO`). Each address goes on Cc of
+  every `run-appowners` email, after passing the same allowed-domain check as a
+  watcher; one that fails is left off and logged, and the owner's email still
+  goes. Already on the email as owner or watcher means one copy, not two. It is
+  a separate list from `WAS_TO` because the AppSec weekly's audience is wider
+  than the people who should see every owner's report. `cti-mailer --lane owner
+  --armed`, and so `run-appowners --dry-run`, says how many addresses it will
+  copy. Unset means owner emails are as before.
 ### Fixed
 
 - **AppSec open counts left out findings that had come back.** Qualys's

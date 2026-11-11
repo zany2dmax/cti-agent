@@ -230,6 +230,14 @@ func run() int {
 			logf("REFUSED: %s (%s, %s) is not at a domain in %s - not sent to them",
 				safelog.Line(r), safelog.Line(w.App), safelog.Line(src.Name()), allowName)
 		}
+		// The security team, copied on every owner email (WAS_OWNER_CC).
+		var teamRefused []string
+		copies, teamRefused = mailer.OwnerTeamCc(recipients, copies, os.Getenv(mailer.OwnerCcVar), allow)
+		for _, r := range teamRefused {
+			logf("REFUSED: %s (%s) is not at a domain in %s - not copied",
+				safelog.Line(r), mailer.OwnerCcVar, allowName)
+		}
+		refused = append(refused, teamRefused...)
 	} else if *lane != "" {
 		// A lane send uses its OWN recipient list and its OWN allowlist, and
 		// refuses if either is unset.
@@ -427,6 +435,18 @@ func ownerArmed() int {
 		return exitOff
 	}
 	logf("owner lane: armed - %d allowed domain(s) in %s", len(mailer.SplitList(list)), name)
+	// Said here so a dry run shows who is copied before anything is sent.
+	team, refused := mailer.OwnerTeamCc(nil, nil, os.Getenv(mailer.OwnerCcVar), list)
+	switch {
+	case len(team) == 0 && len(refused) == 0:
+		logf("owner lane: %s is unset - no security team copy", mailer.OwnerCcVar)
+	default:
+		logf("owner lane: copying %d address(es) from %s on every email", len(team), mailer.OwnerCcVar)
+		for _, r := range refused {
+			logf("owner lane: REFUSED %s in %s - not at a domain in %s, so not copied",
+				safelog.Line(r), mailer.OwnerCcVar, name)
+		}
+	}
 	return exitOK
 }
 
@@ -513,6 +533,7 @@ var optional = [][2]string{
 	{"VMSCAN_ALLOW_TO", "--lane vmscan allowlist; NO fallback - unset means it will not send"},
 	{"SUPPLIER_TO", "--lane supplier recipients; the supplier-request digest, security team only"},
 	{"SUPPLIER_ALLOW_TO", "--lane supplier allowlist; NO fallback - unset means it will not send"},
+	{"WAS_OWNER_CC", "--lane owner: the security team, copied on every owner email; each address must be at an allowed domain"},
 	{"OWNER_ALLOW_DOMAINS", "--lane owner: domains an app owner or watcher may be at; unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},

@@ -482,6 +482,9 @@ A watcher at another domain is dropped and listed in the result's
 an owner at another domain, an unset
 .BR OWNER_ALLOW_DOMAINS ,
 or an application with no line refuses the send.
+Every address in
+.B WAS_OWNER_CC
+(the security team) is added to Cc, through the same domain check.
 .B \-\-to
 and
 .B \-\-cc
@@ -505,7 +508,9 @@ an allowed domain (in
 through its snapshot, or
 .B OWNER_ALLOW_DOMAINS
 when there is no snapshot), 3 when there is none, 1 when the owners cannot be
-read.
+read. It also says how many
+.B WAS_OWNER_CC
+addresses every email will copy, and names any it will leave off.
 .BR run\-appowners (1)
 calls it before doing any work.
 .SH ENVIRONMENT
@@ -574,6 +579,16 @@ A lane's recipients and allowlist, for example
 and
 .BR DOM_TO / DOM_ALLOW_TO .
 No defaults, no fallback.
+.TP
+.B WAS_OWNER_CC
+The security team, copied on every
+.B \-\-lane owner
+email. Each address must be at a domain the owner lane allows, like a
+watcher; one that is not is left off and listed in
+.BR refused .
+A separate list from
+.BR WAS_TO ,
+which is the AppSec weekly's audience. Unset means no copy.
 .TP
 .I NAME
 Any variable referenced as

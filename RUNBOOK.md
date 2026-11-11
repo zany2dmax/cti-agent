@@ -1346,6 +1346,12 @@ application's open findings from the Qualys WAS API and mails it to the owner
 `app-owners.txt`. Many owners and watchers are outside the company and not in
 Jira, which is why this is email and not a ticket.
 
+The security team is copied on every one of these emails through
+`WAS_OWNER_CC` in `fleet.env`, a separate list from `WAS_TO` (the AppSec
+weekly's audience). Each address must be at an allowed domain, like a watcher.
+`run-appowners --dry-run` prints how many addresses it will copy and names any
+it will leave off. Unset means no copy.
+
 The report is one self-contained HTML file: no scripts, no external resources,
 every value escaped. It costs one finding search per application and one
 knowledge-base lookup per 1,000 kinds of finding. It shows the scan facts and severity tiles, the
