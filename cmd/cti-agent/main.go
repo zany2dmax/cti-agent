@@ -232,6 +232,11 @@ func main() {
 	// went out. An unreadable catalog holds as before, and says so.
 	onKEV, kerr := kev.LoadCatalog(os.Getenv("FLEET_HOME"))
 	if kerr != nil {
+		// #nosec G706 -- sanitised by safelog.Line(), as at the manifest warning
+		// above, where the reasoning is set out in full. The error wraps the
+		// catalog path under os.Getenv("FLEET_HOME"), so the taint is real and
+		// the control is the scrub the rule cannot see. Remove this annotation
+		// if the safelog.Line() call below is ever removed.
 		log.Printf("WARNING: KEV catalog unreadable (%s); Patch Tuesday CVEs on "+
 			"KEV are held with the rest today", safelog.Line(kerr.Error()))
 	}
