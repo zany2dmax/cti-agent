@@ -47,6 +47,24 @@ every owner email (see Added).
 
 ### Changed
 
+- **The orchestrator's instructions are regrouped and about 30% shorter.**
+  `fleet/CLAUDE.md` went from 503 to 392 lines (36 KB to 25 KB), read on
+  every beat. It now has the hard rules in one numbered list, one table of what
+  a beat can run beside one of the operator's commands, one section on
+  escalating, one beat loop, and one place per lane for everything about that
+  lane, which before was spread across up to four sections. Contradictions are
+  gone:
+  - "if a variable is unset, read `$FLEET_ENV`", against the rule never to
+    open it;
+  - "you are the only agent permitted to send mail outbound" and "sending the
+    scheduled digests" as something it may do, when the timers send them and
+    it can run no lane;
+  - recipient rules for mail it cannot send, and a Sev5 "said plainly in the
+    next digest", which it does not write.
+
+  The reviewed wording on the Bash guard, the per-beat limits, untrusted text
+  and escalations is kept as it was.
+
 - **Docs: `FLEET_OPERATOR_EMAIL` takes more than one address.** RUNBOOK, `fleet.env.example` and the fleet-kit README now say it is comma-separated (the code always split it), for two people acting as operators. The allowlist does not check it, so spell each address carefully.
 - **The AppSec reports' foot no longer says "Agent Fleet" twice.** The organisation
   name (`FLEET_ORG`, for example "CR Agent Fleet") already ends in it, so the owner
@@ -130,6 +148,21 @@ every owner email (see Added).
 
 ### Added
 
+- **The heartbeat checks the lanes' credentials before they are needed.**
+  - New `--check` on `cti-domains` (the inventory, and one GoDaddy account
+    listing) and on `cti-vmscan` (a Graph token, the network spreadsheet and
+    one Qualys Asset Group list: everything the coverage check needs). Both
+    write nothing and print counts only, never a domain, network or group name.
+  - The beat is granted those two and the existing `cti-mailer --check`,
+    `cti-jira --check` and `cti-appreport --check`, each as the exact command:
+    the guard refuses any other argument, so `cti-mailer` still cannot address
+    mail.
+  - It runs them once a day and after a login failure, so an expired token is
+    escalated before the lane's next run fails, not after.
+  - The lanes' `--dry-run` was considered and not granted: it prints
+    recipients and inbound subjects, spends the Qualys budget, and some lanes
+    write state their real runs read.
+
 - **The security team can be copied on every application owner email.** Set
   `WAS_OWNER_CC` in `fleet.env` (next to `WAS_TO`). Each address goes on Cc of
   every `run-appowners` email, after passing the same allowed-domain check as a
@@ -169,6 +202,16 @@ every owner email (see Added).
   logs a WARNING. The Patch Tuesday lane itself still files no tickets.
 
 ### Fixed
+
+- **Two orchestrator instructions the heartbeat could never carry out.**
+  - The `/checkin` skill checked the daily and weekly sends with
+    `fleet-db was-sent $(date ...)`, which the Bash guard refuses for its
+    dollar sign, so the check cost a turn and never ran. It now says to write
+    the date out.
+  - The guard did not know the `@appowners` handle, so a board line addressed
+    to the owner lane was refused.
+
+  A test now fails if either instruction file shows a command substitution.
 
 - **A held owner report names the real reason.** A scan whose notice said only
   "Finished" was held as "the Qualys scan list did not confirm the run" even

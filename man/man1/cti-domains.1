@@ -215,6 +215,18 @@ and a value may follow
 .B =
 or a space.
 .TP
+.B \-\-check
+Read-only: check that the inventory can be read and lists at least one
+domain, that
+.B GODADDY_PAT
+is set and lists the account (one call), and that the mail gateway's
+settings are consistent when
+.B DOMAINS_MAIL_GATEWAY=pod
+(they are not exercised: the gateway is a log stream with no cheap call). It
+probes no domain, writes nothing, and prints counts only, never a domain
+name, because the heartbeat runs it. Exits 0 when all of that is in order,
+1 otherwise.
+.TP
 .BI \-\-inventory " FILE"
 The domain inventory: one domain per line, followed by any of the markers
 .BR send ,
@@ -475,7 +487,9 @@ Nothing usable was produced: the inventory is missing, unreadable or empty;
 or
 .B DOMAINS_SMTP_PORT
 is invalid; the state file is corrupt (move it aside to start over); or a
-report file could not be written.
+report file could not be written. With
+.BR \-\-check :
+any of its checks failed.
 .SH EXAMPLES
 Preview this week's report without sending or moving the baseline:
 .PP

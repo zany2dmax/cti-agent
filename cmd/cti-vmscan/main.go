@@ -75,6 +75,9 @@ func run() int {
 			"one row per network not scanned or spreadsheet row to fix, with its sheet row and a blank column for the teams to say why")
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
+	check := flag.Bool("check", false,
+		"read-only: check the Graph credentials, the network spreadsheet and the Qualys Asset Group list "+
+			"the coverage check needs, print counts, and exit")
 	flag.Parse()
 
 	if *commitSeen != "" {
@@ -85,6 +88,9 @@ func run() int {
 	cfg, err := config.LoadGraphOnly()
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
+	}
+	if *check {
+		return doCheck(cfg, *scansFlag)
 	}
 	expected := expectedScans(*scansFlag)
 
@@ -149,6 +155,85 @@ func run() int {
 				safelog.Line(*seenOut), safelog.Line(err.Error()))
 		}
 	}
+	return exitOK
+}
+
+// Seams so --check can be tested without Graph or Qualys.
+var (
+	graphToken = func(ctx context.Context, g *graph.Client) error {
+		_, err := g.AccessToken(ctx)
+		return err
+	}
+	driveContent = func(ctx context.Context, g *graph.Client, drive, item string) ([]byte, error) {
+		return g.DriveItemContent(ctx, drive, item, 32<<20)
+	}
+	fetchGroups = netmap.FetchGroups
+)
+
+// doCheck answers "would the weekly get its inputs?" without reading the
+// mailbox: a Graph token, the network spreadsheet the coverage check reads
+// (located, readable, its sheet present), and one Qualys Asset Group list.
+// It writes nothing and prints counts only - no network, group or scan names -
+// because the heartbeat runs it, and what a beat reads is sent with its
+// context. The coverage check is what holds this lane's timer off, so a
+// coverage input that is missing is a failure here, not a note.
+func doCheck(cfg config.Config, scansFlag string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	failed := 0
+	logf("check  : expecting %d scheduled scan(s)", len(expectedScans(scansFlag)))
+
+	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
+	if err := graphToken(ctx, g); err != nil {
+		logf("FAIL   : Graph token: %s", safelog.Line(err.Error()))
+		failed++
+	} else {
+		logf("OK     : Graph token (mailbox roles: cti-mailer --check)")
+	}
+
+	drive, item := strings.TrimSpace(os.Getenv("SUBNETS_DRIVE_ID")), strings.TrimSpace(os.Getenv("SUBNETS_ITEM_ID"))
+	sheetName := strings.TrimSpace(os.Getenv("SUBNETS_SHEET"))
+	if sheetName == "" {
+		sheetName = "Sites"
+	}
+	switch {
+	case drive == "" || item == "":
+		logf("FAIL   : SUBNETS_DRIVE_ID and SUBNETS_ITEM_ID are not set, so the network spreadsheet is not located")
+		failed++
+	case failed > 0:
+		logf("skip   : network spreadsheet not read without a Graph token")
+	default:
+		data, err := driveContent(ctx, g, drive, item)
+		if err != nil {
+			logf("FAIL   : network spreadsheet cannot be read: %s", safelog.Line(err.Error()))
+			failed++
+			break
+		}
+		rows, err := xlsx.ReadSheetRows(data, sheetName)
+		if err != nil {
+			logf("FAIL   : network spreadsheet cannot be parsed: %s", safelog.Line(err.Error()))
+			failed++
+			break
+		}
+		logf("OK     : network spreadsheet, sheet %q, %d row(s), %d site(s)",
+			safelog.Line(sheetName), len(rows), len(netmap.ParseSiteRows(rows)))
+	}
+
+	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" || cfg.QualysPassword == "" {
+		logf("FAIL   : QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD are not all set")
+		failed++
+	} else if groups, err := fetchGroups(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword); err != nil {
+		logf("FAIL   : Qualys Asset Groups: %s", safelog.Line(err.Error()))
+		failed++
+	} else {
+		logf("OK     : Qualys credentials work, %d Asset Group(s)", len(groups))
+	}
+
+	if failed > 0 {
+		logf("check  : %d problem(s); the next run would report its coverage check as not run, or fail", failed)
+		return exitErr
+	}
+	logf("check  : OK")
 	return exitOK
 }
 

@@ -82,8 +82,8 @@ What you owe the schedule instead is **checking it happened**:
 
 | Check | How | If it failed |
 |---|---|---|
-| Daily digest sent | `fleet-db was-sent $(date +%F) daily` | Post to the board. Look for a `cti-alert` line first — the cause is probably already there |
-| Weekly sent (Mon) | `fleet-db was-sent $(date +%F) weekly` | Same |
+| Daily digest sent | `$FLEET_CODE/bin/fleet-db was-sent YYYY-MM-DD daily`, with today's date written out (the guard refuses a dollar sign, so a date substitution costs a turn) | Post to the board. Look for a `cti-alert` line first — the cause is probably already there |
+| Weekly sent (Mon) | `$FLEET_CODE/bin/fleet-db was-sent YYYY-MM-DD weekly` | Same |
 | AppSec report ran (Fri, after 07:30) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-appscan.service --since today --no-pager` | No `[run-appscan] done` line: post to the board. An `AUTH FAILED on N scan(s)` line has **already** alerted the operator - track it, do not re-escalate. `0 notification(s)` is a question, not a quiet week |
 | Domains check ran (Tue, after 08:00) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-domains.service --since today --no-pager` | No `[run-domains] done` line: post to the board. `[REGISTRAR NOT CHECKED]` in the subject: note it; the second Tuesday running, escalate - the GoDaddy token has likely expired. `WARNING: lock-down ticket not filed or updated`: post it to the board - the email went, only IT's Jira ticket is behind. Its findings already reached the security team; do not re-send |
 | Owner emails ran (daily, after 07:15) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-appowners.service --since today --no-pager` | No `[run-appowners] done` line: post to the board. `held back` lines: the operator was **already emailed** (a `HOLD`) and the scan is recorded as held, not retried - track it on the board, do not re-send. The same application held two days running means its owner or watcher data is still not fixed: one board line |
@@ -92,6 +92,7 @@ What you owe the schedule instead is **checking it happened**:
 | VM scan report (Mon, after 08:00) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-vmscan.service --since today --no-pager` | The timer is held off until the coverage check works, so no run is not a fault; a `Not run this week:` line names the part that could not run |
 | Patch Tuesday sent (from the Thursday after Patch Tuesday) | `fleet-db was-sent <YYYY-MM> patchtuesday` | Run by hand for now, so nothing fails loudly if it is forgotten. Not sent: remind the operator once, naming the month (CHEATSHEET.md section 7a) |
 | Timers still enabled | `$FLEET_CODE/bin/fleet-timers --all` | A disabled timer is silent forever. Tell the operator - except `cti-agent-patchtuesday.timer`, which is off on purpose for now, and `cti-agent-vmscan.timer`, which is held off until its coverage check works (if disabled, ask the operator once whether that is still intended) |
+| Credentials still work (once a day, and after a login failure in a journal) | `$FLEET_CODE/bin/cti-mailer --check`, `cti-jira --check`, `cti-appreport --check`, `cti-domains --check`, `cti-vmscan --check`: each exactly that, nothing after `--check` | Exit 1 means that lane's next run will fail or be degraded. One escalation naming the lane and the check's last line, then track it on the board until it passes |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
 **You cannot re-run the pipeline yourself** - no runner is on your grant,

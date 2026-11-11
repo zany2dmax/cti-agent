@@ -105,6 +105,7 @@ about: Probe the domain inventory and render the weekly report
 runs: local
 risk: --no-state-write safe
 risk: --stamp-ticket writes
+flag: --check | read-only: check the inventory can be read and the GoDaddy token works, print counts, and exit
 flag: --actions-out STRING | write the DNS changes each domain needs as JSON, for cti-jira --domains-actions
 flag: --concurrency INT | domains probed at once (default 8)
 flag: --csv-out STRING | write every probed host as CSV (sitecheck.go's columns first)
@@ -242,6 +243,7 @@ command: cti-vmscan
 about: Combine the week's Qualys VM scan-result notices into one report
 runs: local
 risk: --commit-seen writes
+flag: --check | read-only: check the Graph credentials, the network spreadsheet and the Qualys Asset Group list the coverage check needs, print counts, and exit
 flag: --since DURATION | how far back to look for scan-result notices
 flag: --scans STRING | comma-separated titles of the scheduled scans to combine (default VMSCAN_SCANS, else the two weeklies)
 flag: --out FILE | write the HTML here

@@ -122,6 +122,19 @@ report reference or by an identical title and launch time; a scan that did not
 finish keeps them in the inbox.
 .SH OPTIONS
 .TP
+.B \-\-check
+Read-only: request a Graph token, read the network spreadsheet
+.RB ( SUBNETS_DRIVE_ID ,
+.BR SUBNETS_ITEM_ID ,
+.BR SUBNETS_SHEET )
+and find its sheet, and list the Qualys Asset Groups once: everything the
+coverage check needs. It does not read the mailbox (the mailbox roles are
+.BR "cti\-mailer \-\-check" 's),
+writes nothing, and prints counts only, never a network, group or scan name,
+because the heartbeat runs it. A coverage input that is not configured is a
+failure, since that check is what holds this lane's timer off. Exits 0 when
+all of it works, 1 otherwise.
+.TP
 .BI \-\-since " DURATION"
 How far back to look for scan-result notices. Default 168h.
 .TP
@@ -233,7 +246,9 @@ error.
 .TP
 .B 1
 The mailbox could not be read, a file could not be written, or the processed
-log does not parse.
+log does not parse. With
+.BR \-\-check :
+any of its checks failed.
 .SH EXAMPLES
 Render this week's report without sending it:
 .PP

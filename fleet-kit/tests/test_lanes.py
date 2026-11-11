@@ -4321,6 +4321,62 @@ fi
         self.assertIn("unknown argument", r.stderr)
 
 
+class TestHeartbeatCredentialChecks(unittest.TestCase):
+    """The beat may run five credential checks, and nothing else of those
+    commands. They are why it is not granted the lanes' --dry-run, which prints
+    recipients and inbound subjects, spends the Qualys budget and writes state
+    the real runs read. cti-mailer is the recipient gate every send goes
+    through: one extra argument after --check (--to, --lane) would make the
+    grant a way to address mail."""
+
+    CHECKS = ("cti-mailer", "cti-jira", "cti-appreport", "cti-domains", "cti-vmscan")
+    BIN = "/opt/cti-agent/bin/"
+
+    def guard(self, cmd):
+        guard = KIT / "fleet" / "bin" / "checkin-bash-guard"
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
+        return subprocess.run([sys.executable, "-I", str(guard)], input=payload,
+                              capture_output=True, text=True, check=False, env=env)
+
+    def test_each_check_is_allowed_exactly(self):
+        for c in self.CHECKS:
+            with self.subTest(cmd=c):
+                r = self.guard(self.BIN + c + " --check")
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_nothing_rides_along_with_a_check(self):
+        for cmd in ("cti-mailer --check --to someone@example.com", "cti-mailer --lane was --for-real",
+                    "cti-mailer", "cti-jira --check --for-real", "cti-jira --test-ticket --for-real",
+                    "cti-appreport --app-id 1", "cti-domains --check --out /tmp/x",
+                    "cti-domains", "cti-vmscan --commit-seen x.json", "cti-vmscan --check --since 1h"):
+            with self.subTest(cmd=cmd):
+                r = self.guard(self.BIN + cmd)
+                self.assertEqual(r.returncode, 2, f"{cmd} was let through")
+
+    def test_the_grant_is_the_exact_command(self):
+        src = (KIT / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
+        for c in self.CHECKS:
+            with self.subTest(cmd=c):
+                self.assertIn(f"Bash($FLEET_CODE/bin/{c} --check)", src)
+                self.assertNotIn(f"Bash($FLEET_CODE/bin/{c}:*)", src)
+                self.assertNotIn(f"Bash($FLEET_CODE/bin/{c} --check:*)", src)
+
+    def test_the_owner_lane_handle_can_be_addressed(self):
+        r = self.guard(self.BIN + 'fleet-board say @appowners INFO "held scan tracked"')
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_no_instruction_uses_command_substitution(self):
+        # The guard refuses a dollar sign outside single quotes, so an
+        # instruction showing $(date +%F) costs the beat a refused call.
+        for name in ("CLAUDE.md", "skills/checkin/SKILL.md"):
+            text = (KIT / "fleet" / name).read_text(encoding="utf-8")
+            spans = re.findall(r"`([^`\n]+)`", text)
+            bad = [s for s in spans if "$(" in s]
+            with self.subTest(file=name):
+                self.assertEqual(bad, [], f"{name} shows a command the guard refuses")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

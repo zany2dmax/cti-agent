@@ -3,6 +3,7 @@
 //	cti-domains --out r.html --text-out r.txt --subject-out r.subject
 //	cti-domains --no-registrar               # DNS and web only
 //	cti-domains --no-state-write             # dry run: do not advance the diff
+//	cti-domains --check                      # inventory readable, GoDaddy token works
 //
 // For every domain in the inventory file: is it registered in the GoDaddy
 // account (and is the account holding domains the file does not list), is it
@@ -108,10 +109,15 @@ func run() int {
 		"stamp the cti-jira --ref-out FILE into the --out and --text-out reports "+
 			"already written, then exit; a missing or unreadable FILE says the "+
 			"status is unavailable")
+	check := flag.Bool("check", false,
+		"read-only: check the inventory can be read and the GoDaddy token works, print counts, and exit")
 	flag.Parse()
 
 	if *stampTicket != "" {
 		return doStampTicket(*stampTicket, *out, *textOut)
+	}
+	if *check {
+		return doCheck(*inventory)
 	}
 
 	f, err := os.Open(*inventory)
@@ -407,6 +413,72 @@ func dnsResolver(spec string) (*net.Resolver, string, error) {
 		},
 	}
 	return r, "DNS servers " + strings.Join(servers, ", "), nil
+}
+
+// doCheck answers "would Tuesday's run get past its inputs?" without probing a
+// single domain: the inventory parses and lists something, and the GoDaddy
+// token lists the account. It writes nothing and prints counts only - no
+// domain names - because the heartbeat runs it, and what a beat reads is sent
+// with its context. The mail gateway is reported as configured or not; it is
+// a log stream with no cheap call, so it is not exercised here.
+func doCheck(inventory string) int {
+	failed := 0
+	f, err := os.Open(inventory) // #nosec G304 -- the operator's inventory path
+	if err != nil {
+		logf("FAIL   : inventory %s cannot be read: %s", safelog.Line(inventory), safelog.Line(err.Error()))
+		failed++
+	} else {
+		entries, problems, perr := domains.ParseInventory(f)
+		_ = f.Close()
+		switch {
+		case perr != nil:
+			logf("FAIL   : inventory %s: %s", safelog.Line(inventory), safelog.Line(perr.Error()))
+			failed++
+		case len(entries) == 0:
+			logf("FAIL   : inventory %s lists no domains", safelog.Line(inventory))
+			failed++
+		default:
+			logf("OK     : inventory lists %d domain(s), %d line(s) with problems", len(entries), len(problems))
+		}
+	}
+
+	if tok := strings.TrimSpace(os.Getenv("GODADDY_PAT")); tok == "" {
+		logf("FAIL   : GODADDY_PAT is not set, so the registrar would not be checked")
+		failed++
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		reg := registrarFor(tok)
+		list, err := reg.Domains(ctx)
+		cancel()
+		if err != nil {
+			logf("FAIL   : %s: %s", safelog.Line(reg.Name()), safelog.Line(err.Error()))
+			failed++
+		} else {
+			logf("OK     : %s token works, %d domain(s) in the account", safelog.Line(reg.Name()), len(list))
+		}
+	}
+
+	switch g := strings.ToLower(strings.TrimSpace(os.Getenv("DOMAINS_MAIL_GATEWAY"))); g {
+	case "", "off":
+		logf("note   : mail gateway check is off (DOMAINS_MAIL_GATEWAY)")
+	case "pod":
+		if strings.TrimSpace(os.Getenv("POD_CLUSTER_ID")) == "" || strings.TrimSpace(os.Getenv("POD_API_TOKEN")) == "" {
+			logf("FAIL   : DOMAINS_MAIL_GATEWAY=pod but POD_CLUSTER_ID and POD_API_TOKEN are not both set")
+			failed++
+		} else {
+			logf("note   : mail gateway is pod; its credentials are set but not exercised by --check")
+		}
+	default:
+		logf("FAIL   : DOMAINS_MAIL_GATEWAY=%q is not pod or off", safelog.Line(g))
+		failed++
+	}
+
+	if failed > 0 {
+		logf("check  : %d problem(s); the next run would be degraded or fail", failed)
+		return exitErr
+	}
+	logf("check  : OK")
+	return exitOK
 }
 
 // doStampTicket fills the ticket slot in reports already written.

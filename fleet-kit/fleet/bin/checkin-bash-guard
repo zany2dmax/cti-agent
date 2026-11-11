@@ -123,7 +123,8 @@ BIN_DIRS = {os.path.dirname(os.path.abspath(__file__)), "/opt/cti-agent/bin"}
 
 HANDLES = frozenset((
     "@all", "@operator", "@you", "@ingest", "@enrich", "@scout", "@brief",
-    "@patchtuesday", "@mailbox", "@appscan", "@domains", "@vmscan", "@supplier"))
+    "@patchtuesday", "@mailbox", "@appscan", "@appowners", "@domains", "@vmscan",
+    "@supplier"))
 BOARD_KINDS = frozenset(("INFO", "Q", "A", "APPROVE", "P1", "ERROR"))
 MAX_BOARD_MESSAGE = 400
 MAX_MEMORY_CONTENT = 1500
@@ -342,6 +343,13 @@ def _pol_mailbox(a):
     return None if a == ["--dry-run"] else "only `--dry-run` is granted"
 
 
+def _pol_check(a):
+    # The credential checks: `--check` and nothing else, so no flag that sends,
+    # writes or files can ride along (cti-mailer with --to, cti-jira with
+    # --for-real).
+    return None if a == ["--check"] else "only `--check` is granted"
+
+
 def _pol_journal(a):
     i = 0
     units = 0
@@ -385,6 +393,11 @@ POLICY = {
     "cti-mailbox": _pol_mailbox,
     "fleet-journal": _pol_journal,
     "fleet-timers": _pol_timers,
+    "cti-mailer": _pol_check,
+    "cti-jira": _pol_check,
+    "cti-appreport": _pol_check,
+    "cti-domains": _pol_check,
+    "cti-vmscan": _pol_check,
 }
 
 

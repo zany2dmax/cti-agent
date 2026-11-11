@@ -548,6 +548,10 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 #   cti-mailer / mailer.py  - the orchestrator must not be able to address
 #                             mail. Escalation goes through cti-alert, which
 #                             IS granted below and has no recipient argument.
+#                             The one exception is the exact command
+#                             `cti-mailer --check` (no :*, and the guard takes
+#                             no other argument), which requests a token and
+#                             reads its roles: it cannot send.
 #   run-digest, run-patchtuesday, run-appscan, run-mailbox-cleanup
 #                           - every runner either sends mail or moves it.
 #                             Timers own those; a beat that needs one re-run
@@ -594,6 +598,17 @@ ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
 # invocation that starts with --dry-run can change state.
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday --dry-run:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox --dry-run)"
+# The credential checks: would the next run of each lane get past its logins?
+# Each is the exact command, with no :* after it, so no other flag rides along.
+# Each makes one or two read-only calls, writes nothing, and prints counts and
+# setting names - no recipients, no hostnames and no mail text, which is why
+# these and not the lanes' --dry-run (that prints addresses and inbound
+# subjects, spends the Qualys budget, and writes state the real runs read).
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailer --check)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-jira --check)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-appreport --check)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-domains --check)"
+ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-vmscan --check)"
 # Read-only, and the only way a beat can see that a timer was disabled - the
 # failure that raises no alarm at all, and the one ARCHITECTURE.md says the
 # orchestrator exists to catch. Through fleet-timers, not systemctl itself:
