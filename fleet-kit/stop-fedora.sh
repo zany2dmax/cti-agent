@@ -292,7 +292,7 @@ $(printf '\033[1mOff the schedule. Nothing was removed.\033[0m')
 
   Resume:        sudo ./stop-fedora.sh --resume
   Check:         sudo ./stop-fedora.sh --status
-  Remove units:  sudo ./install-fedora.sh --uninstall
+  Remove units:  sudo ./install-fedora.sh --uninstall --for-real
 
 $(if [ "$MODE" = decommission ]; then
   printf '  The timers are MASKED. "systemctl enable --now" will refuse until\n'

@@ -105,10 +105,10 @@ class UpdateFedora(unittest.TestCase):
                 self.assertNotIn("INSTALLER", r.stdout)
                 self.assertEqual(git(self.kit, "describe", "--tags", "--always").strip(), "v1.0")
 
-    def test_the_installer_is_run_with_no_arguments(self):
+    def test_the_installer_is_run_with_for_real_and_nothing_else(self):
         self.publish("two", tag="v1.1")
         r = self.run_update("--for-real")
-        self.assertIn("INSTALLER two args=\n", r.stdout)
+        self.assertIn("INSTALLER two args=--for-real\n", r.stdout)
 
     def test_help_says_how_and_changes_nothing(self):
         self.publish("two", tag="v1.1")
@@ -258,3 +258,51 @@ class UpdateDocsAndCompletion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallerSaysHow(unittest.TestCase):
+    """install-fedora.sh has no default: with no mode it prints usage, exits 2
+    and touches nothing. Runs without root, because the refusal comes first."""
+    SCRIPT = ROOT / "fleet-kit" / "install-fedora.sh"
+
+    def run_installer(self, *args):
+        return subprocess.run(["bash", str(self.SCRIPT), *args], check=False, capture_output=True,
+                              text=True, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
+
+    def test_no_mode_exits_2_with_usage_and_no_scare(self):
+        for args in ((), ("--uninstall",), ("--purge",)):
+            with self.subTest(args=args):
+                r = self.run_installer(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("say how to run it", r.stderr)
+                self.assertIn("--dry-run", r.stderr)
+                self.assertIn("--for-real", r.stderr)
+                self.assertNotIn("PARTIALLY", r.stderr)
+                self.assertNotIn("run with sudo", r.stdout + r.stderr)
+
+    def test_contradictory_modes_are_refused(self):
+        r = self.run_installer("--dry-run", "--for-real")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("contradict", r.stderr)
+
+    def test_help_needs_no_mode_and_names_for_real(self):
+        r = self.run_installer("--help")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--for-real", r.stdout)
+
+    def test_uninstall_dry_run_removes_nothing(self):
+        r = self.run_installer("--uninstall", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("nothing was removed", r.stdout)
+
+    def test_every_caller_in_the_tree_passes_a_mode(self):
+        """Any line that runs the installer (not just names it) says --for-real
+        or --dry-run, or is the updater's exec."""
+        run = re.compile(r"(sudo\s+|exec\s+)\S*install-fedora\.sh(?P<rest>[^\n`]*)")
+        for f in [ROOT / "RUNBOOK.md", ROOT / "fleet-kit" / "README.md", ROOT / "fleet-kit" / "update-fedora.sh",
+                  ROOT / "fleet-kit" / "stop-fedora.sh", ROOT / "fleet-kit" / "install-fedora.sh"]:
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                m = run.search(line)
+                if m and "--help" not in line:
+                    with self.subTest(file=f.name, line=n):
+                        self.assertRegex(m.group("rest"), r"--(for-real|dry-run)", line)

@@ -18,10 +18,15 @@
 #   entirely - stricter than the original and less likely to break.
 #
 # USAGE
-#   sudo ./install-fedora.sh                 install or upgrade
-#   sudo ./install-fedora.sh --dry-run       print what would happen
-#   sudo ./install-fedora.sh --uninstall     remove units, keep state and config
-#   sudo ./install-fedora.sh --purge         remove everything including state
+#   sudo ./install-fedora.sh --for-real              install or upgrade
+#   sudo ./install-fedora.sh --dry-run               print what would happen
+#   sudo ./install-fedora.sh --uninstall --for-real  remove units, keep state and config
+#   sudo ./install-fedora.sh --purge --for-real      remove everything including state
+#   ./install-fedora.sh --help                       this text; touches nothing
+#
+# Say how to run it: with neither --dry-run nor --for-real it prints usage and
+# exits 2 without touching anything. --uninstall and --purge with --dry-run
+# only say what they would remove.
 #
 # It does NOT enable any timer. Enabling is a separate, deliberate step; see the
 # staged rollout it prints at the end.
@@ -100,7 +105,7 @@ case "$SRC" in
     echo "" >&2
     echo "Clone the kit somewhere outside the installed layout and run it there:" >&2
     echo "  sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit" >&2
-    echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh" >&2
+    echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh --for-real" >&2
     echo "" >&2
     echo "Why: this installer runs 'git -C /opt/cti-agent/agent pull' partway" >&2
     echo "through, so from here it would install files from the new tree using" >&2
@@ -113,16 +118,25 @@ case "$SRC" in
     ;;
 esac
 
-MODE=install
+ACTION=install; DRY=""; REAL=""
 for arg in "$@"; do
   case "$arg" in
-    --dry-run)   MODE=dryrun ;;
-    --uninstall) MODE=uninstall ;;
-    --purge)     MODE=purge ;;
-    -h|--help)   sed -n '2,30p' "${BASH_SOURCE[0]}"; bail 0 ;;
+    --dry-run)   DRY=1 ;;
+    --for-real)  REAL=1 ;;
+    --uninstall) ACTION=uninstall ;;
+    --purge)     ACTION=purge ;;
+    -h|--help)   sed -n '2,32p' "${BASH_SOURCE[0]}"; bail 0 ;;
     *) echo "unknown option: $arg" >&2; bail 2 ;;
   esac
 done
+# No default in either direction. fleet_require_mode exits 2 itself, so mark
+# the exit as deliberate first: it is not a half-done install.
+# shellcheck source=fleet/share/fleet-mode.sh
+. "$SRC/fleet/share/fleet-mode.sh"
+EXPECTED_EXIT=1
+fleet_require_mode install-fedora.sh "$DRY" "$REAL" "" "" "./install-fedora.sh --help"
+EXPECTED_EXIT=0
+if [ -n "$DRY" ]; then MODE=dryrun; else MODE=$ACTION; fi
 
 bold() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -157,7 +171,15 @@ cfgval() {
 }
 
 # ─────────────────────────────────────────────────────────── uninstall ────────
-if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
+if [ "$ACTION" != install ] && [ "$MODE" = dryrun ]; then
+  bold "Dry run: $ACTION"
+  info "would stop and disable every $UNIT_DIR/cti-agent-*.timer, remove the units,"
+  info "/usr/local/sbin/cti-agent-update, the tab completion, the man pages and $CODE_DIR"
+  [ "$ACTION" = purge ] && info "and, after a typed confirmation, $CONF_DIR, $STATE_DIR and the $FLEET_USER account"
+  info "Dry run: nothing was removed."
+  bail 0
+fi
+if [ "$ACTION" != install ]; then
   [ "$(id -u)" = 0 ] || { bad "run with sudo"; bail 1; }
   bold "Stopping and disabling timers"
   # Every installed timer, not a hand-kept list: the list stopped at
@@ -185,7 +207,7 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
   bold "Removing code"
   rm -rf "$CODE_DIR"
   ok "$CODE_DIR"
-  if [ "$MODE" = purge ]; then
+  if [ "$ACTION" = purge ]; then
     bold "Purging config and state"
     warn "this deletes the client secret, the findings database and all reports"
     read -r -p "  Type 'purge' to confirm: " c
@@ -201,7 +223,7 @@ if [ "$MODE" = uninstall ] || [ "$MODE" = purge ]; then
     info "$CONF_DIR   (config and secrets)"
     info "$STATE_DIR  (findings db, reports, caches)"
     info "the $FLEET_USER account"
-    info "--purge removes these too"
+    info "--purge --for-real removes these too"
   fi
   bail 0
 fi

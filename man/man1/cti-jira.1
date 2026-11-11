@@ -4,6 +4,10 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5, CVSS 9.0+ o
 .SH SYNOPSIS
 .B cti-jira \-\-check
 .PP
+.B cti-jira \-\-list
+.RB [ \-\-all ]
+.RB [ \-\-json ]
+.PP
 .B cti-jira \-\-test\-ticket
 .RB [ \-\-for\-real ]
 .PP
@@ -197,7 +201,7 @@ two that contradict each other are refused the same way. This is the rule for
 every fleet command that changes something, whether a person, a systemd unit
 or the heartbeat runs it, so a unit that lost its flag fails loudly instead of
 quietly doing nothing.
-\fB\-\-check\fR only reads, so it needs none.
+\fB\-\-check\fR and \fB\-\-list\fR only read, so they need none.
 .SH OPTIONS
 At least one of
 .BR \-\-check ,
@@ -228,7 +232,7 @@ and a value may follow
 or a space.
 .TP
 .B \-\-dry\-run
-Show what would be written to Jira and write nothing. One of this or \fB\-\-for\-real\fR is required, except with \fB\-\-check\fR.
+Show what would be written to Jira and write nothing. One of this or \fB\-\-for\-real\fR is required, except with \fB\-\-check\fR or \fB\-\-list\fR.
 .TP
 .B \-\-check
 Read-only preflight: authenticate and print the account the API token
@@ -241,6 +245,38 @@ in the project; list the create screen's required fields, marking with
 any this command does not set (each would fail a create); and run the
 duplicate-detection search once.
 Default:\~off.
+.TP
+.B \-\-list
+Read-only: list the fleet's tickets in
+.B JIRA_PROJECT_KEY
+(those labelled
+.B cti\-agent
+or the test label
+.BR cti\-agent\-test ):
+key, status, age in days, assignee, kind and summary. The kind is read from
+the labels the fleet set: CVE
+.RB ( cti\-cve\-* ),
+AppSec
+.RB ( cti\-appscan ),
+lock-down
+.RB ( cti\-domains\-lockdown ),
+test, or other. Only open tickets unless
+.B \-\-all
+is given. It needs read credentials but neither a mode flag nor the write
+gate. Summaries and names come from Jira, so control characters are removed
+before they reach the terminal. At most 200 tickets are listed, and the output
+says so when that limit is reached.
+.TP
+.B \-\-all
+With
+.BR \-\-list :
+include closed tickets too.
+.TP
+.B \-\-json
+With
+.BR \-\-list :
+print a JSON array (key, status, done, age_days, assignee, kind, summary)
+instead of a table.
 .TP
 .B \-\-test\-ticket
 Build an obviously synthetic ticket for

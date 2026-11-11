@@ -32,8 +32,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/jira"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
-	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
-	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/providers"
 )
 
 const (
@@ -96,22 +95,30 @@ func run() int {
 		"with --appscan-tickets and --appscan-test: post the weekly comment for that application onto "+
 			"this TEST ticket (filed by --appscan-test) and, if the gateway refuses it, bisect it by line "+
 			"to name the refused text. Preview unless --for-real")
+	list := flag.Bool("list", false,
+		"read-only: list the fleet's open tickets (key, status, age, assignee, kind, summary); "+
+			"needs no mode and not the write gate")
+	listAll := flag.Bool("all", false, "with --list: include closed tickets too")
+	listJSON := flag.Bool("json", false, "with --list: machine-readable output")
 	flag.Parse()
 
+	if (*listAll || *listJSON) && !*list {
+		return die("--all and --json go with --list")
+	}
 	if *appscanCommentProbe != "" && (*appscanTest == "" || *appscanTickets == "") {
 		return die("--appscan-comment-probe needs --appscan-tickets and --appscan-test (which application's comment to post)")
 	}
 	if *appscanTest != "" && *appscanTickets == "" {
 		return die("--appscan-test needs --appscan-tickets (the cti-appscan --tickets-out file)")
 	}
-	if !*check && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
+	if !*check && !*list && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
 		*appscanTickets == "" && *appscanCloseTest == "" {
 		flag.Usage()
-		return die("nothing to do - pass --check, --test-ticket, --from-enriched, --follow-up, " +
+		return die("nothing to do - pass --check, --list, --test-ticket, --from-enriched, --follow-up, " +
 			"--domains-actions, --appscan-tickets or --appscan-close-test")
 	}
-	// --check only reads. Everything else writes tickets, so it is told how.
-	if !*check {
+	// --check and --list only read. Everything else writes tickets, so it is told how.
+	if !*check && !*list {
 		if _, msg := cli.Resolve("cti-jira", *dryRun, *forReal, false, false, cli.Words{
 			DryRun:  "show what would be written to Jira and write nothing",
 			ForReal: "write to Jira: create, comment, close"}); msg != "" {
@@ -158,6 +165,9 @@ func run() int {
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
+	if *list {
+		return doList(ctx, c, cfg, *listAll, *listJSON, os.Stdout, time.Now())
+	}
 	if *check {
 		if rc := doCheck(ctx, c, cfg); rc != exitOK {
 			return rc
@@ -713,14 +723,11 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 // called followUp() directly; the only way to catch that is to test through
 // the entry point the operator runs.
 var scannerFor = func(ctx context.Context, cfg config.Config) (hostFiller, error) {
-	q := qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
-		cfg.QualysKBCachePath, cfg.QualysKBMaxAge)
-	if _, err := q.LoadOrBuildKBCache(ctx, cfg.QualysKBCachePath); err != nil {
+	p, err := providers.Prepare(ctx, cfg)
+	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, cve string) (vulnlookup.Result, error) {
-		return q.LookupCVE(ctx, cve)
-	}, nil
+	return p.LookupCVE, nil
 }
 
 // fileOrUpdate creates a ticket, or updates the one that already exists.

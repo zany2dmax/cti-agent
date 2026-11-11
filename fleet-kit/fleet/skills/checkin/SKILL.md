@@ -120,6 +120,16 @@ they do nothing, then the detail. Spell out an abbreviation the first time and
 keep it under about 600 characters. The guard in CLAUDE.md lists the characters
 a Bash call may not contain.
 
+Every message that asks the operator something (an alert reason, a `HOLD` or
+`ESCALATION`, a board `ERROR`, a `fleet-board say @operator` line) opens with
+two labelled lines before any detail: `What I am asking:` one plain sentence,
+then `If you do nothing:` one plain sentence (say so when nothing breaks and it
+stays as it is). No unit names, QIDs or abbreviations in those two lines. Keep
+them to about 200 characters together: a board message is at most 400 and the
+reason is cut at 600, so cut the detail, never the two lines. The worked
+examples are in CLAUDE.md under "Escalating to the operator". Before you send,
+check that both lines are there.
+
 The guard also limits arguments and calls per beat: an alert reason is at most
 800 characters of plain ASCII, and a beat gets about 2 alerts and 20 calls. A
 refusal with "limit" in it is a safety limit, not an outage: stop, and let the

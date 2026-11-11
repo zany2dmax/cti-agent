@@ -37,6 +37,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+**Action required if you run the installer by hand:** `install-fedora.sh` now
+needs `--for-real` (or `--dry-run`); see Changed. `cti-agent-update` passes it for you.
+
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: the
 defaults apply; the limits can be tuned with `CHECKIN_MAX_*` in `fleet.env`.
 Preview one application with `sudo cti-agent cti-appreport --owner-report <id>
@@ -47,6 +50,10 @@ every owner email (see Added).
 
 ### Changed
 
+- **Action required: `install-fedora.sh` no longer installs by default.** `sudo ./install-fedora.sh` with no flag now prints usage and exits 2 without changing anything, like every other command that changes the system. To install or upgrade by hand add `--for-real` (or `--dry-run` to look first). `--uninstall` and `--purge` also need a mode (`--uninstall --for-real`); `--uninstall --dry-run` and `--purge --dry-run` now say what they would remove instead of removing it. **Upgrade:** nothing if you only use `sudo cti-agent-update --for-real`, which passes the flag. Anyone who runs the installer from their own notes or scripts must add `--for-real`.
+- **The orchestrator opens every question to the operator in plain English.** An alert reason, a `HOLD` or `ESCALATION`, a board `ERROR` or a `fleet-board say @operator` line now starts with "What I am asking:" and "If you do nothing:", ahead of the detail, with worked examples sized for the existing 400/600-character limits. A test fails if the rule is dropped. **Upgrade:** nothing to configure.
+- **`cti-jira` picks its CVE lookup the way the daily digest does.** `LOOKUP_PROVIDER` is now honoured by ticketing and the follow-up, through the shared `internal/vulnlookup/providers` package. With `none` it needs no Qualys credentials and every lookup is UNKNOWN; an unsupported value is an error. Qualys behaves as before. `cti-patchtuesday` still builds Qualys itself (INTERFACES.md says why). **Upgrade:** none.
+- **The mailbox cleanup deletes the "scan scheduled to start" notice of a finished run even when the results email says only `Finished` (WAS 10.21.2).** The pairing now runs after the scan list has confirmed which runs completed, so those notices no longer pile up in the inbox. The guards are unchanged: only authenticated messages, only a notice matching the run's title and start time, and a faulty or never-completed run keeps its notice (an auth-failed or unreachable run now does too). **Upgrade:** none.
 - **The orchestrator's instructions are regrouped and about 30% shorter.**
   `fleet/CLAUDE.md` went from 503 to 392 lines (36 KB to 25 KB), read on
   every beat. It now has the hard rules in one numbered list, one table of what
@@ -93,7 +100,9 @@ every owner email (see Added).
 
 ### Security
 
+- **Output encoding at rendering boundaries (PrimeSec Top-232).** A new test (`internal/renderguard`) parses every Go file and fails when a non-constant, unescaped value is formatted or concatenated into an HTML tag or Jira wiki markup, with each deliberate exception listed and reasoned. An audit of every email, report and Jira builder found no raw untrusted value; the Domains ticket's DNS record type is now wiki-escaped like its neighbours. **Upgrade:** none.
 - **Fixed issues found by PrimeSec AI:**
+  - Top-232 (output encoding at every rendering boundary) - see the entry below
   - Design review 39260, Scenario-222 (Orchestrator Context Window Content Sanitization) - see the entry below
   - Design review 39260, Scenario-223 (Orchestrator Tool Argument Scope Restriction) - see the entry below
   - Design review 39260, Scenario-224 (Heartbeat Session Tool Invocation Anomaly Detection) - see the entry below
@@ -148,6 +157,7 @@ every owner email (see Added).
 
 ### Added
 
+- **`cti-jira --list [--all] [--json]` lists the fleet's tickets.** Key, status, age, assignee, kind (CVE, AppSec, lock-down, test) and summary; `--all` includes closed ones. It only reads, so it needs no `--dry-run` or `--for-real` and not `JIRA_ALLOW_CREATE`. It finds the test ticket's key for `--appscan-close-test`. **Upgrade:** none.
 - **The heartbeat checks the lanes' credentials before they are needed.**
   - New `--check` on `cti-domains` (the inventory, and one GoDaddy account
     listing) and on `cti-vmscan` (a Graph token, the network spreadsheet and

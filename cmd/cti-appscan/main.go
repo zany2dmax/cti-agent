@@ -163,6 +163,7 @@ func run() int {
 	if !*noDetail {
 		if api := newScanner(cfg); api != nil {
 			scans = reconcile(ctx, api, scans, windowStart)
+			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
 			if deliverOnly {
 				return writeDeliveries(*deliveriesOut, *deliveredLog, scans)
@@ -173,9 +174,11 @@ func run() int {
 			}
 			attachRemedies(ctx, api, scans)
 		} else {
+			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
 		}
 	} else {
+		seen = append(seen, scheduledClaims(msgs, scans)...)
 		scans = newestPerApp(scans)
 	}
 	if *deliveriesOut != "" {
@@ -446,7 +449,6 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 	var scans []appscan.ScanResult
 	var seenMsgs []mailbox.Processed
 	var problems []string
-	var done []appscan.ScanResult // claimed runs that completed; their notices go too
 	seen := map[string]bool{}
 
 	for _, m := range msgs {
@@ -491,9 +493,6 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
 				})
-				if s.Complete {
-					done = append(done, s)
-				}
 			}
 			for _, pr := range probs {
 				problems = append(problems,
@@ -517,11 +516,31 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 		}
 	}
 
-	// The "scheduled to start" notices of the runs just claimed, for the
-	// cleanup to delete. Only for a run that completed - a faulty run is
-	// flagged in the report and its notices stay with it for a person - and
-	// only when the notice matches the run (appscan.ScheduledFor), never on
-	// its subject alone.
+	// NOT deduplicated per application here. That happens after
+	// reconciliation, when each result can be keyed on the scanner's own
+	// application id rather than a name derived from the scan title.
+	return scans, seenMsgs, problems
+}
+
+// scheduledClaims returns the "scheduled to start" notices of the runs in
+// scans, for the cleanup to delete. Call it AFTER reconciliation: a notice
+// format that says only "Finished" is not known complete until the scanner's
+// scan list confirms it, so pairing before reconcile left those notices in
+// the inbox. Only for a run that completed - a faulty run is flagged in the
+// report and its notices stay with it for a person, as does a run that never
+// completed - only vouched messages, and only when the notice matches the run
+// (appscan.ScheduledFor), never on its subject alone.
+func scheduledClaims(msgs []graph.Message, scans []appscan.ScanResult) []mailbox.Processed {
+	var done []appscan.ScanResult
+	for _, s := range scans {
+		if s.Complete && !s.Fault() {
+			done = append(done, s)
+		}
+	}
+	var out []mailbox.Processed
+	if len(done) == 0 {
+		return out
+	}
 	for _, m := range msgs {
 		if m.SelfSent {
 			continue
@@ -544,7 +563,7 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			title, launch := r.ParseScheduled(body)
 			for _, s := range done {
 				if appscan.ScheduledFor(title, launch, s) {
-					seenMsgs = append(seenMsgs, mailbox.Processed{
+					out = append(out, mailbox.Processed{
 						ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 						AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan, Delete: true,
 					})
@@ -554,11 +573,7 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 			break
 		}
 	}
-
-	// NOT deduplicated per application here. That happens after
-	// reconciliation, when each result can be keyed on the scanner's own
-	// application id rather than a name derived from the scan title.
-	return scans, seenMsgs, problems
+	return out
 }
 
 // lookalike explains a message that has a provider's notice subject but not

@@ -6,6 +6,9 @@ and expect each to be designed first. Interface work follows the rule in
 is real, not before. Finished work moves out of this file into
 [CHANGELOG.md](CHANGELOG.md).
 
+- **Scanner report staging (PrimeSec Top-228, for 1.7).** Stage scanner reports in
+  `PrivateTmp`, promote them after redaction, clean up orphans on start, extend
+  the scrub list; test with a killed run. Needs an Opus review (credential scrubbing).
 - More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
 - **Compromise assessment cross-check lane (research).** A consulting firm
   sends a draft compromise assessment before a recurring review meeting. The
@@ -24,9 +27,9 @@ is real, not before. Finished work moves out of this file into
 - **Interface work** (the full reasoning, with the current gaps, is in
   [INTERFACES.md](INTERFACES.md); build each when a second implementation is
   real, not before):
-  - Finish `vulnlookup.LookupProvider`: `cti-jira` (`scannerFor`) and
-    `cti-patchtuesday` build the Qualys client directly and ignore
-    `LOOKUP_PROVIDER`. Small for `cti-jira` (share `buildLookupProvider`)
+  - Finish `vulnlookup.LookupProvider`: `cti-patchtuesday` builds the Qualys
+    client directly and ignores `LOOKUP_PROVIDER` (it needs the KB's CVE-to-QID
+    map and host counts, which the interface cannot express yet; `cti-jira` is done)
   - `LOOKUP_PROVIDER`-style setting for the registrar (`registrarFor` is fixed
     to GoDaddy)
   - Mail transport interfaces (read, send, move) so a fleet on Google
@@ -193,10 +196,6 @@ is real, not before. Finished work moves out of this file into
   organisation name, address or supplier in tracked files. Like the other
   lanes, an unset address means the lane does nothing, and its output goes
   only to the security team
-- `cti-jira --list`: a read-only list of the fleet's open tickets (key, status,
-  age, assignee, kind - CVE, AppSec, lock-down, test - and summary), with `--all`
-  to include closed ones and `--json`. No write gate needed; it would also give
-  `--appscan-close-test` a way to find the test ticket's key
 - Qualys severity bands beside the QDS number, once the thresholds are verified
   against Qualys' own documentation rather than guessed
 - A container image for deployment
@@ -280,11 +279,6 @@ is real, not before. Finished work moves out of this file into
      of `op://` references rendered with `op inject` on the operator's Mac at
      setup or rotation and fed to `systemd-creds encrypt` on the box. No
      1Password service-account token on the server
-- Orchestrator asks in plain English: when the orchestrator escalates or asks
-  the operator something (a board ERROR, a check-in question, an alert), it
-  opens with two or three lines saying in plain English what it is asking and
-  what happens if you do nothing, ahead of the detail. Noted only, not
-  designed
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
 - **Heartbeat escalation to a stronger model** (designed 2026-11-08, not
@@ -342,13 +336,6 @@ is real, not before. Finished work moves out of this file into
     beat weighting in `cti-budget`, which counts beats today, not cost;
     tests for the gate's refusals; and the orchestrator CLAUDE.md telling a
     beat when to ask.
-- AppSec: delete the "scan scheduled" notice for a run whose result notice is
-  in the WAS 10.21.2 format (bare `Scan Status : Finished`). `cti-appscan`
-  pairs scheduled notices with finished runs (`done`, cmd/cti-appscan/main.go)
-  from the parser's `Complete`, before `reconcile()` has the scan list to
-  confirm a bare Finished, so those notices are kept, not deleted - the safe
-  direction, but they pile up in the inbox. Fix: do the pairing after
-  reconciliation, keyed on the reference. Found in review, 2026-11-10
 - **VM lane: Jira tickets for out-of-SLA vulnerabilities** (noted 2026-11-10,
   not designed). Pull every detection past its remediation SLA for its
   severity, with the affected hosts, and file Jira tickets for them. Not

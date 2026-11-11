@@ -67,7 +67,7 @@ main() {
     case "$a" in
       --dry-run)  dry=1 ;;
       --for-real) real=1 ;;
-      --uninstall|--purge) echo "update-fedora: $a is the installer's, run install-fedora.sh for it" >&2; exit 2 ;;
+      --uninstall|--purge) echo "update-fedora: $a is the installer's, run install-fedora.sh <mode> for it" >&2; exit 2 ;;
       -h|--help) echo "usage: sudo cti-agent-update --dry-run|--for-real   (man cti-agent-update)"; exit 0 ;;
       *) echo "update-fedora: unknown argument: $a - nothing was fetched or installed" >&2
          echo "usage: sudo cti-agent-update --dry-run|--for-real" >&2; exit 2 ;;
@@ -155,7 +155,7 @@ main() {
   # exec: the installer replaces this process. This file may just have changed on
   # disk, and a shell must not read another line of a script that was rewritten
   # under it.
-  exec "$here/install-fedora.sh"
+  exec "$here/install-fedora.sh" --for-real
 }
 
 # One line, so bash has read all of it before main can change this file.

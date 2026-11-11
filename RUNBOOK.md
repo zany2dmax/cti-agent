@@ -360,8 +360,11 @@ the paths it just created. It refuses to install from inside the tree it
 deploys into.
 
 ```bash
-sudo ./fleet-kit/install-fedora.sh
+sudo ./fleet-kit/install-fedora.sh --dry-run    # look first
+sudo ./fleet-kit/install-fedora.sh --for-real
 ```
+
+With neither flag it prints usage and exits 2 without touching anything.
 
 Read its verification output rather than its exit code. It reports which timers
 are enabled, which is how you find out that only one of six is running — a
@@ -1052,7 +1055,7 @@ sudo ./fleet-kit/stop-fedora.sh --resume        # put it back
 
 Nothing is removed: config, state, the seen-CVE database and the Jira ticket
 map all survive, so a resume is a resume rather than a re-onboarding. Use
-`install-fedora.sh --uninstall` when you actually want the units gone.
+`install-fedora.sh --uninstall --for-real` when you actually want the units gone.
 
 ### Two hosts against one mailbox
 
@@ -1869,6 +1872,7 @@ run's own):
 
 ```bash
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --for-real   # files a [TEST] ticket, say CR-NNN
+sudo cti-agent cti-jira --list --all                                          # finds the test ticket's key (kind "test")
 sudo cti-agent cti-jira --appscan-close-test CR-NNN --dry-run                 # preview
 sudo cti-agent cti-jira --appscan-close-test CR-NNN --for-real                # closes it
 ```

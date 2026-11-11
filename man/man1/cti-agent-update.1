@@ -65,8 +65,11 @@ not an exact release tag (for example
 .BR 1.5.1\-2\-gabc1234 ,
 which usually means a tag was not pushed). It then
 .BR exec s
-.B install\-fedora.sh
-from the updated kit. That keeps
+.B install\-fedora.sh \-\-for\-real
+from the updated kit (the installer has no default either: run by hand it needs
+.B \-\-dry\-run
+or
+.BR \-\-for\-real ). That keeps
 .IR fleet.env ,
 the other files in
 .I /etc/cti\-agent

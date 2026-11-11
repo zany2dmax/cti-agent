@@ -20,9 +20,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/report"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
-	"github.com/zany2dmax/cti-agent/internal/vulnlookup/crowdstrike"
-	"github.com/zany2dmax/cti-agent/internal/vulnlookup/noop"
-	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
+	"github.com/zany2dmax/cti-agent/internal/vulnlookup/providers"
 )
 
 func main() {
@@ -361,16 +359,7 @@ func main() {
 }
 
 func buildLookupProvider(cfg config.Config) (vulnlookup.LookupProvider, error) {
-	switch cfg.LookupProvider {
-	case "qualys":
-		return qualys.New(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, cfg.QualysKBCachePath, cfg.QualysKBMaxAge), nil
-	case "crowdstrike":
-		return crowdstrike.New(), nil
-	case "none", "noop", "":
-		return noop.New(), nil
-	default:
-		return nil, fmt.Errorf("unsupported LOOKUP_PROVIDER %q", cfg.LookupProvider)
-	}
+	return providers.Build(cfg)
 }
 
 // splitList splits a comma-separated setting, dropping blanks.

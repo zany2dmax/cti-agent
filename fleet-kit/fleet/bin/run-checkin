@@ -104,7 +104,7 @@ code_owned_by_root() {
       echo "run-checkin: REFUSING to start: $p is writable by the service" >&2
       echo "  account or not root-owned (owner uid $owner, mode $mode)." >&2
       echo "  The fleet's code must be root-owned and read-only to the service;" >&2
-      echo "  reinstall with install-fedora.sh, which puts it in /opt/cti-agent." >&2
+      echo "  reinstall with install-fedora.sh --for-real, which puts it in /opt/cti-agent." >&2
       return 1
     fi
   done
@@ -153,7 +153,7 @@ if [ "$FLEET_OS" != "macos" ]; then
            "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard"; do
     if [ ! -f "$p" ]; then
       echo "run-checkin: REFUSING to start: $p is missing." >&2
-      echo "  Re-run install-fedora.sh; it installs the orchestrator's" >&2
+      echo "  Re-run install-fedora.sh --for-real; it installs the orchestrator's" >&2
       echo "  instructions root-owned in $AGENT_DIR." >&2
       exit 1
     fi

@@ -288,7 +288,7 @@ func domainsBody(af domains.ActionsFile, now time.Time) string {
 }
 
 func wikiAction(x domains.Action) string {
-	rec := fmt.Sprintf("%s {{%s}}", x.Type, wikiEscape(x.Host))
+	rec := fmt.Sprintf("%s {{%s}}", wikiEscape(x.Type), wikiEscape(x.Host))
 	switch {
 	case x.Delete:
 		return fmt.Sprintf("%s: *delete* - %s", rec, wikiEscape(x.Why))

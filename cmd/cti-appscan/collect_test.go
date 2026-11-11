@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/mailbox"
 )
 
 const noticeSubject = "Qualys: Web Application Vulnerability Scan Results - Example Shop Run #40"
@@ -61,7 +62,8 @@ func TestTheScheduledNoticeOfAReportedRunIsClaimedForDeletion(t *testing.T) {
 		{ID: "fake", From: "team@example.com", Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
 	}
-	_, seen, _ := collect(msgs)
+	scans, seen, _ := collect(msgs)
+	seen = append(seen, scheduledClaims(msgs, scans)...)
 	got := map[string]bool{}
 	for _, s := range seen {
 		got[s.ID] = s.Delete
@@ -85,7 +87,8 @@ func TestAFaultyRunKeepsItsScheduledNotice(t *testing.T) {
 		{ID: "sched", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
 			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
 	}
-	_, seen, _ := collect(msgs)
+	scans, seen, _ := collect(msgs)
+	seen = append(seen, scheduledClaims(msgs, scans)...)
 	claimedResults := false
 	for _, s := range seen {
 		claimedResults = claimedResults || s.ID == "res"
@@ -120,5 +123,47 @@ func TestAnUnauthenticatedNoticeIsReportedNotRead(t *testing.T) {
 	t.Setenv(graph.SenderAuthEnv, "off")
 	if scans, _, _ := collect([]graph.Message{forged}); len(scans) != 1 {
 		t.Errorf("%s=off did not restore reading it: %d scans", graph.SenderAuthEnv, len(scans))
+	}
+}
+
+// WAS 10.21.2 says a bare "Finished": the parser cannot call the run complete,
+// only reconcile (the scan list) can. The scheduled notice is paired after it.
+func bareFinishedMsgs() []graph.Message {
+	return []graph.Message{
+		{ID: "res", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: noticeSubject, BodyHTML: wasNotice("Finished")},
+		{ID: "sched", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: scheduledSubject,
+			BodyHTML: scheduledNotice("Example Shop", "11/08/2026 at 01:27:00 (GMT +0000)")},
+	}
+}
+
+func scheduledDeleted(seen []mailbox.Processed) bool {
+	for _, s := range seen {
+		if s.ID == "sched" && s.Delete {
+			return true
+		}
+	}
+	return false
+}
+
+func TestABareFinishedRunConfirmedByReconcileGetsItsScheduledNoticeDeleted(t *testing.T) {
+	msgs := bareFinishedMsgs()
+	scans, seen, _ := collect(msgs)
+	if len(scans) != 1 || scans[0].Complete {
+		t.Fatalf("setup: a bare Finished must parse as not yet complete, got %+v", scans)
+	}
+	if scheduledDeleted(seen) || len(scheduledClaims(msgs, scans)) != 0 {
+		t.Fatal("an unconfirmed run's scheduled notice was claimed")
+	}
+	scans[0].Complete = true // what reconcile does when the scan list confirms it
+	if !scheduledDeleted(scheduledClaims(msgs, scans)) {
+		t.Error("a reconcile-confirmed run's scheduled notice was not claimed for deletion")
+	}
+}
+
+func TestABareFinishedRunReconcileDoesNotConfirmKeepsItsScheduledNotice(t *testing.T) {
+	msgs := bareFinishedMsgs()
+	scans, _, _ := collect(msgs)
+	if got := scheduledClaims(msgs, scans); len(got) != 0 {
+		t.Errorf("claimed %d scheduled notices for a run never confirmed", len(got))
 	}
 }

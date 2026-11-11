@@ -4649,6 +4649,16 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertEqual(bad, [], f"{name} shows a command the guard refuses")
 
+    def test_operator_messages_open_with_the_plain_english_asks(self):
+        # The operator reads these on a phone: what is asked, and what
+        # happens if nothing is done, come before any detail.
+        for name in ("CLAUDE.md", "skills/checkin/SKILL.md"):
+            text = (KIT / "fleet" / name).read_text(encoding="utf-8")
+            with self.subTest(file=name):
+                self.assertIn("What I am asking:", text)
+                self.assertIn("If you do nothing:", text)
+                self.assertIn("fleet-board say @operator", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

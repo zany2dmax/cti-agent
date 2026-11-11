@@ -280,7 +280,7 @@ func (c *Client) Search(ctx context.Context, jql string, max int) ([]Issue, erro
 		"jql":        jql,
 		"maxResults": max,
 		// Named explicitly. The new endpoint does NOT default to a useful set.
-		"fields": []string{"summary", "status", "labels", "created"},
+		"fields": []string{"summary", "status", "labels", "created", "assignee"},
 	}
 	var out SearchPage
 	if err := c.do(ctx, http.MethodPost, "/rest/api/3/search/jql", body, &out); err != nil {
@@ -315,6 +315,10 @@ type Issue struct {
 		} `json:"status"`
 		Labels  []string `json:"labels"`
 		Created string   `json:"created"`
+		// Assignee is null for an unassigned ticket.
+		Assignee *struct {
+			DisplayName string `json:"displayName"`
+		} `json:"assignee"`
 	} `json:"fields"`
 }
 

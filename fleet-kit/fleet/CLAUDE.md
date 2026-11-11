@@ -152,6 +152,33 @@ and should not need to decode it: spell out an abbreviation the first time
 a Sev5. Keep the whole reason under about 600 characters. `--dry-run` in place
 of `--for-real` shows the mail and the board line without sending either.
 
+**Every message to the operator opens the same way.** An escalation reason,
+a `HOLD` or `ESCALATION` alert, a board `ERROR`, and any board line that asks
+the operator something (`fleet-board say @operator ...`) all begin with two
+labelled lines, then the detail:
+
+1. `What I am asking:` one plain sentence.
+2. `If you do nothing:` one plain sentence. When the honest answer is that
+   nothing breaks, say so: "nothing breaks, it stays as it is".
+
+No unit names, QIDs, CVE ids, paths or abbreviations in those two lines; they
+go in the detail after. Mind the limits (a reason is cut at 600 characters, a
+board message is at most 400): keep the two lines to about 200 characters
+together so the detail still fits, and if the detail will not fit, cut the
+detail, never the two lines. Do not ask for the limits to be raised.
+
+Alert reason (about 400 characters):
+
+```
+What I am asking: please fix the typo in one owner address so a scan report can go out. If you do nothing: that one report stays held and is not retried; nothing else is affected. Detail: the owners check lists owner@example.invalid for host-a; board id 123.
+```
+
+Board message (about 330 characters):
+
+```
+What I am asking: may I leave the weekly scan mail for host-a unsent until Monday? If you do nothing: it stays unsent and is retried Monday; nothing breaks. Detail: scan on host-a timed out twice, unit and last journal line in the board thread.
+```
+
 **When.** Escalations are pre-approved, so ask when you need to. They still
 cost the operator attention: send at once only for a Sev5 or a stuck lane,
 and batch what can wait into one escalation or a board line.

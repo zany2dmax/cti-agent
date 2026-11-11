@@ -126,7 +126,8 @@ command: cti-jira
 about: File and update the fleet's Jira tickets
 runs: effect
 modes: --dry-run --for-real
-exempt: --check
+exempt: --check --list
+flag: --all | with --list: include closed tickets too
 flag: --approve | also file the findings that would otherwise wait for a human: Sev5 findings that are not on CISA KEV
 flag: --appscan-close-test STRING | preview, or with --for-real close, ONE ticket filed by --appscan-test (label cti-agent-test): the single labelled real test of how the weekly run closes the ticket of a retired application. Needs JIRA_ALLOW_CLOSE; refuses any other ticket
 flag: --appscan-comment-probe STRING | with --appscan-tickets and --appscan-test: post the weekly comment for that application onto this TEST ticket (filed by --appscan-test) and, if the gateway refuses it, bisect it by line to name the refused text. Preview unless --for-real
@@ -135,6 +136,8 @@ flag: --appscan-test STRING | with --appscan-tickets: preview, or with --for-rea
 flag: --appscan-tickets STRING | file or update ONE ticket per application from this cti-appscan --tickets-out JSON, assigned to the owner in app-owners.txt
 flag: --check | read-only: verify credentials, project, issue type and required fields
 flag: --domains-actions STRING | file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down ticket, or comment on the one already open when the list has changed
+flag: --json | with --list: machine-readable output
+flag: --list | read-only: list the fleet's tickets (key, status, age, assignee, kind, summary): open ones, or every one with --all. Needs no mode and not the write gate
 flag: --follow-up | with --from-enriched: also re-check every open fleet ticket against the scanner, whether or not its CVE is in today's mail, and comment on spread, on reaching zero, or once on closed-but-still-detected
 flag: --for-real | write to Jira: create, comment, close
 flag: --from-enriched STRING | file tickets for the present KEV, Sev5 and CVSS 9.0+ findings in this enriched JSON
