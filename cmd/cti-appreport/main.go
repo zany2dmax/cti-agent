@@ -580,7 +580,7 @@ func doDeliveries(ctx context.Context, src appscan.OwnerReportSource, path, dir 
 	}
 	generated := time.Now()
 
-	var send, held, heldText strings.Builder
+	var send, held, heldText, caveatText strings.Builder
 	for _, d := range df.Deliveries {
 		name := safelog.Line(d.App)
 		if d.Hold != "" {
@@ -635,9 +635,15 @@ func doDeliveries(ctx context.Context, src appscan.OwnerReportSource, path, dir 
 		}
 		// key, ref, web app id, the application's directory, the attachment
 		fmt.Fprintf(&send, "%s\t%s\t%s\t%s\t%s\n", d.Key, tsvField(d.ScanRef), tsvField(d.AppID), sub, att)
+		if c := strings.TrimSpace(d.Caveat); c != "" {
+			// Not held: the email carries the caveat, and the operator is told.
+			fmt.Fprintf(&caveatText, "%s: %s\n", name, safelog.Line(c))
+			logf("caveat : %s: the email says the scan may be incomplete - %s", name, safelog.Line(c))
+		}
 	}
 	for _, w := range []struct{ name, body string }{
 		{"send.tsv", send.String()}, {"held.tsv", held.String()}, {"held.txt", heldText.String()},
+		{"caveat.txt", caveatText.String()},
 	} {
 		if err := appscan.WriteOwnerFile(dir, w.name, []byte(w.body)); err != nil {
 			return die("writing %s: %s", w.name, safelog.Line(err.Error()))

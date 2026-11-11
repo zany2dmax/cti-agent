@@ -126,6 +126,17 @@ func Reconcile(results []appscan.ScanResult, scans []Scan, since time.Time, port
 // applyScan takes the API's identity, any authentication failure and any
 // incomplete run onto a notified result.
 func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
+	if s.ServiceErrors() && (r.Complete || BareFinished(r.Status) || serviceErrorsText(r.Status)) {
+		// Finished, with errors on the way (decided 2026-11-10). Sent, not
+		// held: the findings it did make are real and the owner should have
+		// them, but every place that shows the scan says it may be partial.
+		// Only from the API, and only for a notice that itself says the scan
+		// finished - never an upgrade of a notice reporting something worse.
+		r.Complete = true
+		r.Status = "Finished with service errors (per the Qualys WAS scan list)"
+		r.Caveat = ServiceErrorsCaveat
+		return identity(r, s)
+	}
 	if r.Complete && !s.InFlight() && !s.Complete() {
 		// Only ever worse, like the login status below. The notice's Scan
 		// Status is text anyone who can mail the mailbox can write; a forged
@@ -148,6 +159,29 @@ func applyScan(r appscan.ScanResult, s Scan) appscan.ScanResult {
 		r.Complete = true
 		r.Status = "Finished (confirmed by the Qualys WAS scan list)"
 	}
+	if !r.Complete && BareFinished(r.Status) {
+		// The notice says Finished and the list does not confirm it: say what
+		// the list does say, so the hold names the real reason.
+		r.Status = "Finished per the notice, but the Qualys WAS scan list says " + listStatus(s)
+	}
+	return identity(r, s)
+}
+
+// listStatus is a scan list run's status and results status, for messages.
+func listStatus(s Scan) string {
+	st := strings.TrimSpace(s.Status)
+	if st == "" {
+		st = "no status"
+	}
+	if rs := strings.TrimSpace(s.ResultsStatus); rs != "" && !strings.EqualFold(rs, "SUCCESSFUL") {
+		st += " / " + rs
+	}
+	return st
+}
+
+// identity takes the API's application identity and any login failure onto
+// a notified result. The API can make the login look worse, never better.
+func identity(r appscan.ScanResult, s Scan) appscan.ScanResult {
 	r.AppID = s.WebAppID
 	r.ScanType = s.Type
 	r.AppURL = s.WebAppURL
@@ -184,7 +218,8 @@ func fromScan(s Scan) appscan.ScanResult {
 		AppURL:         s.WebAppURL,
 		Started:        s.Launched,
 		Status:         s.Status,
-		Complete:       s.Complete(),
+		Complete:       s.Complete() || s.ServiceErrors(),
+		Caveat:         caveatOf(s),
 		LinksCrawled:   s.LinksCrawled,
 		Auth:           apiAuth(s),
 		NoNotification: true,
@@ -206,4 +241,12 @@ func apiAuth(s Scan) appscan.Auth {
 		return appscan.Auth{Record: s.AuthRecord, Status: "Failed"}
 	}
 	return appscan.Auth{Record: s.AuthRecord, Status: "No Authentication specified"}
+}
+
+// caveatOf is the caveat a scan list run carries on its own.
+func caveatOf(s Scan) string {
+	if s.ServiceErrors() {
+		return ServiceErrorsCaveat
+	}
+	return ""
 }

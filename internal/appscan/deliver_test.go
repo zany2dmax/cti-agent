@@ -47,9 +47,9 @@ func TestBuildDeliveriesHoldsWhatWouldMislead(t *testing.T) {
 	}
 	for app, want := range map[string]string{
 		"Good App": "", "Name Only App": "", "Unowned": "no owner",
-		"Cut Short": "did not finish", "Login Broke": "login failed", "Dark": "no host answered",
+		"Cut Short": "not counted as complete: Time Limit", "Login Broke": "login failed", "Dark": "no host answered",
 		"Email Only":  "no web app id",
-		"Unconfirmed": "scan list did not confirm",
+		"Unconfirmed": "no matching run was found in the Qualys scan list",
 	} {
 		d, ok := got[app]
 		if !ok {

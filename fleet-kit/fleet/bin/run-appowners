@@ -163,12 +163,17 @@ fi
 
 # ── the operator's half ──────────────────────────────────────────────────────
 # Held scans and refused watchers are the operator's to fix, not the owners'.
+# So is a scan sent with a caveat (Service Errors Detected): the owner was told
+# it may be incomplete, and somebody should look at why the scanner hit errors.
 # Never fatal, and HOLD rather than FAILED: the lane did its job.
-if [ -s "$WORK/held.txt" ] || [ -n "$refused" ]; then
+if [ -s "$WORK/held.txt" ] || [ -n "$refused" ] || [ -s "$WORK/caveat.txt" ]; then
   n=$(wc -l < "$WORK/held.txt" | tr -d ' ')
   reason=""
   if [ "$n" -gt 0 ]; then
     reason="$n application report(s) held back from their owners: $(awk '{printf "%s%s", sep, $0; sep="; "} END {print ""}' "$WORK/held.txt")."
+  fi
+  if [ -s "$WORK/caveat.txt" ]; then
+    reason="$reason Sent, but the scan may be incomplete: $(awk -F': ' '{printf "%s%s", sep, $1; sep=", "} END {print ""}' "$WORK/caveat.txt") (Qualys reports Service Errors Detected - check the scan in Qualys)."
   fi
   if [ -n "$refused" ]; then
     reason="$reason Some watchers were not sent the report because their domain is not allowed: $refused (the journal names the addresses)."

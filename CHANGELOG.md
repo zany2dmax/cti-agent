@@ -111,7 +111,26 @@ every owner email (see Added).
   than the people who should see every owner's report. `cti-mailer --lane owner
   --armed`, and so `run-appowners --dry-run`, says how many addresses it will
   copy. Unset means owner emails are as before.
+- **An owner report is sent, with a warning, when the scan finished with
+  Qualys's "Service Errors Detected".** It used to be held with no clear reason.
+  Since WAS 10.21.2 the notice email says only "Finished", and the result is in
+  the scan list API; when that says the scan finished with service errors, the
+  report goes to the owner and every place that shows the scan says it may be
+  incomplete: a yellow notice in the email, a "Scan result: May be incomplete"
+  row and no green clean result in the report, and an entry under SCANNER FAULTS
+  in the AppSec weekly, which still counts what it found. The operator's HOLD
+  alert from `run-appowners` names those applications. Only a notice that
+  itself says the scan finished is treated this way; cancelled, timed-out and
+  failed-login scans are still held.
+
 ### Fixed
+
+- **A held owner report names the real reason.** A scan whose notice said only
+  "Finished" was held as "the Qualys scan list did not confirm the run" even
+  when the list had the run and said why it was not complete. The hold now
+  quotes the list ("the Qualys WAS scan list says FINISHED /
+  TIME_LIMIT_EXCEEDED"), and says "no matching run was found" only when there
+  was none.
 
 - **AppSec open counts left out findings that had come back.** Qualys's
   notice splits an application's findings into New, Reopened, Active, Fixed

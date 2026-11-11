@@ -1465,7 +1465,16 @@ To restore, copy a backup over `/etc/cti-agent/owners.db` (root:root 0600), then
 reached no host, and an application with no line in `app-owners.txt`. The
 owners get nothing for that scan; the operator gets one `cti-alert` HOLD
 listing them, once per scan. A scan with no web app id (the WAS API was down)
-is tried again the next day.
+is tried again the next day. Each hold names its reason: for a scan whose notice
+says only "Finished", that is what the Qualys scan list says about the run.
+
+**Sent with a warning.** A scan that Qualys finished with **Service Errors
+Detected** (the scanner hit errors, so parts of the application may not have
+been tested) is not held. Its email and report say plainly that the scan may be
+incomplete, with no green "clean" result even when nothing was found; the
+AppSec weekly lists it under SCANNER FAULTS and still counts what it found; and
+the operator's HOLD alert names it so somebody checks why the scanner hit
+errors (often a host or WAF blocking the scanner).
 
 **What is sent.** A short covering email (open findings by severity, what this
 scan found, authenticated or not, and a do-not-forward note) with the report

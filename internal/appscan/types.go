@@ -269,6 +269,11 @@ type ScanResult struct {
 
 	// Status is the vendor's completion status, verbatim.
 	Status string
+	// Caveat is a problem the scanner reported with a scan that still ran to
+	// completion: today only Qualys's "Service Errors Detected". Complete is
+	// true and the counts are a real measurement that may be partial, so
+	// every place that shows this scan must show the caveat beside it.
+	Caveat string
 	// Complete reports whether the scan ran to completion. Counts from a scan
 	// that was cancelled or hit a time limit describe a partial crawl, and
 	// presenting them as a result is reporting a measurement that was never
@@ -507,7 +512,7 @@ func (s ScanResult) AppKey() string {
 // SUPPOSED to authenticate and could not is a different matter, and that is
 // what Auth.Failed() picks out.
 func (s ScanResult) Attention() bool {
-	if s.Fault() {
+	if s.Fault() || s.Caveat != "" {
 		return true
 	}
 	n, r := s.AppState.New, s.AppState.Reopened

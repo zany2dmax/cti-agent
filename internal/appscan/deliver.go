@@ -51,6 +51,9 @@ type Delivery struct {
 	// the scanner's list, which gives no end time. Zero when neither is known.
 	LaunchOnly bool   `json:"launchOnly,omitempty"`
 	AuthLabel  string `json:"auth"`
+	// Caveat is the scanner's warning about a scan that finished but may be
+	// partial (Service Errors Detected). The email and the report show it.
+	Caveat string `json:"caveat,omitempty"`
 	// Hold is why this is not sent; empty means send. Retry says the hold
 	// may clear by itself (the API was unreachable), so it is not recorded
 	// as done.
@@ -121,16 +124,19 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 			ScanRef: ref, Finished: s.Finished, AuthLabel: s.Auth.Label(), NoNotice: s.NoNotification,
 			Open: s.AppState.Open(), ScanCounts: s.ScanCounts, FirstScan: s.FirstScan,
 			URL: strings.TrimSpace(s.AppURL), Started: s.Started, Duration: s.Duration,
-			LinksCrawled: s.LinksCrawled, ScanDelta: s.ScanDelta, Launch: s.Launch}
+			LinksCrawled: s.LinksCrawled, ScanDelta: s.ScanDelta, Launch: s.Launch, Caveat: s.Caveat}
 		switch {
 		case !s.Complete && strings.EqualFold(strings.Join(strings.Fields(s.Status), ""), "finished"):
 			// The newer notice format, which needs the scan list to confirm
-			// it - and the list did not (unreachable, or no matching run).
-			// The same test as qualys.BareFinished, which this package cannot
-			// import (qualys imports appscan).
-			d.Hold = "the notice says Finished, but the Qualys scan list did not confirm the run - not counted as complete"
+			// it - and the list had no matching run, or was unreachable (a
+			// matched run that did not confirm it rewrites the status to say
+			// what the list said, and lands in the next case). The same test
+			// as qualys.BareFinished, which this package cannot import
+			// (qualys imports appscan).
+			d.Hold = "the notice says Finished, but no matching run was found in the Qualys scan list " +
+				"(or the list was unreachable) - not counted as complete"
 		case !s.Complete:
-			d.Hold = "the scan did not finish (" + orUnknown(s.Status) + ")"
+			d.Hold = "not counted as complete: " + orUnknown(s.Status)
 		case s.Auth.Failed():
 			d.Hold = "the scan's login failed (" + orUnknown(s.Auth.Status) + ")"
 		case s.Unreachable():
@@ -338,6 +344,10 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 		lead = emailkit.Amber
 	case d.Open.Total() > 0:
 		lead = emailkit.Blue
+	case d.Caveat != "":
+		// Nothing found, by a scan that may not have tested everything: not
+		// the green of a clean result.
+		lead = emailkit.Yellow
 	}
 
 	var b strings.Builder
@@ -365,6 +375,10 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 		}, more)
 	}
 
+	if c := strings.TrimSpace(d.Caveat); c != "" {
+		emailkit.Callout(&b, emailkit.Yellow, "<b>The scan may be incomplete.</b> "+e(c)+
+			" The findings below are real; there may be others the scan did not reach.")
+	}
 	if d.AuthLabel == "unauthenticated scan" {
 		emailkit.Callout(&b, emailkit.Yellow,
 			`The scan did not log in, so it covers only the parts of the application that need no login.`)

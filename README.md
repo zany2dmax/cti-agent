@@ -119,7 +119,8 @@ that finished since the last run, the application's owner (and watchers) get the
 scanner's own report of what is open on it, by email, with the scan account's
 session removed. Many owners are outside the company and have no Jira login, so
 this is email and not a ticket. A scan that did not finish, whose login failed or
-that reached no host is held back and the operator is told. Off until an
+that reached no host is held back and the operator is told; one Qualys finished
+with service errors is sent, marked as possibly incomplete. Off until an
 allowed-domain list is set; who may receive it is decided in the mailer, not in
 the runner. The owners list stays in step with the scanner: `fleet-owners sync`
 asks Qualys for every web application, reports each one with no owner, and

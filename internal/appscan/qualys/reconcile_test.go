@@ -272,3 +272,60 @@ func TestABareFinishedNoticeNeedsTheListToConfirmIt(t *testing.T) {
 		t.Error("a bare Finished with no scan list entry was counted complete")
 	}
 }
+
+// Service Errors Detected (decided 2026-11-10): the scan finished with errors
+// on the way. Sent with a caveat, not held - but only when the notice itself
+// says the scan finished, and only on the API's word.
+func TestServiceErrorsAreCompleteWithACaveat(t *testing.T) {
+	cases := []struct {
+		mailStatus string
+		mailDone   bool
+		want       bool
+	}{
+		{"Finished", false, true},                           // 10.21.2 bare notice
+		{"Finished : OK", true, true},                       // older notice, the API knows better
+		{"Finished : Service Errors Detected", false, true}, // older notice saying so itself
+		{"Canceled", false, false},                          // a worse notice is never upgraded
+		{"Finished : Time Limit Exceeded", false, false},    // nor a different fault
+	}
+	for _, c := range cases {
+		m := fromMail("was/9.1", "ExPortal")
+		m.Complete, m.Status = c.mailDone, c.mailStatus
+		s := listScan(9, "was/9.1", "VULNERABILITY", "SCHEDULED", "9009",
+			"Example Portal", "", "FINISHED", "", day(1))
+		s.ResultsStatus = "SERVICE_ERRORS_DETECTED"
+		got, _ := Reconcile([]appscan.ScanResult{m}, []Scan{s}, window, "")
+		r := got[0]
+		if r.Complete != c.want || (r.Caveat != "") != c.want {
+			t.Errorf("mail %q: Complete = %v, Caveat = %q, want complete+caveat = %v",
+				c.mailStatus, r.Complete, r.Caveat, c.want)
+		}
+		if r.AppID != "9009" {
+			t.Errorf("mail %q: the API identity was not taken (AppID %q)", c.mailStatus, r.AppID)
+		}
+	}
+}
+
+func TestAnEmaillessServiceErrorsScanIsAddedWithItsCaveat(t *testing.T) {
+	s := listScan(10, "was/10.1", "VULNERABILITY", "SCHEDULED", "9010",
+		"Example Portal", "", "FINISHED", "", day(1))
+	s.ResultsStatus = "Service Errors Detected"
+	got, _ := Reconcile(nil, []Scan{s}, window, "")
+	if len(got) != 1 || !got[0].Complete || got[0].Caveat != ServiceErrorsCaveat {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// A bare Finished the list does not confirm says what the list said, so the
+// hold names the real reason rather than "did not confirm".
+func TestAnUnconfirmedBareFinishedNamesTheListStatus(t *testing.T) {
+	m := fromMail("was/11.1", "ExPortal")
+	m.Complete, m.Status = false, "Finished"
+	s := listScan(11, "was/11.1", "VULNERABILITY", "SCHEDULED", "9011",
+		"Example Portal", "", "FINISHED", "", day(1))
+	s.ResultsStatus = "TIME_LIMIT_EXCEEDED"
+	got, _ := Reconcile([]appscan.ScanResult{m}, []Scan{s}, window, "")
+	if got[0].Complete || got[0].Status != "Finished per the notice, but the Qualys WAS scan list says FINISHED / TIME_LIMIT_EXCEEDED" {
+		t.Errorf("Complete = %v, Status = %q", got[0].Complete, got[0].Status)
+	}
+}

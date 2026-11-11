@@ -66,6 +66,26 @@ func (s Scan) Complete() bool {
 	return s.ResultsStatus == "" || strings.EqualFold(s.ResultsStatus, "SUCCESSFUL")
 }
 
+// ServiceErrors reports a run that finished but whose results the scanner
+// marks Service Errors Detected: it ran to the end, and hit errors on the
+// way, so some of the application may not have been tested. The console says
+// "Service Errors Detected"; the API's resultsStatus is
+// SERVICE_ERRORS_DETECTED. Compared without case, spaces or underscores.
+func (s Scan) ServiceErrors() bool {
+	return strings.EqualFold(s.Status, "FINISHED") && serviceErrorsText(s.ResultsStatus)
+}
+
+// ServiceErrorsCaveat is what the owner email, its report and the AppSec
+// weekly say about such a scan.
+const ServiceErrorsCaveat = "Qualys reports Service Errors Detected: the scanner hit errors " +
+	"during this scan, so parts of the application may not have been tested and the " +
+	"findings may be incomplete."
+
+func serviceErrorsText(v string) bool {
+	k := strings.ToLower(strings.NewReplacer("_", "", " ", "", "-", "").Replace(v))
+	return strings.Contains(k, "serviceerrors")
+}
+
 // scanPageSize and scanMaxPages bound the listing the same way the finding
 // search is bounded: 200 a page, 20 pages. A real fortnight here is about
 // twenty scans, so hitting the cap is a bug or a runaway, and is reported as

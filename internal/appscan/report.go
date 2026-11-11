@@ -98,7 +98,10 @@ func renderReport(week []ScanResult, weekEnding time.Time, slot bool) Block {
 	// An INCOMPLETE scan is the one case with no numbers to print: its counts
 	// describe a crawl that stopped partway, so it is in faults only.
 	for _, s := range r.scans {
-		if s.Fault() {
+		// A scan that finished with a caveat (Service Errors Detected) is in
+		// both: listed as a fault so the operator sees it, and counted, since
+		// what it found is real.
+		if s.Fault() || s.Caveat != "" {
 			r.faults = append(r.faults, s)
 		}
 		switch {
@@ -369,6 +372,11 @@ func (r *report) leadLine() string {
 
 // faultLine is the headline and the explanation for one scan-level fault.
 func faultLine(s ScanResult) (head, detail string) {
+	if s.Complete && s.Caveat != "" && !s.Auth.Failed() && !s.Unreachable() {
+		return fmt.Sprintf("%s - finished with service errors", s.App),
+			s.Caveat + " Its counts are reported under OPEN NOW, and there may be " +
+				"findings the scan did not reach."
+	}
 	if s.Complete && s.Unreachable() {
 		// Checked before authentication: with no host answering, a login
 		// could not have been attempted, so "authentication failed" would

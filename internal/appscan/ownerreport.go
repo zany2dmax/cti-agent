@@ -255,9 +255,17 @@ func writeSummary(b *strings.Builder, d Delivery, open Counts, kinds []kindGroup
 	if d.LinksCrawled > 0 {
 		row("Crawled", h(fmt.Sprintf("%d links", d.LinksCrawled)))
 	}
+	caveat := strings.TrimSpace(d.Caveat)
+	if caveat != "" {
+		row("Scan result", `<b>May be incomplete</b> – `+h(caveat))
+	}
 	b.WriteString(`</table><div>`)
 
 	tone, lead := emailkit.Green, "<b>No vulnerabilities are open.</b> The scanner found nothing to fix on this run."
+	if caveat != "" {
+		tone, lead = emailkit.Yellow, "<b>No vulnerabilities were found, but the scan hit errors.</b> "+
+			"Parts of the application may not have been tested, so this is not a clean result."
+	}
 	if len(kinds) > 0 {
 		k := kinds[0]
 		st := sevOf(k.severity)
