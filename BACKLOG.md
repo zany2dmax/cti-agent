@@ -363,3 +363,48 @@ is real, not before. Finished work moves out of this file into
     (see #160), and CR is the infrastructure help desk.
   - It must follow the fleet's rules: a full preview and one labelled test
     ticket before any real filing, and no real host names in tracked files.
+- **New lane: weekly design-review coverage report** (noted 2026-11-11, not
+  designed; the Jira query is still to be decided). Once a week, look at the
+  sprint status across the development projects in Jira. Report which work
+  items got a PrimeSec design review, which did not, and, for each that did
+  not, the justification recorded for skipping it, or that there is none.
+  - **Inputs.**
+    - Jira: the sprint's issues across projects, via the existing
+      `/rest/api/3/search/jql` client in `internal/jira` (read-only). **The JQL
+      is TBD**: which projects and boards, which sprint (the active one, or
+      the one closed that week), and which issue types count as needing a
+      review (stories and epics, but probably not bugs or subtasks).
+    - PrimeSec: the design reviews (`search_design_docs` and the security
+      review brief in the Prime API), matched back to Jira issues.
+  - **Open questions, to brainstorm before building:**
+    - *How a review is tied to an issue.* A Jira link or field on the issue,
+      the issue key in the Prime design doc, or Prime's own Jira integration?
+      This decides whether matching is exact or a guess. A guess should be
+      reported as unmatched, never as reviewed.
+    - *Where the justification lives.* A Jira field, a label (such as
+      `no-design-review`) with a comment, or a resolution. It has to be
+      something a person sets on purpose, so the report can tell "no review,
+      justified" apart from "no review, nobody said why".
+    - *What "got a review" means.* A Prime review that exists, one that is
+      finished, or one whose open threats have been answered. It could also
+      show the review's risk level or open recommendations.
+    - *Audience and format.* Who gets it (AppSec, engineering leads, the
+      product owners), on which day after the sprint boundary, and whether it
+      is an email digest, a board post, or both. The default is email to an
+      allowlisted audience through `cti-mailer`, like the other lanes.
+    - *The Prime credential.* A Prime API token for the fleet, read-only,
+      kept with the other secrets (see "Split `fleet.env`" above), and how the
+      lane's rate use is budgeted.
+    - *Go or Python.* A Go command (`cti-designreview`) with a
+      `run-designreview` runner and timer, following `cti-appscan` and
+      `run-appscan`. Python only if it needs SQLite (SECURITY.md, Supply
+      chain); the history of what was reported each week probably does not.
+  - **Fleet rules it must follow.**
+    - Read-only against Jira and Prime: it files and changes nothing.
+    - `--dry-run`, `--for-real` or `--to-dev` with no default, and an entry
+      in `commands.manifest` and a man page.
+    - Listed in the orchestrator's lane table and the checkin skill, which a
+      test enforces.
+    - Issue keys and titles can name internal projects, so the report goes
+      only to the configured audience, and none of it lands in tracked files.
+      The tests use example projects.
