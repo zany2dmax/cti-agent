@@ -4659,6 +4659,28 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
                 self.assertIn("If you do nothing:", text)
                 self.assertIn("fleet-board say @operator", text)
 
+    def test_the_worked_operator_examples_pass_the_guard(self):
+        # The examples are what the beat copies. A semicolon or question mark
+        # inside them is refused by checkin-bash-guard even in quotes, which
+        # costs the beat a turn (found in review, 2026-11-11).
+        import importlib.machinery
+        import importlib.util
+        guard = KIT / "fleet" / "bin" / "checkin-bash-guard"
+        loader = importlib.machinery.SourceFileLoader("checkin_guard_ex", str(guard))
+        spec = importlib.util.spec_from_loader("checkin_guard_ex", loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        text = (KIT / "fleet" / "CLAUDE.md").read_text(encoding="utf-8")
+        examples = re.findall(r"```\n(What I am asking:[^\n]+)\n```", text)
+        self.assertEqual(len(examples), 2, "expected the alert and the board example")
+        wraps = ('cti-alert --unit cti-agent-checkin.service --for-real --kind ESCALATION --reason "%s"',
+                 'fleet-board say @operator INFO "%s"')
+        for ex, wrap in zip(examples, wraps):
+            cmd = "/opt/cti-agent/bin/" + (wrap % ex)
+            event = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            with self.subTest(example=ex[:40]):
+                self.assertIsNone(mod.verdict(event))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

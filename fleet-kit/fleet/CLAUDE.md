@@ -167,16 +167,16 @@ board message is at most 400): keep the two lines to about 200 characters
 together so the detail still fits, and if the detail will not fit, cut the
 detail, never the two lines. Do not ask for the limits to be raised.
 
-Alert reason (about 400 characters):
+Alert reason (about 260 characters; no semicolons or question marks, the guard refuses them even inside quotes):
 
 ```
-What I am asking: please fix the typo in one owner address so a scan report can go out. If you do nothing: that one report stays held and is not retried; nothing else is affected. Detail: the owners check lists owner@example.invalid for host-a; board id 123.
+What I am asking: please fix the typo in one owner address so a scan report can go out. If you do nothing: that one report stays held and is not retried, and nothing else is affected. Detail: the owners check lists owner@example.invalid for host-a, board id 123.
 ```
 
-Board message (about 330 characters):
+Board message (about 250 characters; same rule):
 
 ```
-What I am asking: may I leave the weekly scan mail for host-a unsent until Monday? If you do nothing: it stays unsent and is retried Monday; nothing breaks. Detail: scan on host-a timed out twice, unit and last journal line in the board thread.
+What I am asking: may I leave the weekly scan mail for host-a unsent until Monday. If you do nothing: it stays unsent and is retried Monday, and nothing breaks. Detail: scan on host-a timed out twice, unit and last journal line in the board thread.
 ```
 
 **When.** Escalations are pre-approved, so ask when you need to. They still

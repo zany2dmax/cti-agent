@@ -157,7 +157,7 @@ every owner email (see Added).
 
 ### Added
 
-- **`cti-jira --list [--all] [--json]` lists the fleet's tickets.** Key, status, age, assignee, kind (CVE, AppSec, lock-down, test) and summary; `--all` includes closed ones. It only reads, so it needs no `--dry-run` or `--for-real` and not `JIRA_ALLOW_CREATE`. It finds the test ticket's key for `--appscan-close-test`. **Upgrade:** none.
+- **`cti-jira --list [--all] [--json]` lists the fleet's tickets.** Key, status, age, assignee, kind (CVE, AppSec, lock-down, test) and summary; `--all` includes closed ones. It only reads, so it needs no `--dry-run` or `--for-real` and not `JIRA_ALLOW_CREATE`. It finds the test ticket's key for `--appscan-close-test`. **Upgrade:** none. It refuses to run together with another action or a mode flag.
 - **The heartbeat checks the lanes' credentials before they are needed.**
   - New `--check` on `cti-domains` (the inventory, and one GoDaddy account
     listing) and on `cti-vmscan` (a Graph token, the network spreadsheet and

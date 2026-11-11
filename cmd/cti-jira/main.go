@@ -105,6 +105,10 @@ func run() int {
 	if (*listAll || *listJSON) && !*list {
 		return die("--all and --json go with --list")
 	}
+	if *list && (*check || *testTicket || *fromEnriched != "" || *followUpFlag || *domainsActions != "" ||
+		*appscanTickets != "" || *appscanCloseTest != "" || *dryRun || *forReal) {
+		return die("--list reads and stops: it cannot be combined with another action or with --dry-run/--for-real")
+	}
 	if *appscanCommentProbe != "" && (*appscanTest == "" || *appscanTickets == "") {
 		return die("--appscan-comment-probe needs --appscan-tickets and --appscan-test (which application's comment to post)")
 	}
@@ -627,10 +631,11 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 		if withFollowUp {
 			skipped += " and NO OPEN TICKET RE-CHECKED"
 		}
-		logf("WARNING: scanner KB cache unavailable at %s (%s) - %s this run. "+
-			"A relative QUALYS_KB_CACHE resolves against the directory the command "+
-			"was run from; set it to an absolute path in fleet.env",
-			safelog.Line(cfg.QualysKBCachePath), safelog.Line(err.Error()), skipped)
+		logf("WARNING: CVE lookup unavailable (%s) - %s this run. "+
+			"For Qualys: the KB cache is at %s; a relative QUALYS_KB_CACHE resolves against "+
+			"the directory the command was run from, so set it to an absolute path in fleet.env. "+
+			"For anything else, check LOOKUP_PROVIDER",
+			safelog.Line(err.Error()), skipped, safelog.Line(cfg.QualysKBCachePath))
 		return exitOK
 	}
 
