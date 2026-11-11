@@ -146,7 +146,7 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 		}
 		if d.Hold == "" {
 			if _, ok := owners.For(s.AppID, s.App); !ok {
-				d.Hold = "no owner in app-owners.txt"
+				d.Hold = "no owner on file"
 			}
 		}
 		if d.Finished.IsZero() && !s.Started.IsZero() {

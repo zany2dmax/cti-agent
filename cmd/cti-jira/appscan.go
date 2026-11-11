@@ -335,7 +335,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		assignee, note := "", ""
 		switch {
 		case !t.OwnerListed:
-			note = "no owner in app-owners.txt - unassigned"
+			note = "no owner on file - unassigned"
 		default:
 			id, ok := accounts[t.Owner]
 			if !ok {
@@ -585,7 +585,7 @@ func appscanBody(t appscan.AppTicket, now time.Time) string {
 
 func appscanHeader(t appscan.AppTicket) string {
 	var b strings.Builder
-	owner := "not listed in app-owners.txt"
+	owner := "not on file"
 	if t.OwnerListed {
 		owner = t.Owner
 	}
