@@ -59,6 +59,14 @@ every owner email (see Added).
 - **The attached HTML report is titled "Web Application Scan Report".** The page
   heading and the browser tab title were "Web application scan report"; each word
   now starts with a capital, to match the email's title.
+- **The orchestrator now knows every lane, and a test keeps it that way.** It had
+  never been told the owner-email lane existed, so when that lane held a scan it
+  said nothing. `fleet/CLAUDE.md` now lists the owner lane (`@appowners`), names
+  every lane's timer, and has a journal row for the owner, supplier and VM scan
+  lanes; the checkin skill has a "did it run" check for the owner, supplier,
+  mailbox cleanup and VM scan lanes, and says the VM scan timer is held off until
+  its coverage check works so a disabled timer is not reported as a fault. A new
+  test fails when a timer or `run-*` runner is missing from its instructions.
 - **The hold and ticket texts say "no owner on file", not "app-owners.txt".** The
   owners live in the database now, so an alert that named the old file sent
   people looking in the wrong place. Affects the owner lane's hold alert and the

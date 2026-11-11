@@ -2850,6 +2850,35 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                 self.assertIn("checkin-bash-guard:", r.stderr)
 
+    def test_the_orchestrator_knows_every_lane_that_has_a_timer(self):
+        """The orchestrator's job is to oversee every lane. A lane added without
+        telling it is a lane nobody checks: the owner lane held a scan on
+        2026-11-11 and the orchestrator, which had never been told the lane
+        existed, said nothing. So every cti-agent-*.timer must be named in its
+        instructions (fleet/CLAUDE.md), and the lane table must name each
+        runner's handle. Add the lane there, and a check to the checkin skill's
+        'Scheduled work' table, when a lane is created."""
+        root = pathlib.Path(__file__).resolve().parents[1] / "fleet"
+        orch = (root / "CLAUDE.md").read_text(encoding="utf-8")
+        skill = (root / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
+        timers = sorted(p.name[: -len(".timer")] for p in (root / "systemd-fedora").glob("cti-agent-*.timer"))
+        self.assertGreaterEqual(len(timers), 10)
+        for t in timers:
+            with self.subTest(timer=t):
+                self.assertIn(t, orch, f"{t} is not named in fleet/CLAUDE.md: the orchestrator does not know this lane")
+        # A lane with its own runner has a handle on the board and a row in the table.
+        for runner in sorted(p.name for p in (root / "bin").glob("run-*")):
+            if runner in ("run-checkin", "run-digest"):
+                continue  # the orchestrator itself; the digest is @ingest/@brief
+            with self.subTest(runner=runner):
+                self.assertIn("bin/" + runner, orch, f"{runner} has no row in the orchestrator's lane table")
+        # Every timer's service can be read through the beat's journal wrapper
+        # (any cti-agent-* unit), and the skill says where to look for the ones
+        # that report a result.
+        for t in ("cti-agent-appowners", "cti-agent-appscan", "cti-agent-domains", "cti-agent-supplier"):
+            with self.subTest(journal=t):
+                self.assertIn(t + ".service", skill, f"the checkin skill has no 'did it run' check for {t}")
+
     def test_every_command_the_beat_is_granted_has_an_argument_policy(self):
         """The table in the guard and run-checkin's grant must not drift:
         a granted command with no row would be refused, and a row with no grant
