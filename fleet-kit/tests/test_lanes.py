@@ -4141,6 +4141,9 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         RunnersToDev.setUp(self)
         # The digest's real and dry sends go through mailer.py.
         (self.code / "lanes" / "mailer.py").write_text(_LANE_STUB)
+        p = self.code / "bin" / "cti-vmscan"
+        p.write_text(_STUB)
+        p.chmod(0o755)
 
     run_lane = RunnersToDev.run_lane
 
@@ -4250,14 +4253,79 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         probe = [c for c in calls if c.startswith("cti-domains --out")][0]
         self.assertIn(f"--websites-out {self.home}/state/domains-websites.json", probe)
 
+    def test_vmscan_rehearsal_leaves_the_seen_list_and_report_alone(self):
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        real = [self.plant(f"state/vmscan-{n}-{stamp}.{e}")
+                for n, e in (("seen", "json"), ("subject", "txt"), ("findings", "csv"))]
+        real += [self.plant(f"state/vmscan-{stamp}.html"), self.plant(f"state/vmscan-{stamp}.txt")]
+        out = self.home / "dryrun" / "vmscan"
+        for args in (["--dry-run"], ["--to-dev"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-vmscan", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertUntouched(*real)
+                scan = [c for c in calls if c.startswith("cti-vmscan --out")][0]
+                self.assertIn(f"--seen-out {out}/vmscan-seen-{stamp}.json", scan)
+                self.assertFalse(any("--commit-seen" in c for c in calls), calls)
+        self.log.write_text("")
+        r, calls = self.run_lane("run-vmscan", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        scan = [c for c in calls if c.startswith("cti-vmscan --out")][0]
+        self.assertIn(f"--seen-out {self.home}/state/vmscan-seen-{stamp}.json", scan)
+
+    def test_patchtuesday_rehearsal_leaves_the_sent_synopsis_alone(self):
+        # The stub's subject is October 2026, so the tag is 2026-October.
+        real = [self.plant(f"reports/patchtuesday-2026-October.{e}") for e in ("html", "txt", "json")]
+        out = self.home / "dryrun" / "patchtuesday"
+        for args in (["--dry-run"], ["--to-dev"], ["--to-dev", "--month", "2026-08"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-patchtuesday", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertUntouched(*real)
+                build = [c for c in calls if c.startswith("cti-patchtuesday ") and "--out" in c][0]
+                self.assertIn(f"--out {out}/", build)
+                self.assertIn("--no-manifest", build)
+        self.log.write_text("")
+        r, calls = self.run_lane("run-patchtuesday", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        build = [c for c in calls if c.startswith("cti-patchtuesday ") and "--out" in c][0]
+        self.assertIn(f"--out {self.home}/reports/patchtuesday-2026-October.html", build)
+
+    def test_appowners_rehearsal_works_in_its_own_directory(self):
+        old = self.plant("state/appowners-2026-01-01T0000/report.html")
+        os.utime(old.parent, (0, 0))
+        out = self.home / "dryrun" / "appowners"
+        for args in (["--dry-run"], ["--to-dev"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appowners", *args, env="OWNER_ALLOW_DOMAINS=example.com\n")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                plan = [c for c in calls if c.startswith("cti-appscan ") and "--deliveries-out" in c][0]
+                self.assertIn(f"--deliveries-out {out}/appowners-plan-", plan)
+                self.assertIn(f"--delivered-log {self.home}/state/appowners-sent.json", plan,
+                              "the rehearsal must plan from the real delivered log")
+                self.assertIn(f"--out-dir {out}/appowners-",
+                              [c for c in calls if c.startswith("cti-appreport ")][0])
+                self.assertFalse(any("--commit-delivered" in c for c in calls), calls)
+                self.assertUntouched(old)
+                self.assertEqual(list(out.iterdir()), [], "the rehearsal's reports were not deleted")
+        self.log.write_text("")
+        r, calls = self.run_lane("run-appowners", "--for-real", env="OWNER_ALLOW_DOMAINS=example.com\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(old.exists(), "a real run still clears a killed run's leftovers")
+
     def test_a_rehearsal_refuses_while_the_lane_is_running(self):
         cases = (("run-digest", ["daily"], "digest-daily"), ("run-digest", ["weekly"], "digest-weekly"),
-                 ("run-appscan", [], "appscan"), ("run-domains", [], "domains"))
+                 ("run-appscan", [], "appscan"), ("run-domains", [], "domains"),
+                 ("run-appowners", [], "appowners"), ("run-vmscan", [], "vmscan"),
+                 ("run-patchtuesday", [], "patchtuesday"))
         for runner, pre, lane in cases:
             for mode in ("--dry-run", "--to-dev"):
                 with self.subTest(runner=runner, lane=lane, mode=mode), hold_lane_lock(self.home, lane):
                     self.log.write_text("")
-                    r, calls = self.run_lane(runner, *pre, mode)
+                    r, calls = self.run_lane(runner, *pre, mode, env="OWNER_ALLOW_DOMAINS=example.com\n")
                     self.assertEqual(r.returncode, 75, r.stdout + r.stderr)
                     self.assertIn("pid 4242", r.stderr, "the refusal must say which run holds the lane")
                     self.assertEqual(calls, [], "a refused rehearsal did work")
@@ -4267,15 +4335,17 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         # A long operator dry run must not cost the timer's run: rehearsals
         # write only their own files, so the real run waits, then goes on.
         cases = (("run-digest", ["daily"], "digest-daily"), ("run-appscan", [], "appscan"),
-                 ("run-domains", [], "domains"))
+                 ("run-domains", [], "domains"), ("run-appowners", [], "appowners"),
+                 ("run-vmscan", [], "vmscan"), ("run-patchtuesday", [], "patchtuesday"))
         for runner, pre, lane in cases:
             with self.subTest(runner=runner), hold_lane_lock(self.home, lane, kind="dry"):
                 self.log.write_text("")
-                r, calls = self.run_lane(runner, *pre, "--for-real", env="FLEET_LOCK_WAIT_SECONDS=1\n")
+                r, calls = self.run_lane(runner, *pre, "--for-real",
+                                         env="FLEET_LOCK_WAIT_SECONDS=1\nOWNER_ALLOW_DOMAINS=example.com\n")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 self.assertIn("going ahead without it", r.stderr)
                 sends = [c for c in calls if c.startswith(("cti-mailer ",))]
-                if runner != "run-digest":
+                if runner not in ("run-digest", "run-patchtuesday"):
                     self.assertTrue(sends and "--for-real" in sends[-1], calls)
 
     def test_a_failed_dry_digest_says_dry_run_on_the_board(self):
@@ -4300,12 +4370,14 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
 
     def test_a_real_run_waits_for_the_lane_then_fails_loudly(self):
         cases = (("run-digest", ["daily"], "digest-daily"), ("run-appscan", [], "appscan"),
-                 ("run-domains", [], "domains"))
+                 ("run-domains", [], "domains"), ("run-appowners", [], "appowners"),
+                 ("run-vmscan", [], "vmscan"), ("run-patchtuesday", [], "patchtuesday"))
         for runner, pre, lane in cases:
             with self.subTest(runner=runner), hold_lane_lock(self.home, lane):
                 self.log.write_text("")
                 t0 = time.monotonic()
-                r, calls = self.run_lane(runner, *pre, "--for-real", env="FLEET_LOCK_WAIT_SECONDS=1\n")
+                r, calls = self.run_lane(runner, *pre, "--for-real",
+                                         env="FLEET_LOCK_WAIT_SECONDS=1\nOWNER_ALLOW_DOMAINS=example.com\n")
                 self.assertGreaterEqual(time.monotonic() - t0, 1.0, "the real run did not wait")
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn("still going", r.stdout + r.stderr)

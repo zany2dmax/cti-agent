@@ -269,7 +269,7 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent run-appscan --dry-run` | The weekly AppSec report, rendered to `dryrun/appscan/`, sent nowhere |
 | `sudo cti-agent cti-appscan --since 336h --out FILE` | The report over any window, by hand. Sends nothing; chain it to `cti-mailer --lane was` |
 | `sudo cti-agent run-domains --dry-run` | The weekly domains check, rendered to `dryrun/domains/`, sent nowhere, baseline not advanced, Jira lock-down ticket only previewed |
-| `sudo cti-agent run-vmscan --dry-run` | The weekly VM scan report (the two scheduled scans combined, plus the network spreadsheet coverage check), rendered to `state/`, sent nowhere. `run-vmscan --to-dev` mails it to `FLEET_DEV_EMAIL` only |
+| `sudo cti-agent run-vmscan --dry-run` | The weekly VM scan report (the two scheduled scans combined, plus the network spreadsheet coverage check), rendered to `dryrun/vmscan/`, sent nowhere. `run-vmscan --to-dev` mails it to `FLEET_DEV_EMAIL` only |
 | `sudo cti-agent run-supplier --dry-run` | The supplier-request lane: judges each new request and renders the digest into `dryrun/supplier/` (the request text is not kept); files nothing, sends nothing, records nothing. `run-supplier --to-dev` mails the digest to `FLEET_DEV_EMAIL` only |
 | `sudo cti-agent cti-vmscan --subnets-file FILE.xlsx --out F.html --text-out F.txt --csv-out F.csv` | The same report and coverage check by hand against a downloaded copy of the spreadsheet. Sends nothing; the files land in `/var/lib/cti-agent/` |
 | `sudo cti-agent run-patchtuesday --dry-run` | The monthly synopsis, sent nowhere, manifest untouched. **Run by hand for now** - see [The monthly Patch Tuesday synopsis](#the-monthly-patch-tuesday-synopsis) |

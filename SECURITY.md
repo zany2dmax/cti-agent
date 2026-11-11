@@ -500,8 +500,9 @@ mails `FLEET_DEV_EMAIL` instead of the operator and posts nothing to the board
 the orchestrator reads. Unset `FLEET_DEV_EMAIL` is refused before any work in
 every case: there is no fallback to a real audience.
 
-A dry run or test send of `run-digest`, `run-appscan`, `run-domains` or
-`run-supplier` writes nothing a real run reads. Its files go under
+A dry run or test send of `run-digest`, `run-appscan`, `run-domains`,
+`run-supplier`, `run-appowners`, `run-vmscan` or `run-patchtuesday` writes
+nothing a real run reads. Its files go under
 `$FLEET_HOME/dryrun/<lane>/`; the digest's ingest writes its own
 processed-message log there (so a rehearsal never licenses mailbox cleanup to
 archive mail) and `enrich.py` runs with `--no-db` (so `memory.db`, and the next

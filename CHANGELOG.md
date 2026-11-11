@@ -213,6 +213,24 @@ every owner email (see Added).
 
   A test now fails if either instruction file shows a command substitution.
 
+- **The lane lock and rehearsal directory reach the other three runners.**
+  `run-appowners`, `run-vmscan` and `run-patchtuesday` now take the same lane
+  lock as the four lanes below (a rehearsal refuses with exit 75 while its lane
+  runs; a real run waits `FLEET_LOCK_WAIT_SECONDS`, then fails past a real run
+  or goes ahead past a rehearsal), and their dry runs and test sends write only
+  under `$FLEET_HOME/dryrun/<lane>/`:
+  - `run-vmscan`'s rehearsal began by deleting the day's SEEN list (what lets
+    the mailbox cleanup archive the notices once the report is out), then
+    replaced the day's report and findings worksheet.
+  - `run-patchtuesday`'s rehearsal, a `--month` replay included, replaced the
+    `reports/patchtuesday-<tag>.*` record of the synopsis that was sent.
+  - `run-appowners` had no protection against two real runs at once, which
+    would each plan the same finished scans and mail every owner twice. Its
+    rehearsal's plan and reports now go to `dryrun/appowners/` (still deleted
+    on exit), and only a real run clears a killed run's leftovers in `state/`.
+  A failed Patch Tuesday dry run's board line now starts "DRY RUN". No flag
+  changed. **Upgrade:** nothing.
+
 - **A dry run no longer writes the state the real run depends on.** Run on the
   day of a timer run, `--dry-run` (and `--to-dev`, which is one except at the
   mailer) could change what the real run did:

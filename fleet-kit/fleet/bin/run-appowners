@@ -80,6 +80,14 @@ for b in "$APPSCAN" "$APPREPORT" "$MAILER"; do
   [ -x "$b" ] || fail "$(basename "$b") not found at $b - rerun the installer"
 done
 
+# One run of this lane at a time; a dry run or test send refuses while a run
+# is active instead of waiting (see fleet_lock in fleet-mode.sh).
+if [ -n "$REAL" ]; then
+  fleet_lock appowners real || fail "another run of run-appowners is still going - this one did not start"
+else
+  fleet_lock appowners dry
+fi
+
 # Off until armed, and the mailer decides - it is the one that reads the
 # allowlist, wherever it is kept. 3 is "off"; anything else non-zero means the
 # owners could not be read, which is a failure, not a quiet day. A test send
@@ -97,16 +105,33 @@ fi
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
 
+# THE LANE LOCK (above) matters most here: two real runs at once would each
+# plan the same finished scans from the delivered log before either recorded
+# them, and mail every owner twice.
+#
+# A DRY RUN OR TEST SEND HAS ITS OWN FILES, under $FLEET_HOME/dryrun/appowners/:
+# its plan and its work directory (the test send's fetched reports included)
+# go there, and are still deleted on every way out. It reads the delivered log
+# the real run keeps, and never writes it.
+OUTDIR="$STATE"
+if [ -z "$REAL" ]; then
+  OUTDIR="$(fleet_dryrun_dir appowners)" || fail "no rehearsal directory - nothing was run"
+fi
+
 STAMP="$(date -u +%Y-%m-%dT%H%M)"
 # One entry per application: the last scan sent or held. Kept across runs.
 LOG="$STATE/appowners-sent.json"
-PLAN="$STATE/appowners-plan-$STAMP.json"
+PLAN="$OUTDIR/appowners-plan-$STAMP.json"
 # The fetched reports and covering emails. Deleted on every way out: even
 # redacted, a report is a list of our unfixed weaknesses.
-WORK="$STATE/appowners-$STAMP"
+WORK="$OUTDIR/appowners-$STAMP"
 SENT="$WORK/sent.tsv"
 trap 'rm -rf "$PLAN" "$WORK"' EXIT
-find "$STATE" -maxdepth 1 -name 'appowners-20*' -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+# Leftovers of a real run that was killed. Real runs only: a rehearsal deletes
+# nothing in state/.
+if [ -n "$REAL" ]; then
+  find "$STATE" -maxdepth 1 -name 'appowners-20*' -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+fi
 
 # 48 hours, not 24: a run that fails or is late does not lose a day's scans.
 # The log keeps a scan from being sent twice.
