@@ -118,8 +118,10 @@ mails the operator naming them and the file. A missing or failing
 .B cti\-alert
 is logged; the lane still succeeds.
 .PP
-A dry run still reads the mailbox and the scanner API and overwrites
-today's report files. It sends nothing through
+A dry run still reads the mailbox and the scanner API, and writes its
+report under
+.I dryrun/appscan/
+(see DRY RUNS AND THE LANE LOCK), never over the real run's. It sends nothing through
 .BR cti\-mailer ,
 and it logs, but does not alert on, authentication failures.
 .SH HOW TO RUN
@@ -231,6 +233,45 @@ One line per scan whose configured credential failed, application first;
 written 0600 by
 .BR cti\-appscan .
 Present and empty: checked, nothing failed. Absent: nothing was checked.
+.TP
+.I $FLEET_HOME/dryrun/appscan/
+A dry run's or test send's files, replaced by the next one.
+.TP
+.I locks/appscan.lock
+The lane lock.
+.SH DRY RUNS AND THE LANE LOCK
+A dry run and a test send
+.RB ( \-\-to\-dev ,
+with or without
+.BR \-\-dry\-run )
+write nothing a real run reads. They work under
+.I $FLEET_HOME/dryrun/
+(0700), emptied at the start of each one; nothing in the fleet reads it.
+Its report, subject, SEEN list, ticket input, refs, plan, preview and
+fetched scanner reports go in
+.IR dryrun/appscan/ ;
+the real run's
+.I state/appscan\-*\-DATE
+files are neither deleted nor replaced.
+.PP
+Each run takes the lane lock,
+.I state/locks/appscan.lock,
+with
+.BR flock (2).
+A dry run or test send that finds it held \- a timer run, or another
+person's rehearsal \- says which process holds it and exits 75 without doing
+anything; it never waits and never runs beside the real run. A real run
+waits for it up to
+.B FLEET_LOCK_WAIT_SECONDS
+(from
+.IR fleet.env ,
+default 600, under the unit's
+.BR TimeoutStartSec ),
+then, if another real run still holds it, fails with exit status 1, so the
+unit fails and it can be rerun; if a rehearsal still holds it, goes ahead
+with a warning, because a rehearsal writes only its own files. The
+kernel drops the lock when the process ends, however it ends, so there is
+no stale lock to clear.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -250,6 +291,10 @@ mailer's refusal when
 or
 .B WAS_ALLOW_TO
 is unset.
+.TP
+.B 75
+A dry run or test send refused because another run of the lane holds
+the lane lock. Nothing was done; run it again when that run has finished.
 .SH EXAMPLES
 Render this week's report and check who it would go to:
 .PP

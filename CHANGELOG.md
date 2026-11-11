@@ -213,6 +213,43 @@ every owner email (see Added).
 
   A test now fails if either instruction file shows a command substitution.
 
+- **A dry run no longer writes the state the real run depends on.** Run on the
+  day of a timer run, `--dry-run` (and `--to-dev`, which is one except at the
+  mailer) could change what the real run did:
+  - `run-digest daily`: the ingest recorded every message it read in the
+    processed-message log, which is mailbox cleanup's only authority to
+    archive, so a rehearsal licensed the cleanup to file away mail no sent
+    digest had reported; and `enrich.py` upserted the findings into
+    `memory.db`, so the next real digest counted the rehearsal's CVEs as seen
+    before and left them out of "new since the last run". It also replaced
+    the day's raw report (the email's attachment), enriched file and digest,
+    the record of what was sent.
+  - `run-appscan`: began by deleting the day's SEEN list, ticket input, refs,
+    plan and scanner reports, so it could break a running Friday run, then
+    replaced its report.
+  - `run-supplier`: `rm -rf` on the day's work directory, under a running
+    real run, and kept its own work directory (request mail text and the
+    model's answers) until someone deleted it.
+  - `run-domains`: wrote `state/domains-websites.json`, which `run-appscan`'s
+    NOT SCANNED coverage check reads, and the day's report and actions files.
+
+  A rehearsal of these four lanes now writes only under
+  `$FLEET_HOME/dryrun/<lane>/` (0700, emptied each time): the digest gets its
+  own processed log and `--no-db`, while still reading `memory.db`, today's
+  ticket map and `products.json` so the preview matches; the supplier lane
+  removes the work directory on every way out and keeps only the rendered
+  digest. And each lane now takes a lock (`state/locks/<lane>.lock`, `flock(2)`,
+  released by the kernel however the run ends): a rehearsal refuses with exit
+  75 while any run of its lane is active, and never waits; a real run waits up
+  to `FLEET_LOCK_WAIT_SECONDS` (default 600) for the other run, then fails if
+  that is a real run (two real runs never overlap) or goes ahead with a
+  warning if it is a long rehearsal (which can no longer harm it). A failed
+  dry digest's board line now starts "DRY RUN". The AppSec one-ticket rehearsal (RUNBOOK 11f) now takes its
+  tickets file from `dryrun/appscan/`. No flag changed.
+  **Upgrade:** nothing to configure. Files a dry run left in `state/` before
+  this (a `supplier-work-<date>/` after a supplier rehearsal holds request text)
+  can be deleted.
+
 - **A held owner report names the real reason.** A scan whose notice said only
   "Finished" was held as "the Qualys scan list did not confirm the run" even
   when the list had the run and said why it was not complete. The hold now

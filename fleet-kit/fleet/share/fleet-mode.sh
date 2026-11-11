@@ -35,3 +35,97 @@ fleet_require_mode() {
     exit 2
   fi
 }
+
+# ── one run of a lane at a time ─────────────────────────────────────────────
+#
+#   fleet_lock digest-daily real   # a real run: waits for the other run
+#   fleet_lock digest-daily dry    # a dry run or test send: refuses at once
+#
+# A lane's runs take $FLEET_HOME/state/locks/<lane>.lock. A dry run (and a
+# test send, which is a dry run except at the mailer) that finds the lock held
+# prints who holds it and exits 75 without touching anything. A real run
+# waits up to FLEET_LOCK_WAIT_SECONDS (default 600, under every unit's
+# TimeoutStartSec) for the other run to end. If that run is still going:
+#   - another REAL run: return 75, and the runner fails the way it fails for
+#     anything else. Two real runs at once could send twice.
+#   - a dry run or test send: go ahead without the lock, with a warning. A
+#     rehearsal writes only its own files (fleet_dryrun_dir), so the overlap
+#     costs shared outside sessions at worst (the PoD log session allows one
+#     reader per token, and the domains lane holds when it is refused) - never
+#     the timer's run. A long rehearsal must not cost the day's digest.
+#
+# The lock is flock(2) on file descriptor 9, which the runner and everything
+# it starts hold open until they exit, so the kernel releases it on any way
+# out - kill -9 included - and there is no stale lock to clear. python3 takes
+# it because macOS has no flock(1).
+fleet_lock() {
+  local lane="$1" kind="$2" dir rc=0 wait=0 holder
+  dir="${FLEET_HOME:?FLEET_HOME is not set}/state/locks"
+  mkdir -p "$dir"
+  chmod 0700 "$dir" 2>/dev/null || true
+  exec 9>>"$dir/$lane.lock"
+  chmod 0600 "$dir/$lane.lock" 2>/dev/null || true
+  if [ "$kind" = real ]; then
+    wait="${FLEET_LOCK_WAIT_SECONDS:-600}"
+    case "$wait" in ''|*[!0-9]*) wait=600 ;; esac
+  fi
+  python3 -I -c '
+import fcntl, os, sys, time
+wait, who = int(sys.argv[1]), sys.argv[2]
+deadline = time.monotonic() + wait
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            sys.exit(75)
+        time.sleep(min(5.0, left))
+os.ftruncate(9, 0)
+os.write(9, (who + "\n").encode())
+' "$wait" "pid $$, $kind run, started $(date '+%F %T')" || rc=$?
+  [ "$rc" = 0 ] && return 0
+  holder="$(head -n 1 "$dir/$lane.lock" 2>/dev/null || true)"
+  if [ "$rc" != 75 ]; then
+    echo "$lane: could not take the lane lock $dir/$lane.lock" >&2
+    exit 1
+  fi
+  if [ "$kind" = real ]; then
+    case "$holder" in
+      *", dry run,"*)
+        echo "$lane: WARNING: a rehearsal (${holder}) still holds the lane lock after ${wait}s;" \
+             "going ahead without it - a rehearsal writes only its own files" >&2
+        return 0 ;;
+    esac
+    echo "$lane: another run of this lane (${holder:-unknown}) still held the lane lock after ${wait}s" >&2
+    return 75
+  fi
+  echo "$lane: another run of this lane is in progress (${holder:-unknown})." >&2
+  echo "$lane: a dry run never waits for it or runs beside it - try again when it has finished." >&2
+  exit 75
+}
+
+# ── where a dry run writes ──────────────────────────────────────────────────
+#
+#   OUT="$(fleet_dryrun_dir digest-daily)"
+#
+# A dry run and a test send write every file of theirs under
+# $FLEET_HOME/dryrun/<lane>/, emptied at the start of each one, and never the
+# real run's files in state/ or reports/: a same-day dry run used to replace
+# the files a real run had written (the record of what was sent) or delete
+# them while it was still using them. Nothing in the fleet reads dryrun/. The
+# lane lock is held, so no other dry run of the lane is using the directory.
+fleet_dryrun_dir() {
+  local d="${FLEET_HOME:?FLEET_HOME is not set}/dryrun/$1"
+  # Checked by hand: it runs inside $(...), where bash does not apply -e, and
+  # a directory that could not be emptied would hand the runner the last
+  # rehearsal's files as this one's.
+  mkdir -p "$FLEET_HOME/dryrun" || return 1
+  chmod 0700 "$FLEET_HOME/dryrun" 2>/dev/null || true
+  if ! { rm -rf "$d" && mkdir -m 0700 "$d"; }; then
+    echo "cannot make a fresh $d" >&2
+    return 1
+  fi
+  printf '%s\n' "$d"
+}

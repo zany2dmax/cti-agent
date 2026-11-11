@@ -12,6 +12,7 @@ mailer's autonomy gate.
 import base64
 import contextlib
 import datetime
+import fcntl
 import importlib.util
 import io
 import json
@@ -4106,6 +4107,237 @@ class RunnersToDev(unittest.TestCase):
                 self.assertTrue(sends and all("--dry-run" in c for c in sends), calls)
 
 
+
+@contextlib.contextmanager
+def hold_lane_lock(home, lane, kind="real"):
+    """Hold a lane's lock the way a running runner does (flock on
+    $FLEET_HOME/state/locks/<lane>.lock, holder line rewritten) for the length
+    of the block."""
+    d = pathlib.Path(home) / "state" / "locks"
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / f"{lane}.lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        f.truncate(0)
+        f.write(f"pid 4242, {kind} run, started in a test\n")
+        f.flush()
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
+    """A dry run or a test send on the day a timer runs must not change what
+    the real run reads or reports: no processed-log entries (the mailbox
+    cleanup's authority to archive), no memory.db upsert (the next digest's
+    "new" flags), and none of the real run's files written or deleted. It
+    works in $FLEET_HOME/dryrun/<lane>/, and refuses while a run of the lane
+    holds the lane lock."""
+
+    BIN = RunnersToDev.BIN
+    tearDown = RunnersToDev.tearDown
+
+    def setUp(self):
+        RunnersToDev.setUp(self)
+        # The digest's real and dry sends go through mailer.py.
+        (self.code / "lanes" / "mailer.py").write_text(_LANE_STUB)
+
+    run_lane = RunnersToDev.run_lane
+
+    def plant(self, rel, text="REAL RUN"):
+        p = self.home / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+        return p
+
+    def assertUntouched(self, *paths):
+        for p in paths:
+            self.assertTrue(p.exists(), f"a rehearsal deleted {p}")
+            self.assertEqual(p.read_text(), "REAL RUN", f"a rehearsal overwrote {p}")
+
+    def agent_logs_its_env(self):
+        agent = pathlib.Path(self.base["CTI_AGENT_DIR"]) / "cti-agent"
+        agent.write_text('#!/usr/bin/env bash\n'
+                         'echo "cti-agent processed=${FLEET_PROCESSED_LOG:-} report=$REPORT_PATH" >> "$STUB_LOG"\n'
+                         'echo "| CVE-2026-1 |" > "$REPORT_PATH"\n')
+
+    def test_digest_daily_rehearsal_writes_no_processed_log_no_db_and_no_real_file(self):
+        self.agent_logs_its_env()
+        day = datetime.date.today().isoformat()
+        real = [self.plant(f"reports/raw-{day}.md"), self.plant(f"state/enriched-{day}.json"),
+                self.plant(f"reports/digest-daily-{day}.html"), self.plant(f"reports/digest-daily-{day}.txt")]
+        self.plant(f"state/enriched-{day}-tickets.json", '{"tickets": {}}')
+        self.plant("state/products.json", "{}")
+        out = self.home / "dryrun" / "digest-daily"
+        for args in (["daily", "--dry-run"], ["daily", "--to-dev"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-digest", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertUntouched(*real)
+                agent = [c for c in calls if c.startswith("cti-agent ")]
+                self.assertEqual(agent, [f"cti-agent processed={out}/processed-messages.json "
+                                         f"report={out}/raw-{day}.md"],
+                                 "the rehearsal's ingest wrote the real processed-message log")
+                enrich_ = [c for c in calls if c.startswith("enrich.py ")]
+                self.assertIn("--no-db", enrich_[0], "the rehearsal upserted into memory.db")
+                self.assertIn(f"--out {out}/enriched-{day}.json", enrich_[0])
+                self.assertIn(f"--enriched {out}/enriched-{day}.json", [c for c in calls if c.startswith("brief.py ")][0])
+                jira = [c for c in calls if c.startswith("cti-jira ")]
+                self.assertEqual(jira, [f"cti-jira --from-enriched {out}/enriched-{day}.json --dry-run --follow-up"])
+                # What the preview reads beside the enriched file, copied in.
+                self.assertTrue((out / f"enriched-{day}-tickets.json").exists())
+                self.assertTrue((out / "products.json").exists())
+                self.assertEqual(oct(out.stat().st_mode & 0o777), "0o700")
+
+    def test_digest_real_run_keeps_the_real_files_log_and_db(self):
+        self.agent_logs_its_env()
+        day = datetime.date.today().isoformat()
+        r, calls = self.run_lane("run-digest", "daily", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"cti-agent processed= report={self.home}/reports/raw-{day}.md", calls)
+        enrich_ = [c for c in calls if c.startswith("enrich.py ")]
+        self.assertNotIn("--no-db", enrich_[0])
+        self.assertIn(f"--out {self.home}/state/enriched-{day}.json", enrich_[0])
+        self.assertFalse((self.home / "dryrun").exists())
+
+    def test_digest_weekly_rehearsal_leaves_the_weekly_file_alone(self):
+        day = datetime.date.today().isoformat()
+        real = [self.plant(f"state/weekly-enriched-{day}.json"), self.plant(f"reports/digest-weekly-{day}.html")]
+        r, calls = self.run_lane("run-digest", "weekly", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertUntouched(*real)
+        self.assertTrue((self.home / "dryrun" / "digest-weekly" / f"weekly-enriched-{day}.json").exists())
+
+    def test_appscan_rehearsal_deletes_and_overwrites_none_of_the_real_files(self):
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        real = [self.plant(f"state/appscan-{n}-{stamp}.json")
+                for n in ("seen", "tickets", "tickets-ref", "tickets-plan")]
+        real += [self.plant(f"state/appscan-{stamp}.html"), self.plant(f"state/appscan-{stamp}.txt"),
+                 self.plant(f"state/appscan-authfail-{stamp}.tsv"), self.plant(f"state/appscan-subject-{stamp}.txt"),
+                 self.plant(f"state/appscan-reports-{stamp}/app.zip")]
+        out = self.home / "dryrun" / "appscan"
+        for args in (["--dry-run"], ["--to-dev"], ["--to-dev", "--dry-run"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appscan", *args, env="WAS_TICKETS=1\nWAS_ATTACH_REPORT=1\n")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertUntouched(*real)
+                scan = [c for c in calls if c.startswith("cti-appscan --out")][0]
+                self.assertIn(f"--out {out}/appscan-{stamp}.html", scan)
+                self.assertIn(f"--seen-out {out}/appscan-seen-{stamp}.json", scan)
+                self.assertIn(f"--tickets-out {out}/appscan-tickets-{stamp}.json", scan)
+                for c in calls:
+                    self.assertNotIn(f"{self.home}/state/appscan-", c, f"a rehearsal used a real file: {c}")
+
+    def test_domains_rehearsal_leaves_the_website_list_and_real_files_alone(self):
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        real = [self.plant("state/domains-websites.json"), self.plant(f"state/domains-{stamp}.html"),
+                self.plant(f"state/domains-{stamp}-actions.json")]
+        out = self.home / "dryrun" / "domains"
+        for args in (["--dry-run"], ["--to-dev"]):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-domains", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertUntouched(*real)
+                probe = [c for c in calls if c.startswith("cti-domains --no-state-write")][0]
+                self.assertIn(f"--websites-out {out}/domains-websites.json", probe,
+                              "run-appscan's coverage check would read the rehearsal's website list")
+        self.log.write_text("")
+        r, calls = self.run_lane("run-domains", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        probe = [c for c in calls if c.startswith("cti-domains --out")][0]
+        self.assertIn(f"--websites-out {self.home}/state/domains-websites.json", probe)
+
+    def test_a_rehearsal_refuses_while_the_lane_is_running(self):
+        cases = (("run-digest", ["daily"], "digest-daily"), ("run-digest", ["weekly"], "digest-weekly"),
+                 ("run-appscan", [], "appscan"), ("run-domains", [], "domains"))
+        for runner, pre, lane in cases:
+            for mode in ("--dry-run", "--to-dev"):
+                with self.subTest(runner=runner, lane=lane, mode=mode), hold_lane_lock(self.home, lane):
+                    self.log.write_text("")
+                    r, calls = self.run_lane(runner, *pre, mode)
+                    self.assertEqual(r.returncode, 75, r.stdout + r.stderr)
+                    self.assertIn("pid 4242", r.stderr, "the refusal must say which run holds the lane")
+                    self.assertEqual(calls, [], "a refused rehearsal did work")
+                    self.assertFalse((self.home / "dryrun").exists())
+
+    def test_a_real_run_goes_ahead_past_a_rehearsal_that_outlasts_the_wait(self):
+        # A long operator dry run must not cost the timer's run: rehearsals
+        # write only their own files, so the real run waits, then goes on.
+        cases = (("run-digest", ["daily"], "digest-daily"), ("run-appscan", [], "appscan"),
+                 ("run-domains", [], "domains"))
+        for runner, pre, lane in cases:
+            with self.subTest(runner=runner), hold_lane_lock(self.home, lane, kind="dry"):
+                self.log.write_text("")
+                r, calls = self.run_lane(runner, *pre, "--for-real", env="FLEET_LOCK_WAIT_SECONDS=1\n")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("going ahead without it", r.stderr)
+                sends = [c for c in calls if c.startswith(("cti-mailer ",))]
+                if runner != "run-digest":
+                    self.assertTrue(sends and "--for-real" in sends[-1], calls)
+
+    def test_a_failed_dry_digest_says_dry_run_on_the_board(self):
+        (self.code / "lanes" / "enrich.py").write_text("import sys\nsys.exit(1)\n")
+        r, calls = self.run_lane("run-digest", "daily", "--dry-run")
+        self.assertEqual(r.returncode, 1)
+        board = [c for c in calls if c.startswith("fleet-board post")]
+        self.assertTrue(board and all("DRY RUN run-digest daily failed" in c for c in board), calls)
+
+    def test_a_rehearsal_that_cannot_empty_its_directory_stops(self):
+        # Carrying on would present the last rehearsal's files as this one's.
+        stale = self.home / "dryrun" / "domains" / "stuck"
+        stale.mkdir(parents=True)
+        (stale / "domains-old.html").write_text("LAST TIME")
+        stale.chmod(0o500)          # rm -rf cannot empty it
+        try:
+            r, calls = self.run_lane("run-domains", "--dry-run")
+        finally:
+            stale.chmod(0o700)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([c for c in calls if c.startswith("cti-domains ")], [], calls)
+
+    def test_a_real_run_waits_for_the_lane_then_fails_loudly(self):
+        cases = (("run-digest", ["daily"], "digest-daily"), ("run-appscan", [], "appscan"),
+                 ("run-domains", [], "domains"))
+        for runner, pre, lane in cases:
+            with self.subTest(runner=runner), hold_lane_lock(self.home, lane):
+                self.log.write_text("")
+                t0 = time.monotonic()
+                r, calls = self.run_lane(runner, *pre, "--for-real", env="FLEET_LOCK_WAIT_SECONDS=1\n")
+                self.assertGreaterEqual(time.monotonic() - t0, 1.0, "the real run did not wait")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("still going", r.stdout + r.stderr)
+                self.assertEqual([c for c in calls if not c.startswith("fleet-board post")], [],
+                                 "a real run ran beside another run of its lane")
+        # Free again: the next run goes ahead.
+        r, _ = self.run_lane("run-domains", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_the_lock_is_released_when_the_runner_is_killed(self):
+        # flock on an open descriptor: the kernel drops it with the process,
+        # so a killed run never leaves a stale lock behind to clear by hand.
+        code = self.code / "bin" / "cti-domains"
+        code.write_text('#!/usr/bin/env bash\necho "cti-domains $*" >> "$STUB_LOG"\nsleep 30\n')
+        self.envfile.write_text("FLEET_DEV_EMAIL=dev@example.com\n")
+        p = subprocess.Popen(["bash", str(KIT / "fleet" / "bin" / "run-domains"), "--for-real"],
+                             env=self.base, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        try:
+            deadline = time.monotonic() + 20
+            while "cti-domains" not in self.log.read_text() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            r, _ = self.run_lane("run-domains", "--dry-run")
+            self.assertEqual(r.returncode, 75, "the running real run did not hold the lane")
+        finally:
+            os.killpg(p.pid, 9)
+            p.wait()
+        code.write_text(_STUB)
+        r, _ = self.run_lane("run-domains", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
 class TestUserAgent(unittest.TestCase):
     """The agent names a contact from GRAPH_MAILBOX, never a hardcoded one,
     and the two lanes that fetch build it the same way as internal/useragent."""
@@ -4314,6 +4546,47 @@ fi
         c = self.calls()
         self.assertTrue(any(x.startswith("mailer --lane supplier") for x in c), "the digest must still go out")
         self.assertTrue(any("--commit-seen" in x for x in c), "and what was filed be recorded as reported")
+
+    def test_a_rehearsal_leaves_the_real_work_alone_and_keeps_no_request_text(self):
+        # A same-day timer run's work directory must survive a rehearsal, and
+        # the rehearsal must not leave mail text behind: only the digest.
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        real = self.home / "state" / f"supplier-work-{stamp}"
+        real.mkdir(parents=True)
+        (real / "000.input.txt").write_text("THE REAL RUN'S REQUEST")
+        for args in (["--dry-run"], ["--to-dev"], ["--to-dev", "--dry-run"]):
+            with self.subTest(args=args):
+                r = self.run_it(*args, env={"SUPPLIER_MODEL": "sonnet"})
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual((real / "000.input.txt").read_text(), "THE REAL RUN'S REQUEST",
+                                 "a rehearsal touched the real run's work")
+                preview = self.home / "dryrun" / "supplier"
+                self.assertFalse((preview / "work").exists(), "request text kept after a rehearsal")
+                self.assertEqual(list(preview.rglob("*.input.txt")), [])
+                self.assertEqual((preview / "digest.html").read_text().strip(), "hi")
+                self.assertEqual(oct((preview / "digest.html").stat().st_mode & 0o777), "0o600")
+                self.assertTrue(any(f"--collect {preview}/work" in x for x in self.calls()), self.calls())
+
+    def test_a_rehearsal_that_fails_still_removes_the_request_text(self):
+        # --collect writes one request, then fails: "$3" is the work directory.
+        self.stub("cti-supplier", 'echo x > "$3/000.input.txt"; exit 1\n')
+        r = self.run_it("--dry-run")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(list(self.home.rglob("*.input.txt")), [],
+                         "a failed rehearsal left request text behind")
+
+    def test_a_rehearsal_refuses_while_a_run_of_the_lane_holds_the_lock(self):
+        with hold_lane_lock(self.home, "supplier"):
+            r = self.run_it("--dry-run")
+            self.assertEqual(r.returncode, 75, r.stderr)
+            self.assertIn("in progress", r.stderr)
+            self.assertEqual(self.calls(), [], "a refused rehearsal did work")
+            r = self.run_it("--for-real", env={"FLEET_LOCK_WAIT_SECONDS": "1"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(self.calls(), [], "a real run ran beside another run")
+        r = self.run_it("--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
 
     def test_unknown_arguments_are_refused(self):
         r = self.run_it("--for-real", "--file-jira")

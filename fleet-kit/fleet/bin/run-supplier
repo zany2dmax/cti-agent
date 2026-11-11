@@ -106,12 +106,36 @@ if [ -n "$REAL" ]; then SMODE="--for-real"; else SMODE="--dry-run"; fi
 
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
+
+# One run of this lane at a time; a dry run or test send refuses while a run
+# is active instead of waiting (see fleet_lock in fleet-mode.sh).
+if [ -n "$REAL" ]; then
+  fleet_lock supplier real || fail "another run of run-supplier is still going - this one did not start"
+else
+  fleet_lock supplier dry
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
-WORK="$STATE/supplier-work-$STAMP"
 # The work directory holds the form's answers and hostile mail text: private,
 # fresh each run.
-rm -rf "$WORK"
-mkdir -m 0700 "$WORK"
+#
+# A DRY RUN OR TEST SEND DOES NOT USE THE REAL RUN'S. Both used
+# $STATE/supplier-work-<date> and began with rm -rf on it, so a rehearsal
+# deleted a same-day timer run's work while it was judging; and a rehearsal
+# then kept the directory - every request's mail text and the model's answers -
+# until someone remembered to delete it. Now a rehearsal works in a fresh
+# directory removed on every way out, and keeps only the rendered digest, in
+# $FLEET_HOME/dryrun/supplier/, so there is still something to look at.
+if [ -n "$REAL" ]; then
+  WORK="$STATE/supplier-work-$STAMP"
+  rm -rf "$WORK"
+  mkdir -m 0700 "$WORK"
+else
+  PREVIEW="$(fleet_dryrun_dir supplier)" || fail "no rehearsal directory - nothing was run"
+  WORK="$PREVIEW/work"
+  mkdir -m 0700 "$WORK"
+  trap 'rm -rf "$WORK"' EXIT
+fi
 
 "$SUPPLIER" "$SMODE" --collect "$WORK" \
   || fail "cti-supplier --collect exited non-zero (check outbound 443 to Graph)"
@@ -201,7 +225,12 @@ record_seen
 record_owned
 
 if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
-  log "nothing was filed or recorded. The work is in $WORK (it holds request text - delete it when done)"
+  # The digest only: what would have been mailed. The request text, the
+  # form's answers and the model's output go with $WORK when this exits.
+  for f in digest.subject digest.html digest.txt problems.txt; do
+    if [ -f "$WORK/$f" ]; then cp "$WORK/$f" "$PREVIEW/" && chmod 0600 "$PREVIEW/$f"; fi
+  done
+  log "nothing was filed or recorded. The digest is in $PREVIEW; the request text is not kept"
 else
   rm -rf "$WORK"
 fi

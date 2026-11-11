@@ -166,7 +166,7 @@ sudo cti-agent fleet-owners check                                 # what would s
 #   copy others on an app's ticket: fleet-owners watcher add id:123456 a@example.com b@example.com  (Jira "Manage watcher list")
 #   scanner report on each ticket (off until tested, RUNBOOK 11f): sudo cti-agent cti-appreport --list-ids, then --check
 #   rehearse one ticket: cti-appreport --app-id 1234 --out-dir /tmp/report, then
-#   cti-jira --appscan-tickets <state/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]
+#   cti-jira --appscan-tickets <dryrun/appscan/appscan-tickets-DATE.json> --appscan-test 1234 --appscan-reports /tmp/report [--for-real]
 #   (files an unassigned "[TEST]" ticket; delete it in Jira and rm -rf /tmp/report afterwards)
 #   weekly comment refused with an HTML 403? find the text: cti-jira --appscan-tickets <file> --appscan-test 1234 --appscan-comment-probe CR-NNN [--for-real]  (on a [TEST] ticket only)
 #   rehearse closing a retired app's ticket: cti-jira --appscan-close-test CR-NNN [--for-real]  (only a [TEST] ticket; needs JIRA_ALLOW_CLOSE)

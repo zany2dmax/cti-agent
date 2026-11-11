@@ -93,19 +93,39 @@ MAILER="$FLEET_CODE/bin/cti-mailer"
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
 
+# One run of this lane at a time; a dry run or test send refuses while a run
+# is active instead of waiting (see fleet_lock in fleet-mode.sh).
+if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
+  fleet_lock appscan dry
+else
+  fleet_lock appscan real || fail "another run of run-appscan is still going - this one did not start"
+fi
+
+# A DRY RUN OR TEST SEND HAS ITS OWN FILES. Every per-run file below used to be
+# $STATE/appscan-*-<date>, and the run starts by deleting them - so a dry run
+# on a Friday deleted the timer run's SEEN list (what the mailbox cleanup may
+# archive), its ticket input and refs, and the scanner reports it was about to
+# attach, and then replaced its report. Now a rehearsal writes only under
+# $FLEET_HOME/dryrun/appscan/. It still reads what the real run reads.
+OUTDIR="$STATE"
+if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
+  OUTDIR="$(fleet_dryrun_dir appscan)" || fail "no rehearsal directory - nothing was run"
+  log "rehearsal: working in $OUTDIR - the real run's files in $STATE are left alone"
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
-HTML="$STATE/appscan-$STAMP.html"
-TXT="$STATE/appscan-$STAMP.txt"
-AUTHFAIL="$STATE/appscan-authfail-$STAMP.tsv"
+HTML="$OUTDIR/appscan-$STAMP.html"
+TXT="$OUTDIR/appscan-$STAMP.txt"
+AUTHFAIL="$OUTDIR/appscan-authfail-$STAMP.tsv"
 # The notices this report covers. Committed to the processed log only after a
 # real send, so the mailbox cleanup archives them once App Dev has the report
 # - never on a dry run or a test send.
-SEEN="$STATE/appscan-seen-$STAMP.json"
+SEEN="$OUTDIR/appscan-seen-$STAMP.json"
 rm -f "$SEEN"
 # One Jira ticket per application: the input cti-appscan writes, and what
 # cti-jira did with it. Both deleted first, so a stale one is never stamped.
-TICKETS="$STATE/appscan-tickets-$STAMP.json"
-TICKETREF="$STATE/appscan-tickets-ref-$STAMP.json"
+TICKETS="$OUTDIR/appscan-tickets-$STAMP.json"
+TICKETREF="$OUTDIR/appscan-tickets-ref-$STAMP.json"
 JIRA="$FLEET_CODE/bin/cti-jira"
 rm -f "$TICKETS" "$TICKETREF"
 # The scanner's own report per application, attached to the ticket when
@@ -113,13 +133,16 @@ rm -f "$TICKETS" "$TICKETREF"
 # commented (PLAN is a cti-jira preview), and deleted after cti-jira: each
 # report carries the scan account's session cookies.
 APPREPORT="$FLEET_CODE/bin/cti-appreport"
-PLAN="$STATE/appscan-tickets-plan-$STAMP.json"
-REPORTS="$STATE/appscan-reports-$STAMP"
+PLAN="$OUTDIR/appscan-tickets-plan-$STAMP.json"
+REPORTS="$OUTDIR/appscan-reports-$STAMP"
 rm -rf "$PLAN" "$REPORTS"
 # And on every way out - a timeout or SIGTERM included - plus any left by an
 # earlier run that was killed before it could clean up.
 trap 'rm -rf "$PLAN" "$REPORTS"' EXIT
-find "$STATE" -maxdepth 1 -name 'appscan-reports-*' -type d -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+# Real runs only: a rehearsal deletes nothing in state/.
+if [ "$OUTDIR" = "$STATE" ]; then
+  find "$STATE" -maxdepth 1 -name 'appscan-reports-*' -type d -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+fi
 REPORTARGS=()
 
 # Mode set BEFORE anything is written. A report naming which applications have
@@ -147,7 +170,7 @@ rm -f "$AUTHFAIL"
 # `cti-appscan --subject-only`, which re-read the mailbox and repeated every
 # Qualys WAS call - twice the API load against the rate limit, for one line -
 # and could disagree with the report if a scan landed in between.
-SUBJFILE="$STATE/appscan-subject-$STAMP.txt"
+SUBJFILE="$OUTDIR/appscan-subject-$STAMP.txt"
 rm -f "$SUBJFILE"
 # APPLICATION TICKETS ARE OFF UNLESS WAS_TICKETS=1.
 #
@@ -177,7 +200,7 @@ if [ "${WAS_TICKETS:-0}" = 1 ] && [ -x "$JIRA" ] && [ -s "$TICKETS" ]; then
   if [ -n "$DRY" ] || [ -n "$TODEV" ]; then
     # The would-be ticket text names URLs and parameters on our own
     # applications: a 0600 file, not the journal.
-    PREVIEW="$STATE/appscan-tickets-preview-$STAMP.txt"
+    PREVIEW="$OUTDIR/appscan-tickets-preview-$STAMP.txt"
     : > "$PREVIEW"; chmod 0600 "$PREVIEW"
     log "tickets: preview only - nothing will be filed or commented; would-be text in $PREVIEW"
     # A test send rehearses the attachment too: the scanner reports are

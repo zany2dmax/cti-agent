@@ -216,7 +216,8 @@ regression test.
 |---|---|
 | `NVD_API_KEY` | Free NVD key. Without it enrichment is 10x slower |
 | `FLEET_USER_AGENT` | User-Agent sent to NVD, EPSS, CISA, advisory feeds, Microsoft and the domains web check. `GRAPH_MAILBOX` is appended as the contact unless the value has its own `(...)` comment |
-| `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. **This file is mailbox cleanup's entire authority to move anything** — no entry, no move |
+| `FLEET_PROCESSED_LOG` | Where the agent records which messages it read. Defaults to `$FLEET_HOME/state/processed-messages.json`. **This file is mailbox cleanup's entire authority to move anything** — no entry, no move. A `run-digest` dry run or test send sets its own, under `dryrun/digest-<kind>/` |
+| `FLEET_LOCK_WAIT_SECONDS` | How long a real `run-digest`, `run-appscan`, `run-domains` or `run-supplier` waits for another run of its lane (the lane lock, `state/locks/<lane>.lock`) before failing (or, past a rehearsal still running, going ahead with a warning). Default 600. A dry run or test send never waits: it refuses with exit 75 |
 | `MAILBOX_SELF_MIN_AGE_HOURS` | How long the fleet's own reports stay in the inbox before cleanup archives them. Default 168 (a week); 0 archives on sight; must be less than `MAILBOX_LOOKBACK_HOURS` |
 | `MAILBOX_DIGEST_SENDERS` | The quarantine digest's sending address(es), exactly. A digest holding nothing the fleet reads goes to Deleted Items; one holding mail from Qualys or `MAILBOX_FEED_SENDERS` stays a week and the operator is alerted to release it. Blank: rule off |
 | `MAILBOX_FEED_SENDERS` | The senders the fleet reads besides Qualys (newsletters, advisory lists): `name@example.com` exactly or `@example.com` for a domain |
@@ -1284,8 +1285,8 @@ fallback), `SUPPLIER_JIRA_PROJECT` (also in `JIRA_ALLOW_CREATE`) with
 `SUPPLIER_OWNER_EMAIL`, and `SUPPLIER_BOARD_URL`. Set `SUPPLIER_MODEL` (an alias
 such as `sonnet`) and make sure `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
 is set. Then run `--dry-run` and read the digest and the items it says it would
-file (the work directory under `state/` is kept after a dry run and holds the
-request text, so delete it), then `--to-dev`, then enable the timer. The
+file (only the digest is kept, in `dryrun/supplier/`; the request text is
+removed when the dry run ends), then `--to-dev`, then enable the timer. The
 installer builds `cti-supplier` and puts the model's instructions at
 `/opt/cti-agent/agents/supplier/CLAUDE.md`, root-owned.
 
@@ -1800,9 +1801,9 @@ To see exactly what a developer would receive, file one clearly-labelled test
 ticket for a single application:
 
 ```bash
-sudo cti-agent run-appscan --dry-run     # leaves /var/lib/cti-agent/state/appscan-tickets-<date>.json
+sudo cti-agent run-appscan --dry-run     # leaves /var/lib/cti-agent/dryrun/appscan/appscan-tickets-<date>.json
 sudo cti-agent cti-appreport --app-id 1234 --out-dir /tmp/report
-T=/var/lib/cti-agent/state/appscan-tickets-$(date -u +%F).json
+T=/var/lib/cti-agent/dryrun/appscan/appscan-tickets-$(date -u +%F).json
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report --dry-run    # preview
 sudo cti-agent cti-jira --appscan-tickets $T --appscan-test 1234 --appscan-reports /tmp/report --for-real  # files it
 sudo rm -rf /tmp/report

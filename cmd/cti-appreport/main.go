@@ -429,7 +429,8 @@ func newestTicketsFile(stateDir string) (string, error) {
 	}
 	if len(names) == 0 {
 		return "", fmt.Errorf("no appscan-tickets-<date>.json in %s - has run-appscan run since "+
-			"application tickets were added? (sudo cti-agent run-appscan --dry-run writes one)", stateDir)
+			"application tickets were added? (a real run writes one there; a --dry-run writes its own under "+
+			"$FLEET_HOME/dryrun/appscan/ - pass that with --tickets)", stateDir)
 	}
 	sort.Strings(names)
 	return filepath.Join(stateDir, names[len(names)-1]), nil

@@ -152,14 +152,15 @@ A fatal step prints
 and posts an ERROR line to the board before exiting 1.
 .PP
 A dry run still does everything up to the mailer: the daily reads the
-mailbox, writes the processed-message log, calls NVD and the scanner,
-writes the findings into
-.IR memory.db ,
-and runs
+mailbox, calls NVD and the scanner, and runs
 .B cti\-jira
 in its own dry-run mode. It does not send mail, does not file or comment on
-tickets, and does not record the digest as sent, so the real run that day
-still goes out.
+tickets, does not record the digest as sent, and writes none of the real
+run's files: not the processed-message log, not
+.IR memory.db ,
+not today's report, enriched file or digest (see DRY RUNS AND THE LANE
+LOCK). The real run that day still goes out, and reports what it would have
+reported without the rehearsal.
 .PP
 .B run-digest
 never sends twice for the same day and kind, never reads the mailbox for the
@@ -319,11 +320,61 @@ The rendered digest.
 SQLite: findings, and the digests table behind the already-sent check.
 .TP
 .I state/processed\-messages.json
-Written by the daily ingest, read by mailbox cleanup.
+Written by the daily's real ingest (never a dry run's), read by mailbox cleanup.
+.TP
+.I dryrun/digest\-KIND/
+A dry run's or test send's files, replaced by the next one.
+.TP
+.I state/locks/digest\-KIND.lock
+The lane lock.
 .TP
 .I board.md
 The fleet board, appended to by
 .BR fleet\-board .
+.SH DRY RUNS AND THE LANE LOCK
+A dry run and a test send
+.RB ( \-\-to\-dev ,
+with or without
+.BR \-\-dry\-run )
+write nothing a real run reads. They work under
+.I $FLEET_HOME/dryrun/
+(0700), emptied at the start of each one; nothing in the fleet reads it.
+Its files go in
+.IR dryrun/digest\-KIND/ :
+the raw report, the enriched file, the digest and its own
+.IR processed\-messages.json ,
+so the ingest records nothing in the real processed-message log (mailbox
+cleanup's authority to archive), and
+.B enrich.py
+runs with
+.B \-\-no\-db
+so
+.I memory.db
+is not written and the next real digest still flags today's CVEs as new.
+It reads
+.I memory.db
+for those flags, and today's ticket map and
+.I products.json
+are copied in, so the preview shows what the real digest would.
+.PP
+Each run takes the lane lock,
+.I state/locks/digest\-daily.lock (or \fIstate/locks/digest\-weekly.lock\fR),
+with
+.BR flock (2).
+A dry run or test send that finds it held \- a timer run, or another
+person's rehearsal \- says which process holds it and exits 75 without doing
+anything; it never waits and never runs beside the real run. A real run
+waits for it up to
+.B FLEET_LOCK_WAIT_SECONDS
+(from
+.IR fleet.env ,
+default 600, under the unit's
+.BR TimeoutStartSec ),
+then, if another real run still holds it, fails with exit status 1, so the
+unit fails and it can be rerun; if a rehearsal still holds it, goes ahead
+with a warning, because a rehearsal writes only its own files. The
+kernel drops the lock when the process ends, however it ends, so there is
+no stale lock to clear.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -350,6 +401,10 @@ journal and the board ERROR line give the exact
 command that records it by hand; run that, not the digest. A failure to
 read the counts after the send records zeros instead, and a failed closing
 board post is only a warning.
+.TP
+.B 75
+A dry run or test send refused because another run of the lane holds
+the lane lock. Nothing was done; run it again when that run has finished.
 .SH EXAMPLES
 Rehearse today's daily, then read what it would send:
 .PP

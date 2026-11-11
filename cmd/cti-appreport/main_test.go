@@ -158,7 +158,9 @@ func TestListIDsUsesTheNewestWeeklyFile(t *testing.T) {
 
 func TestListIDsWithNoFileSaysHowToMakeOne(t *testing.T) {
 	_, err := newestTicketsFile(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "run-appscan --dry-run") {
+	// A dry run writes its tickets file under dryrun/appscan/, not here, so
+	// the hint names where it is and how to pass it.
+	if err == nil || !strings.Contains(err.Error(), "dryrun/appscan/") || !strings.Contains(err.Error(), "--tickets") {
 		t.Fatalf("err = %v", err)
 	}
 }

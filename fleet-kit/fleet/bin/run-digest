@@ -92,11 +92,63 @@ DB="$FLEET_CODE/bin/fleet-db"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say() { echo "[run-digest $(date '+%H:%M:%S')] $*"; }
-fail() { say "FAILED: $*"; [ -n "$TODEV" ] || "$BOARD" post @brief @you ERROR "run-digest $KIND failed: $*" || true; exit 1; }
+# A failed DRY run says so on the board, so the orchestrator does not read it
+# as the timer's run failing.
+fail() { say "FAILED: $*"; [ -n "$TODEV" ] || "$BOARD" post @brief @you ERROR "${DRY:+DRY RUN }run-digest $KIND failed: $*" || true; exit 1; }
 
 # Before any work: a test send with nowhere to go is a usage error.
 if [ -n "$TODEV" ] && [ -z "${FLEET_DEV_EMAIL:-}" ]; then
   say "--to-dev needs FLEET_DEV_EMAIL set in $FLEET_ENV"; exit 2
+fi
+
+# One run of this digest at a time, taken before the already-sent check so a
+# second real run waits for the first and then finds it recorded. A dry run
+# refuses while any run of it is active (see fleet_lock in fleet-mode.sh).
+if [ -n "$DRY" ]; then
+  fleet_lock "digest-$KIND" dry
+else
+  fleet_lock "digest-$KIND" real \
+    || fail "another run of the $KIND digest is still going - this one did not start"
+fi
+
+# ── A DRY RUN WRITES NOTHING THE REAL RUN READS ──────────────────────────────
+#
+# It used to share every file with the real run, and three of them decide
+# what the real run does:
+#
+#   - the processed-message log. cti-agent records every message it read, and
+#     that record is mailbox cleanup's whole authority to archive mail. A dry
+#     run therefore licensed the cleanup to file away mail that no sent digest
+#     had reported - and, if the real run then failed, mail nobody ever saw.
+#   - memory.db. enrich.py upserted the findings, so the next real digest
+#     counted every CVE the rehearsal had seen as "seen before" and its
+#     "new since the last run" section lost them.
+#   - today's raw report, enriched file and digest. A dry run after the real
+#     one replaced the record of what was sent (and the raw report the email
+#     attached) with the rehearsal's.
+#
+# So a dry run - and a test send, which is one except at the mailer - works
+# in $FLEET_HOME/dryrun/digest-<kind>/ with its own processed log and no
+# database write. It still READS what the real run reads (memory.db for the
+# novelty flags, the ticket map and the product names, copied in), so the
+# preview shows what the real digest would.
+NODB=""
+if [ -n "$DRY" ]; then
+  REAL_ENRICHED="$ENRICHED"
+  OUT="$(fleet_dryrun_dir "digest-$KIND")" || fail "no rehearsal directory - nothing was run"
+  RAW="$OUT/$(basename "$RAW")"
+  ENRICHED="$OUT/$(basename "$ENRICHED")"
+  HTML="$OUT/$(basename "$HTML")"
+  TXT="$OUT/$(basename "$TXT")"
+  export FLEET_PROCESSED_LOG="$OUT/processed-messages.json"
+  NODB="--no-db"
+  # Same names in the work directory, which is where brief.py looks for them
+  # (beside the enriched file). The weekly copies its borrowed map itself.
+  for f in "${REAL_ENRICHED%.json}-tickets.json" "$FLEET_HOME/state/products.json"; do
+    if [ -f "$f" ]; then cp "$f" "$OUT/" 2>/dev/null || true; fi
+  done
+  chmod 0600 "$OUT"/* 2>/dev/null || true
+  say "dry run: working in $OUT - the processed log, memory.db and today's real files are left alone"
 fi
 
 # Do not double-send. A duplicate 6am digest trains people to ignore it.
@@ -167,7 +219,8 @@ say "ingest: $(grep -c '^| CVE-' "$RAW" || true) CVE rows"
 # when they were first ingested, and re-enriching them would spend several
 # hundred NVD and scanner calls to recompute numbers already on disk.
 say "enrich: NVD + EPSS + KEV"
-python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
+# shellcheck disable=SC2086
+python3 "$FLEET_CODE/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" $NODB \
   || fail "enrich lane failed"
 
 fi

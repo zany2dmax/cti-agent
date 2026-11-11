@@ -75,13 +75,35 @@ MAILER="$FLEET_CODE/bin/cti-mailer"
 mkdir -p "$STATE"
 chmod 0700 "$STATE" 2>/dev/null || true
 
+# One run of this lane at a time; a dry run or test send refuses while a run
+# is active instead of waiting. Here it also keeps a rehearsal off the PoD log
+# session, which allows one reader per token: a second reader during the
+# weekly's read makes the real run hold (see fleet_lock in fleet-mode.sh).
+if [ -n "$DRY" ]; then
+  fleet_lock domains dry
+else
+  fleet_lock domains real || fail "another run of run-domains is still going - this one did not start"
+fi
+
+# A DRY RUN OR TEST SEND HAS ITS OWN FILES, under $FLEET_HOME/dryrun/domains/.
+# It used to write the real run's report, actions and ticket files for the day
+# and, with no --no-state-write equivalent, the website list
+# (state/domains-websites.json) that run-appscan's NOT SCANNED coverage check
+# reads - so a rehearsal's answer became the AppSec lane's. The baseline was
+# already left alone (--no-state-write).
+OUTDIR="$STATE"
+if [ -n "$DRY" ]; then
+  OUTDIR="$(fleet_dryrun_dir domains)" || fail "no rehearsal directory - nothing was run"
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
-HTML="$STATE/domains-$STAMP.html"
-TXT="$STATE/domains-$STAMP.txt"
-SUBJ="$STATE/domains-$STAMP.subject"
-CSV="$STATE/domains-$STAMP.csv"
-ACTIONS="$STATE/domains-$STAMP-actions.json"
-TICKET="$STATE/domains-$STAMP-ticket.json"
+HTML="$OUTDIR/domains-$STAMP.html"
+TXT="$OUTDIR/domains-$STAMP.txt"
+SUBJ="$OUTDIR/domains-$STAMP.subject"
+CSV="$OUTDIR/domains-$STAMP.csv"
+ACTIONS="$OUTDIR/domains-$STAMP-actions.json"
+TICKET="$OUTDIR/domains-$STAMP-ticket.json"
+WEBSITES="$OUTDIR/domains-websites.json"
 JIRA="$FLEET_CODE/bin/cti-jira"
 
 # Mode before content: the report lists every domain we own and which of them
@@ -101,7 +123,7 @@ NOSTATE=""
 # shellcheck disable=SC2086
 "$DOMAINS" $NOSTATE --out "$HTML" --text-out "$TXT" --subject-out "$SUBJ" \
   --csv-out "$CSV" --actions-out "$ACTIONS" --ticket-slot \
-  --websites-out "$STATE/domains-websites.json" \
+  --websites-out "$WEBSITES" \
   || fail "cti-domains exited non-zero (is DOMAINS_FILE readable by ctiagent?)"
 
 [ -s "$SUBJ" ] || fail "no subject written - refusing to send"

@@ -500,6 +500,17 @@ mails `FLEET_DEV_EMAIL` instead of the operator and posts nothing to the board
 the orchestrator reads. Unset `FLEET_DEV_EMAIL` is refused before any work in
 every case: there is no fallback to a real audience.
 
+A dry run or test send of `run-digest`, `run-appscan`, `run-domains` or
+`run-supplier` writes nothing a real run reads. Its files go under
+`$FLEET_HOME/dryrun/<lane>/`; the digest's ingest writes its own
+processed-message log there (so a rehearsal never licenses mailbox cleanup to
+archive mail) and `enrich.py` runs with `--no-db` (so `memory.db`, and the next
+digest's "new" flags, are untouched); the supplier rehearsal's request text is
+removed when it ends. Each lane also takes a lock (`state/locks/<lane>.lock`,
+`flock(2)`): a rehearsal refuses (exit 75) while any run of the lane is active,
+and a real run waits up to `FLEET_LOCK_WAIT_SECONDS` (default 600), then fails
+rather than run beside another real one, or goes ahead past a rehearsal.
+
 ### There are two outbound paths, and only one is gated
 
 `mailer.py` is the path for every digest and report, and it is gated as above.
@@ -1183,6 +1194,12 @@ nor the portal reports the effective scope.
   Every Jira write is gated (Autonomy gates, above).
 - ~~`cti-alert --dry-run` posted a real line to the board.~~ It prints the line
   it would post and posts nothing.
+- ~~A runner's `--dry-run` wrote the state its real run depends on.~~ The
+  digest's rehearsal recorded processed messages (mailbox cleanup's authority)
+  and findings in `memory.db`; the AppSec, domains and supplier rehearsals
+  deleted or replaced the day's real files and the domains website list. Dry
+  runs now write under `dryrun/<lane>/` and take the lane lock (Test sends,
+  above).
 
 **Worth fixing**
 
