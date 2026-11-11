@@ -582,8 +582,8 @@ def held_section(data):
       HELD FOR APPROVAL &mdash; {len(held)} Sev5 with no ticket</div>
     <div style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
                 color:#2d3748;margin-bottom:6px">
-      Confirmed present and known exploited, but neither on CISA KEV nor CVSS 9.0+,
-      so the scheduled run does not file it. No ticket exists for these.</div>
+      Confirmed present and known exploited, but not on CISA KEV, not CVSS 9.0+
+      and not QDS 91+, so the scheduled run does not file it. No ticket exists for these.</div>
     <table cellpadding="0" cellspacing="0" role="presentation"
            style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
       {rows}
@@ -604,8 +604,8 @@ def held_text(data):
     if not held:
         return []
     lines = [f"HELD FOR APPROVAL - {len(held)} Sev5 with no ticket", "-" * 68,
-             "  Confirmed present and known exploited, but neither on CISA KEV nor",
-             "  CVSS 9.0+, so the scheduled run does not file it."]
+             "  Confirmed present and known exploited, but not on CISA KEV, not",
+             "  CVSS 9.0+ and not QDS 91+, so the scheduled run does not file it."]
     products = products_by_cve(data)
     for h in held:
         title = f"  {h['title']}" if h.get("title") else ""
@@ -914,7 +914,7 @@ def load_products(enriched_path):
 def load_held(enriched_path):
     """CVEs cti-jira held for approval, from the same map as the tickets.
 
-    A Sev5 that is neither on KEV nor CVSS 9.0+ is not filed by the scheduled
+    A Sev5 that is not on KEV, not CVSS 9.0+ and not QDS 91+ is not filed by the scheduled
     run. Without this the digest said nothing, and the reader could not tell a
     ticket not filed from a ticket not wanted.
     """

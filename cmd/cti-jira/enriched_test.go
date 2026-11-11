@@ -328,3 +328,28 @@ func TestTheMailSourceReachesTheFinding(t *testing.T) {
 		}
 	}
 }
+
+// A finding chosen only for its QDS is filed on today's score: the lookup's
+// QDS replaces the morning report's, and one that has dropped to 90 or below
+// is not filed.
+func TestAHighQDSIsTicketedOnTodaysScore(t *testing.T) {
+	r := row("CVE-9", "Sev3", "PRESENT", 0, 2)
+	r.QDS = 95
+	fill := func(score int) hostFiller {
+		return func(_ context.Context, cve string) (vulnlookup.Result, error) {
+			return vulnlookup.Result{CVE: cve, Status: vulnlookup.StatusPresent,
+				Hosts: []string{"a.example.com"}, HostCount: 1, MaxScore: score}, nil
+		}
+	}
+	got := selectForTicketing(context.Background(), []enrichedRow{r}, fill(97), quiet)
+	if len(got) != 1 || got[0].QDS != 97 {
+		t.Fatalf("got %+v, want one finding at today's QDS 97", got)
+	}
+	if got := selectForTicketing(context.Background(), []enrichedRow{r}, fill(88), quiet); len(got) != 0 {
+		t.Errorf("filed at today's QDS 88: %+v", got)
+	}
+	r.QDS = 90
+	if got := selectForTicketing(context.Background(), []enrichedRow{r}, fill(99), quiet); len(got) != 0 {
+		t.Errorf("a Sev3 at QDS 90 in the morning report was selected: %+v", got)
+	}
+}

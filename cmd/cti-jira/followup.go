@@ -79,6 +79,10 @@ func applyLookup(f *jira.Finding, res vulnlookup.Result) {
 		f.HostCount = res.HostCount
 	}
 	f.CountIsFloor = res.HostCountIsFloor
+	if res.MaxScore > 0 {
+		// Today's QDS, not the morning report's.
+		f.QDS = res.MaxScore
+	}
 	if len(res.ExternalIDs) > 0 {
 		f.QIDs = res.ExternalIDs
 		f.QQL = "vulnerabilities.vulnerability.qid:[" + strings.Join(f.QIDs, ",") + "]"

@@ -50,7 +50,10 @@ type Finding struct {
 	// Product is what the CVE is about - "Google Chrome", "PHP" - from the
 	// CISA KEV catalog or NVD's CPE data, named by enrich.py. Empty when
 	// neither source had one; nothing guesses it.
-	Product   string
+	Product string
+	// QDS is the highest Qualys Detection Score among the CVE's detections,
+	// 0 when unknown. Above HighQDS it earns a ticket on its own.
+	QDS       int
 	QQL       string // the Qualys query that reproduces the host list
 	FirstSeen time.Time
 
@@ -121,6 +124,9 @@ func Labels(f Finding) []string {
 	if IsCriticalCVSS(f) {
 		out = append(out, "cvss-critical")
 	}
+	if IsHighQDS(f) {
+		out = append(out, "qds-high")
+	}
 	out = append(out, fmt.Sprintf("sev%d", f.Severity))
 	if f.UnverifiedSource {
 		out = append(out, UnverifiedSourceLabel)
@@ -176,6 +182,9 @@ func Summary(f Finding, now time.Time) string {
 		// The reason it was filed, when KEV is not: a queue reader should not
 		// have to open it to see why a "Sev4" is a ticket.
 		b.WriteString(", CVSS " + strconv.FormatFloat(v, 'f', -1, 64))
+	}
+	if IsHighQDS(f) {
+		b.WriteString(", QDS " + strconv.Itoa(f.QDS))
 	}
 	if t := strings.TrimSpace(f.Title); t != "" {
 		b.WriteString(" - " + t)
@@ -237,6 +246,9 @@ func Description(f Finding, now time.Time, csvName string) string {
 	b.WriteString(row("Severity", fmt.Sprintf("Sev%d", f.Severity)))
 	if f.CVSS != "" {
 		b.WriteString(row("CVSS", f.CVSS))
+	}
+	if f.QDS > 0 {
+		b.WriteString(row("QDS", strconv.Itoa(f.QDS)))
 	}
 
 	hostCount := fmt.Sprintf("%d", f.Count())
@@ -392,8 +404,17 @@ func IsCriticalCVSS(f Finding) bool {
 	return ok && v >= CriticalCVSS
 }
 
-// ShouldFile decides whether a finding earns a ticket: on CISA KEV, Sev5, or
-// a CVSS base score of 9.0 or more.
+// HighQDS is the Qualys Detection Score above which a confirmed detection
+// earns a ticket on its own, KEV or not (decided 2026-11-11). QDS is the
+// scanner's own 1-100 rating of the detection on our hosts, so it weighs
+// exploitation evidence and the asset, not only the CVE's base score.
+const HighQDS = 90
+
+// IsHighQDS reports a QDS above HighQDS: 91 and up.
+func IsHighQDS(f Finding) bool { return f.QDS > HighQDS }
+
+// ShouldFile decides whether a finding earns a ticket: on CISA KEV, Sev5, a
+// CVSS base score of 9.0 or more, or a QDS above 90.
 //
 // The CVSS rule exists because KEV-or-Sev5 missed CVE-2025-27918, a CVSS 9.8
 // in a remote-access tool present on three workstations, for two weeks: not
@@ -405,14 +426,17 @@ func IsCriticalCVSS(f Finding) bool {
 // how busy IT is. Volume control is IdempotencyLabel's job - one ticket per
 // CVE, forever - and mixing the two would mean a genuine new finding could be
 // suppressed because the week was busy.
-func ShouldFile(f Finding) bool { return f.KEV || f.Severity >= 5 || IsCriticalCVSS(f) }
+func ShouldFile(f Finding) bool {
+	return f.KEV || f.Severity >= 5 || IsCriticalCVSS(f) || IsHighQDS(f)
+}
 
 // NeedsApproval reports whether a human must confirm before this is filed.
 //
 // KEV entries carry an external deadline, and a CVSS 9.0+ is critical by the
 // standard's own measure, so for both delay is the larger risk and they go
-// automatically, unassigned for triage. What is left - a non-KEV Sev5 below
-// CVSS 9.0, which is the fleet's own scoring rather than an external one -
-// drafts and waits, which matches the fleet's standing rule: auto-send
-// scheduled reports, gate everything else.
-func NeedsApproval(f Finding) bool { return !f.KEV && !IsCriticalCVSS(f) }
+// automatically, unassigned for triage. So does a QDS above 90: the scanner's
+// own score for the detection on our hosts, not the fleet's judgement. What is
+// left - a non-KEV Sev5 below CVSS 9.0 and QDS 91, which is the fleet's own
+// scoring rather than an external one - drafts and waits, which matches the
+// fleet's standing rule: auto-send scheduled reports, gate everything else.
+func NeedsApproval(f Finding) bool { return !f.KEV && !IsCriticalCVSS(f) && !IsHighQDS(f) }

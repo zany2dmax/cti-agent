@@ -480,3 +480,28 @@ func TestAnUnverifiedSourceIsLabelledAndSaidInTheTicket(t *testing.T) {
 		t.Error("a trusted finding was labelled unverified")
 	}
 }
+
+// QDS above 90 is filed automatically, KEV or not (decided 2026-11-11).
+func TestAHighQDSIsFiledWithoutApproval(t *testing.T) {
+	f := Finding{CVE: "CVE-2026-0001", Severity: 4, CVSS: "7.5", QDS: 91, HostCount: 3}
+	if !ShouldFile(f) || NeedsApproval(f) {
+		t.Errorf("QDS 91: ShouldFile %v, NeedsApproval %v", ShouldFile(f), NeedsApproval(f))
+	}
+	if s := Summary(f, now); !strings.Contains(s, ", QDS 91") {
+		t.Errorf("the summary does not say why it was filed: %q", s)
+	}
+	if !strings.Contains(strings.Join(Labels(f), ","), "qds-high") {
+		t.Errorf("labels %v", Labels(f))
+	}
+	if d := Description(f, now, "h.csv"); !strings.Contains(d, "|QDS|91|") {
+		t.Errorf("no QDS row:\n%s", d)
+	}
+	f.QDS = 90
+	if ShouldFile(f) {
+		t.Error("QDS 90 is not above 90 and must not file on its own")
+	}
+	f.Severity = 5
+	if !NeedsApproval(f) {
+		t.Error("a Sev5 at QDS 90 still waits for approval")
+	}
+}

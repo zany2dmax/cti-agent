@@ -14,6 +14,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/cti"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/kev"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
 	"github.com/zany2dmax/cti-agent/internal/report"
@@ -227,7 +228,20 @@ func main() {
 			"every CVE found, including any the monthly synopsis covers",
 			safelog.Line(err.Error()))
 	}
-	keep, held := patchtuesday.Held(all, manifests)
+	// KEV is never held (decided 2026-11-11). The synopsis carries no tickets,
+	// and the hold runs before the lookup, so a held CVE could never earn
+	// one - including a Microsoft CVE CISA adds to KEV after the synopsis
+	// went out. An unreadable catalog holds as before, and says so.
+	onKEV, kerr := kev.LoadCatalog(os.Getenv("FLEET_HOME"))
+	if kerr != nil {
+		log.Printf("WARNING: KEV catalog unreadable (%s); Patch Tuesday CVEs on "+
+			"KEV are held with the rest today", safelog.Line(kerr.Error()))
+	}
+	keep, held := patchtuesday.HeldExcept(all, manifests, func(c string) bool { return onKEV[c] })
+	if n := passedKEV(all, held, manifests, onKEV); n > 0 {
+		log.Printf("reporting %d Patch Tuesday CVE(s) on CISA KEV despite the "+
+			"synopsis: KEV is looked up and ticketed every day", n)
+	}
 	if len(held) > 0 {
 		// #nosec G706 -- the taint analysis is right that `held` derives from a
 		// file path read out of the environment, and wrong that anything
@@ -380,4 +394,20 @@ func trustedSource(msg graph.Message, feed []string) bool {
 	}
 	ok, _ := msg.VouchedFor()
 	return ok
+}
+
+// passedKEV counts the CVEs a sent synopsis covered that were reported anyway
+// because they are on KEV, for the log line.
+func passedKEV(all []string, held map[string]string, manifests []patchtuesday.Manifest, onKEV map[string]bool) int {
+	if len(onKEV) == 0 {
+		return 0
+	}
+	_, wouldHold := patchtuesday.Held(all, manifests)
+	n := 0
+	for c := range wouldHold {
+		if _, still := held[c]; !still {
+			n++
+		}
+	}
+	return n
 }

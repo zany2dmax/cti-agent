@@ -189,6 +189,15 @@ func RecentManifests(home string, now time.Time) ([]Manifest, error) {
 // that covered it, so the caller can say which email to go and read instead of
 // just announcing that something was removed.
 func Held(cves []string, manifests []Manifest) (keep []string, held map[string]string) {
+	return HeldExcept(cves, manifests, nil)
+}
+
+// HeldExcept is Held, except that a CVE for which exempt returns true is
+// never held: it is reported, looked up and can be ticketed like any other.
+// The daily passes CISA KEV here (decided 2026-11-11), so a Microsoft CVE
+// that is exploited - or is added to KEV after the synopsis went out - still
+// reaches the scanner lookup and a ticket. nil exempts nothing.
+func HeldExcept(cves []string, manifests []Manifest, exempt func(string) bool) (keep []string, held map[string]string) {
 	held = map[string]string{}
 	covered := map[string]string{}
 	for _, m := range manifests {
@@ -202,7 +211,8 @@ func Held(cves []string, manifests []Manifest) (keep []string, held map[string]s
 		}
 	}
 	for _, c := range cves {
-		if month, ok := covered[strings.ToUpper(strings.TrimSpace(c))]; ok {
+		if month, ok := covered[strings.ToUpper(strings.TrimSpace(c))]; ok &&
+			(exempt == nil || !exempt(strings.ToUpper(strings.TrimSpace(c)))) {
 			held[c] = month
 			continue
 		}

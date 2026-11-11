@@ -313,3 +313,25 @@ func TestAnUnreadableManifestIsReportedAndDecidesNothing(t *testing.T) {
 		t.Errorf("held = %v; the corrupt file must decide nothing either way", held)
 	}
 }
+
+// KEV is never held (decided 2026-11-11): the synopsis files no tickets, and
+// a held CVE is never looked up, so one CISA adds to KEV after the synopsis
+// went out would otherwise never be ticketed.
+func TestAnExemptCVEIsNeverHeld(t *testing.T) {
+	m := Manifest{Month: "2026-11", Sent: true,
+		CVEs: []string{"CVE-2026-1111", "cve-2026-2222"}}
+	found := []string{"CVE-2026-1111", "CVE-2026-2222", "CVE-2026-3333"}
+	kevSet := map[string]bool{"CVE-2026-2222": true}
+
+	keep, held := HeldExcept(found, []Manifest{m}, func(c string) bool { return kevSet[c] })
+	if strings.Join(keep, ",") != "CVE-2026-2222,CVE-2026-3333" {
+		t.Errorf("keep = %v, want the KEV CVE and the uncovered one", keep)
+	}
+	if len(held) != 1 || held["CVE-2026-1111"] != "2026-11" {
+		t.Errorf("held = %v", held)
+	}
+	// nil exempts nothing: Held's behaviour.
+	if _, h := HeldExcept(found, []Manifest{m}, nil); len(h) != 2 {
+		t.Errorf("nil exempt held %v", h)
+	}
+}

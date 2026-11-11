@@ -36,6 +36,7 @@ type enrichedRow struct {
 	Priority  string `json:"priority"` // "Sev5".."Sev1"
 	QIDs      string `json:"qids"`     // comma-separated
 	HostCount int    `json:"host_count"`
+	QDS       int    `json:"qualys_score"` // the morning report's max QDS
 	Status    string `json:"status"`
 	Published string `json:"published"`
 	LastSeen  string `json:"last_seen"`
@@ -144,6 +145,7 @@ func (r enrichedRow) toFinding() jira.Finding {
 		CVSS:      asText(r.CVSS),
 		Title:     strings.TrimSpace(r.KEVName),
 		Product:   strings.TrimSpace(r.Product),
+		QDS:       r.QDS,
 		HostCount: r.HostCount,
 		// Only the exact word. "" (not judged) labels nothing.
 		UnverifiedSource: strings.EqualFold(strings.TrimSpace(r.MailSource), "unverified"),
@@ -226,6 +228,13 @@ func selectForTicketing(ctx context.Context, rows []enrichedRow, fill hostFiller
 		// two and the one the host names came from. Shared with the
 		// follow-up pass, so both compare a ticket on the same numbers.
 		applyLookup(&f, res)
+		// A finding chosen only for its QDS is checked again on today's
+		// score: one that has dropped to 90 or below since the morning
+		// report no longer qualifies.
+		if !jira.ShouldFile(f) {
+			warn("%s qualified on QDS but the scanner now scores it %d - not filed", f.CVE, f.QDS)
+			continue
+		}
 		out = append(out, f)
 	}
 	// Worst first, so the biggest exposure is filed (and logged) first.
@@ -262,7 +271,7 @@ type TicketRef struct {
 
 // HeldCVE is a CVE that qualified for a ticket but is waiting for a person.
 //
-// A Sev5 that is neither on KEV nor CVSS 9.0+ is the fleet's own judgement, so
+// A Sev5 that is not on KEV, not CVSS 9.0+ and not QDS 91+ is the fleet's own judgement, so
 // it is not filed by the scheduled run. Its only trace used to be one journal
 // line, and nobody reading the digest knew a ticket had not been opened
 // (CVE-2026-111497, 2026-10-27). The digest lists these so the person can say

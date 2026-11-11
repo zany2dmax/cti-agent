@@ -142,6 +142,23 @@ every owner email (see Added).
   itself says the scan finished is treated this way; cancelled, timed-out and
   failed-login scans are still held.
 
+- **Tickets for any detection with a Qualys Detection Score above 90.** The
+  daily now files a Jira ticket for a confirmed-present CVE whose QDS is 91 or
+  more, whether or not it is on CISA KEV or rated CVSS 9.0+, and files it
+  automatically like those (no `--approve`). The morning report's QDS selects
+  it and the fresh scanner lookup's QDS decides, so one that has dropped to 90
+  or below is not filed. The ticket carries the label `qds-high`, "QDS 95" in
+  the summary and a QDS row in the body. A Sev5 below all three bars is still
+  held for approval, and the digest's HELD FOR APPROVAL text says so.
+- **Patch Tuesday CVEs on CISA KEV are no longer held back from the daily.**
+  Once the monthly synopsis is sent, the daily holds that release's CVEs back,
+  and a held CVE was never looked up, so it could never be ticketed - including
+  a Microsoft CVE that CISA added to KEV after the synopsis went out. KEV CVEs
+  are now reported, looked up and ticketed every day; the rest of the release
+  stays held. The KEV list is the catalog `enrich.py` keeps in
+  `state/kev-cache.json`; if it cannot be read, the daily holds as before and
+  logs a WARNING. The Patch Tuesday lane itself still files no tickets.
+
 ### Fixed
 
 - **A held owner report names the real reason.** A scan whose notice said only

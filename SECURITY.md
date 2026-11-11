@@ -558,7 +558,7 @@ comment is refused. `--appscan-close-test` closes only a `cti-agent-test` ticket
 stopped new tickets only; comments, CSV attachments and stored exposure
 properties went ahead. Every write is gated now, so with the gate closed the
 daily follow-up and the domains lane's lock-down ticket run read-only. The
-lanes that do write - `run-digest` (one ticket per KEV, Sev5 or CVSS 9.0+ CVE) and
+lanes that do write - `run-digest` (one ticket per KEV, Sev5, CVSS 9.0+ or QDS 91+ CVE) and
 `run-domains` (one DNS lock-down ticket per run, commented on only when the
 list changes) - are timer-owned and not on the orchestrator's grant.
 

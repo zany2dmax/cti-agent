@@ -771,11 +771,11 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	//
 	// --approve is the person saying so, and it is a FLAG rather than a
 	// config setting on purpose: the scheduled run in run-digest does not
-	// pass it, so the automatic path only ever files KEV and CVSS 9.0+. Putting
+	// pass it, so the automatic path only ever files KEV, CVSS 9.0+ and QDS 91+. Putting
 	// this in fleet.env would make "the fleet decided to file this" a thing
 	// that happens at 10:00 with nobody watching.
 	if jira.NeedsApproval(f) && !approve {
-		logf("%s is Sev5 but neither on KEV nor CVSS 9.0+ - held for approval "+
+		logf("%s is Sev5 but not on KEV, not CVSS 9.0+ and not QDS 91+ - held for approval "+
 			"(re-run with --approve to file it)", f.CVE)
 		return TicketRef{Held: true, CVE: f.CVE, Hosts: f.Count(), Summary: f.Title}, nil
 	}

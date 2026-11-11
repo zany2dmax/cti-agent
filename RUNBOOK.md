@@ -851,15 +851,28 @@ cannot catch.
 file and writes nothing. A dry run that quietly filed real tickets would be
 the September dropped-`--dry-run` incident again, with a longer cleanup.
 
-What gets a ticket: a finding that is **KEV, Sev5, or CVSS 9.0 or more** *and* **PRESENT** in the
+What gets a ticket: a finding that is **KEV, Sev5, CVSS 9.0 or more, or QDS above 90** *and* **PRESENT** in the
 estate. Not-present and unknown-coverage findings are skipped — a ticket for a
 CVE the scanner cannot find carries no host list, which is the thing that makes
 a ticket useless. A CVSS base score of 9.0 or more (CVSS's own Critical band)
 files whether or not the CVE is on KEV: a CVSS 9.8 with low EPSS ranks Sev4
 and would otherwise get a digest line and no ticket. Those tickets carry the
 label `cvss-critical` and "CVSS 9.8" (the score) in the summary, and are
-unassigned for triage. A Sev5 that is not on KEV and is below CVSS 9.0 is
+unassigned for triage. A Qualys Detection Score above 90 (91 and up) files the
+same way, KEV or not: the scanner's own rating of the detection on our hosts.
+The morning report's QDS picks the finding and the fresh lookup's QDS decides;
+those tickets carry the label `qds-high`, "QDS 95" in the summary and a QDS row
+in the body. A Sev5 that is not on KEV, below CVSS 9.0 and at QDS 90 or less is
 reported but held for approval rather than filed.
+
+**Patch Tuesday CVEs on KEV are always looked up.** Once a month's synopsis is
+sent, the daily holds that release's Microsoft CVEs back (they are in the
+monthly email), and a held CVE is not looked up, so it can never be ticketed.
+CVEs on CISA KEV are the exception: they are reported, looked up and ticketed
+every day, including one CISA adds to KEV after the synopsis went out. The KEV
+list is the catalog `enrich.py` keeps in `state/kev-cache.json`; if it cannot be
+read, the daily holds as before and logs a WARNING. The Patch Tuesday lane
+itself files no tickets.
 
 Host names come from a fresh Qualys lookup, not from the enriched file — that
 file carries only a ten-host sample. Only the selected CVEs are looked up, so
@@ -886,8 +899,8 @@ sudo cti-agent cti-jira --from-enriched /var/lib/cti-agent/state/enriched-$(date
 `--dry-run` reports what it would file and writes nothing. Use `--for-real`
 instead once the list looks right.
 
-**KEV and CVSS 9.0+ findings file automatically; a Sev5 that is neither is
-held.** The reason is that a KEV entry carries an external deadline and a
+**KEV, CVSS 9.0+ and QDS 91+ findings file automatically; a Sev5 that is none
+of them is held.** The reason is that a KEV entry carries an external deadline and a
 CVSS 9.0+ is critical by the standard's own measure (NVD's score, or the
 CNA's when NVD has none), so delay is the larger risk,
 whereas a Sev5 the fleet scored itself is a judgement call and
@@ -900,7 +913,7 @@ sudo cti-agent cti-jira --from-enriched <file> --for-real --approve
 
 `--approve` is a command-line flag and not a `fleet.env` setting on purpose:
 `run-digest` never passes it, so the scheduled 06:00 run can only ever file
-KEV and CVSS 9.0+ entries. Making it configuration would turn "the fleet decided to file
+KEV, CVSS 9.0+ and QDS 91+ entries. Making it configuration would turn "the fleet decided to file
 this" into something that happens overnight with nobody watching.
 
 **A held CVE is named in the daily.** The digest carries a "HELD FOR APPROVAL"
