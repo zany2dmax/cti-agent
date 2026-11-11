@@ -7,6 +7,20 @@ is real, not before. Finished work moves out of this file into
 [CHANGELOG.md](CHANGELOG.md).
 
 - More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
+- **Compromise assessment cross-check lane (research).** A consulting firm
+  sends a draft compromise assessment before a recurring review meeting. The
+  first one was a posture report (many numbered categories, no conclusion, no
+  indicators section), so the useful lane is a pre-meeting brief that checks
+  the report's claims against what the fleet already knows: scan coverage and
+  open exploited CVEs (`cti-vmscan`, `cti-kev`), domain and mail-authentication
+  posture (`cti-domains`), web-application findings (`cti-appscan`) and patch
+  status. Research first: how the report arrives (an encrypted PDF, the
+  password in a second email, so it must be read by a person or a local tool,
+  never by the mailbox lane), whether its tables can be read reliably (icons
+  and chart values were lost in text extraction), and which questions come up
+  every time (counts that disagree between pages, findings with no follow-up).
+  Never ingest the report into a tracked file; the brief names no hosts or
+  users.
 - **Interface work** (the full reasoning, with the current gaps, is in
   [INTERFACES.md](INTERFACES.md); build each when a second implementation is
   real, not before):
