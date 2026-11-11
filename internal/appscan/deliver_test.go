@@ -166,6 +166,7 @@ func TestRedactReportRefuses(t *testing.T) {
 }
 
 func TestRenderOwnerMail(t *testing.T) {
+	t.Setenv("FLEET_ORG", "CR Agent Fleet")
 	d := Delivery{App: `<script>Shop</script>`, Finished: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
 		AuthLabel: "unauthenticated scan", Open: Counts{Urgent: 2, Medium: 1}, ScanCounts: Counts{Crit: 1}}
 	m := RenderOwnerMail(d, "shop-scan-report-2026-11-02.html", "")
@@ -177,7 +178,7 @@ func TestRenderOwnerMail(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if !strings.HasPrefix(m.Subject, "Web application scan results: <script>Shop</script>") {
+	if !strings.HasPrefix(m.Subject, "CR Web Application Scan Results: <script>Shop</script>") {
 		t.Errorf("subject %q", m.Subject)
 	}
 	m = RenderOwnerMail(Delivery{App: "Listed", NoNotice: true, LaunchOnly: true,
@@ -204,7 +205,7 @@ func TestTheOwnerMailLooksLikeTheFleetsOtherEmails(t *testing.T) {
 	for _, want := range []string{
 		"background:#12203a", // the navy header band
 		">CR</div>",          // the org label in it
-		"Web application scan results",
+		"CR Web Application Scan Results",
 		"max-width:640px", "background:#eef1f5", // the same card on the same page
 		"border-left:4px solid #b3001b",                      // red lead: something is Urgent
 		"URGENT", "CRITICAL", "SERIOUS", "MEDIUM", "MINIMAL", // the severity tiles
@@ -277,5 +278,19 @@ func TestOwnerMailNamesTheURLScanned(t *testing.T) {
 	}
 	if m2 := RenderOwnerMail(Delivery{App: "Shop"}, "shop.html", ""); strings.Contains(m2.HTML, " at <code") {
 		t.Error("an empty URL left a dangling 'at'")
+	}
+}
+
+func TestTheScanResultsTitleTakesTheOrganisationWithoutTheProductName(t *testing.T) {
+	for in, want := range map[string]string{
+		"CR Agent Fleet": "CR Web Application Scan Results",
+		"CR":             "CR Web Application Scan Results",
+		"Security":       "Security Web Application Scan Results",
+		"Agent Fleet":    "Web Application Scan Results",
+		"":               "Web Application Scan Results",
+	} {
+		if got := scanResultsTitle(in); got != want {
+			t.Errorf("scanResultsTitle(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

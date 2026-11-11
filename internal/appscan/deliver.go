@@ -302,6 +302,18 @@ func RedactReport(zipped []byte) (name string, body []byte, err error) {
 	return "report.zip", buf.Bytes(), nil
 }
 
+// scanResultsTitle is the owner email's title, and the front of its subject:
+// "<ORG> Web Application Scan Results". FLEET_ORG is the organisation plus the
+// product ("CR Agent Fleet") and the header band above already says that in
+// full, so the title takes the organisation alone.
+func scanResultsTitle(org string) string {
+	org = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(org), "Agent Fleet"))
+	if org == "" {
+		return "Web Application Scan Results"
+	}
+	return org + " Web Application Scan Results"
+}
+
 // OwnerMail is one application's covering email.
 type OwnerMail struct {
 	Subject string
@@ -318,7 +330,8 @@ type OwnerMail struct {
 // often outside the company, and a bare paragraph from an unknown sender is
 // what gets reported as phishing.
 func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
-	subj := "Web application scan results: " + oneLineName(d.App)
+	title := scanResultsTitle(orgName())
+	subj := title + ": " + oneLineName(d.App)
 	finished := "finished recently"
 	banner := oneLineName(d.App)
 	if !d.Finished.IsZero() {
@@ -351,7 +364,7 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	}
 
 	var b strings.Builder
-	emailkit.Open(&b, subj, org, "Web application scan results", banner)
+	emailkit.Open(&b, subj, org, title, banner)
 	at := ""
 	if u := strings.TrimSpace(d.URL); u != "" {
 		at = fmt.Sprintf(` at <code style="font-family:%s">%s</code>`, emailkit.Mono, e(u))
