@@ -1,6 +1,6 @@
 .TH FLEET-TRACE 1 "2026-11-08" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
-fleet-trace \- keep and read a record of what each heartbeat did
+fleet-trace \- keep and read a record of what each heartbeat did, and what each model call cost
 .SH SYNOPSIS
 .B fleet\-trace show
 .RI [ FILE " | " \fB\-\-last\fR ]
@@ -14,6 +14,11 @@ fleet-trace \- keep and read a record of what each heartbeat did
 .I N
 .br
 .B fleet\-trace init
+.br
+.B fleet\-trace unwrap \-\-result
+.I FILE
+.RB [ \-\-trace
+.IR FILE ]
 .br
 .B fleet\-trace tee \-\-out
 .I FILE
@@ -64,7 +69,9 @@ terminal shows.
 .BR show " [\fIFILE\fR | " \-\-last "] [" \-\-full ]
 Print one beat as a timeline. With no argument, or
 .BR \-\-last ,
-the newest trace. A
+the newest heartbeat; name a
+.B supplier\-
+trace to see one of those. A
 .I FILE
 without a slash is looked for in the trace directory. Tool results are shown
 as a size and ok or ERROR; with
@@ -72,9 +79,12 @@ as a size and ok or ERROR; with
 their text is printed as well, sanitized, up to 4000 characters each.
 .TP
 .BR list " [" \-n " \fIN\fR]"
-One line per beat, newest first: the trace's name and size, ok or ERROR,
-turns, tool calls denied, and cost. Default 10; 0 lists all. A trace with no
-result line (the beat was killed) shows
+One line per heartbeat or supplier run, newest first by the time in the name:
+the trace's name and size, ok or ERROR, model calls, turns, tool calls denied,
+and cost (a supplier run's is the sum of its calls). A last line gives the
+total for the rows listed, and per lane. Default 10; 0 lists all, which is the
+fleet's model spend for as long as traces are kept. A trace with no result line
+(the beat was killed) shows
 .BR none .
 .TP
 .BI "prune \-\-days " N
@@ -82,6 +92,8 @@ Delete traces older than
 .I N
 days. Only files named
 .BI checkin\- YYYYMMDD T HHMMSS .jsonl
+or
+.BI supplier\- YYYYMMDD T HHMMSS .jsonl
 in the trace directory are touched, never through a link.
 .B run\-checkin
 runs it after every beat with
@@ -119,6 +131,25 @@ megabytes (default 20) with a
 .B truncated
 marker; the reading does not. A trace that cannot be written stops the
 trace, not the reading, so the beat is never cut off by a full disk.
+.TP
+.BI "unwrap \-\-result " FILE " \fR[\fB\-\-trace \fIFILE\fR]"
+Read one
+.B claude \-p \-\-output\-format json
+reply on standard input and write the model's answer to
+.B \-\-result
+(created 0600, refused if it exists): the same text the CLI's text mode
+prints.
+.BR run\-supplier (1)
+uses it for each request it judges. With
+.BR \-\-trace ,
+which must be named
+.BI supplier\- YYYYMMDD T HHMMSS .jsonl\fR,
+the call's cost is appended to that trace (created 0600 with a header line,
+never through a link): the turns, duration, token counts, cost and model
+names, never the answer, which discusses untrusted supplier mail. The cost is
+kept even for a failed call, which is still billed; a trace that cannot be
+written loses the record, not the answer. Exits 1 when the reply is not a JSON
+result or holds no usable answer.
 .SH ENVIRONMENT
 .TP
 .B FLEET_HOME

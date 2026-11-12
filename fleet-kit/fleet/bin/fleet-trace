@@ -1,5 +1,6 @@
 #!/usr/bin/python3 -sE
-"""fleet-trace - keep and read a record of what each heartbeat did.
+"""fleet-trace - keep and read a record of what each heartbeat did, and what
+each model call in the fleet cost.
 
   fleet-trace init                    create the trace directory (0700)
   fleet-trace tee --out FILE --plain FILE [--max-mb N]
@@ -7,9 +8,15 @@
                                       every line in --out, print a timeline for
                                       the journal, write the beat's plain text
                                       (what cti-budget classifies) to --plain
+  fleet-trace unwrap --result FILE [--trace FILE]
+                                      read one `claude -p --output-format json`
+                                      reply on stdin: write the model's answer
+                                      to --result, and add what the call cost
+                                      (never its text) to --trace
   fleet-trace show [FILE | --last] [--full]
                                       print one beat as a timeline
-  fleet-trace list [-n N]             the latest beats, one line each
+  fleet-trace list [-n N]             the latest traces, one line each, with
+                                      what they cost and a total
   fleet-trace prune --days N          delete traces older than N days
 
 Traces live in $FLEET_HOME/state/traces, 0600 in a 0700 directory. A trace
@@ -26,19 +33,31 @@ classifier, and an advisory that mentions billing, or a beat that used 4290
 tokens, would read as a hold. So --plain gets exactly what text mode printed:
 lines that are not JSON (stderr), API error messages, and the result text.
 
+Why unwrap exists. The heartbeat is not the only lane that calls Claude:
+run-supplier shows each new supplier request to a no-tools model. It used text
+mode, so what those calls cost was recorded nowhere and `list` showed the
+heartbeat's spend as if it were the fleet's. unwrap lets the lane ask for JSON,
+hands the lane the same answer text mode gave, and keeps the cost in a
+supplier-<timestamp>.jsonl trace - usage and cost only, because the answer
+talks about untrusted supplier mail and the cost is all `list` needs.
+
 This program never stops reading stdin. If it exited early, claude would die
 of SIGPIPE in the middle of a beat; so a failure to write the trace stops the
 trace, not the reading.
 """
 import json
+import math
 import os
 import re
+import stat
 import sys
 import time
 
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 TRACE_DIR = os.path.join(FLEET_HOME, "state", "traces")
-NAME = re.compile(r"^checkin-\d{8}T\d{6}(-\d+)?\.jsonl$")
+# checkin- is a heartbeat; supplier- is one run of the supplier lane.
+NAME = re.compile(r"^(checkin|supplier)-(\d{8}T\d{6})(-\d+)?\.jsonl$")
+UNITS = ("checkin", "supplier")
 
 # Untrusted text reaches the operator's terminal through `show`. Anything that
 # is not printable - ANSI escapes above all, which can rewrite what the screen
@@ -328,17 +347,20 @@ def cmd_tee(args):
     sys.exit(1 if errors else 0)
 
 
-def _traces():
+def _traces(unit=None):
+    """Every trace, oldest first by the time in its name (not by name, which
+    would put every heartbeat before every supplier run)."""
     try:
         names = os.listdir(TRACE_DIR)
     except OSError:
         return []
     out = []
     for n in names:
+        m = NAME.match(n)
         p = os.path.join(TRACE_DIR, n)
-        if NAME.match(n) and os.path.isfile(p) and not os.path.islink(p):
-            out.append(p)
-    return sorted(out)
+        if m and (unit is None or m.group(1) == unit) and os.path.isfile(p) and not os.path.islink(p):
+            out.append((m.group(2), m.group(3) or "", n, p))
+    return [p for *_, p in sorted(out)]
 
 
 def _events(path):
@@ -349,11 +371,97 @@ def _events(path):
                 yield ev
 
 
+# What unwrap keeps of a reply: the numbers, never the text.
+_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+               "cache_creation_input_tokens")
+_RESULT_KEYS = ("subtype", "is_error", "num_turns", "duration_ms", "total_cost_usd")
+
+
+def _cost_only(ev):
+    out = {"type": "result"}
+    for k in _RESULT_KEYS:
+        v = ev.get(k)
+        if isinstance(v, (bool, int, float)) or (k == "subtype" and isinstance(v, str)):
+            out[k] = clean(v, 40) if k == "subtype" else v
+    u = ev.get("usage")
+    if isinstance(u, dict):
+        out["usage"] = {k: u[k] for k in _USAGE_KEYS
+                        if isinstance(u.get(k), int) and not isinstance(u.get(k), bool)}
+    models = ev.get("modelUsage")
+    if isinstance(models, dict):
+        out["models"] = sorted(clean(m, 80) for m in models)[:5]
+    return out
+
+
+def _append(path, ev, unit):
+    """Add one line to a trace: created 0600 with its header the first time,
+    appended after that, never through a link."""
+    # O_NONBLOCK: a FIFO planted at the path must not hang the lane.
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
+        first = True
+    except FileExistsError:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | nofollow)
+        first = False
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(0, "not a regular file")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        if first:
+            f.write(json.dumps({"type": "fleet_trace", "version": 1, "unit": unit,
+                                "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}) + "\n")
+        f.write(json.dumps(ev) + "\n")
+
+
+def cmd_unwrap(args):
+    result_path = trace_path = None
+    it = iter(args)
+    for a in it:
+        if a == "--result":
+            result_path = next(it, None)
+        elif a == "--trace":
+            trace_path = next(it, None)
+        else:
+            usage(f"unknown argument {a!r}")
+    if not result_path:
+        usage("unwrap needs --result FILE")
+    if trace_path is not None:
+        m = NAME.match(os.path.basename(trace_path))
+        if not m or m.group(1) == "checkin":
+            usage("--trace must be named supplier-<YYYYMMDDTHHMMSS>.jsonl")
+
+    raw = sys.stdin.buffer.read(16 * 1024 * 1024).decode("utf-8", "replace")
+    ev = parse(raw.strip())
+    if ev is None or ev.get("type") != "result":
+        print("fleet-trace: the reply is not a claude JSON result", file=sys.stderr)
+        sys.exit(1)
+
+    # The cost is kept even when the answer is unusable: a failed call is
+    # still billed. A trace that cannot be written costs the record, not the
+    # judgement.
+    if trace_path is not None:
+        try:
+            _append(trace_path, _cost_only(ev), "supplier")
+        except OSError as e:
+            print(f"fleet-trace: cost not recorded in {trace_path}: {e.strerror}", file=sys.stderr)
+
+    answer = ev.get("result")
+    if ev.get("is_error") or not isinstance(answer, str) or not answer.strip():
+        why = clean(ev.get("subtype") or "no answer", 80)
+        print(f"fleet-trace: the model returned no usable answer ({why})", file=sys.stderr)
+        sys.exit(1)
+    with _open_new(result_path) as f:
+        f.write(answer.encode("utf-8"))
+
+
 def cmd_show(args):
     full = "--full" in args
     rest = [a for a in args if a != "--full"]
     if rest == ["--last"] or not rest:
-        traces = _traces()
+        # The newest heartbeat: a supplier run every morning must not hide the
+        # beat an operator is looking for. Name a supplier trace to see one.
+        traces = _traces("checkin")
         if not traces:
             print(f"fleet-trace: no traces in {TRACE_DIR}", file=sys.stderr)
             sys.exit(1)
@@ -375,7 +483,8 @@ def cmd_show(args):
 
 
 def _summary(path):
-    """The result line of one trace, read from the end of the file."""
+    """What one trace adds up to, read from the end of the file: a heartbeat
+    has one result event, a supplier run one per request it judged."""
     size = 0
     try:
         with open(path, "rb") as f:
@@ -385,11 +494,31 @@ def _summary(path):
             tail = f.read().decode("utf-8", "replace").splitlines()
     except OSError:
         return size, None
-    for raw in reversed(tail):
-        ev = parse(raw)
-        if ev and ev.get("type") == "result":
-            return size, ev
-    return size, None
+    results = [ev for ev in map(parse, tail) if ev and ev.get("type") == "result"]
+    if not results:
+        return size, None
+    # The CLI writes these lines, but a malformed one must not stop `list`.
+    costs = []
+    for ev in results:
+        c = ev.get("total_cost_usd")
+        if isinstance(c, (int, float)) and not isinstance(c, bool):
+            try:
+                c = float(c)
+            except OverflowError:
+                continue
+            if math.isfinite(c):
+                costs.append(c)
+    turns = [ev.get("num_turns") for ev in results]
+    turns = [t for t in turns if isinstance(t, int) and not isinstance(t, bool)]
+    return size, {
+        "is_error": any(ev.get("is_error") for ev in results),
+        "num_turns": sum(turns) if turns else "-",
+        "permission_denials": [d for ev in results
+                               if isinstance(ev.get("permission_denials"), list)
+                               for d in ev["permission_denials"]],
+        "total_cost_usd": sum(costs) if costs else None,
+        "calls": len(results),
+    }
 
 
 def cmd_list(args):
@@ -402,17 +531,24 @@ def cmd_list(args):
     if not traces:
         print(f"(no traces in {TRACE_DIR})")
         return
-    print(f"{'trace':<34} {'size':>8}  {'result':<6} {'turns':>5} {'denied':>6} {'cost':>9}")
+    print(f"{'trace':<34} {'size':>8}  {'result':<6} {'calls':>5} {'turns':>5} {'denied':>6} {'cost':>9}")
+    totals = {}
     for p in reversed(traces):
         size, ev = _summary(p)
         if ev is None:
-            print(f"{os.path.basename(p):<34} {size:>8}  {'none':<6} {'-':>5} {'-':>6} {'-':>9}")
+            print(f"{os.path.basename(p):<34} {size:>8}  {'none':<6} {'-':>5} {'-':>5} {'-':>6} {'-':>9}")
             continue
         cost = ev.get("total_cost_usd")
+        if cost is not None:
+            unit = NAME.match(os.path.basename(p)).group(1)
+            totals[unit] = totals.get(unit, 0.0) + cost
         print(f"{os.path.basename(p):<34} {size:>8}  "
-              f"{'ERROR' if ev.get('is_error') else 'ok':<6} {ev.get('num_turns', '-'):>5} "
-              f"{len(ev.get('permission_denials') or []):>6} "
-              f"{(f'${cost:.4f}' if isinstance(cost, (int, float)) else '-'):>9}")
+              f"{'ERROR' if ev.get('is_error') else 'ok':<6} {ev['calls']:>5} {ev['num_turns']:>5} "
+              f"{len(ev['permission_denials']):>6} "
+              f"{(f'${cost:.4f}' if cost is not None else '-'):>9}")
+    if totals:
+        parts = ", ".join(f"{u} ${totals[u]:.4f}" for u in UNITS if u in totals)
+        print(f"total for the {len(traces)} listed: ${sum(totals.values()):.4f} ({parts})")
 
 
 def cmd_prune(args):
@@ -435,7 +571,7 @@ def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         usage()
     sub, args = argv[0], argv[1:]
-    cmds = {"init": cmd_init, "tee": cmd_tee, "show": cmd_show,
+    cmds = {"init": cmd_init, "tee": cmd_tee, "unwrap": cmd_unwrap, "show": cmd_show,
             "list": cmd_list, "prune": cmd_prune}
     if sub not in cmds:
         usage(f"unknown subcommand {sub!r}")

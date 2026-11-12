@@ -327,13 +327,14 @@ sub: snapshot | write the snapshot
 sub: backup | copy the database
 
 command: fleet-trace
-about: What each heartbeat did: tools, denials, turns, cost (state/traces)
+about: What each heartbeat did, and what the heartbeat and supplier model calls cost (state/traces)
 runs: local
 sub: show | print one beat as a timeline (--last, --full)
-sub: list | the latest beats, one line each (-n N)
+sub: list | the latest heartbeats and supplier runs with their cost and a total (-n N, 0 for all)
 sub: prune | delete traces older than --days N
 sub: init | create the trace directory
 sub: tee | used by run-checkin: record a beat from stdin
+sub: unwrap | used by run-supplier: pass on one model answer and record its cost
 
 command: fleet-timers
 about: Whether a timer has been disabled, which raises no alarm on its own

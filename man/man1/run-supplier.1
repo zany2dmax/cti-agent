@@ -45,6 +45,15 @@ With
 unset, or the model missing or down, or its output unusable, a request is Unsure.
 The lane degrades toward asking a person, never toward a No.
 .PP
+What each call costs is recorded. With
+.BR fleet\-trace (1)
+installed, the model answers in JSON and
+.B fleet\-trace unwrap
+passes on its answer and adds its cost, never its text, to
+.IR state/traces/supplier\-<timestamp>.jsonl .
+.B sudo cti\-agent fleet\-trace list
+shows each run's cost beside the heartbeat's, with a total.
+.PP
 Recipients are
 .BR SUPPLIER_TO ,
 checked against

@@ -4777,6 +4777,147 @@ fi
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
+    # -- what the model calls cost ------------------------------------------
+
+    REPLY = {"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
+             "duration_ms": 2100, "total_cost_usd": 0.0125,
+             "result": '{"schema":"cti-supplier/1","SECRET":"supplier mail text"}',
+             "usage": {"input_tokens": 900, "output_tokens": 120, "cache_read_input_tokens": 0},
+             "modelUsage": {"claude-sonnet-5-5": {"costUSD": 0.0125}}}
+
+    def with_trace(self, reply=None):
+        """The real fleet-trace on the box, and a model that answers in JSON."""
+        shutil.copy(KIT / "fleet" / "bin" / "fleet-trace", self.code / "bin" / "fleet-trace")
+        (self.code / "bin" / "fleet-trace").chmod(0o755)
+        reply_file = self.tmp / "reply.json"
+        reply_file.write_text(json.dumps(reply or self.REPLY))
+        self.stub("claude", 'echo "claude $*" >> "$CALLS"\ncat >/dev/null\ncat "%s"\n' % reply_file)
+        # --finish copies what the runner handed it, so the test can read it.
+        body = (self.code / "bin" / "cti-supplier").read_text().replace(
+            'if [ "$MODE" = finish ]; then',
+            'if [ "$MODE" = finish ]; then\n  cat "$DIR"/*.result.json > "%s" 2>/dev/null || true'
+            % (self.tmp / "results.seen"))
+        (self.code / "bin" / "cti-supplier").write_text(body)
+
+    def traces(self):
+        return sorted((self.home / "state" / "traces").glob("supplier-*.jsonl"))
+
+    def fleet_trace(self, *args):
+        return subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), *args],
+                              capture_output=True, text=True, check=False,
+                              env={"PATH": "/usr/bin:/bin", "FLEET_HOME": str(self.home)})
+
+    def test_each_call_asks_for_json_and_the_lane_gets_the_answer_text(self):
+        self.with_trace()
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        claude = [x for x in self.calls() if x.startswith("claude ")]
+        self.assertTrue(claude and all("--output-format json" in x for x in claude), claude)
+        self.assertEqual((self.tmp / "results.seen").read_text(), self.REPLY["result"] * 2,
+                         "cti-supplier must get the model's answer, not the JSON envelope")
+        self.assertIn("judged 2 request(s); 0 without", r.stderr)
+
+    def test_the_cost_is_recorded_without_the_answer_and_listed_with_a_total(self):
+        self.with_trace()
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        [trace] = self.traces()
+        self.assertEqual(oct(trace.stat().st_mode & 0o777), "0o600")
+        text = trace.read_text()
+        self.assertNotIn("SECRET", text, "the trace kept the model's answer")
+        self.assertNotIn("supplier mail", text)
+        lines = [json.loads(l) for l in text.splitlines()]
+        self.assertEqual(lines[0]["unit"], "supplier")
+        self.assertEqual([l["total_cost_usd"] for l in lines[1:]], [0.0125, 0.0125])
+        self.assertEqual(lines[1]["models"], ["claude-sonnet-5-5"])
+        out = self.fleet_trace("list").stdout
+        self.assertIn(trace.name, out)
+        self.assertIn("$0.0250", out, "a run's cost is the sum of its calls")
+        self.assertIn("total for the 1 listed: $0.0250 (supplier $0.0250)", out)
+
+    def test_a_failed_call_is_unsure_but_its_cost_is_still_recorded(self):
+        self.with_trace(dict(self.REPLY, is_error=True, subtype="error_max_turns", result=""))
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no usable judgement", r.stderr)
+        self.assertIn("error_max_turns", r.stderr)
+        self.assertEqual((self.tmp / "results.seen").read_text(), "")
+        [trace] = self.traces()
+        self.assertEqual(sum(json.loads(l).get("total_cost_usd", 0) for l in trace.read_text().splitlines()),
+                         0.025, "a failed call is still billed")
+
+    def test_a_call_that_exits_non_zero_is_still_costed(self):
+        self.with_trace(dict(self.REPLY, is_error=True, subtype="error_during_execution", result=""))
+        body = (self.code / "bin" / "claude").read_text() + "exit 1\n"
+        (self.code / "bin" / "claude").write_text(body)
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("2 without a judgement", r.stderr)
+        [trace] = self.traces()
+        self.assertEqual(len(trace.read_text().splitlines()), 3, "header and both calls")
+
+    def test_list_survives_malformed_result_lines(self):
+        self.with_trace()
+        d = self.home / "state" / "traces"
+        d.mkdir(parents=True)
+        (d / "checkin-20261111T080000.jsonl").write_text(
+            '{"type":"result","total_cost_usd":%s,"permission_denials":5}\n' % ("1" + "0" * 400)
+            + '{"type":"result","total_cost_usd":true,"permission_denials":"abc"}\n')
+        r = self.fleet_trace("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("checkin-20261111T080000.jsonl", r.stdout)
+
+    def test_a_reply_that_is_not_json_is_unsure(self):
+        self.with_trace()
+        self.stub("claude", 'cat >/dev/null\necho "not json"\n')
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("not a claude JSON result", r.stderr)
+        self.assertIn("2 without a judgement", r.stderr)
+
+    def test_an_unwritable_trace_directory_costs_the_record_not_the_judgement(self):
+        self.with_trace()
+        (self.home / "state").mkdir(exist_ok=True)
+        (self.home / "state" / "traces").write_text("a file, not a directory")
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("what they cost is not recorded", r.stderr)
+        self.assertIn("judged 2 request(s); 0 without", r.stderr)
+
+    def test_list_interleaves_lanes_by_time_and_show_last_stays_a_heartbeat(self):
+        self.with_trace()
+        d = self.home / "state" / "traces"
+        d.mkdir(parents=True)
+        beat = {"type": "result", "num_turns": 7, "total_cost_usd": 0.5, "is_error": False}
+        (d / "checkin-20261111T080000.jsonl").write_text(json.dumps(beat) + "\n")
+        (d / "supplier-20261111T070000.jsonl").write_text(json.dumps(dict(beat, total_cost_usd=0.01)) + "\n")
+        (d / "checkin-20261111T060000.jsonl").write_text(json.dumps(beat) + "\n")
+        out = self.fleet_trace("list").stdout.splitlines()
+        names = [l.split()[0] for l in out[1:-1]]
+        self.assertEqual(names, ["checkin-20261111T080000.jsonl", "supplier-20261111T070000.jsonl",
+                                 "checkin-20261111T060000.jsonl"], "newest first, whatever the lane")
+        self.assertEqual(out[-1], "total for the 3 listed: $1.0100 (checkin $1.0000, supplier $0.0100)")
+        self.assertIn("checkin-20261111T080000", self.fleet_trace("show", "--last").stdout)
+
+    def test_unwrap_refuses_a_heartbeat_trace_name_and_a_planted_link(self):
+        self.with_trace()
+        d = self.home / "state" / "traces"
+        d.mkdir(parents=True)
+        reply = json.dumps(self.REPLY)
+        r = subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), "unwrap",
+                            "--result", str(self.tmp / "r1"), "--trace", str(d / "checkin-20261111T080000.jsonl")],
+                           input=reply, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 2)
+        target = self.tmp / "elsewhere"
+        target.write_text("")
+        (d / "supplier-20261111T080000.jsonl").symlink_to(target)
+        r = subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), "unwrap",
+                            "--result", str(self.tmp / "r2"), "--trace", str(d / "supplier-20261111T080000.jsonl")],
+                           input=reply, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, "the judgement is kept")
+        self.assertIn("cost not recorded", r.stderr)
+        self.assertEqual(target.read_text(), "", "wrote through a planted link")
+
     def test_unknown_arguments_are_refused(self):
         r = self.run_it("--for-real", "--file-jira")
         self.assertNotEqual(r.returncode, 0)

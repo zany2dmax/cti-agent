@@ -172,24 +172,63 @@ judge_all() {
   local prompt; prompt="$(cat "$instr")"
   local limit=()
   if command -v timeout >/dev/null 2>&1; then limit=(timeout "${SUPPLIER_MODEL_TIMEOUT:-180}"); fi
+  # WHAT IT COST. With fleet-trace on the box each call asks for JSON, and
+  # fleet-trace unwrap hands back the same answer text mode gave while adding
+  # the call's cost to state/traces/supplier-<timestamp>.jsonl, so
+  # `fleet-trace list` shows this lane's spend beside the heartbeat's. Without
+  # fleet-trace the call is text mode, as before. A trace directory that
+  # cannot be written loses the cost record, never a judgement.
+  local trace_tool="$FLEET_CODE/bin/fleet-trace" cost_trace="" json=""
+  if [ -x "$trace_tool" ]; then
+    json=1
+    if "$trace_tool" init >/dev/null 2>&1; then
+      cost_trace="$FLEET_HOME/state/traces/supplier-$(date '+%Y%m%dT%H%M%S').jsonl"
+      [ -e "$cost_trace" ] && cost_trace="${cost_trace%.jsonl}-$$.jsonl"
+    else
+      log "warn: fleet-trace init failed - the requests are judged, but what they cost is not recorded"
+    fi
+  fi
+  local trace_arg=()
+  [ -n "$cost_trace" ] && trace_arg=(--trace "$cost_trace")
   local in out ok=0 bad=0
   for in in ${INPUTS[@]+"${INPUTS[@]}"}; do
     out="${in%.input.txt}.result.json"
+    rm -f "$out.tmp" "$out.reply"
     # No tools (--tools ""), no MCP servers, no session file, no settings from
     # the host (the working directory is the empty work directory, and only
     # project settings are read). The request is data on stdin, not a prompt
     # the model is asked to obey; the standing instructions are the system prompt.
-    if ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
+    # set -e: every failure below is caught by "|| rc=$?" and means Unsure.
+    local rc=0 urc=0
+    if [ -n "$json" ]; then
+      ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
           --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
-          --system-prompt "$prompt" < "$in" > "$out.tmp" 2> "$out.err" ) && [ -s "$out.tmp" ]; then
+          --output-format json --system-prompt "$prompt" < "$in" > "$out.reply" 2> "$out.err" ) || rc=$?
+      # Unwrapped even when claude exited non-zero: an error result is still
+      # billed, so its cost is recorded; the request is Unsure either way.
+      if [ -s "$out.reply" ]; then
+        "$trace_tool" unwrap --result "$out.tmp" ${trace_arg[@]+"${trace_arg[@]}"} \
+          < "$out.reply" 2>> "$out.err" || urc=$?
+        [ "$rc" -ne 0 ] || rc="$urc"
+      else
+        [ "$rc" -ne 0 ] || rc=1
+      fi
+    else
+      ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
+          --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
+          --system-prompt "$prompt" < "$in" > "$out.tmp" 2> "$out.err" ) || rc=$?
+    fi
+    if [ "$rc" -eq 0 ] && [ -s "$out.tmp" ]; then
       mv "$out.tmp" "$out"; ok=$((ok + 1))
     else
       rm -f "$out.tmp"; bad=$((bad + 1))
       log "warn: no usable judgement for $(basename "$in") ($(head -c 200 "$out.err" 2>/dev/null | tr '\n' ' ')) - it will be Unsure"
     fi
-    rm -f "$out.err"
+    rm -f "$out.err" "$out.reply"
   done
   log "judged $ok request(s); $bad without a judgement"
+  [ -n "$cost_trace" ] && [ -e "$cost_trace" ] && log "cost recorded in $cost_trace (sudo cti-agent fleet-trace list)"
+  return 0
 }
 judge_all
 

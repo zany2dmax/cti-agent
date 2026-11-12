@@ -60,6 +60,21 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   `mailbox week:` summary to the board once a week, puts `NEVER-READ:` on the
   board daily, and mails it to the operator through `cti-alert` once a week.
   The plan file gains `stale`, `left` and `neverReadOld`.
+- **The supplier lane's model calls are costed.** `fleet-trace list` showed the
+  heartbeat's spend only: `run-supplier` ran Claude in text mode, so what
+  judging supplier requests cost was recorded nowhere. Each call now asks for
+  JSON, and the new `fleet-trace unwrap` hands the lane the same answer text as
+  before while adding the call's cost - usage and cost only, never the answer,
+  which talks about untrusted supplier mail - to
+  `state/traces/supplier-<timestamp>.jsonl`. A failed call is still costed. If
+  the trace cannot be written the request is still judged; without
+  `fleet-trace` on the box the lane runs in text mode as before.
+- **`fleet-trace list` totals.** One row per heartbeat or supplier run, newest
+  first across both (it sorted by name, which put every heartbeat first), a
+  `calls` column, and a last line with the total for the rows listed and per
+  lane: `sudo cti-agent fleet-trace list -n 0` is the fleet's spend while
+  traces are kept (`CHECKIN_TRACE_DAYS`). `show --last` is still the newest
+  heartbeat.
 
 ### Changed
 
