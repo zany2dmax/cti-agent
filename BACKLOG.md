@@ -279,10 +279,6 @@ is real, not before. Finished work moves out of this file into
      of `op://` references rendered with `op inject` on the operator's Mac at
      setup or rotation and fed to `systemd-creds encrypt` on the box. No
      1Password service-account token on the server
-- Supplier request mail: the shared inbox also collects supplier requests, and
-  nothing tidies them. Probably its own lane (they are not CTI mail and need a
-  different owner and rules than cti-mailbox). Not designed: what the requests
-  are, who answers them, and what "done" means for one
 - The AI triage agent wired into the threat-intel digest, and a Defender for
   Cloud attack-path lane
 - **Heartbeat escalation to a stronger model** (designed 2026-11-08, not
