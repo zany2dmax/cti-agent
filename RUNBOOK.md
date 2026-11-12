@@ -222,6 +222,9 @@ regression test.
 | `MAILBOX_DIGEST_SENDERS` | The quarantine digest's sending address(es), exactly. A digest holding nothing the fleet reads goes to Deleted Items; one holding mail from Qualys or `MAILBOX_FEED_SENDERS` stays a week and the operator is alerted to release it. Blank: rule off |
 | `MAILBOX_FEED_SENDERS` | The senders the fleet reads besides Qualys (newsletters, advisory lists): `name@example.com` exactly or `@example.com` for a domain |
 | `FLEET_MAILBOX_BACKLOG_THRESHOLD` | Report when this many inbox messages have no processing record, default 25 |
+| `MAILBOX_STALE_DAYS` | Inbox mail older than this many days that no rule moved goes to `MAILBOX_STALE_FOLDER`. Default 30; 0 turns the sweep off; must be longer than `MAILBOX_LOOKBACK_HOURS` |
+| `MAILBOX_STALE_FOLDER` | The folder under the inbox the sweep moves into, created on first use. Default `Unhandled` |
+| `MAILBOX_STALE_MAX` | The most messages one cleanup run sweeps, 1-5000. Default 200 |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Only for the orchestrator heartbeat |
 | `FLEET_BUDGET_*` | Quota ceilings for the heartbeat. See [fleet-kit/README.md → Quota ceilings](fleet-kit/README.md#8-quota-ceilings) |
 
@@ -446,14 +449,39 @@ nobody watching. Treat the rollout accordingly.
 | The same digest holding mail from Qualys or a feed sender | **Left** a week; the operator is alerted to release the held mail (the fleet never does) |
 | An automatic reply - by its headers, or a subject starting `Automatic reply:`, `Out of Office:` and the like - read by a lane or not | **Deleted Items** (recoverable) |
 | The digest read it and took a CVE from it | **Archive**, after the grace |
-| A Qualys WAS scan notice the AppSec weekly reported on (recorded only after a real send) | **Archive**, after the grace |
+| A Qualys WAS scan notice whose application's owners were sent its report (recorded by `run-appowners` after a real send), or that the AppSec weekly reported on | **Archive**, after the grace |
 | A Qualys VM "Scan Results" notice the VM scan weekly combined and sent | **Archive**, after the grace |
 | A supplier request the supplier lane judged not critical, or critical or unsure with its Kanban item filed (recorded after every real run in `state/processed-supplier.json`) | **Archive**, after the grace. A thread set aside as not a supplier request, one whose item failed to file, and a reply newer than the judgement are **left** |
 | A companion notice of a run one of those weeklies reported as complete - WAS "Scheduled ... Scan Notification", VM "Scan Completed" and "Completed Vulnerability Scan Notification" - from Qualys and matched to that run | **Deleted Items**, after the grace |
-| Everything else | **Left alone** |
+| Everything else, under `MAILBOX_STALE_DAYS` (30) old | **Left alone** |
+| Anything older than `MAILBOX_STALE_DAYS` that is still in the inbox, unless a person flagged it | **Moved to `Inbox/Unhandled`** (`MAILBOX_STALE_FOLDER`), at most `MAILBOX_STALE_MAX` (200) a run |
+
+**The 30-day sweep.** The daily plan only sees the last 14 days
+(`MAILBOX_LOOKBACK_HOURS`), and the records that let a lane vouch for a message
+expire after 14 days too. Before the sweep, anything still in the inbox at two
+weeks stayed there for good. Now mail past `MAILBOX_STALE_DAYS` goes to the
+`Unhandled` folder under the inbox, by age alone, with no judgement of what it is:
+not Archive, because no lane handled it, and never Deleted Items. A flagged
+message stays. The first real run creates the folder; a first run against a deep
+inbox moves 200 a day until it catches up. `MAILBOX_STALE_DAYS=0` turns it off.
+Look in `Unhandled` now and then: it is where a reported phish nobody answered
+ends up.
+
+**What is left, said once a week.** Every run prints a `LEFT:` line (what stayed,
+by reason) and a `STALE:` line (what was swept). Once a week the runner posts
+the week's totals to the board as `mailbox week: ...`. If mail **no lane has
+read** has been in the inbox over a week, a `NEVER-READ:` line goes on the board
+every day and to you by `cti-alert` once a week: the digest reads every message
+within a day, so that means it has stopped reading the mailbox, or the mail
+arrived outside its window.
+
+**Qualys WAS notices clear in about two days now.** `run-appowners` records the
+notices of each scan whose report it mailed to the owners (not held ones), so
+the cleanup archives them after its 48-hour grace instead of waiting for
+Friday's weekly. A held scan's notices still wait for the weekly report.
 
 On a day the digest read no mail (out-of-office replies do not count) nothing
-is archived, but auto-replies still go. For a one-off sweep of old auto-replies:
+is archived, but auto-replies still go, and the sweep still runs. For a one-off sweep of old auto-replies:
 `sudo cti-agent cti-mailbox --lookback 720h --timeout 10m --dry-run`, then run it
 again without `--dry-run`.
 

@@ -1,4 +1,4 @@
-.TH CTI-MAILBOX 1 "2026-11-09" "cti-agent 1.6" "CTI Fleet Manual"
+.TH CTI-MAILBOX 1 "2026-11-12" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lane has read, delete auto-replies, leave the rest
 .SH SYNOPSIS
@@ -11,6 +11,8 @@ cti-mailbox \- daily tidy of the shared CTI mailbox: archive what its owning lan
 .RB [ \-\-timeout
 .IR DURATION ]
 .RB [ \-\-lookback
+.IR DURATION ]
+.RB [ \-\-never\-read\-age
 .IR DURATION ]
 .PP
 .B sudo cti\-agent cti\-mailbox
@@ -139,6 +141,43 @@ instead, on the same terms: after the grace, and not on a held day.
 Read, but no lane owns it: a reported phish, a Defender alert, a colleague's
 mail. Somebody else's job.
 .PP
+.B The stale sweep.
+After the plan above, mail in
+.B GRAPH_FOLDER
+older than
+.B MAILBOX_STALE_DAYS
+(or this run's window, if that reaches further back) is past every rule
+above: the processed records that could vouch for it have expired, so no rule
+will ever move it. Each such message, oldest first and at most
+.B MAILBOX_STALE_MAX
+a run, goes to the folder
+.B MAILBOX_STALE_FOLDER
+under
+.BR GRAPH_FOLDER ,
+except one a person flagged (flagged or complete), which stays. The sweep
+judges nothing: it reads no body and no header, and moves by age alone. It
+never archives (that would say a lane handled the message) and never deletes.
+A real run creates the folder the first time it is needed; a dry run says it
+would. Messages are not read for this, only listed.
+.PP
+Three lines are printed for
+.BR run\-mailbox\-cleanup (1)
+to keep:
+.B LEFT:
+(what stayed in the inbox, counted by reason, never-read first, with how many
+are older than
+.B \-\-never\-read\-age
+and the oldest's age),
+.B STALE:
+(what the sweep moved, or would move, and how many were flagged) and, when any
+never-read message is older than
+.BR \-\-never\-read\-age ,
+.BR NEVER\-READ: .
+The runner posts the week's totals to the board once a week, and mails the
+operator a
+.B NEVER\-READ
+line, also once a week.
+.PP
 Every line of the plan states the action, the subject (sanitised and cut to
 60 characters, because subjects are attacker-controlled) and the reason.
 The summary splits the leave count into
@@ -182,8 +221,16 @@ folder, delete to
 Each move prints the new message ID, or
 .B FAILED
 with the Graph error, and a final
-.B moved\~N, failed\~N, left\~N
+.B moved\~N, swept\~N, failed\~N, left\~N
 line follows.
+.TP
+.BI \-\-never\-read\-age " DURATION"
+Print the
+.B NEVER\-READ:
+line when a message no lane has a record of reading has been in the inbox
+longer than this. The digest reads every message within a day, so a week means
+it has stopped reading the mailbox, or the mail arrived outside its window.
+Default:\~\fB168h0m0s\fR (a week).
 .TP
 .BI \-\-json " FILE"
 Also write the plan to
@@ -197,7 +244,13 @@ mode 0600, as JSON:
 .BR moved ,
 .BR failed ,
 .B counts
-and every decision. Written after the moves, so it records what happened.
+and every decision, then
+.B stale
+(the sweep's decisions),
+.B left
+(the leave count by reason) and
+.BR neverReadOld .
+Written after the moves, so it records what happened.
 A write failure is reported on standard error and does not change the exit
 status. Not written when the run refuses for want of a processed message.
 .TP
@@ -291,6 +344,30 @@ Must be less than
 .B 0
 archives them on sight.
 Default:\~\fB168\fR (a week).
+.TP
+.B MAILBOX_STALE_DAYS
+Age in days past which the stale sweep moves mail no rule moved to
+.BR MAILBOX_STALE_FOLDER .
+Must be longer than
+.B MAILBOX_LOOKBACK_HOURS
+(as days), so the sweep never takes mail the daily plan is still deciding
+about; every command that loads the fleet settings refuses to start otherwise.
+.B 0
+turns the sweep off.
+Default:\~\fB30\fR.
+.TP
+.B MAILBOX_STALE_FOLDER
+The folder under
+.B GRAPH_FOLDER
+the sweep moves into, created on the first real run that needs it. A name,
+not a path: no slash or backslash, no control characters, at most 64
+characters.
+Default:\~\fBUnhandled\fR.
+.TP
+.B MAILBOX_STALE_MAX
+The most messages one run sweeps, 1 to 5000, so a first run against a deep
+inbox spreads over several days; the output says when more remain.
+Default:\~\fB200\fR.
 .TP
 .BR GRAPH_LOOKBACK_HOURS ", " QUALYS_KB_MAX_AGE_HOURS
 Not used by this command, but validated by the shared loader: each must be a

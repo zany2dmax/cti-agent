@@ -1,4 +1,4 @@
-.TH RUN-APPOWNERS 1 "2026-11-03" "cti-agent 1.4" "CTI Fleet Manual"
+.TH RUN-APPOWNERS 1 "2026-11-12" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 run-appowners \- daily: mail each application's scanner report to its owners
 .SH SYNOPSIS
@@ -30,9 +30,9 @@ unset it logs that the lane is off and exits 0, except on
 The steps, in order:
 .TP
 .B 1. Plan
-.B cti\-appscan \-\-since 48h \-\-deliveries\-out \-\-delivered\-log
-lists the scans finished since the last run and not yet sent or held. Fatal
-on a non-zero exit.
+.B cti\-appscan \-\-since 48h \-\-deliveries\-out \-\-delivered\-log \-\-seen\-out
+lists the scans finished since the last run and not yet sent or held, and the
+scan notices it read. Fatal on a non-zero exit.
 .TP
 .B 2. Prepare
 .B cti\-appreport \-\-deliveries \-\-out\-dir
@@ -53,7 +53,13 @@ On a real run only,
 .B cti\-appscan \-\-commit\-delivered
 records each sent scan, and each held one, in
 .IR $FLEET_HOME/state/appowners\-sent.json ,
-so each is dealt with once.
+so each is dealt with once. Then, when anything was sent,
+.B cti\-appscan \-\-commit\-seen \-\-only\-sent
+records the notices of the scans that were sent (not the held ones) for
+.BR cti\-mailbox (1),
+which archives them after its usual grace: about two days after the owners
+get the report, instead of after the weekly report. A failure here is a
+warning; the weekly report records them anyway.
 .TP
 .B 5. Operator
 Held scans and watchers refused for their domain go to
@@ -109,6 +115,12 @@ Last scan sent or held per application.
 .TP
 .I $FLEET_HOME/state/appowners\-<stamp>/
 This run's reports and emails, 0700, deleted when the run ends.
+.TP
+.I $FLEET_HOME/state/appowners\-seen\-<stamp>.json
+The notices this run read, for
+.BR \-\-commit\-seen ;
+deleted when the run ends. A rehearsal writes its own under
+.IR dryrun/appowners/ .
 .SH DRY RUNS AND THE LANE LOCK
 A dry run and a test send
 .RB ( \-\-to\-dev ,

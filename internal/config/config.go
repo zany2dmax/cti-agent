@@ -50,6 +50,18 @@ type Config struct {
 	// back to the inbox: a week by default, then Archive. Zero archives them
 	// on sight.
 	MailboxSelfMinAge time.Duration
+	// MailboxStaleAge is MAILBOX_STALE_DAYS: inbox mail older than this that
+	// no rule above moved goes to MailboxStaleFolder (not Archive, not
+	// Deleted Items), so the inbox stops collecting what fell out of every
+	// lane's window. Zero turns the sweep off. Always longer than
+	// MailboxLookback, so the sweep only sees mail the daily plan no longer can.
+	MailboxStaleAge time.Duration
+	// MailboxStaleFolder is MAILBOX_STALE_FOLDER, the folder under GRAPH_FOLDER
+	// the sweep moves into ("Unhandled"); created on the first real run.
+	MailboxStaleFolder string
+	// MailboxStaleMax is MAILBOX_STALE_MAX, the most messages one run sweeps,
+	// so a first run against a deep inbox spreads over days.
+	MailboxStaleMax int
 	// MailboxDigestSenders is MAILBOX_DIGEST_SENDERS: the exact addresses the
 	// quarantine digest ("End User Digest") comes from, comma-separated.
 	// Empty turns the quarantine-digest cleanup rule off (mailbox.QuarantineDigest).
@@ -266,6 +278,28 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 				"still inside the window",
 			mailboxSelfMinAgeHours, mailboxLookbackHours)
 	}
+	// The stale sweep. Its cutoff has to sit past the daily plan's window:
+	// inside it, one message could be both "left for a person" by the plan
+	// and swept by age in the same run.
+	staleDays, err := strconv.Atoi(getenvDefault("MAILBOX_STALE_DAYS", "30"))
+	if err != nil || staleDays < 0 {
+		return Config{}, fmt.Errorf("MAILBOX_STALE_DAYS must be zero (off) or a positive number of days")
+	}
+	if staleDays > 0 && staleDays*24 <= mailboxLookbackHours {
+		return Config{}, fmt.Errorf(
+			"MAILBOX_STALE_DAYS (%d) must be longer than MAILBOX_LOOKBACK_HOURS (%d hours); "+
+				"otherwise the sweep would move mail the daily cleanup is still deciding about",
+			staleDays, mailboxLookbackHours)
+	}
+	staleMax, err := strconv.Atoi(getenvDefault("MAILBOX_STALE_MAX", "200"))
+	if err != nil || staleMax <= 0 || staleMax > 5000 {
+		return Config{}, fmt.Errorf("MAILBOX_STALE_MAX must be between 1 and 5000")
+	}
+	staleFolder := getenvDefault("MAILBOX_STALE_FOLDER", "Unhandled")
+	if err := validStaleFolder(staleFolder); err != nil {
+		return Config{}, fmt.Errorf("MAILBOX_STALE_FOLDER: %w", err)
+	}
+
 	// THE CLEANUP MUST NOT ARCHIVE MAIL THE DIGEST STILL NEEDS.
 	//
 	// cti-agent ingests from the INBOX over GRAPH_LOOKBACK_HOURS and rebuilds
@@ -323,6 +357,9 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		MailboxLookback:      time.Duration(mailboxLookbackHours) * time.Hour,
 		MailboxMinAge:        time.Duration(mailboxMinAgeHours) * time.Hour,
 		MailboxSelfMinAge:    time.Duration(mailboxSelfMinAgeHours) * time.Hour,
+		MailboxStaleAge:      time.Duration(staleDays) * 24 * time.Hour,
+		MailboxStaleFolder:   staleFolder,
+		MailboxStaleMax:      staleMax,
 		MailboxDigestSenders: os.Getenv("MAILBOX_DIGEST_SENDERS"),
 		MailboxFeedSenders:   os.Getenv("MAILBOX_FEED_SENDERS"),
 
@@ -413,4 +450,26 @@ func getenvDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// validStaleFolder is graph.ValidFolderName, repeated here because config
+// does not import graph: the name becomes a folder in a shared mailbox.
+func validStaleFolder(name string) error {
+	n := strings.TrimSpace(name)
+	switch {
+	case n == "":
+		return fmt.Errorf("is empty")
+	case n != name:
+		return fmt.Errorf("%q has leading or trailing spaces", name)
+	case len(n) > 64:
+		return fmt.Errorf("is longer than 64 characters")
+	case strings.ContainsAny(n, "/\\"):
+		return fmt.Errorf("%q has a path separator in it", name)
+	}
+	for _, r := range n {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("has a control character in it")
+		}
+	}
+	return nil
 }

@@ -402,7 +402,11 @@ shared reporting mailbox, and "read looking for CVEs" is not "triaged". A
 growing count of messages with **no processing record** is a possible ingest
 failure, not an untidy inbox: the digest succeeding while reading nothing looks
 exactly like a quiet week. Check the last `cti-agent` run and escalate if the
-count keeps climbing.
+count keeps climbing. Mail older than 30 days that no rule moved goes to the
+`Unhandled` folder (not Archive) unless flagged; a `mailbox week:` board line
+counts it once a week. A `NEVER-READ:` line means mail no lane has read has sat
+over a week: the runner already mails the operator once a week, so check the
+digest's last runs rather than escalating it again.
 
 **Scout** (`@scout`). It polls vendor advisories and RSS for CVEs the mailbox
 missed. A feed dead for over a day is a blind spot that looks like good news.

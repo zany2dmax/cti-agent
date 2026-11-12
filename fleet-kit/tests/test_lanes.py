@@ -3943,6 +3943,66 @@ class RunnersToDev(unittest.TestCase):
                          "a dry run must not mail the operator")
         self.assertIn("would alert the operator", r.stdout)
 
+    def _fake_mailbox(self, *lines):
+        clean = self.code / "bin" / "cti-mailbox"
+        body = "".join(f"echo '{ln}'\n" for ln in lines)
+        clean.write_text('#!/usr/bin/env bash\necho "cti-mailbox $*" >> "$STUB_LOG"\n' + body)
+        clean.chmod(0o755)
+
+    def test_weekly_summary_counts_the_sweep_and_escalates_never_read_mail(self):
+        """Mail swept to Unhandled is counted once a week on the board, and
+        mail no lane has read for over a week goes to the operator by mail -
+        once a week, not every morning."""
+        never = ("NEVER-READ: 2 message(s) no lane has read have been in the inbox over "
+                 "168h0m0s (oldest 9d)")
+        self._fake_mailbox("  archive 1   delete 0   leave 3 (2 never read, 1 not CTI mail)",
+                           "LEFT: never-read=2 (2 over 7d, oldest 9d) not-lane-mail=1",
+                           "STALE: moved=4 flagged=1 failed=0 folder=Unhandled", never)
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        week = [c for c in calls if c.startswith("fleet-board post @mailbox @you INFO mailbox week:")]
+        self.assertEqual(len(week), 1, calls)
+        self.assertIn("4 message(s) swept to the Unhandled folder", week[0])
+        self.assertIn("LEFT: never-read=2", week[0])
+        alerts = [c for c in calls if c.startswith("cti-alert ")]
+        self.assertEqual(len(alerts), 1, calls)
+        self.assertIn("--kind ESCALATION", alerts[0])
+        self.assertIn("no lane has read", alerts[0])
+        self.assertTrue(any(c.startswith("fleet-board post @mailbox @you WARN NEVER-READ:") for c in calls))
+
+        # The next morning: the board still hears about it, the operator's
+        # inbox does not, and the week's sweep keeps adding up.
+        self.log.write_text("")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(any(c.startswith("cti-alert ") for c in calls), "escalated twice in one week")
+        self.assertFalse(any("mailbox week:" in c for c in calls), "summarised twice in one week")
+        self.assertTrue(any(c.startswith("fleet-board post @mailbox @you WARN NEVER-READ:") for c in calls))
+        rows = (self.home / "state" / "mailbox-week.tsv").read_text().splitlines()
+        self.assertEqual([r.split("\t")[1] for r in rows], ["4", "4"])
+
+        # A week on, it is due again and sums the last seven days.
+        stamp = self.home / "state" / "mailbox-week.stamp"
+        old = time.time() - 7 * 86400
+        os.utime(stamp, (old, old))
+        self.log.write_text("")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        week = [c for c in calls if c.startswith("fleet-board post @mailbox @you INFO mailbox week:")]
+        self.assertEqual(len(week), 1, calls)
+        self.assertIn("12 message(s) swept", week[0])
+
+    def test_weekly_summary_dry_run_posts_and_records_nothing(self):
+        self._fake_mailbox("STALE: would-move=4 flagged=0 folder=Unhandled",
+                           "NEVER-READ: 1 message(s) no lane has read have been in the inbox over 168h0m0s (oldest 8d)")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(any(c.startswith("cti-alert ") for c in calls), calls)
+        self.assertFalse(any("mailbox week:" in c for c in calls), calls)
+        self.assertIn("would post the weekly summary", r.stdout)
+        self.assertFalse((self.home / "state" / "mailbox-week.tsv").exists())
+        self.assertFalse((self.home / "state" / "mailbox-week.stamp").exists(),
+                         "a rehearsal used up this week's summary")
+
     def assertTestSend(self, runner, *args):
         r, calls = self.run_lane(runner, *args, "--to-dev")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -4087,6 +4147,25 @@ class RunnersToDev(unittest.TestCase):
         for c in calls:
             self.assertNotIn("--commit-delivered", c)
             self.assertFalse(c.startswith("cti-alert "), c)
+
+    def test_appowners_records_the_sent_scans_notices_for_the_cleanup(self):
+        # The mailbox cleanup archives a WAS notice once its owners have the
+        # report - so after a real send, and only for the scans that were
+        # sent (--only-sent), never on a rehearsal or a test send.
+        for args, want in ((["--to-dev"], False), (["--dry-run"], False), (["--for-real"], True)):
+            with self.subTest(args=args):
+                self.log.write_text("")
+                r, calls = self.run_lane("run-appowners", *args, env="OWNER_ALLOW_DOMAINS=example.com\n")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                plan = [c for c in calls if "--deliveries-out" in c][0]
+                self.assertIn("--seen-out ", plan)
+                committed = [c for c in calls if "--commit-seen" in c]
+                self.assertEqual(bool(committed), want, calls)
+                if want:
+                    self.assertIn("--only-sent ", committed[0],
+                                  "a held scan's notices must not be archived")
+                    send = [i for i, c in enumerate(calls) if c.startswith("cti-mailer ") and "--armed" not in c]
+                    self.assertLess(send[-1], calls.index(committed[0]), "recorded before the send")
 
     def test_no_dev_address_is_refused_before_any_work(self):
         for runner in ("run-digest", "run-patchtuesday", "run-domains", "run-appscan", "run-appowners"):

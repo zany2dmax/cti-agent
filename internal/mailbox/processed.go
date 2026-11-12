@@ -69,6 +69,12 @@ type Processed struct {
 	// choice: those are noise, not records worth filing. Deleted Items is
 	// still recoverable; nothing here purges.
 	Delete bool `json:"delete,omitempty"`
+
+	// Ref is the owning lane's own name for what the message is about -
+	// cti-appscan writes the scan's reference - so a lane that reports per
+	// item can record only the messages of the items it actually delivered
+	// (cti-appscan --commit-seen --only-sent). The cleanup does not read it.
+	Ref string `json:"ref,omitempty"`
 }
 
 // Log is the on-disk record.

@@ -70,7 +70,25 @@ type Decision struct {
 	// deriving the difference from the Reason string afterwards would be
 	// parsing our own prose.
 	Known bool
+
+	// Why is a short, stable code for a leave (LeaveNeverRead and the rest),
+	// so the weekly summary can count what stayed in the inbox and why
+	// without parsing Reason. Empty on a move.
+	Why string `json:"Why,omitempty"`
 }
+
+// The reasons a message is left in the inbox, as Decision.Why.
+const (
+	LeaveOwnReportGrace   = "own-report-grace"      // our own report, under a week old
+	LeaveQuarantineHeld   = "quarantine-held"       // a digest holding fleet mail: release it
+	LeaveQuarantineUnread = "quarantine-unreadable" // a digest whose rows did not parse
+	LeaveAutoReplyWait    = "auto-reply-wait"       // an auto-reply waiting for the digest
+	LeaveNeverRead        = "never-read"            // no lane has a record of reading it
+	LeaveNotLaneMail      = "not-lane-mail"         // read, but no lane owns it: a person's
+	LeaveHeld             = "held"                  // archiving held today (digest read nothing)
+	LeaveOwnedGrace       = "owned-grace"           // owned, inside the archive grace
+	LeaveFlagged          = "flagged"               // stale sweep: a person flagged it
+)
 
 // Plan decides what to do with each candidate.
 //
@@ -217,7 +235,7 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 				Reason: fmt.Sprintf("sent by this fleet, only %s old - our own "+
 					"reports stay in the inbox until %s so the team can still "+
 					"read them there", now.Sub(c.Received).Round(time.Minute),
-					o.SelfMinAge), Known: true})
+					o.SelfMinAge), Known: true, Why: LeaveOwnReportGrace})
 		case c.SelfSent:
 			out = append(out, Decision{Candidate: c, Action: ActionArchive,
 				Reason: "sent by this fleet - our own report delivered back to " +
@@ -227,12 +245,12 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 				Reason: "a quarantine digest holding mail the fleet reads (" + c.HeldForFleet +
 					") - release it in the quarantine portal; this digest goes after " +
 					DigestKeep.String(),
-				Known: true})
+				Known: true, Why: LeaveQuarantineHeld})
 		case c.QuarantineDigest && c.DigestRows == 0:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "a quarantine digest whose held messages could not be read - " +
 					"left for a person, in case the digest's layout has changed",
-				Known: true})
+				Known: true, Why: LeaveQuarantineUnread})
 		case c.QuarantineDigest:
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: "a quarantine digest holding nothing the fleet reads - nobody " +
@@ -242,30 +260,32 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 			c.Received.After(now.Add(-o.SubjectGrace)):
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: autoReplyWhy(headerAuto) + ", but no lane has read it yet - " +
-					"it waits for the digest in case it is a real advisory"})
+					"it waits for the digest in case it is a real advisory",
+				Why: LeaveAutoReplyWait})
 		case (headerAuto || subjectAuto) && (!ok || !rec.HasCVE):
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: autoReplyWhy(headerAuto),
 				Known:  ok})
 		case !ok:
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
-				Reason: "no record that a completed run has read this message"})
+				Reason: "no record that a completed run has read this message",
+				Why:    LeaveNeverRead})
 		case owner == "":
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: "read by the agent but no lane owns it - not a CTI " +
 					"advisory or a scan notification; could be a reported " +
 					"phish, an alert or a person writing to the team",
-				Known: true})
+				Known: true, Why: LeaveNotLaneMail})
 		case o.HoldArchive != "":
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
-				Reason: o.HoldArchive, Known: true})
+				Reason: o.HoldArchive, Known: true, Why: LeaveHeld})
 		case minAge > 0 && c.Received.After(now.Add(-minAge)):
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: fmt.Sprintf(
 					"%s, but only %s old - it stays in the inbox until %s so "+
 						"the team can still read it there",
 					ownedBy(owner), now.Sub(c.Received).Round(time.Minute), minAge),
-				Known: true})
+				Known: true, Why: LeaveOwnedGrace})
 		case rec.Delete && rec.Owner != "":
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: companionOf(owner), Known: true})

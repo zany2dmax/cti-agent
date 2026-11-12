@@ -29,6 +29,7 @@ func TestMain(m *testing.M) {
 		"QUALYS_KB_CACHE", "QUALYS_KB_MAX_AGE_HOURS",
 		"REPORT_PATH",
 		"MAILBOX_LOOKBACK_HOURS", "MAILBOX_MIN_AGE_HOURS", "MAILBOX_SELF_MIN_AGE_HOURS",
+		"MAILBOX_STALE_DAYS", "MAILBOX_STALE_FOLDER", "MAILBOX_STALE_MAX",
 		"JIRA_BASE_URL", "JIRA_CLOUD_ID", "JIRA_EMAIL", "JIRA_API_TOKEN",
 		"JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_ALLOW_CREATE",
 		"JIRA_DOMAINS_PROJECT_KEY", "JIRA_DOMAINS_ISSUE_TYPE", "DIGEST_SKIP_SUBJECTS",
@@ -468,5 +469,44 @@ func TestOwnReportGraceDefaultsToAWeekAndMustFitTheWindow(t *testing.T) {
 	t.Setenv("MAILBOX_SELF_MIN_AGE_HOURS", "0")
 	if cfg, err := LoadVulnLookup(); err != nil || cfg.MailboxSelfMinAge != 0 {
 		t.Errorf("0 must mean archive on sight, got %v %v", cfg.MailboxSelfMinAge, err)
+	}
+}
+
+func TestMailboxStaleSweepSettings(t *testing.T) {
+	t.Setenv("LOOKUP_PROVIDER", "none")
+	cfg, err := LoadVulnLookup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MailboxStaleAge != 30*24*time.Hour || cfg.MailboxStaleFolder != "Unhandled" || cfg.MailboxStaleMax != 200 {
+		t.Errorf("defaults = %s %q %d, want 720h \"Unhandled\" 200",
+			cfg.MailboxStaleAge, cfg.MailboxStaleFolder, cfg.MailboxStaleMax)
+	}
+	t.Setenv("MAILBOX_STALE_DAYS", "0")
+	if cfg, err := LoadVulnLookup(); err != nil || cfg.MailboxStaleAge != 0 {
+		t.Errorf("0 must turn the sweep off, got %v %v", cfg.MailboxStaleAge, err)
+	}
+	// Inside the daily window, a message could be left for a person and
+	// swept by age in the same run.
+	t.Setenv("MAILBOX_STALE_DAYS", "14")
+	if _, err := LoadVulnLookup(); err == nil {
+		t.Error("a sweep at the 14-day window must be refused")
+	}
+	t.Setenv("MAILBOX_STALE_DAYS", "30")
+	for _, bad := range []string{"Inbox/Unhandled", " x", ""} {
+		t.Setenv("MAILBOX_STALE_FOLDER", bad)
+		if bad == "" {
+			continue // unset-or-empty is the default
+		}
+		if _, err := LoadVulnLookup(); err == nil {
+			t.Errorf("folder %q accepted", bad)
+		}
+	}
+	t.Setenv("MAILBOX_STALE_FOLDER", "Unhandled")
+	for _, bad := range []string{"0", "-1", "9999", "lots"} {
+		t.Setenv("MAILBOX_STALE_MAX", bad)
+		if _, err := LoadVulnLookup(); err == nil {
+			t.Errorf("MAILBOX_STALE_MAX=%s accepted", bad)
+		}
 	}
 }

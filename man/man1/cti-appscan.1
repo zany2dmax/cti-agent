@@ -182,9 +182,32 @@ runs and no Graph credentials are needed.
 .BR run\-appscan (1)
 calls it only after a real send, never on a dry run or a
 .B \-\-to\-dev
-test. Needs
+test, and so does
+.BR run\-appowners (1),
+with
+.BR \-\-only\-sent .
+Needs
 .BR FLEET_HOME .
 Default:\~empty.
+.TP
+.BI \-\-only\-sent " FILE"
+With
+.BR \-\-commit\-seen :
+record only the notices of the scans that
+.I FILE
+(the owners lane's
+.B key<TAB>ref<TAB>status
+list) marks
+.BR sent ,
+matched on the scanner's own scan reference. A held scan's notices, and a
+notice with no scan reference, are left for the weekly report to record. So a
+notice is archived once that application's owners have its report, not at the
+end of the week. An unreadable
+.I FILE
+fails the commit rather than recording everything. Given without
+.B \-\-commit\-seen
+it is refused.
+Default:\~empty (record every notice in the file).
 .TP
 .BI \-\-tickets\-out " FILE"
 Write one Jira ticket's input per application, as JSON, mode 0600, for

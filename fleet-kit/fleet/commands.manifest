@@ -83,6 +83,7 @@ flag: --deliveries-out STRING | write which applications' scanner reports to mai
 flag: --list-apps | print a complete app-owners.txt for every web app defined in the scanner - owners already on file kept, new apps with a placeholder - and exit
 flag: --json | with --list-apps: print the machine-readable listing fleet-owners sync reads (id, name and URL host as separate fields, and the live websites no web app scans)
 flag: --no-detail | skip the Qualys WAS API; report counts from the notifications only
+flag: --only-sent STRING | with --commit-seen: record only the notices of scans this key<TAB>ref<TAB>status file (the owners lane's sent list) marks sent
 flag: --out STRING | write the HTML here
 flag: --seen-out STRING | write the scan notifications this report covered here, for --commit-seen after the report has been sent
 flag: --since DURATION | how far back to look for scan notifications (default 168h0m0s)
@@ -156,7 +157,7 @@ flag: --json | machine-readable output
 flag: --quiet | print nothing when nothing is overdue or due within the horizon
 
 command: cti-mailbox
-about: Tidy the shared CTI mailbox: archive, delete auto-replies, leave the rest
+about: Tidy the shared CTI mailbox: archive, delete auto-replies, sweep month-old mail to Unhandled, leave the rest
 runs: effect
 modes: --dry-run --for-real
 flag: --backlog-threshold INT | report when this many inbox messages have no processing record. A growing backlog is what 'the agent stopped reading the mailbox' looks like from outside (default 25)
@@ -164,6 +165,7 @@ flag: --dry-run | show the plan and move nothing
 flag: --for-real | move the mail the plan lists
 flag: --json STRING | write the plan here, so what happened can be checked afterwards
 flag: --lookback DURATION | how far back to look this run, e.g. 720h for a one-off sweep of old auto-replies; 0 means MAILBOX_LOOKBACK_HOURS. Archiving still needs a processing record, and records expire after 14 days
+flag: --never-read-age DURATION | print a NEVER-READ line when mail no lane has read has been in the inbox this long; the runner escalates it once a week (default 168h0m0s)
 flag: --timeout DURATION | overall Graph timeout (default 2m0s)
 
 command: cti-mailer

@@ -3,7 +3,10 @@
 #
 # Tidies the shared CTI mailbox once a day: processed advisories to Archive,
 # header-confirmed out-of-office replies to Deleted Items, everything the agent
-# has no record of reading left exactly where it is.
+# has no record of reading left exactly where it is - until it is a month old,
+# when the sweep moves it to the Unhandled folder. Once a week it says on the
+# board what was left and swept, and mails the operator if any mail has gone
+# unread by every lane for over a week.
 #
 # SAY HOW TO RUN IT. --for-real moves the mail, --dry-run prints the plan and
 # the reason for every message and moves nothing, and with neither this prints
@@ -121,6 +124,65 @@ if [ -n "$QUAR" ]; then
   done <<EOF
 $QUAR
 EOF
+fi
+
+# ── what stayed, what was swept, and the weekly summary ───────────────────────
+# cti-mailbox prints a LEFT line (what it left in the inbox, by reason), a
+# STALE line (what the 30-day sweep moved to the Unhandled folder) and, when
+# mail no lane has read has sat in the inbox over a week, a NEVER-READ line.
+# Every real run appends one record to $WEEK; once a week the totals go to
+# the board, and NEVER-READ to the operator by mail. So mail that was swept
+# rather than handled is counted where somebody reads it, and mail the fleet
+# never read is said out loud instead of waiting for the sweep.
+LEFT="$(printf '%s' "$OUT" | grep '^LEFT: ' | head -n 1 || true)"
+STALE="$(printf '%s' "$OUT" | grep '^STALE: ' | tail -n 1 || true)"
+NEVER="$(printf '%s' "$OUT" | grep '^NEVER-READ: ' | head -n 1 || true)"
+[ -n "$STALE" ] && say "$STALE"
+[ -n "$LEFT" ] && say "$LEFT"
+
+if [ -n "$NEVER" ]; then
+  "$BOARD" post @mailbox @you WARN "$NEVER" 2>/dev/null || true
+fi
+
+WEEK="$FLEET_HOME/state/mailbox-week.tsv"
+STAMPF="$FLEET_HOME/state/mailbox-week.stamp"
+swept="$(printf '%s' "$STALE" | sed -n 's/.*moved=\([0-9][0-9]*\).*/\1/p')"
+if [ -n "$REAL" ]; then
+  printf '%s\t%s\n' "$(date +%s)" "${swept:-0}" >> "$WEEK"
+  chmod 0600 "$WEEK" 2>/dev/null || true
+  # Keep a month of records; the summary reads only the last week.
+  tail -n 31 "$WEEK" > "$WEEK.tmp" && mv "$WEEK.tmp" "$WEEK"
+fi
+
+# Due when there is no stamp, or it is over six days old: once a week, and a
+# missed day only delays it.
+due=""
+if [ ! -f "$STAMPF" ] || [ -n "$(find "$STAMPF" -mmin +8640 2>/dev/null)" ]; then
+  due=1
+fi
+if [ -n "$due" ]; then
+  week_swept=0
+  if [ -f "$WEEK" ]; then
+    week_swept="$(awk -F'\t' -v since="$(( $(date +%s) - 7*86400 ))" \
+      '$1 >= since {s += $2} END {print s + 0}' "$WEEK")"
+  fi
+  WSUM="mailbox week: ${week_swept:-0} message(s) swept to the Unhandled folder in 7 days; ${LEFT:-LEFT: not reported}"
+  if [ -n "$DRY" ]; then
+    say "dry run - would post the weekly summary: $WSUM"
+    [ -n "$NEVER" ] && say "dry run - would alert the operator: $NEVER"
+  else
+    "$BOARD" post @mailbox @you INFO "$WSUM" 2>/dev/null || true
+    if [ -n "$NEVER" ]; then
+      if [ -x "$FLEET_CODE/bin/cti-alert" ]; then
+        "$FLEET_CODE/bin/cti-alert" --unit cti-agent-mailbox.service --kind ESCALATION \
+          --for-real --reason "${NEVER#NEVER-READ: } This week: $WSUM" \
+          || say "warn: cti-alert failed - the never-read mail is on the board"
+      else
+        say "warn: cti-alert not found - the never-read mail is on the board only"
+      fi
+    fi
+    touch "$STAMPF"
+  fi
 fi
 
 say "done - $SUMMARY"

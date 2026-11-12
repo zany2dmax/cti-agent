@@ -4,7 +4,8 @@
 // took a CVE from, Qualys WAS notifications the application-security weekly
 // reported on, and supplier requests the supplier-request lane dismissed as not
 // critical or filed a Kanban item for. Automatic replies go to Deleted Items, read or not. Anything
-// else is left exactly where it is, and counted.
+// else is left exactly where it is, and counted - until it is MAILBOX_STALE_DAYS
+// old, when the sweep moves it to the Unhandled folder (see sweep).
 //
 //	cti-mailbox --dry-run       show what would happen, move nothing
 //	cti-mailbox --for-real      move the mail the plan lists
@@ -77,6 +78,9 @@ func run() int {
 		"report when this many inbox messages have no processing record. "+
 			"A growing backlog is what 'the agent stopped reading the mailbox' "+
 			"looks like from outside")
+	neverReadAge := flag.Duration("never-read-age", 7*24*time.Hour,
+		"print a NEVER-READ line when mail no lane has read has been in the inbox this long; "+
+			"the runner escalates it once a week")
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall Graph timeout")
 	lookback := flag.Duration("lookback", 0,
 		"how far back to look this run, e.g. 720h for a one-off sweep of old "+
@@ -278,12 +282,25 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "cti-mailbox: %s\n", note)
 	}
 
+	// What stayed, and why: one line the runner keeps for the weekly summary.
+	left := mailbox.Left(plan, now, *neverReadAge)
+	fmt.Println(left.Line(*neverReadAge))
+	if left.NeverReadOld > 0 {
+		fmt.Printf("NEVER-READ: %d message(s) no lane has read have been in the inbox over %s "+
+			"(oldest %s) - the digest may have stopped reading the mailbox, or they arrived "+
+			"outside its window\n", left.NeverReadOld, *neverReadAge,
+			left.Oldest.Round(time.Hour))
+	}
+
+	stale, sMoved, sFailed := sweep(ctx, g, cfg, now, window, forReal)
+	failed += sFailed
+
 	if *jsonOut != "" {
-		writePlan(*jsonOut, cfg.GraphMailbox, plan, counts, forReal, moved, failed)
+		writePlan(*jsonOut, cfg.GraphMailbox, plan, counts, forReal, moved, failed, stale, left)
 	}
 
 	if forReal {
-		fmt.Printf("moved %d, failed %d, left %d\n", moved, failed, counts.Leave)
+		fmt.Printf("moved %d, swept %d, failed %d, left %d\n", moved, sMoved, failed, counts.Leave)
 	}
 	// A failed move is a real failure: the permission may be missing, and a
 	// lane that reports success while moving nothing is the thing this whole
@@ -305,8 +322,108 @@ func timezone() *time.Location {
 	return time.Local
 }
 
+// staleMailbox is the part of the Graph client the sweep uses, so a test can
+// stand in for the mailbox.
+type staleMailbox interface {
+	OldMessages(ctx context.Context, mailbox, folder string, before time.Time, max int) ([]graph.OldMessage, error)
+	FindChildFolder(ctx context.Context, mailbox, parent, name string) (graph.ChildFolder, bool, error)
+	CreateChildFolder(ctx context.Context, mailbox, parent, name string) (graph.ChildFolder, error)
+	MoveToChildFolder(ctx context.Context, mailbox, messageID string, dest graph.ChildFolder) (string, error)
+}
+
+// sweep moves inbox mail older than MAILBOX_STALE_DAYS - past every lane's
+// window and past this run's - into MAILBOX_STALE_FOLDER, except what a
+// person flagged. It prints a STALE line for the runner either way.
+//
+// The cutoff is the stale age or this run's window, whichever is further
+// back, so a message the daily plan above just decided about is never also
+// swept (a --lookback 720h catch-up pushes the sweep back with it).
+func sweep(ctx context.Context, g staleMailbox, cfg config.Config, now time.Time,
+	window time.Duration, forReal bool) (plan []mailbox.Decision, moved, failed int) {
+	if cfg.MailboxStaleAge <= 0 {
+		fmt.Println("STALE: off (MAILBOX_STALE_DAYS=0)")
+		return nil, 0, 0
+	}
+	age := cfg.MailboxStaleAge
+	if window > age {
+		age = window
+	}
+	old, err := g.OldMessages(ctx, cfg.GraphMailbox, cfg.GraphFolder, now.Add(-age), cfg.MailboxStaleMax)
+	if err != nil {
+		fmt.Printf("STALE: failed - reading mail older than %s: %s\n", age, safelog.Line(err.Error()))
+		return nil, 0, 1
+	}
+	cands := make([]mailbox.StaleCandidate, 0, len(old))
+	for _, m := range old {
+		cands = append(cands, mailbox.StaleCandidate{ID: m.ID, Subject: m.Subject,
+			Received: m.ReceivedDateTime, Flagged: m.Flagged})
+	}
+	plan = mailbox.PlanStale(cands, now, age, cfg.MailboxStaleFolder)
+	var toMove, flagged int
+	for _, d := range plan {
+		if d.Action == mailbox.ActionUnhandled {
+			toMove++
+		} else {
+			flagged++
+		}
+	}
+	more := ""
+	if len(old) == cfg.MailboxStaleMax {
+		more = fmt.Sprintf(" (the cap of %d - more remain; the next run carries on)", cfg.MailboxStaleMax)
+	}
+	fmt.Printf("  stale sweep: %d message(s) older than %s, %d to %s, %d flagged and left%s\n",
+		len(plan), age, toMove, cfg.MailboxStaleFolder, flagged, more)
+
+	var dest graph.ChildFolder
+	if toMove > 0 {
+		f, ok, err := g.FindChildFolder(ctx, cfg.GraphMailbox, cfg.GraphFolder, cfg.MailboxStaleFolder)
+		switch {
+		case err != nil:
+			fmt.Printf("STALE: failed - looking for the %s folder: %s\n",
+				safelog.Line(cfg.MailboxStaleFolder), safelog.Line(err.Error()))
+			return plan, 0, 1
+		case !ok && !forReal:
+			fmt.Printf("  the %s folder does not exist yet; a real run creates it under %s\n",
+				safelog.Line(cfg.MailboxStaleFolder), safelog.Line(cfg.GraphFolder))
+		case !ok:
+			if f, err = g.CreateChildFolder(ctx, cfg.GraphMailbox, cfg.GraphFolder, cfg.MailboxStaleFolder); err != nil {
+				fmt.Printf("STALE: failed - creating the %s folder: %s\n",
+					safelog.Line(cfg.MailboxStaleFolder), safelog.Line(err.Error()))
+				return plan, 0, 1
+			}
+			fmt.Printf("  created the %s folder under %s\n",
+				safelog.Line(cfg.MailboxStaleFolder), safelog.Line(cfg.GraphFolder))
+		}
+		dest = f
+	}
+
+	for _, d := range plan {
+		line := fmt.Sprintf("  %-9s %s  (%s)", d.Action, safelog.LineMax(d.Subject, 60), d.Reason)
+		if d.Action != mailbox.ActionUnhandled || !forReal {
+			fmt.Println(line)
+			continue
+		}
+		newID, err := g.MoveToChildFolder(ctx, cfg.GraphMailbox, d.ID, dest)
+		if err != nil {
+			failed++
+			fmt.Printf("%s -> FAILED: %s\n", line, safelog.Line(err.Error()))
+			continue
+		}
+		moved++
+		fmt.Printf("%s -> moved (new id %s)\n", line, safelog.LineMax(newID, 16))
+	}
+	if forReal {
+		fmt.Printf("STALE: moved=%d flagged=%d failed=%d folder=%s\n", moved, flagged, failed,
+			safelog.Line(cfg.MailboxStaleFolder))
+	} else {
+		fmt.Printf("STALE: would-move=%d flagged=%d folder=%s\n", toMove, flagged,
+			safelog.Line(cfg.MailboxStaleFolder))
+	}
+	return plan, moved, failed
+}
+
 func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts,
-	forReal bool, moved, failed int) {
+	forReal bool, moved, failed int, stale []mailbox.Decision, left mailbox.LeftSummary) {
 	// #nosec G304 -- operator-supplied --json path; 0o600 because the plan
 	// carries subject lines from a security mailbox.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -321,6 +438,7 @@ func writePlan(path, mbox string, plan []mailbox.Decision, counts mailbox.Counts
 		"mailbox": mbox, "at": time.Now().Format(time.RFC3339),
 		"applied": forReal, "moved": moved, "failed": failed,
 		"counts": counts, "plan": plan,
+		"stale": stale, "left": left.ByWhy, "neverReadOld": left.NeverReadOld,
 	})
 }
 

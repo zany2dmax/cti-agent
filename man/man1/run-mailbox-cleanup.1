@@ -1,4 +1,4 @@
-.TH RUN-MAILBOX-CLEANUP 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH RUN-MAILBOX-CLEANUP 1 "2026-11-12" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 run-mailbox-cleanup \- daily tidy of the CTI mailbox: archive what was processed, delete auto-replies
 .SH SYNOPSIS
@@ -84,6 +84,33 @@ A dry run only says it would. Releasing the mail is the operator's job.
 If the binary reported an unread backlog at or above the threshold (mail
 with no processing record), posts that line as a separate WARN: it is the
 sign that the digest stopped reading the mailbox.
+.TP
+.B 6.
+Prints the binary's
+.B STALE:
+line (what the 30-day sweep moved to the
+.B Unhandled
+folder) and
+.B LEFT:
+line (what stayed in the inbox, by reason), and posts any
+.B NEVER\-READ:
+line (mail no lane has read, in the inbox over a week) to the board as a WARN.
+A real run appends the day's sweep count to
+.IR mailbox\-week.tsv .
+.TP
+.B 7.
+Once a week (when
+.I mailbox\-week.stamp
+is missing or over six days old), posts
+.B "mailbox week:"
+to the board: the messages swept in the last seven days and today's
+.B LEFT:
+line. If there is a
+.B NEVER\-READ:
+line that day, it also goes to the operator by
+.BR "cti\-alert \-\-kind ESCALATION" ,
+so it is mailed once a week, not every morning. A dry run says what it would
+post and send, and does not use up the week's summary.
 .PP
 A fatal step prints
 .B FAILED:
@@ -143,6 +170,10 @@ runs alike, but not when the binary refuses because the digest read no
 mail today; the board line names the path either way.
 .I DATE
 is the local date, so a later run the same day replaces it.
+.TP
+.IR mailbox\-week.tsv ", " mailbox\-week.stamp
+One line per real run (time, messages swept), the last 31 kept; and when the
+weekly summary last went out. Real runs only.
 .TP
 .I processed\-messages.json
 The digest's record of which messages it read, and the only authority

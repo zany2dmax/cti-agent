@@ -35,6 +35,43 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`, then one
+`sudo cti-agent run-mailbox-cleanup --dry-run` to read what the new sweep would
+move before the timer does it. Nothing to configure: the sweep is on at 30 days
+by default (`MAILBOX_STALE_DAYS=0` turns it off).
+
+### Added
+
+- **Mailbox cleanup: a 30-day sweep into `Inbox/Unhandled`.** The daily plan
+  only ever looked at the last 14 days (`MAILBOX_LOOKBACK_HOURS`), so anything
+  still in the inbox at two weeks - a reported phish nobody answered, an
+  unauthenticated Qualys notice, a faulty scan's notices - stayed for good. Mail
+  older than `MAILBOX_STALE_DAYS` (30) now moves to `MAILBOX_STALE_FOLDER`
+  (`Unhandled`, created on first use), at most `MAILBOX_STALE_MAX` (200) a run.
+  By age alone: no body or header is read, a flagged message stays, and nothing
+  is archived (that would say a lane handled it) or deleted. The Graph client can
+  move only into a folder it looked up by name under the folder it reads.
+- **Mailbox cleanup: what was left, once a week.** `cti-mailbox` prints a
+  `LEFT:` line (what stayed, by reason) and a `STALE:` line every run, and a
+  `NEVER-READ:` line when mail no lane has read has been in the inbox over a
+  week (`--never-read-age`, default 168h). `run-mailbox-cleanup` posts a
+  `mailbox week:` summary to the board once a week, puts `NEVER-READ:` on the
+  board daily, and mails it to the operator through `cti-alert` once a week.
+  The plan file gains `stale`, `left` and `neverReadOld`.
+
+### Changed
+
+- **Qualys WAS notices are archived about two days after the owners get the
+  report, not after Friday's weekly.** `run-appowners` now records, after a real
+  send, the notices of each scan it mailed (`cti-appscan --commit-seen
+  --only-sent`), matched on the scanner's own scan reference. A held scan's
+  notices, and one without a reference, still wait for the weekly report. Before
+  this, a week of notices sat in the inbox between weeklies.
+
+---
+
 ## 1.6.4 — 2026-11-11
 
 **Action required if you run the installer by hand:** `install-fedora.sh` now

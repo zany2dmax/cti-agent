@@ -78,6 +78,9 @@ func run() int {
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup "+
 			"reads, so those notifications can be archived; then exit")
+	onlySent := flag.String("only-sent", "",
+		"with --commit-seen: record only the notices of scans this key<TAB>ref<TAB>status "+
+			"file (the owners lane's sent list) marks sent")
 	ticketsOut := flag.String("tickets-out", "",
 		"write one Jira ticket's input per application (active findings of Serious or "+
 			"above, with where, risk and fix) here, for cti-jira --appscan-tickets")
@@ -107,7 +110,10 @@ func run() int {
 		return doCommitDelivered(*commitDelivered, *deliveredLog)
 	}
 	if *commitSeen != "" {
-		return doCommitSeen(*commitSeen)
+		return doCommitSeen(*commitSeen, *onlySent)
+	}
+	if *onlySent != "" {
+		return die("--only-sent goes with --commit-seen")
 	}
 	if *stampTickets != "" {
 		return doStampTickets(*stampTickets, *ticketsOut, *out, *textOut)
@@ -166,6 +172,7 @@ func run() int {
 			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
 			if deliverOnly {
+				saveSeen(*seenOut, seen)
 				return writeDeliveries(*deliveriesOut, *deliveredLog, scans)
 			}
 			attachDetail(ctx, api, scans, windowStart)
@@ -182,6 +189,9 @@ func run() int {
 		scans = newestPerApp(scans)
 	}
 	if *deliveriesOut != "" {
+		if deliverOnly {
+			saveSeen(*seenOut, seen)
+		}
 		if rc := writeDeliveries(*deliveriesOut, *deliveredLog, scans); rc != exitOK || deliverOnly {
 			return rc
 		}
@@ -274,13 +284,7 @@ func run() int {
 	// The notices this report covered. Written here, committed by the runner
 	// only after the send: "the owning lane has seen it" has to mean the
 	// report reached its audience, not that a dry run rendered it.
-	if *seenOut != "" {
-		if err := writeSeen(*seenOut, seen); err != nil {
-			logf("warn   : could not write %s: %s - these notifications "+
-				"will not be archived this week", safelog.Line(*seenOut),
-				safelog.Line(err.Error()))
-		}
-	}
+	saveSeen(*seenOut, seen)
 
 	// THE AUTHENTICATION-FAILURE FILE, AND WHY IT IS A FILE.
 	//
@@ -492,6 +496,11 @@ func collect(msgs []graph.Message) ([]appscan.ScanResult, []mailbox.Processed, [
 				seenMsgs = append(seenMsgs, mailbox.Processed{
 					ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 					AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan,
+					// The scanner's own reference only, never the title@time
+					// fallback: --only-sent matches it against the owners
+					// lane's sent list, and a guess that matched the wrong
+					// scan would archive a notice nobody was sent.
+					Ref: strings.TrimSpace(s.Reference),
 				})
 			}
 			for _, pr := range probs {
@@ -566,6 +575,7 @@ func scheduledClaims(msgs []graph.Message, scans []appscan.ScanResult) []mailbox
 					out = append(out, mailbox.Processed{
 						ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 						AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerAppScan, Delete: true,
+						Ref: strings.TrimSpace(s.Reference),
 					})
 					break
 				}
@@ -614,8 +624,45 @@ func writeSeen(path string, seen []mailbox.Processed) error {
 	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
-// doCommitSeen merges a --seen-out file into this lane's processed log.
-func doCommitSeen(path string) int {
+// saveSeen writes --seen-out when it was asked for. A warning, not a failure:
+// the report is the deliverable, and an unwritten list only leaves those
+// notices in the inbox until a later run records them.
+func saveSeen(path string, seen []mailbox.Processed) {
+	if path == "" {
+		return
+	}
+	if err := writeSeen(path, seen); err != nil {
+		logf("warn   : could not write %s: %s - these notifications "+
+			"stay in the inbox until a later run records them", safelog.Line(path),
+			safelog.Line(err.Error()))
+	}
+}
+
+// sentRefs reads the owners lane's key<TAB>ref<TAB>status file and returns
+// the refs of the scans marked "sent". Held scans are left out: their owners
+// got nothing, so their notices wait for the weekly report.
+func sentRefs(path string) (map[string]bool, error) {
+	// #nosec G304 -- the runner's own sent list under $FLEET_HOME
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	refs := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Split(strings.TrimRight(line, "\r"), "\t")
+		if len(f) < 3 {
+			continue
+		}
+		if ref := strings.TrimSpace(f[1]); ref != "" && strings.TrimSpace(f[2]) == "sent" {
+			refs[ref] = true
+		}
+	}
+	return refs, nil
+}
+
+// doCommitSeen merges a --seen-out file into this lane's processed log. With
+// onlySent, only the notices whose Ref is a scan that file marks sent.
+func doCommitSeen(path, onlySent string) int {
 	dest := mailbox.OwnerLogPath(mailbox.OwnerAppScan)
 	if dest == "" {
 		return die("FLEET_HOME is not set, so there is no state directory to record in")
@@ -633,6 +680,19 @@ func doCommitSeen(path string) int {
 	l, err := store.Load()
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
+	}
+	if onlySent != "" {
+		refs, err := sentRefs(onlySent)
+		if err != nil {
+			return die("reading %s: %s", safelog.Line(onlySent), safelog.Line(err.Error()))
+		}
+		kept := pending.Entries[:0]
+		for _, e := range pending.Entries {
+			if e.Ref != "" && refs[e.Ref] {
+				kept = append(kept, e)
+			}
+		}
+		pending.Entries = kept
 	}
 	for i := range pending.Entries {
 		pending.Entries[i].Owner = mailbox.OwnerAppScan
