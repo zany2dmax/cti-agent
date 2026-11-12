@@ -43,7 +43,7 @@ tasks:
     # pandoc turns the Markdown into LaTeX and pdflatex typesets it, so there is
     # no Python library to install. CHEATSHEET.md must stay plain ASCII:
     # pdflatex does not take arrows or smart quotes without extra setup.
-    # Mac: brew install pandoc; brew install --cask basictex (then
+    # Needs pandoc 3.8+ (--syntax-highlighting). Mac: brew install pandoc; brew install --cask basictex (then
     # sudo tlmgr install fvextra etoolbox framed), or install MacTeX.
     sources:
       - CHEATSHEET.md
@@ -63,7 +63,7 @@ tasks:
         pandoc CHEATSHEET.md -o CHEATSHEET.pdf --pdf-engine=pdflatex \
           -H scripts/cheatsheet-header.tex -V geometry:margin=0.7in \
           -V fontsize=10pt -V colorlinks=true -V linkcolor=blue \
-          --highlight-style=tango
+          --syntax-highlighting=tango
         echo "  ok  CHEATSHEET.pdf"
 
   fmt:check:
