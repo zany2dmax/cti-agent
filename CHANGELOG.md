@@ -63,6 +63,13 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
 
 ### Changed
 
+- **`cti-mailer --check` knows the SharePoint permission.** It listed
+  `Sites.Selected` as UNUSED and suggested removing it - the grant IT adds for
+  the VM scan coverage check's network spreadsheet. It is now reported OK (or
+  `absent`, never fatal), `Files.Read.All` / `Sites.Read.All` are reported
+  `BROAD` instead, and the output says that the site grant is not in the token:
+  `sudo cti-agent cti-vmscan --check` reads the file to prove it.
+
 - **Qualys WAS notices are archived about two days after the owners get the
   report, not after Friday's weekly.** `run-appowners` now records, after a real
   send, the notices of each scan it mailed (`cti-appscan --commit-seen

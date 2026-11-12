@@ -434,8 +434,41 @@ class GrantedRoles(unittest.TestCase):
         self.assertIn("cti-mailbox", out)
         rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
         self.assertEqual(rc, 0)
-        self.assertIn("cti-mailbox cleanup", out)
-        self.assertNotIn("absent", out)
+        cleanup = [l for l in out.split("\n") if "cti-mailbox cleanup" in l]
+        self.assertTrue(cleanup and "OK" in cleanup[0], out)
+        self.assertNotIn("absent   Mail.ReadWrite", out)
+
+    def test_sites_selected_is_used_and_points_at_the_real_test(self):
+        """The VM scan coverage lane reads the subnets file with Sites.Selected.
+
+        The check used to list it as UNUSED and suggest removing it - the one
+        grant IT added for that lane. The role is reported OK, and since the
+        site grant it needs is not in the token, the output names the command
+        that reads the file.
+        """
+        rc, out = self.check(["Mail.ReadWrite", "Mail.Send", "Sites.Selected"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("UNUSED", out)
+        self.assertNotIn("BROAD", out)
+        line = [l for l in out.split("\n") if "cti-vmscan coverage" in l][0]
+        self.assertIn("OK", line)
+        self.assertIn("Sites.Selected", line)
+        self.assertIn("cti-vmscan --check", out)
+
+    def test_a_missing_site_role_is_reported_not_fatal(self):
+        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
+        self.assertEqual(rc, 0)
+        line = [l for l in out.split("\n") if "cti-vmscan coverage" in l][0]
+        self.assertIn("absent", line)
+        self.assertIn("Sites.Selected", line)
+
+    def test_a_tenant_wide_file_role_is_called_broad_not_unused(self):
+        for role in ("Files.Read.All", "Sites.Read.All"):
+            rc, out = self.check(["Mail.ReadWrite", "Mail.Send", role])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("UNUSED", out)
+            self.assertIn("BROAD", out)
+            self.assertIn(role, [l for l in out.split("\n") if "BROAD" in l][0])
 
     def test_unused_permissions_are_named(self):
         """The finding from the real app registration.
@@ -478,11 +511,16 @@ class GrantedRoles(unittest.TestCase):
         self.assertIn("/mailFolders/%s/messages", graph)
         self.assertIn("/sendMail", graph)
         self.assertIn("/messages/%s/move", graph)
+        drive = (root / "internal" / "graph" / "driveitem.go").read_text()
+        self.assertIn('"/drives/"', drive)
+        self.assertIn("/content", drive)
         for forbidden in ("/auditLogs", "/directoryObjects", "/servicePrincipals"):
             self.assertNotIn(forbidden, graph,
                              f"{forbidden} needs a permission USED_ROLES omits")
         self.assertEqual(mailer.USED_ROLES,
-                         frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send"}))
+                         frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send",
+                                    "Sites.Selected", "Files.Read.All",
+                                    "Sites.Read.All"}))
 
 
 class Attribution(unittest.TestCase):

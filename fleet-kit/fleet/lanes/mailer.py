@@ -258,21 +258,42 @@ REQUIRED_ROLES = (
     ("send the digest", ("Mail.Send",)),
 )
 
-# Needed only by the mailbox cleanup lane. Reported, never fatal: most installs
-# do not run it, and a check that fails for a feature you chose not to use is a
-# check people learn to ignore.
+# What reads a SharePoint file, narrowest first: Sites.Selected is one site,
+# the other two are every site and file in the tenant.
+SITE_ROLES = ("Sites.Selected", "Files.Read.All", "Sites.Read.All")
+
+# Needed only by one lane each. Reported, never fatal: not every install runs
+# them, and a check that fails for a feature you chose not to use is a check
+# people learn to ignore. Each entry: what it is for, the roles that satisfy it
+# (narrowest first), and what happens without it.
 OPTIONAL_ROLES = (
-    ("move mail - cti-mailbox cleanup", ("Mail.ReadWrite",)),
+    ("move mail - cti-mailbox cleanup", ("Mail.ReadWrite",),
+     "the cleanup lane will 403. Harmless if you are not running it"),
+    ("read the network spreadsheet - cti-vmscan coverage",
+     SITE_ROLES,
+     "the VM scan coverage check cannot read the subnets file. Harmless if "
+     "SUBNETS_DRIVE_ID is not set"),
 )
 
-# Every Graph endpoint in this codebase needs one of these three:
+# Sites.Selected is the narrow grant, and on its own it reaches nothing: IT
+# must also give the app read access on the one site, and that grant is not in
+# the token. So the token can show only that the role is there; reading the
+# file is the test, and cti-vmscan --check does it.
+SITE_GRANT_NOTE = ("the read grant on the site itself is not in the token - "
+                   "sudo cti-agent cti-vmscan --check reads the file to prove it")
+
+# Every Graph endpoint in this codebase needs one of these:
 #   GET  /users/{mbx}/mailFolders/{f}/messages   Mail.Read or Mail.ReadWrite
 #   POST /users/{mbx}/sendMail                   Mail.Send
 #   POST /users/{mbx}/messages/{id}/move         Mail.ReadWrite
+#   GET  /drives/{d}/items/{i}/content           Sites.Selected (with a read
+#                                                grant on the site), or the
+#                                                broad Files.Read.All /
+#                                                Sites.Read.All
 # Anything else consented is unused, and an unused APPLICATION permission on a
 # daemon app is blast radius with no upside: a leaked client secret gets
 # whatever the tenant consented to, not whatever the code calls.
-USED_ROLES = frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send"})
+USED_ROLES = frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send", *SITE_ROLES})
 
 
 def check(tok, mailbox):
@@ -295,13 +316,18 @@ def check(tok, mailbox):
                 f"Add it in Entra and grant admin consent")
             ok = False
 
-    for what, alternatives in OPTIONAL_ROLES:
+    for what, alternatives, without in OPTIONAL_ROLES:
         have = [r for r in alternatives if r in roles]
         if have:
             log(f"  OK       {have[0]:16} {what}")
         else:
-            log(f"  absent   {' or '.join(alternatives):16} {what} - the cleanup "
-                f"lane will 403. Harmless if you are not running it")
+            log(f"  absent   {' or '.join(alternatives)} - {what}: {without}")
+    if "Sites.Selected" in roles:
+        log(f"           {SITE_GRANT_NOTE}")
+    broad = [r for r in SITE_ROLES[1:] if r in roles]
+    if broad:
+        log(f"  BROAD    {', '.join(broad)} reach every site and file in the "
+            "tenant; Sites.Selected with a read grant on the one site is enough")
 
     # The unused-permission report. This is not a style note: the app in front
     # of me had Directory.Read.All, User.Read.All and AuditLog.Read.All

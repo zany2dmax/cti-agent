@@ -1,4 +1,4 @@
-.TH CTI-MAILER 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-MAILER 1 "2026-11-12" "cti-agent 1.3" "CTI Fleet Manual"
 .SH NAME
 cti-mailer \- the fleet's single outbound mail channel, behind the recipient allowlist
 .SH SYNOPSIS
@@ -456,10 +456,25 @@ or
 .B Mail.ReadWrite
 for
 .BR cti\-mailbox (1)
-is reported
+and
+.B Sites.Selected
+for the network spreadsheet
+.BR cti\-vmscan (1)
+reads are reported
 .B absent
-without failing; any other granted role is listed as
+without failing;
+.B Files.Read.All
+or
+.B Sites.Read.All
+is reported
+.B BROAD
+(Sites.Selected on the one site is enough); any other granted role is listed as
 .BR UNUSED .
+The site grant
+.B Sites.Selected
+needs is not in the token:
+.B "cti\-vmscan \-\-check"
+reads the file to prove it.
 Of the lane variables only
 .BR WAS_TO ,
 .BR WAS_ALLOW_TO ,
