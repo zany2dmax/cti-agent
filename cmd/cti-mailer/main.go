@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,8 +63,11 @@ const (
 
 // logf writes the operator-facing line. stderr, so stdout stays a clean JSON
 // document for the runners that parse it.
+// logOut is where logf writes; a test swaps it to read the --check report.
+var logOut io.Writer = os.Stderr
+
 func logf(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "[mailer] "+format+"\n", a...)
+	_, _ = fmt.Fprintf(logOut, "[mailer] "+format+"\n", a...)
 }
 
 func die(format string, a ...any) int {
@@ -631,27 +635,50 @@ var requiredRoles = []struct {
 	{"send the digest", []string{"Mail.Send"}},
 }
 
-// Needed only by the mailbox cleanup lane. Reported, never fatal: most installs
-// do not run it, and a check that fails for a feature you chose not to use is a
-// check people learn to ignore.
+// What reads a SharePoint file, narrowest first: Sites.Selected is one site,
+// the other two are every site and file in the tenant.
+var siteRoles = []string{"Sites.Selected", "Files.Read.All", "Sites.Read.All"}
+
+// Needed only by one lane each. Reported, never fatal: not every install runs
+// them, and a check that fails for a feature you chose not to use is a check
+// people learn to ignore. Each entry: what it is for, the roles that satisfy
+// it (narrowest first), and what happens without it. Kept in step with
+// OPTIONAL_ROLES in mailer.py.
 var optionalRoles = []struct {
 	what         string
 	alternatives []string
+	without      string
 }{
-	{"move mail - cti-mailbox cleanup", []string{"Mail.ReadWrite"}},
+	{"move mail - cti-mailbox cleanup", []string{"Mail.ReadWrite"},
+		"the cleanup lane will 403. Harmless if you are not running it"},
+	{"read the network spreadsheet - cti-vmscan coverage", siteRoles,
+		"the VM scan coverage check cannot read the subnets file. Harmless if " +
+			"SUBNETS_DRIVE_ID is not set"},
 }
+
+// Sites.Selected is the narrow grant, and on its own it reaches nothing: IT
+// must also give the app read access on the one site, and that grant is not in
+// the token. So the token can show only that the role is there; reading the
+// file is the test, and cti-vmscan --check does it.
+const siteGrantNote = "the read grant on the site itself is not in the token - " +
+	"sudo cti-agent cti-vmscan --check reads the file to prove it"
 
 // usedRoles is every Graph permission this codebase actually calls:
 //
 //	GET  /users/{mbx}/mailFolders/{f}/messages   Mail.Read or Mail.ReadWrite
 //	POST /users/{mbx}/sendMail                   Mail.Send
 //	POST /users/{mbx}/messages/{id}/move         Mail.ReadWrite
+//	GET  /drives/{d}/items/{i}/content           Sites.Selected (with a read
+//	                                             grant on the site), or the
+//	                                             broad Files.Read.All /
+//	                                             Sites.Read.All
 //
 // Anything else consented is unused, and an unused APPLICATION permission on a
 // daemon app is blast radius with no upside: a leaked client secret gets
 // whatever the tenant consented to, not whatever the code calls.
 var usedRoles = map[string]bool{
 	"Mail.Read": true, "Mail.ReadWrite": true, "Mail.Send": true,
+	"Sites.Selected": true, "Files.Read.All": true, "Sites.Read.All": true,
 }
 
 func reportRoles(tok, mailbox string) int {
@@ -686,8 +713,20 @@ func reportRoles(tok, mailbox string) int {
 			logf("  OK       %-16s %s", got, rr.what)
 			continue
 		}
-		logf("  absent   %-16s %s - the cleanup lane will 403. Harmless if you "+
-			"are not running it", strings.Join(rr.alternatives, " or "), rr.what)
+		logf("  absent   %s - %s: %s", strings.Join(rr.alternatives, " or "), rr.what, rr.without)
+	}
+	if has["Sites.Selected"] {
+		logf("           %s", siteGrantNote)
+	}
+	var broad []string
+	for _, r := range siteRoles[1:] {
+		if has[r] {
+			broad = append(broad, r)
+		}
+	}
+	if len(broad) > 0 {
+		logf("  BROAD    %s reach every site and file in the tenant; Sites.Selected "+
+			"with a read grant on the one site is enough", strings.Join(broad, ", "))
 	}
 
 	// The unused-permission report. Not a style note: an app in front of us had
