@@ -69,6 +69,15 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   `state/traces/supplier-<timestamp>.jsonl`. A failed call is still costed. If
   the trace cannot be written the request is still judged; without
   `fleet-trace` on the box the lane runs in text mode as before.
+- **Fewer wasted heartbeat turns.** A week of Sonnet beats lost a turn on 9
+  refused calls, none of them a reasoning failure. `checkin-bash-guard` now
+  refuses `< > | ; & * ? [ ~` only outside quotes, where bash acts on them;
+  inside quotes they are plain text, so a message may hold a semicolon or ask
+  a question. `$` is still refused outside single quotes, and a backtick, line
+  break or backslash anywhere. `fleet-board tail -n N` works (passing `-n`
+  through made `tail` fail), and `fleet-db findings --cve CVE-ID` looks up one
+  CVE. The checkin skill lists the board kinds (there is no `WARN`) and says
+  no command takes `--help`.
 - **`fleet-trace list` totals.** One row per heartbeat or supplier run, newest
   first across both (it sorted by name, which put every heartbeat first), a
   `calls` column, and a last line with the total for the rows listed and per

@@ -7,7 +7,7 @@
 #   fleet-board resolve <id>                        archive a question (id=<id>) and its answers (re:<id>)
 #   fleet-board expire <days>                       archive lines older than <days> (min 2)
 #   fleet-board prune <pattern>                     archive lines matching a regex (operator only)
-#   fleet-board tail [n]                            last n lines
+#   fleet-board tail [-n] [n]                       last n lines (default 20)
 #
 # Appends are serialized with an mkdir lock, which is atomic on POSIX
 # filesystems. Two lanes writing at the same instant will never interleave.
@@ -182,6 +182,13 @@ case "$cmd" in
     mv "$tmp" "$BOARD"
     echo "pruned lines matching: $pattern"
     ;;
-  tail) tail -n "${1:-20}" "$BOARD" | beat_clean ;;
+  tail)
+    # `tail -n N` as well as `tail N`: the beat writes the first form, and
+    # passing "-n" through as the count used to fail in tail itself.
+    [ "${1:-}" = "-n" ] && shift
+    n="${1:-20}"
+    case "$n" in ''|*[!0-9]*) echo "fleet-board: tail takes a number of lines" >&2; exit 2 ;; esac
+    [ "${#n}" -le 4 ] || { echo "fleet-board: too many lines" >&2; exit 2; }
+    tail -n "$n" "$BOARD" | beat_clean ;;
   *) echo "usage: fleet-board {post|say|read|resolve|expire|prune|tail}" >&2; exit 2 ;;
 esac

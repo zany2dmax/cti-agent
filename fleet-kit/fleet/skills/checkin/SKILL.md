@@ -135,6 +135,15 @@ The guard also limits arguments and calls per beat: an alert reason is at most
 refusal with "limit" in it is a safety limit, not an outage: stop, and let the
 next beat continue.
 
+Arguments the guard takes, so a call is not wasted on a guess (each of these
+was refused at least once in the week of 2026-11-08):
+- Board kinds are only `INFO`, `Q`, `A`, `APPROVE`, `P1` and `ERROR`; there is
+  no `WARN`. Use `INFO` for a note and `ERROR` for something broken.
+- `fleet-board tail 20` or `fleet-board tail -n 20` (at most 200).
+- One CVE from memory: `fleet-db findings --cve CVE-2026-12345`.
+- No command takes `--help`, and there is no `grep`, `cat` or `ls` on a beat.
+  Read the board with `fleet-board read` or `tail`, never the file.
+
 `cti-alert` is your only mail. It has no `--to`; the operator is the only
 person it can reach, which is the point.
 

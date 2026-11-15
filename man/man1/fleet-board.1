@@ -21,6 +21,7 @@ fleet-board \- the fleet's append-only message board: post, read, prune and tail
 .I pattern
 .br
 .B fleet\-board tail
+.RB [ \-n ]
 .RI [ n ]
 .br
 .B fleet\-board
@@ -215,10 +216,16 @@ and
 instead. The operator runs
 .BR prune .
 .TP
-.BR tail " [\fIn\fR]"
+.BR tail " [\fB\-n\fR] [\fIn\fR]"
 The last
 .I n
-lines of the board.
+lines of the board, a whole number of up to four digits; a leading
+.B \-n
+is accepted, so
+.B "tail \-n 8"
+and
+.B "tail 8"
+are the same.
 Default:\~\fB20\fR.
 .SH ENVIRONMENT
 .B fleet\-board

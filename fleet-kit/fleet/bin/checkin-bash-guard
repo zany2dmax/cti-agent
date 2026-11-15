@@ -13,14 +13,19 @@ those is its business; this makes the answer not depend on it.
 So a beat's command may be one granted command with plain arguments:
 no redirection, pipes, chaining, background jobs, line breaks, and no
 expansion of any kind outside single quotes - not $(...), not ${...}, and
-not plain $NAME either. The beat's process carries fleet.env, so
+not plain $NAME either. Those operators are refused where bash would act on
+them, which is outside quotes: inside single or double quotes ; & | < > are
+plain characters to bash, so a message may say "done; nothing new" or ask
+"approve?" (2026-11-15: a week of beats lost a turn each time they wrote a
+semicolon or question mark in a quoted message). The beat's process carries fleet.env, so
 `fleet-board say @all INFO $CLIENT_SECRET` would put a credential on the
 board, and `cti-alert --reason $QUALYS_PASSWORD` would mail one. Globs and
-~ are refused for the same reason (they list paths Read is not granted),
-and so is a leading NAME=value, which changes what a granted command reads.
-Single-quoted text is literal to bash, so patterns such as 'cti-agent-*'
-stay usable there. Double-quoted text is checked like the rest, because bash
-expands $ inside it. A backslash outside single quotes and an unbalanced
+~ are refused outside quotes for the same reason (they list paths Read is
+not granted), and so is a leading NAME=value, which changes what a granted
+command reads. Quoted text is not globbed or tilde-expanded, so patterns
+such as 'cti-agent-*' stay usable in quotes. Double-quoted text is still
+checked for $, because bash expands it there, and a backtick or a line break
+is refused anywhere. A backslash outside single quotes and an unbalanced
 quote are refused: either one moves where bash thinks a quote ends. The grants are absolute paths, so nothing legitimate
 needs a variable. Exit 2 blocks the call and the message goes
 back to the model. ANY failure here - unreadable input, a crash - also exits
@@ -59,13 +64,16 @@ import sys
 import syslog
 
 
-# Anywhere in the command, quoted or not.
-FORBIDDEN_ANYWHERE = set("<>|;&`\n\r")
-# Outside single quotes, where bash expands them.
-FORBIDDEN_UNQUOTED = set("$*?[~")
+# Anywhere in the command, quoted or not: a backtick substitutes inside
+# double quotes, and a line break ends a command wherever the walk thinks a
+# quote is.
+FORBIDDEN_ANYWHERE = set("`\n\r")
+# Outside single quotes, where bash expands it - double quotes included.
+FORBIDDEN_UNQUOTED = set("$")
 # Outside every quote, including double quotes (inside them bash leaves these
-# alone): brace expansion, extglob and a comment.
-FORBIDDEN_BARE = set("{}()#")
+# alone): redirection, pipes, chaining and background jobs; globs and ~;
+# brace expansion, extglob and a comment.
+FORBIDDEN_BARE = set("<>|;&*?[~{}()#")
 ASSIGNMENT = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -234,6 +242,11 @@ def _pol_board(a):
             return f"{_short(rest[0])} is not a handle"
         return None
     if sub == "tail":
+        # `tail -n 8` is how a model writes it; fleet-board takes both forms.
+        if rest[:1] == ["-n"]:
+            rest = rest[1:]
+            if not rest:
+                return "tail -n needs a number"
         if len(rest) > 1:
             return "tail takes at most one number"
         bad = _int(1, 200)(rest[0]) if rest else None
@@ -260,13 +273,14 @@ def _pol_db(a):
         bad = _int(1, 100)(rest[0]) if rest else None
         return f"the count {bad}" if bad else None
     if sub == "findings":
-        return _flags(rest, {"--priority": _rx(r"Sev[1-5]\Z", "Sev1 to Sev5"),
+        return _flags(rest, {"--cve": _rx(r"CVE-[0-9]{4}-[0-9]{4,7}\Z", "a CVE id"),
+                             "--priority": _rx(r"Sev[1-5]\Z", "Sev1 to Sev5"),
                              "--stale-days": _int(1, 3650),
                              "--status": _rx(r"[A-Z_]{1,20}\Z", "a status word")})
     if sub == "was-sent":
         if len(rest) != 2:
             return "was-sent takes a date and a kind"
-        for v, rx, what in ((rest[0], r"\d{4}-\d{2}(-\d{2})?\Z", "a date or month"),
+        for v, rx, what in ((rest[0], r"[0-9]{4}-[0-9]{2}(-[0-9]{2})?\Z", "a date or month"),
                             (rest[1], r"[a-z]{1,20}\Z", "a digest kind")):
             if not re.match(rx, v):
                 return f"{_short(v)} is not {what}"
@@ -335,7 +349,7 @@ def _pol_budget(a):
 def _pol_patchtuesday(a):
     if not a or a[0] != "--dry-run":
         return "must start with --dry-run"
-    return _flags(a[1:], {"--month": _rx(r"\d{4}-(0[1-9]|1[0-2])\Z", "YYYY-MM"),
+    return _flags(a[1:], {"--month": _rx(r"[0-9]{4}-(0[1-9]|1[0-2])\Z", "YYYY-MM"),
                           "--subject-only": None, "--max-rows": _int(0, 1000)})
 
 

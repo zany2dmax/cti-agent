@@ -7,7 +7,7 @@
   fleet-db task add <title> | done <id> | list
   fleet-db mail send <agent> <kind> <body> | inbox <agent> | ack <id>
   fleet-db finding upsert <json>      persist an enriched finding
-  fleet-db findings [--priority Sev5] [--status UNKNOWN] [--stale-days N]
+  fleet-db findings [--cve CVE-ID] [--priority Sev5] [--status UNKNOWN] [--stale-days N]
   fleet-db sent <date> <s5> <s4> <s3> <s2> <s1> <message_id>
   fleet-db note <cve> <text>          record who is handling a finding
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
@@ -254,6 +254,11 @@ def main(argv):
     elif cmd == "findings":
         q = "SELECT * FROM findings WHERE 1=1"
         p = []
+        if "--cve" in args:
+            # One CVE: a beat checking a CVE it read about asked for it as a
+            # positional argument and was refused (2026-11-12).
+            q += " AND cve=?"
+            p.append(args[args.index("--cve") + 1].upper())
         if "--priority" in args:
             q += " AND priority=?"
             p.append(args[args.index("--priority") + 1])

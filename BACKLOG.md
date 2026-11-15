@@ -336,6 +336,36 @@ is real, not before. Finished work moves out of this file into
     beat weighting in `cti-budget`, which counts beats today, not cost;
     tests for the gate's refusals; and the orchestrator CLAUDE.md telling a
     beat when to ask.
+  - **The week on Sonnet, 2026-11-08 to 11-15: not built yet, on purpose.**
+    82 beats, all `claude-sonnet-5-5`, all completed `ok`: $13.35, $0.163 a
+    beat ($0.136 to $0.227), about $1.91 a day or $57 a month, 8 to 17 turns
+    (usually 9 to 11). Read from the traces (`fleet-trace list -n 0` and
+    `show`). What it found:
+    - *Routine work was fine.* It found the VM scan's SharePoint 403 and
+      escalated once (11-11). Through the Graph 502 outage (11-13) it posted
+      once, did not repeat itself, saw the recovery and noted the 11-13
+      digest was never sent (the 11-14 one covers it).
+    - *One stronger-model case, the one this design names.* KEV readings
+      disagreed and no beat asked why: 11-12 and 11-13 said two Sev5 KEV CVEs
+      due 11-24 on 435 and 230 hosts, and from 11-14 16:17 "none due within
+      30 days". On 11-09 the weekly said 9 overdue KEV deadlines while
+      `cti-kev` said none, the same pair as 11-04. It reported each side
+      faithfully. First check whether `cti-kev` and the weekly rollup simply
+      define "overdue" or "due" differently, or the KEV data changed on
+      11-14: if it is a definition mismatch, fix the data and this case goes
+      away without a stronger model.
+    - *The rest was guard friction, not reasoning,* fixed without a stronger
+      model (2026-11-15): 9 refused calls, each a lost turn and a retry. A
+      semicolon, question mark or tilde in a quoted message (5, including the
+      first try of the 11-09 11:20 escalation, which went out after a reword);
+      `fleet-board tail -n 8`; board kind `WARN`; `fleet-db findings CVE-...`;
+      `fleet-db recent --help`; a `grep` of the board file. The guard now
+      allows that punctuation inside quotes, `fleet-board tail -n N` and
+      `fleet-db findings --cve` exist, and the skill lists the kinds and says
+      there is no `--help`.
+    - *Next:* settle the KEV question, then rerun this review on another
+      week of traces. Build the escalation only if real stronger-model cases
+      keep appearing; at about one in 82 beats it would cost more than it buys.
 - **VM lane: Jira tickets for out-of-SLA vulnerabilities** (noted 2026-11-10,
   not designed). Pull every detection past its remediation SLA for its
   severity, with the affected hosts, and file Jira tickets for them. Not

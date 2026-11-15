@@ -278,7 +278,7 @@ sub: read | lines for a handle
 sub: resolve | archive a question and its answers
 sub: expire | archive lines older than N days
 sub: prune | archive lines matching a pattern (operator only)
-sub: tail | last N lines
+sub: tail | last N lines (tail N or tail -n N)
 
 command: fleet-db
 about: SQLite memory: findings, tasks, mail, sent digests
@@ -289,7 +289,7 @@ sub: recent | recent memories, open tasks, unacked mail
 sub: task | add, done or list tasks
 sub: mail | send, inbox or ack board mail
 sub: finding | upsert a finding
-sub: findings | list findings
+sub: findings | list findings (--cve, --priority, --status, --stale-days)
 sub: rollup | summarise the findings
 sub: sent | record a digest as delivered
 sub: note | record who is handling a finding

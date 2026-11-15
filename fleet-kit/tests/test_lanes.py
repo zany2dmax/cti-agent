@@ -2755,6 +2755,12 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             # An apostrophe inside double quotes is a literal, not a quote.
             '/opt/cti-agent/bin/fleet-db remember checkin beat_1 "the digest didn\'t run"',
             "/opt/cti-agent/bin/fleet-board say @all INFO 'say \"hi\" here'",
+            # Inside quotes these are plain characters to bash (2026-11-15: a
+            # week of beats lost a turn on each quoted semicolon or question).
+            '/opt/cti-agent/bin/fleet-board say @all INFO "done; nothing new"',
+            '/opt/cti-agent/bin/fleet-board say @operator INFO "May I hold it until Monday?"',
+            '/opt/cti-agent/bin/fleet-db remember checkin t "A & B, a->b, x|y, ~30 min, [cut], *"',
+            "/opt/cti-agent/bin/fleet-board say @all INFO 'it is done; ok?'",
         ):
             with self.subTest(allowed=cmd):
                 r = bash(cmd)
@@ -2792,6 +2798,20 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             "/opt/cti-agent/bin/fleet-board say @all INFO 'open quote $HOME",
             "FLEET_HOME= /opt/cti-agent/bin/cti-kev --enriched /tmp/enriched-x.json",
             " X=1 /opt/cti-agent/bin/cti-kev",
+            # The operators still mean what they mean outside quotes, however
+            # close to a quote they sit.
+            '/opt/cti-agent/bin/fleet-board say @all INFO "x"; id',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "x";id',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "x"|sh',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "x"&id',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "x">/tmp/y',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "a;"b;id',
+            "/opt/cti-agent/bin/fleet-board say @all INFO 'a;'b;id",
+            # $ and backticks still expand inside double quotes.
+            '/opt/cti-agent/bin/fleet-board say @all INFO "ok; $(id)"',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "ok? $CLIENT_SECRET"',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "ok; `id`"',
+            '/opt/cti-agent/bin/fleet-board say @all INFO "a\\;" id',
         ):
             with self.subTest(refused=cmd):
                 r = bash(cmd)
@@ -2823,6 +2843,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         b = "/opt/cti-agent/bin/"
         allowed = (
             b + "fleet-board read", b + "fleet-board read @all", b + "fleet-board tail 6",
+            b + "fleet-board tail -n 8", b + "fleet-db findings --cve CVE-2026-124194",
             b + "fleet-board resolve q17", b + "fleet-board expire 7",
             b + 'fleet-board say @all INFO "braces {ok} and (parens) inside double quotes"',
             b + "fleet-board say @all INFO 'a #hash and {braces} in single quotes'",
@@ -2855,6 +2876,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             b + "fleet-board say @all INFO " + "x" * 401,
             b + "fleet-board say @all INFO 'caf\u00e9'",
             b + "fleet-board tail 99999", b + "fleet-board expire 1",
+            b + "fleet-board tail -n", b + "fleet-board tail -n 999", b + "fleet-board tail -n 8 9",
+            b + "fleet-db findings CVE-2026-124194", b + "fleet-db findings --cve 'x OR 1=1'",
+            b + "fleet-db findings --cve CVE-2026-\u0661\u0662\u0663\u0664",
+            b + "fleet-db was-sent 2026-11-1\u0665 daily",
+            b + "fleet-board say @all WARN x",
             b + "fleet-db sent 2026-11-10 1 2 3 4 5 m", b + "fleet-db finding upsert '{}'",
             b + "fleet-db note CVE-2026-1 x", b + "fleet-db init",
             b + "fleet-db remember checkin one", b + "fleet-db remember BAD topic text",
