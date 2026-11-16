@@ -104,6 +104,17 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   notices, and one without a reference, still wait for the weekly report. Before
   this, a week of notices sat in the inbox between weeklies.
 
+### Fixed
+
+- **AppSec owner email: no findings summary when Qualys sent no notice.** A scan
+  the fleet knows only from the Qualys scan list (no notification email) has no
+  counts, so the covering email dropped the severity tiles and said nothing
+  about what is open (seen 15 Nov 2026). `cti-appreport`
+  now counts the open vulnerabilities from the findings it already reads to
+  build the attached report, the same numbers as the report's own summary,
+  and the email shows them with a line saying the scanner sent no summary of
+  this scan. No extra Qualys API calls.
+
 ---
 
 ## 1.6.4 — 2026-11-11

@@ -599,6 +599,12 @@ func doDeliveries(ctx context.Context, src appscan.OwnerReportSource, path, dir 
 				logf("warn   : %s: no report, not sent today - %s", name, safelog.Line(orText(failed[d.Key], "not fetched")))
 				continue
 			}
+			if d.NoNotice {
+				// No notice, so no counts in the plan: take them from the
+				// findings the report is built from, which are the same
+				// numbers the attachment's summary shows.
+				d.Open, d.OpenFromAPI = appscan.OpenVulnCounts(fs), true
+			}
 			rbody := appscan.RenderOwnerReport(appscan.OwnerReportInput{
 				Delivery: d, Findings: fs, Remedies: rem, Org: emailkit.Org(), Generated: generated})
 			rname := "report.html"

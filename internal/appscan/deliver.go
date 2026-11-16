@@ -61,10 +61,15 @@ type Delivery struct {
 	Retry bool   `json:"retry,omitempty"`
 	// Counts from the notice, for the covering email. Unknown (and not
 	// shown) when the scanner sent no notice.
-	NoNotice   bool   `json:"noNotice,omitempty"`
-	Open       Counts `json:"open"` // New + Reopened + Active (Lifecycle.Open)
-	ScanCounts Counts `json:"scanCounts"`
-	FirstScan  bool   `json:"firstScan,omitempty"`
+	NoNotice bool `json:"noNotice,omitempty"`
+	// OpenFromAPI says Open was counted from the scanner's API (the owner
+	// report's own findings) because there was no notice. Open is then
+	// known; ScanCounts and FirstScan still are not. Set by cti-appreport,
+	// never read from the deliveries file.
+	OpenFromAPI bool   `json:"-"`
+	Open        Counts `json:"open"` // New + Reopened + Active (Lifecycle.Open)
+	ScanCounts  Counts `json:"scanCounts"`
+	FirstScan   bool   `json:"firstScan,omitempty"`
 
 	// What was scanned and how the run went, for the email and the report's
 	// summary. URL is the web app's address from the scanner's API record;
@@ -349,7 +354,7 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	// anything lower, green for a clean scan - the colours of the tiles.
 	lead := emailkit.Green
 	switch {
-	case d.NoNotice:
+	case d.NoNotice && !d.OpenFromAPI:
 		lead = emailkit.Blue
 	case d.Open.Urgent > 0:
 		lead = emailkit.Red
@@ -372,9 +377,13 @@ func RenderOwnerMail(d Delivery, attached, why string) OwnerMail {
 	emailkit.Lead(&b, lead, fmt.Sprintf(`The scheduled security scan of <b>%s</b>%s %s (%s).`,
 		e(d.App), at, e(finished), e(d.AuthLabel)))
 
-	if !d.NoNotice {
+	if !d.NoNotice || d.OpenFromAPI {
 		more := fmt.Sprintf(`<b>Open findings in the application:</b> %s`, e(ownerCounts(d.Open)))
-		if d.FirstScan {
+		if d.NoNotice {
+			// Counted from the scanner's open findings: there was no notice
+			// to say what this one scan found.
+			more += `<br>The scanner sent no summary of this scan, so what this scan alone found is not shown.`
+		} else if d.FirstScan {
 			more += `<br>This is the first scan of the application, so nothing is compared with an earlier one.`
 		} else {
 			more += fmt.Sprintf(`<br><b>Found by this scan:</b> %s`, e(ownerCounts(d.ScanCounts)))

@@ -127,6 +127,40 @@ func groupKinds(fs []Finding) []kindGroup {
 	return out
 }
 
+// OpenVulnCounts is the open vulnerabilities in an owner report's findings,
+// by severity: what the report's own summary counts. Ignored findings and the
+// other kinds (sensitive content, information gathered) are left out, as the
+// report leaves them out of its tiles.
+func OpenVulnCounts(fs []Finding) Counts {
+	var vulns []Finding
+	for _, f := range fs {
+		if f.Ignored || f.Kind == "SENSITIVE_CONTENT" || f.Kind == "INFORMATION_GATHERED" {
+			continue
+		}
+		vulns = append(vulns, f)
+	}
+	return countBySeverity(vulns)
+}
+
+func countBySeverity(fs []Finding) Counts {
+	var c Counts
+	for _, f := range fs {
+		switch f.Severity {
+		case 5:
+			c.Urgent++
+		case 4:
+			c.Crit++
+		case 3:
+			c.Serious++
+		case 2:
+			c.Medium++
+		default:
+			c.Minimal++
+		}
+	}
+	return c
+}
+
 // RenderOwnerReport is the report, as one HTML document.
 func RenderOwnerReport(in OwnerReportInput) []byte {
 	d := in.Delivery
@@ -161,21 +195,7 @@ func RenderOwnerReport(in OwnerReportInput) []byte {
 			vulns = append(vulns, f)
 		}
 	}
-	var open Counts
-	for _, f := range vulns {
-		switch f.Severity {
-		case 5:
-			open.Urgent++
-		case 4:
-			open.Crit++
-		case 3:
-			open.Serious++
-		case 2:
-			open.Medium++
-		default:
-			open.Minimal++
-		}
-	}
+	open := countBySeverity(vulns)
 	kinds := groupKinds(vulns)
 
 	var b strings.Builder

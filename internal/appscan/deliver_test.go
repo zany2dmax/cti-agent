@@ -195,6 +195,34 @@ func TestRenderOwnerMail(t *testing.T) {
 	}
 }
 
+// A scan Qualys sent no notice for is known only from its scan list, which
+// has no counts. The report's own findings do: the email's tiles come from
+// them, the same numbers as the attachment's summary (one on 15 Nov 2026
+// went out with no tiles at all).
+func TestAScanWithNoNoticeGetsItsTilesFromTheReportsFindings(t *testing.T) {
+	t.Setenv("FLEET_ORG", "CR Agent Fleet")
+	fs := []Finding{
+		{ID: "1", Severity: 5}, {ID: "2", Severity: 3, Kind: "VULNERABILITY"},
+		{ID: "3", Severity: 3}, {ID: "4", Severity: 4, Ignored: true},
+		{ID: "5", Severity: 5, Kind: "SENSITIVE_CONTENT"}, {ID: "6", Severity: 2, Kind: "INFORMATION_GATHERED"},
+	}
+	if got, want := OpenVulnCounts(fs), (Counts{Urgent: 1, Serious: 2}); got != want {
+		t.Fatalf("OpenVulnCounts = %+v, want %+v", got, want)
+	}
+	d := Delivery{App: "Listed", NoNotice: true, LaunchOnly: true, AuthLabel: "unauthenticated scan",
+		Finished: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)}
+	d.Open, d.OpenFromAPI = OpenVulnCounts(fs), true
+	h := RenderOwnerMail(d, "r.html", "").HTML
+	for _, want := range []string{"Open findings in the application:</b> 1 Urgent, 2 Serious", "sent no summary of this scan"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("missing %q:\n%s", want, h)
+		}
+	}
+	if strings.Contains(h, "Found by this scan") || strings.Contains(h, "first scan") {
+		t.Errorf("claims to know what this one scan found:\n%s", h)
+	}
+}
+
 func TestTheOwnerMailLooksLikeTheFleetsOtherEmails(t *testing.T) {
 	t.Setenv("FLEET_ORG", "CR")
 	t.Setenv("FLEET_ATTRIBUTION", "")
