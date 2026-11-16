@@ -91,6 +91,7 @@ func run() int {
 	if *asJSON {
 		out := map[string]any{
 			"source":              path,
+			"scope":               scopeNote,
 			"enriched_generated":  e.Generated,
 			"now":                 r.Now.Format(time.RFC3339),
 			"horizon_days":        r.Horizon,
@@ -109,7 +110,7 @@ func run() int {
 		_ = enc.Encode(out)
 	} else if !suppress {
 		fmt.Print(r.Markdown(*showHosts))
-		fmt.Printf("\n_Source: %s (enriched %s)_\n", filepath.Base(path), e.Generated)
+		fmt.Printf("\n_Source: %s (enriched %s). %s_\n", filepath.Base(path), e.Generated, scopeNote)
 	}
 
 	if *failIfOverdue && len(r.Overdue) > 0 {
@@ -117,6 +118,15 @@ func run() int {
 	}
 	return 0
 }
+
+// scopeNote says what the file covers. The daily's enriched file holds the
+// CVEs that day's mail named, not every open finding, so a present KEV CVE
+// nobody mailed about drops out of it: from 14 Nov 2026 the check-in read
+// "none due within 30 days" for a pair it had reported due on 24 Nov the two
+// days before. Said on every report so a clean one is not read as the estate.
+const scopeNote = "Covers the CVEs that digest's mail named, not every open " +
+	"finding: a CVE no email mentioned that day is not here. The weekly's KEV " +
+	"line counts every stored finding seen in the week."
 
 func cves(rows []kev.Dated) []string {
 	out := make([]string, 0, len(rows))

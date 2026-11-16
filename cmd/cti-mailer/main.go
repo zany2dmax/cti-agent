@@ -334,6 +334,10 @@ func run() int {
 		}
 		body = mailer.EscalationHTML(*message, *boardID, replyTo)
 	}
+	var added bool
+	if body, added = mailer.WithAttribution(body); added {
+		logf("attribution: the body lacked FLEET_ATTRIBUTION, a credit line was added")
+	}
 
 	subj := mailer.Subject(*subject, *boardID, *message != "", time.Now())
 	if *toDev {

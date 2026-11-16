@@ -350,10 +350,11 @@ is real, not before. Finished work moves out of this file into
       due 11-24 on 435 and 230 hosts, and from 11-14 16:17 "none due within
       30 days". On 11-09 the weekly said 9 overdue KEV deadlines while
       `cti-kev` said none, the same pair as 11-04. It reported each side
-      faithfully. First check whether `cti-kev` and the weekly rollup simply
-      define "overdue" or "due" differently, or the KEV data changed on
-      11-14: if it is a definition mismatch, fix the data and this case goes
-      away without a stronger model.
+      faithfully. **Settled 2026-11-16, no stronger model needed:** both
+      were definition and scope problems. The weekly counted deadlines on
+      CVEs not found here (fixed), and `cti-kev` reads one day's mail, so the
+      due pair dropped out on 11-14 when no email named it again (now said on
+      every report; the estate-wide version is its own item below).
     - *The rest was guard friction, not reasoning,* fixed without a stronger
       model (2026-11-15): 9 refused calls, each a lost turn and a retry. A
       semicolon, question mark or tilde in a quoted message (5, including the
@@ -363,9 +364,19 @@ is real, not before. Finished work moves out of this file into
       allows that punctuation inside quotes, `fleet-board tail -n N` and
       `fleet-db findings --cve` exist, and the skill lists the kinds and says
       there is no `--help`.
-    - *Next:* settle the KEV question, then rerun this review on another
-      week of traces. Build the escalation only if real stronger-model cases
+    - *Next:* rerun this review on another week of traces. Build the escalation only if real stronger-model cases
       keep appearing; at about one in 82 beats it would cost more than it buys.
+- **`cti-kev` over every stored finding, not one day's mail** (noted
+  2026-11-16, not designed). It reads the newest daily enriched file, which
+  holds only the CVEs that day's emails named, so a present KEV CVE drops out
+  the first day nobody mails about it (the 11-12/11-13 due pair, gone from
+  11-14). The stored findings in `state/memory.db` are the estate picture, but
+  Go cannot read SQLite without a dependency. Likely shape: `run-digest daily`
+  writes a JSON snapshot of stored PRESENT KEV findings after the upsert
+  (`fleet-db rollup`, a wider window), and `cti-kev` reads that by default.
+  Decide the window (stored rows are re-confirmed only when mail names them
+  again, so an old row may be fixed already) and whether the daily's own KEV
+  banner should move to it too.
 - **VM lane: Jira tickets for out-of-SLA vulnerabilities** (noted 2026-11-10,
   not designed). Pull every detection past its remediation SLA for its
   severity, with the affected hosts, and file Jira tickets for them. Not

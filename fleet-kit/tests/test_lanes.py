@@ -800,6 +800,37 @@ class MailerGate(unittest.TestCase):
         self.assertNotIn("<script>", body)
         self.assertIn("&lt;script&gt;", body)
 
+    def test_escalation_fallback_colours_equal_the_token_file(self):
+        # The fallback is used only when email-tokens.json is missing; it must
+        # not drift from the file, or that install's escalations look different.
+        path = os.path.join(os.path.dirname(mailer.__file__), "email-tokens.json")
+        with open(path, encoding="utf-8") as f:
+            t = json.load(f)
+        fb = mailer._ESC_TOKENS
+        for k in ("font", "page_bg", "navy", "band_text", "ink", "soft", "muted", "rule"):
+            self.assertEqual(fb[k], t[k], k)
+        self.assertEqual(fb["blue"], t["tones"]["blue"])
+
+    def test_a_token_that_could_break_out_of_a_style_is_ignored(self):
+        bad = {"font": 'Arial"><script>x</script>', "navy": "red;}</style>",
+               "tones": {"blue": {"fg": '#fff"', "bg": "#ebf4ff"}}}
+        d = tempfile.mkdtemp()
+        try:
+            shutil.copy(mailer.__file__, d)
+            with open(os.path.join(d, "email-tokens.json"), "w", encoding="utf-8") as f:
+                json.dump(bad, f)
+            spec = importlib.util.spec_from_file_location(
+                "mailer_badtokens", os.path.join(d, "mailer.py"))
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            t = m._esc_tokens()
+            self.assertEqual(t["font"], m._ESC_TOKENS["font"])
+            self.assertEqual(t["navy"], m._ESC_TOKENS["navy"])
+            self.assertEqual(t["blue"], m._ESC_TOKENS["blue"])
+            self.assertNotIn("<script>", m.escalation_html("hi", "q1"))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 class BandLabelsDoNotOverclaim(unittest.TestCase):
     """A band heading must not assert presence the scanner never confirmed.
@@ -1999,6 +2030,37 @@ class WeeklyRollsUpStoredFindings(unittest.TestCase):
         kev = self.rollup()["kev_deadlines"]
         self.assertEqual(kev["overdue"], 1)
         self.assertEqual(kev["worst_overdue_days"], 9)
+
+    def test_a_deadline_on_a_cve_not_found_here_is_not_overdue(self):
+        # The weekly once counted every stored row with a passed date and said
+        # "9 KEV deadlines OVERDUE" on weeks cti-kev said none (2026-11-09).
+        import sqlite3
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        up = now.isoformat(timespec="seconds")
+        past = (now - timedelta(days=30)).date().isoformat()
+        soon = (now + timedelta(days=5)).date().isoformat()
+        con = sqlite3.connect(os.path.join(self.tmp, "state", "memory.db"))
+        for cve, st, hc, due in (("CVE-D", "NOT_PRESENT", 0, past),
+                                 ("CVE-E", "UNKNOWN", 0, past),
+                                 ("CVE-F", "PRESENT", 0, past),  # PRESENT, no hosts
+                                 ("CVE-G", "PRESENT", 4, soon)):
+            con.execute(
+                "INSERT INTO findings(cve,status,priority,host_count,kev,kev_due,"
+                "first_seen,updated) VALUES(?,?,'Sev3',?,1,?,?,?)",
+                (cve, st, hc, due, up, up))
+        con.commit()
+        con.close()
+        d = self.rollup()
+        kev = d["kev_deadlines"]
+        self.assertEqual(kev["overdue"], 1, kev)
+        self.assertEqual(kev["overdue_cves"], ["CVE-A"])
+        self.assertEqual(kev["due_within_14d"], 1)
+        # The same answer the daily's own summary gives for the same rows.
+        rows = [dict(f, kev_days_left=enrich.kev_days_left(f)) for f in d["findings"]]
+        daily = enrich.kev_summary(rows)
+        for k in ("overdue", "due_within_14d", "worst_overdue_days", "overdue_cves"):
+            self.assertEqual(kev[k], daily[k], k)
 
     def test_the_rendered_weekly_states_its_provenance(self):
         d = self.rollup()

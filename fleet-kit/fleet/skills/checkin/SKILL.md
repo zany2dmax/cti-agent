@@ -174,6 +174,14 @@ $FLEET_CODE/bin/cti-kev --json      # if you want to reason over the numbers
 
 Read it carefully before acting on it:
 
+- **It covers one day's mail, not the estate.** It reads the newest daily
+  enriched file, which holds only the CVEs that day's emails named. A KEV CVE
+  that was due soon yesterday and is missing today has most likely just not
+  been mailed about again - it has not been fixed. Do not report it as
+  resolved, and do not read a clean report as "nothing due anywhere". The
+  weekly's KEV line counts every stored finding seen in the week, PRESENT on
+  at least one host, the same rule as here.
+
 - **Overdue and present** is worth telling the operator about, and worth
   checking whether the same CVE has been overdue for several beats without
   anyone moving. A deadline that keeps passing unremarked is the thing to

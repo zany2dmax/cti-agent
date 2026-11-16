@@ -30,6 +30,13 @@ export FLEET_ALLOW_TO=""   # old name; empty so fleet.env cannot load a conflict
 export FLEET_OPERATOR_EMAIL="op@example.com"
 export CTI_REPLY_MAILBOX="reply@example.com"
 unset DIGEST_CC_FROM_ALLOW_TO
+# The credit line: pinned so the comparison does not depend on this box, and
+# set (not cleared) so the attribution path is what gets compared. The
+# escalation cases check both put it in the footer; the digest cases check
+# both add the safety-net line to a page that lacks it.
+export FLEET_ATTRIBUTION="Example fleet credit line"
+export FLEET_REPO_URL="https://example.com/fleet"
+unset FLEET_ORG
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

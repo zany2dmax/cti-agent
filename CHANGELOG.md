@@ -131,6 +131,29 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   and the email shows them with a line saying the scanner sent no summary of
   this scan. No extra Qualys API calls.
 
+- **The weekly's KEV count included CVEs not found here.** `fleet-db
+  rollup` counted every stored finding with a passed CISA date, so the weekly
+  said "9 KEV deadlines OVERDUE" on weeks `cti-kev` and the daily said none
+  (4 and 9 Nov 2026), and the check-in could not tell which was right. It now
+  uses the daily's rule - PRESENT on at least one host - and also gives the
+  due-within-14-days count, ransomware count and overdue CVE list the daily
+  carries. `cti-kev`'s report now says it covers the CVEs that day's mail
+  named, not every open finding: a due pair it reported on 12 and 13 Nov
+  dropped out on 14 Nov because no email named them again, which read as
+  "none due".
+- **The Go `cti-mailer` had no attribution safety net.** `mailer.py` adds the
+  `FLEET_ATTRIBUTION` credit line to any page that lacks it; `cti-mailer`,
+  which most lanes send through, did not, so a lane whose footer forgot the
+  credit sent it without one. It now adds the same line and logs the same
+  warning. Found by `compare-mailers`, which failed 11 of 19 cases and now
+  runs with an attribution set so the credit path is compared too.
+- **`compare-mailers` passes 19 of 19.** The two mailers had drifted in
+  output only - the recipient gate was never different (every refusal case
+  passed). `mailer.py` now logs the Cc line, puts a `refused` list in its
+  JSON, and renders escalations in the same page as `cti-mailer`, credit
+  (with the `FLEET_REPO_URL` link) in the footer. Its colours come from
+  `email-tokens.json`, and a value that is not a plain colour or font list is
+  ignored.
 - **A lane's escalation email said the orchestrator sent it.** The mailbox
   cleanup's weekly never-read alert (13 Nov 2026) read "The orchestrator needs
   you" and "The orchestrator wrote this reason itself", and its journal section

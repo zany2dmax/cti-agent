@@ -23,6 +23,16 @@ It is run by hand, by the orchestrator during a heartbeat, or from
 .BR "task kev" ;
 no timer runs it. The daily digest carries the same deadlines itself.
 .PP
+The file covers the CVEs that day's mail named, not every open finding: a
+present KEV vulnerability no email mentioned that day is not in it, so a
+clean report is not a clean estate. Every report says so in its source line
+(the
+.B scope
+field with
+.BR \-\-json ).
+The weekly digest's KEV line is built from every stored finding seen in the
+week, with the same PRESENT rule.
+.PP
 Only findings the scanner actually detected count: status
 .B PRESENT
 with at least one host. Each such finding with a

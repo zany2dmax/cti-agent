@@ -335,20 +335,33 @@ def main(argv):
             k = r.get("priority") or "unscored"
             counts[k] = counts.get(k, 0) + 1
 
-        # Deadlines, computed the same way the daily reports them.
+        # Deadlines, computed the same way the daily reports them
+        # (enrich.kev_summary, and cti-kev): only CVEs the scanner found here,
+        # PRESENT on at least one host. This loop once counted every stored
+        # row with a passed date, CVEs not in the estate included, so the
+        # weekly said "9 KEV deadlines OVERDUE" on weeks cti-kev said none
+        # (2026-11-04 and 11-09), and the check-in could not tell which was
+        # right. A deadline on a CVE we do not run is not an obligation.
         today = datetime.now(timezone.utc).date()
-        overdue, worst = 0, 0
+        overdue, worst, soon, ransomware, overdue_cves = 0, 0, 0, 0, []
         for r in rows:
-            due = (r.get("kev_due") or "")[:10]
+            if r.get("status") != "PRESENT" or (r.get("host_count") or 0) <= 0:
+                continue
+            due = (r.get("kev_due") or "").strip()[:10]
             if not due:
                 continue
             try:
-                d = (today - date.fromisoformat(due)).days
+                left = (date.fromisoformat(due) - today).days
             except ValueError:
                 continue
-            if d > 0:
+            if str(r.get("ransomware") or "").lower() == "known":
+                ransomware += 1
+            if left < 0:
                 overdue += 1
-                worst = max(worst, d)
+                worst = max(worst, -left)
+                overdue_cves.append(r["cve"])
+            elif left <= 14:
+                soon += 1
 
         out = {
             "generated": now(),
@@ -362,7 +375,10 @@ def main(argv):
             "counts": counts,
             "total": len(rows),
             "degraded": [],
-            "kev_deadlines": {"overdue": overdue, "worst_overdue_days": worst},
+            "kev_deadlines": {"overdue": overdue, "due_within_14d": soon,
+                              "worst_overdue_days": worst,
+                              "ransomware_present": ransomware,
+                              "overdue_cves": overdue_cves},
             # Omitted deliberately, not set to []: brief.py drops the
             # "emails read this run" section when it is absent.
             "findings": rows,
