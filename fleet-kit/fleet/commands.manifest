@@ -294,6 +294,7 @@ sub: rollup | summarise the findings
 sub: sent | record a digest as delivered
 sub: note | record who is handling a finding
 sub: was-sent | exit 0 if a digest already went out
+sub: last-sent | when the newest digest of a kind went out (--hours: how long ago)
 sub: vacuum | compact the database
 
 command: fleet-journal

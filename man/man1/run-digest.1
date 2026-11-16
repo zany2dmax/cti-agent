@@ -225,6 +225,18 @@ the
 .B cti\-agent
 wrapper drops the environment at the sudo hop. The ingest binary refuses a
 value that is not positive or is over 90 days (2160h). Ignored by the weekly.
+.IP
+Without it, the daily catches up by itself: when the last daily that was sent
+started reading the mailbox more than 10 minutes further back than
+.BR GRAPH_LOOKBACK_HOURS ,
+the run reads back to that point plus 30 minutes, at most 168h (or the
+configured window, if larger), and says so. The point is saved in
+.I state/daily\-read\-start
+only after a real send is recorded; until the first one, the send time
+.RB ( "fleet\-db last\-sent daily" )
+stands in. Past the cap it reads the cap and posts an INFO line to the board;
+older mail needs
+.BR \-\-lookback .
 The value is required: a bare
 .B \-\-lookback
 at the end of the line stops the runner with an unbound-variable error,

@@ -131,6 +131,28 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   and the email shows them with a line saying the scanner sent no summary of
   this scan. No extra Qualys API calls.
 
+- **Mail from a day the daily failed was never read.** The daily read a fixed
+  `GRAPH_LOOKBACK_HOURS` (24h), so mail that arrived on a day it did not
+  complete fell before the next morning's window: the 12 Nov 2026 roundup,
+  due to be read on the 13th (the Graph outage), was never read, and four
+  messages sat in the inbox as `NEVER-READ`. When the last daily that was sent
+  started reading more than 10 minutes further back than that window,
+  `run-digest daily` now reads back to that point plus 30 minutes, at most
+  168h (or the configured window), and says so in the journal; past the cap
+  it posts an INFO line to the board. The point is saved in
+  `state/daily-read-start` only after a real send is recorded; before the
+  first, the send time stands in. An operator's `--lookback` still wins. New:
+  `fleet-db last-sent [kind] [--hours]`.
+- **Supplier threads that went quiet stayed in the inbox.** The lane claimed a
+  settled request's mail for the cleanup only on a run that saw the thread
+  inside its 72-hour window, so a thread judged before claiming shipped (or
+  quiet since a claim failed) was never filed away - 12 on 16 Nov 2026. It now
+  also claims settled threads in the 21 days of mail it already reads for
+  context, matched by the request's label, with nothing newer than the
+  judgement; no attachment is opened. A thread set aside as not a supplier
+  request still stays for a person, and so does any message a person has
+  flagged: the cleanup now reads the follow-up flag and no lane's claim moves
+  a flagged message.
 - **The weekly's KEV count included CVEs not found here.** `fleet-db
   rollup` counted every stored finding with a passed CISA date, so the weekly
   said "9 KEV deadlines OVERDUE" on weeks `cti-kev` and the daily said none

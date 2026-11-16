@@ -593,8 +593,12 @@ re-raising it, and that is the daily's job.
 
 ## 11a. Catching up after the lane was off
 
-The digest is idempotent per `(day, kind)`, so a lane that was off for a week
-does not backfill itself. One run with a wider window does the job:
+A day or a few missed are caught up on their own: the daily reads back to
+where the last daily that was sent started reading (`state/daily-read-start`,
+saved after a real send; before the first, `fleet-db last-sent daily`), up to
+168h, and its journal says `catch-up: ... reads back NhMm`. Past a week it reads 168h only and
+posts an INFO line to the board. For more than that, one run with a wider
+window does the job (the digest is idempotent per `(day, kind)`):
 
 ```bash
 sudo cti-agent run-digest daily --lookback 168h --dry-run   # read it first

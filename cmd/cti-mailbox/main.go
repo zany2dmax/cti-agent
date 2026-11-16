@@ -208,6 +208,7 @@ func run() int {
 			// a From address or a header any sender could add.
 			SelfSent:         m.SelfVerified,
 			QuarantineDigest: mailbox.QuarantineDigest(m.From, m.Subject, digestSenders),
+			Flagged:          m.Flagged,
 		})
 		if c := &candidates[len(candidates)-1]; c.QuarantineDigest {
 			held := mailbox.ParseDigest(m.BodyHTML)

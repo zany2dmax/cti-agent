@@ -1307,6 +1307,43 @@ class DigestSendLedger(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "no")
         self.assertNotEqual(r.returncode, 0, "a miss must exit non-zero for the shell guard")
 
+    def test_last_sent_says_how_far_back_the_next_daily_must_read(self):
+        # run-digest reads back to the last daily that went out, so a day the
+        # daily failed is read by the next run instead of never.
+        import sqlite3
+        from datetime import datetime, timezone, timedelta
+        self.run_db("init")
+        self.assertEqual(self.run_db("last-sent", "daily", "--hours").returncode, 1,
+                         "never sent must say so, not print 0")
+        con = sqlite3.connect(os.path.join(self.home, "state", "memory.db"))
+        for kind, ago in (("daily", 50.5), ("daily", 74), ("weekly", 1.5)):
+            ts = (datetime.now(timezone.utc) - timedelta(hours=ago)).isoformat(timespec="seconds")
+            con.execute("INSERT INTO digests(kind,day,ts) VALUES(?,?,?)",
+                        (kind, f"d{ago}", ts))
+        con.commit()
+        con.close()
+        r = self.run_db("last-sent", "daily", "--hours")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "51", "newest daily, whole hours rounded up")
+        self.assertEqual(self.run_db("last-sent", "weekly", "--hours").stdout.strip(), "2")
+
+    def test_run_digest_reads_back_to_the_last_daily(self):
+        # The window rule itself, read from the runner: an operator's
+        # --lookback wins, the configured window is the floor, and a week is
+        # the cap.
+        src = (pathlib.Path(self.db).parent / "run-digest").read_text(encoding="utf-8")
+        block = src[src.index("READ BACK TO THE LAST DAILY"):src.index('say "ingest: reading')]
+        self.assertIn('[ "$KIND" = daily ] && [ -z "$LOOKBACK" ]', block)
+        self.assertIn('"$DB" last-sent daily --hours', block)  # the fallback
+        self.assertIn('[ "$BEHIND_M" -gt $((CONF_H * 60 + 10)) ]', block)
+        self.assertIn("CATCHUP_MAX_H=168", block)
+        self.assertIn('[ "$CONF_H" -gt "$CATCHUP_MAX_H" ] && CATCHUP_MAX_H="$CONF_H"', block)
+        self.assertIn('LOOKBACK="${WANT_M}m"', block)
+        # Where the last sent daily started reading is saved only after its
+        # send is recorded, so a dry run or a failed send never moves it.
+        rec = src[src.index('"$DB" sent "$DAY"'):src.index('"$KIND digest sent: Sev5')]
+        self.assertIn('"$READ_START_FILE"', rec)
+
 
 class DigestTicketLinks(unittest.TestCase):
     """The digest must quote the ticket, and must render without one.

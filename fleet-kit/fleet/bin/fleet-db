@@ -11,6 +11,8 @@
   fleet-db sent <date> <s5> <s4> <s3> <s2> <s1> <message_id>
   fleet-db note <cve> <text>          record who is handling a finding
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
+  fleet-db last-sent <kind> [--hours] when the newest digest of a kind went out, or
+                                      how many whole hours ago, rounded up (exit 1: never)
   fleet-db vacuum
 """
 import json
@@ -406,6 +408,29 @@ def main(argv):
         hit = c.execute("SELECT 1 FROM digests WHERE day=? AND kind=?", (day, kind)).fetchone()
         print("yes" if hit else "no")
         return 0 if hit else 1
+
+    elif cmd == "last-sent":
+        # run-digest reads back to here, so a day the daily failed is read by
+        # the next run instead of never. ts is written by `sent`, after the
+        # send, so it is the time of a COMPLETED digest.
+        rest = [a for a in args if a != "--hours"]
+        kind = rest[0] if rest else "daily"
+        row = c.execute("SELECT ts FROM digests WHERE kind=? ORDER BY datetime(ts) DESC LIMIT 1",
+                        (kind,)).fetchone()
+        if not row or not row[0]:
+            return 1
+        if "--hours" not in args:
+            print(row[0])
+            return 0
+        try:
+            t = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+        except ValueError:
+            return 1
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        secs = (datetime.now(timezone.utc) - t).total_seconds()
+        print(max(0, -(-int(secs) // 3600)))  # whole hours, rounded up
+        return 0
 
     elif cmd == "vacuum":
         c.execute("VACUUM")

@@ -200,6 +200,59 @@ if [ "$KIND" = weekly ]; then
   say "rollup: $(python3 -c "import json,sys;print(json.load(open('$ENRICHED'))['total'])" 2>/dev/null || echo '?') finding(s) in the window"
 else
 
+# ── READ BACK TO THE LAST DAILY THAT WENT OUT ───────────────────────────────
+#
+# The window was a fixed GRAPH_LOOKBACK_HOURS, so mail that arrived on a day
+# the daily failed was never read by any run: the next morning's 24 hours
+# started after it. The 13 Nov 2026 Graph outage left the 12 Nov roundup
+# unread for good, and the mailbox cleanup could only report it as NEVER-READ.
+#
+# Now the daily reads back to where the last daily that was SENT started
+# reading the mailbox ($READ_START_FILE, written below only after a real send
+# is recorded), plus 30 minutes of overlap, when that is more than 10 minutes
+# further back than the configured window - a normal day is the window give or
+# take the timer's drift, and catching up on that would re-read the last
+# morning's mail every day. Never more than CATCHUP_MAX_H (or the configured
+# window, if that is larger). An operator's --lookback wins. Before the first
+# real send records a start, it falls back to when the last daily was
+# recorded as sent (fleet-db last-sent), which is later than its read.
+# The weekly does not read mail, so this is the daily's only.
+READ_START_FILE="$FLEET_HOME/state/daily-read-start"
+CATCHUP_MAX_H=168
+if [ "$KIND" = daily ] && [ -z "$LOOKBACK" ]; then
+  CONF_H="${GRAPH_LOOKBACK_HOURS:-24}"
+  case "$CONF_H" in ""|*[!0-9]*) CONF_H=24 ;; esac
+  [ "$CONF_H" -gt "$CATCHUP_MAX_H" ] && CATCHUP_MAX_H="$CONF_H"
+  NOW_S=$(date +%s)
+  BEHIND_M=""; FROM=""
+  PREV_START=$(cat "$READ_START_FILE" 2>/dev/null || true)
+  case "$PREV_START" in
+    ""|*[!0-9]*)
+      H=$("$DB" last-sent daily --hours 2>/dev/null || true)
+      case "$H" in ""|*[!0-9]*) ;; *) BEHIND_M=$((H * 60)); FROM="the last daily was recorded as sent" ;; esac ;;
+    *)
+      if [ "$PREV_START" -le "$NOW_S" ]; then
+        BEHIND_M=$(( (NOW_S - PREV_START + 59) / 60 ))
+        FROM="the last daily sent started reading at $(date -u -d "@$PREV_START" '+%F %H:%M UTC' 2>/dev/null || echo "$PREV_START")"
+      fi ;;
+  esac
+  if [ -n "$BEHIND_M" ] && [ "$BEHIND_M" -gt $((CONF_H * 60 + 10)) ]; then
+    WANT_M=$((BEHIND_M + 30))
+    if [ "$WANT_M" -gt $((CATCHUP_MAX_H * 60)) ]; then
+      WANT_M=$((CATCHUP_MAX_H * 60))
+      say "catch-up: $FROM, over ${CATCHUP_MAX_H}h ago - reading ${CATCHUP_MAX_H}h only; run with --lookback for more"
+      [ -n "$TODEV" ] || "$BOARD" post @brief @you INFO "${DRY:+DRY RUN }daily: $FROM, over ${CATCHUP_MAX_H}h ago, so this run read only the last ${CATCHUP_MAX_H}h - older mail needs run-digest daily --lookback" 2>/dev/null || true
+    else
+      say "catch-up: $FROM, so this run reads back $((WANT_M / 60))h$((WANT_M % 60))m, not ${CONF_H}h"
+    fi
+    LOOKBACK="${WANT_M}m"
+  fi
+fi
+
+# When this run starts reading. Saved as READ_START_FILE once a real daily
+# send is recorded, so the next run's catch-up starts from the read, not from
+# the send (enrich, Jira and the brief can take a while in between).
+READ_START=$(date +%s)
 say "ingest: reading $GRAPH_MAILBOX"
 if [ -x "${CTI_AGENT_DIR:-}/cti-agent" ]; then
   ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
@@ -312,6 +365,11 @@ print(*(int(c.get(k, 0) or 0) for k in ('Sev5','Sev4','Sev3','Sev2','Sev1')))" 2
     say "       sudo cti-agent fleet-db sent $DAY $S5 $S4 $S3 $S2 $S1 $MID $KIND"
     "$BOARD" post @brief @you ERROR "$KIND digest SENT but not recorded - do not rerun; run: fleet-db sent $DAY $S5 $S4 $S3 $S2 $S1 $MID $KIND" || true
     exit 3
+  fi
+  if [ "$KIND" = daily ] && [ -n "${READ_START:-}" ]; then
+    { printf '%s\n' "$READ_START" > "$READ_START_FILE.tmp" && chmod 0600 "$READ_START_FILE.tmp" \
+        && mv -f "$READ_START_FILE.tmp" "$READ_START_FILE"; } 2>/dev/null \
+      || say "WARNING: could not record where this daily started reading; the next run's catch-up falls back to the send time"
   fi
   "$BOARD" post @brief @you INFO "$KIND digest sent: Sev5=$S5 Sev4=$S4 Sev3=$S3 Sev2=$S2 Sev1=$S1 ($SUBJECT)" \
     || say "WARNING: digest sent and recorded, but the board post failed"

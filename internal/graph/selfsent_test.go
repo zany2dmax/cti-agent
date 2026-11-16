@@ -285,3 +285,19 @@ func TestRecentMessagesHTMLAsksForAndKeepsTheHTMLBody(t *testing.T) {
 		t.Errorf("text body %q", got[0].BodyText)
 	}
 }
+
+func TestAPersonsFlagIsRead(t *testing.T) {
+	item := func(id, status string) string {
+		return `{"id":"` + id + `","subject":"s","receivedDateTime":"2026-10-03T10:03:00Z",
+			"from":{"emailAddress":{"address":"a@example.com"}},"body":{"content":"x"},
+			"flag":{"flagStatus":"` + status + `"}}`
+	}
+	msgs := fetch(t, item("1", "flagged")+","+item("2", "notFlagged")+","+item("3", "complete")+","+
+		`{"id":"4","subject":"s","receivedDateTime":"2026-10-03T10:03:00Z","from":{"emailAddress":{"address":"a@example.com"}},"body":{"content":"x"}}`)
+	want := map[string]bool{"1": true, "2": false, "3": true, "4": false}
+	for _, m := range msgs {
+		if m.Flagged != want[m.ID] {
+			t.Errorf("message %s: Flagged %v, want %v", m.ID, m.Flagged, want[m.ID])
+		}
+	}
+}

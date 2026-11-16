@@ -96,6 +96,11 @@ type Message struct {
 	// A connector set up as OnPremises (or TreatMessagesAsInternal) stamps
 	// relayed mail Internal too - see the RUNBOOK. See Internal.
 	AuthAs string
+
+	// Flagged is a person's follow-up flag (any flagStatus but notFlagged).
+	// The mailbox cleanup leaves a flagged message where it is even when a
+	// lane has claimed it: the flag is a person saying "I am dealing with this".
+	Flagged bool
 }
 
 // Internal reports that Exchange Online took the message from an
@@ -156,6 +161,9 @@ type messagesResponse struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`
 		} `json:"internetMessageHeaders"`
+		Flag struct {
+			FlagStatus string `json:"flagStatus"`
+		} `json:"flag"`
 	} `json:"value"`
 	NextLink string `json:"@odata.nextLink"`
 }
@@ -247,7 +255,7 @@ func messagesURLBase(base, mailbox, folder string, since time.Time) string {
 	// an out-of-office auto-reply from a real advisory by what the sending
 	// system declared, rather than by guessing from the subject. Graph returns
 	// the full header set for a $select that names it.
-	selectFields := "id,subject,receivedDateTime,from,body,internetMessageHeaders"
+	selectFields := "id,subject,receivedDateTime,from,body,internetMessageHeaders,flag"
 
 	params := []string{
 		"$top=50",
@@ -366,11 +374,14 @@ func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, sin
 			if m.From.EmailAddress.Name != "" {
 				from = fmt.Sprintf("%s <%s>", m.From.EmailAddress.Name, m.From.EmailAddress.Address)
 			}
+			// Anything but notFlagged is a person's flag, as in OldMessages.
+			st := strings.TrimSpace(m.Flag.FlagStatus)
 			msg := Message{
 				ID:               m.ID,
 				Subject:          m.Subject,
 				ReceivedDateTime: m.ReceivedDateTime,
 				From:             from,
+				Flagged:          st != "" && !strings.EqualFold(st, "notFlagged"),
 			}
 			// By what was asked for, not by the contentType Graph reports:
 			// a text reader must never be handed an empty body.

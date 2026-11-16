@@ -991,3 +991,32 @@ func TestAQuarantineDigestGoesOnSightEvenOnAHeldDay(t *testing.T) {
 		t.Errorf("%s %q", plan[0].Action, plan[0].Reason)
 	}
 }
+
+func TestAFlaggedMessageALaneClaimedStaysForThePerson(t *testing.T) {
+	// A supplier thread claimed 21 days back, or a scan notice: a person's
+	// flag outranks the lane's claim, archive and companion delete alike.
+	now := time.Date(2026, 11, 16, 7, 0, 0, 0, time.UTC)
+	old := now.Add(-10 * 24 * time.Hour)
+	cands := []Candidate{
+		{ID: "a", Received: old, Flagged: true},
+		{ID: "b", Received: old, Flagged: true},
+		{ID: "c", Received: old},
+	}
+	proc := map[string]Processed{
+		"a": {Owner: OwnerSupplier},
+		"b": {Owner: OwnerAppScan, Delete: true},
+		"c": {Owner: OwnerSupplier},
+	}
+	got := map[string]Decision{}
+	for _, d := range Plan(cands, proc, now, 48*time.Hour) {
+		got[d.ID] = d
+	}
+	for _, id := range []string{"a", "b"} {
+		if got[id].Action != ActionLeave || got[id].Why != LeaveFlagged {
+			t.Errorf("%s: %v (%s), want left as flagged", id, got[id].Action, got[id].Why)
+		}
+	}
+	if got["c"].Action != ActionArchive {
+		t.Errorf("c: %v, want archived (not flagged)", got["c"].Action)
+	}
+}

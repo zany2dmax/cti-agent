@@ -756,6 +756,42 @@ func TestMessagesOfARequestReportedAndSettledEarlierAreHandedOver(t *testing.T) 
 	}
 }
 
+func TestAQuietSettledThreadOutsideTheWindowIsStillHandedOver(t *testing.T) {
+	// Judged on 5 Nov, nothing since; the run's window starts on 8 Nov. It used
+	// to be claimed only by a run that saw it inside the window, so a thread
+	// that went quiet unclaimed stayed in the inbox for good.
+	settledReq, asideReq, newerReq := Request{ConversationID: "cs"}, Request{ConversationID: "ca"}, Request{ConversationID: "cn"}
+	seenAt := time.Date(2026, 11, 5, 23, 0, 0, 0, time.UTC)
+	seen := Seen{
+		settledReq.Label(): {LastReceived: seenAt, Verdict: No},
+		asideReq.Label():   {LastReceived: seenAt, Verdict: NotRequest},
+		// Judged before its last message: that message was never judged.
+		newerReq.Label(): {LastReceived: time.Date(2026, 11, 5, 8, 0, 0, 0, time.UTC), Verdict: No},
+	}
+	src := &perMessage{atts: map[string][]Attachment{"s1": {file("f", "Supplier Form.xlsx", 4000)}}}
+	mail := fakeMail{[]graph.AddressedMessage{
+		msg("s1", "cs", "new supplier", "a@example.test", "gravel", 9, true),
+		msg("s2", "cs", "Re: new supplier", "b@example.test", "ok", 10, false),
+		msg("a1", "ca", "W-9 correction", "c@example.test", "question", 9, false),
+		msg("n1", "cn", "new supplier", "d@example.test", "tile", 9, false),
+	}}
+	since := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	c, err := CollectRead(context.Background(), mail, src, Policy{}, Config{}, seen, mailbox, since, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range c.Settled {
+		got = append(got, r.ID)
+	}
+	if strings.Join(got, ",") != "s1,s2" {
+		t.Errorf("settled %v: want only the quiet settled thread", got)
+	}
+	if len(c.Items) != 0 || len(src.opened) != 0 {
+		t.Errorf("items %d, opened %v: a quiet thread is neither judged nor read", len(c.Items), src.opened)
+	}
+}
+
 func TestAReplyNewerThanTheJudgementIsNotHandedOver(t *testing.T) {
 	req := Request{ConversationID: "c1"}
 	seen := Seen{req.Label(): {LastReceived: time.Date(2026, 11, 5, 9, 30, 0, 0, time.UTC), Verdict: No}}

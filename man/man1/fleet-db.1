@@ -57,6 +57,10 @@ fleet-db \- the fleet's SQLite memory: findings, digests sent, tasks, notes and 
 .I day
 .RI [ kind ]
 .br
+.B fleet\-db last\-sent
+.RI [ kind ]
+.RB [ \-\-hours ]
+.br
 .B fleet\-db vacuum
 .PP
 .B sudo cti\-agent fleet\-db
@@ -316,6 +320,17 @@ record for the same kind and day replaces the first. Prints
 Not on the heartbeat's allowlist: a fake record makes
 .B run\-digest
 skip that day's real send.
+.TP
+.BR last\-sent " [\fIkind\fR] [\fB\-\-hours\fR]"
+Print when the newest
+.I kind
+digest (default
+.BR daily )
+was recorded as sent, or with
+.B \-\-hours
+how many whole hours ago, rounded up. Exit 1 when none was ever sent.
+.B run\-digest
+uses it to read back to the last daily after a day it failed.
 .TP
 .BR was\-sent " \fIday\fR [\fIkind\fR]"
 Print

@@ -208,7 +208,21 @@ func CollectRead(ctx context.Context, mail Mail, src Source, p Policy, cfg Confi
 		}
 		// Only a thread with something new in the window is a candidate; the
 		// older messages are there for context, not to bring back an old thread.
+		//
+		// A quiet thread is still claimed for the mailbox cleanup when it was
+		// reported and settled and nothing has arrived since it was judged.
+		// Without this a thread was claimed only by a run that saw it inside
+		// the window, so one that went quiet unclaimed - judged before claiming
+		// shipped (9 Nov 2026), or on a run whose claim failed - stayed in the
+		// inbox for good (12 such threads on 16 Nov). Matched by label alone,
+		// so no attachment is opened; a single message with no conversation id
+		// is its own thread, and buildItem's label for it is the same.
 		if mine[len(mine)-1].Received.Before(since) {
+			req := Request{ConversationID: mine[0].ConversationID, MessageID: mine[0].ID}
+			if prior, ok := seen[req.Label()]; ok && SettledEntry(prior) &&
+				!prior.LastReceived.IsZero() && !mine[len(mine)-1].Received.After(prior.LastReceived) {
+				out.Settled = append(out.Settled, refs(mine)...)
+			}
 			continue
 		}
 		it, err := buildItem(ctx, mine, src, p, cfg)

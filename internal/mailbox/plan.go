@@ -48,6 +48,10 @@ type Candidate struct {
 	// Candidate stays comparable.
 	DigestRows   int
 	HeldForFleet string
+
+	// Flagged is a person's follow-up flag. A lane's claim does not move a
+	// flagged message (rule 3): it stays for the person who flagged it.
+	Flagged bool
 }
 
 // Decision pairs a candidate with what will happen to it and why.
@@ -87,7 +91,7 @@ const (
 	LeaveNotLaneMail      = "not-lane-mail"         // read, but no lane owns it: a person's
 	LeaveHeld             = "held"                  // archiving held today (digest read nothing)
 	LeaveOwnedGrace       = "owned-grace"           // owned, inside the archive grace
-	LeaveFlagged          = "flagged"               // stale sweep: a person flagged it
+	LeaveFlagged          = "flagged"               // a person flagged it (stale sweep, or owned mail)
 )
 
 // Plan decides what to do with each candidate.
@@ -108,7 +112,8 @@ const (
 //     to release it by hand; so does one whose rows cannot be read, so a
 //     layout change cannot delete the one notice that mattered.
 //  2. No record of a lane having read it -> leave.
-//  3. Read by the lane that OWNS it -> archive, after the grace. The digest
+//  3. Read by the lane that OWNS it -> archive, after the grace, unless a
+//     person flagged it (then it stays). The digest
 //     owns what it took a CVE from; cti-appscan owns the Qualys WAS
 //     notifications its weekly reported on (Processed.Owner). A companion
 //     notice the owner marked Processed.Delete goes to Deleted Items instead,
@@ -276,6 +281,11 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 					"advisory or a scan notification; could be a reported " +
 					"phish, an alert or a person writing to the team",
 				Known: true, Why: LeaveNotLaneMail})
+		case c.Flagged:
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: ownedBy(owner) + ", but a person flagged it - it stays in " +
+					"the inbox until the flag is cleared",
+				Known: true, Why: LeaveFlagged})
 		case o.HoldArchive != "":
 			out = append(out, Decision{Candidate: c, Action: ActionLeave,
 				Reason: o.HoldArchive, Known: true, Why: LeaveHeld})
