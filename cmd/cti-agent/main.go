@@ -87,6 +87,13 @@ func main() {
 	// labels one with no trusted source so a person can see it was not.
 	trusted := map[string]bool{}
 	feed := splitList(cfg.MailboxFeedSenders)
+	// asked is the CVEs a colleague mailed in to be checked: a sender on
+	// MAILBOX_TEAM_SENDERS (the mailbox's own domain by default) whom
+	// Exchange authenticated. Each is looked up and listed whatever its
+	// band - the security team is told it can drop a CVE in this mailbox
+	// and the fleet will check it, and a Sev1 row is a count with no name.
+	asked := map[string]bool{}
+	team := cfg.TeamSenders()
 	withCVEs := 0
 	selfSent := 0
 	subjects := make([]report.ScannedEmail, 0, len(messages))
@@ -131,10 +138,19 @@ func main() {
 			withCVEs++
 		}
 		fromFeed := trustedSource(msg, feed)
+		// A colleague's ask names a CVE or a few. A message with more is a
+		// forwarded newsletter or a reply to the daily, quoted text and all,
+		// and marking all of it would skip the Patch Tuesday hold for a
+		// whole release and let an outsider reach "asked" through anyone
+		// who forwards their mail here.
+		fromTeam := len(found) <= maxAskedPerMessage && teamSource(msg, team)
 		for _, cve := range found {
 			cves[cve] = true
 			if fromFeed {
 				trusted[cve] = true
+			}
+			if fromTeam {
+				asked[cve] = true
 			}
 		}
 		subjects = append(subjects, report.ScannedEmail{
@@ -240,7 +256,9 @@ func main() {
 		log.Printf("WARNING: KEV catalog unreadable (%s); Patch Tuesday CVEs on "+
 			"KEV are held with the rest today", safelog.Line(kerr.Error()))
 	}
-	keep, held := patchtuesday.HeldExcept(all, manifests, func(c string) bool { return onKEV[c] })
+	// Nor is a CVE a colleague asked about: they asked for a lookup, and a
+	// hold skips the lookup.
+	keep, held := patchtuesday.HeldExcept(all, manifests, func(c string) bool { return onKEV[c] || asked[c] })
 	if n := passedKEV(all, held, manifests, onKEV); n > 0 {
 		log.Printf("reporting %d Patch Tuesday CVE(s) on CISA KEV despite the "+
 			"synopsis: KEV is looked up and ticketed every day", n)
@@ -280,6 +298,10 @@ func main() {
 		CatchUp:   catchUp,
 		Lookback:  cfg.GraphLookback,
 		Trusted:   trusted,
+		Asked:     asked,
+	}
+	if len(asked) > 0 {
+		log.Printf("%d CVE(s) mailed in by the team to be checked; each is listed in the digest", len(asked))
 	}
 	if err := report.WriteMarkdownScan(cfg.ReportPath, cfg.GraphMailbox, since, scan, provider.Name(), results); err != nil {
 		// #nosec G706 -- sanitised by safelog.Line(), as at the manifest warning
@@ -387,6 +409,29 @@ func trustedSource(msg graph.Message, feed []string) bool {
 		return false
 	}
 	ok, _ := msg.VouchedFor()
+	return ok
+}
+
+// maxAskedPerMessage is the most CVEs one message can ask about.
+const maxAskedPerMessage = 5
+
+// teamSource reports a message from a colleague asking for a CVE to be
+// checked: a sender on the team list, and authenticated - by Exchange as
+// internal mail (X-MS-Exchange-Organization-AuthAs: Internal), or by DMARC or
+// composite auth for the From domain. The From address alone is a claim, and
+// "anyone can pad the daily" is the thing the list exists to stop.
+//
+// SenderAuthenticated, not VouchedFor: FLEET_SENDER_AUTH=off is for a tenant
+// behind a mail gateway, which is where a forged From of the org's own
+// domain is easiest, and the team list defaults to that domain.
+func teamSource(msg graph.Message, team []string) bool {
+	if len(team) == 0 || !mailbox.SenderIn(msg.From, team) {
+		return false
+	}
+	if msg.Internal() {
+		return true
+	}
+	ok, _ := msg.SenderAuthenticated()
 	return ok
 }
 

@@ -120,6 +120,25 @@ ROW_LIMITS = {
     "weekly": {"Sev5": 99, "Sev4": 15, "Sev3": 15, "Sev2": 12, "Sev1": 0},
 }
 
+# A CVE a colleague mailed in to be checked is listed whatever its band, in
+# its own section above the bands, with what the scanner said. The security
+# team is told it can drop a CVE in the mailbox and the fleet will check it;
+# a Sev1 is a number in a tile, so a lookup they asked for came back as
+# nothing they could see. The cap is high because nobody mails in fifty, and
+# a list that silently stops is one the reader believes is complete.
+ASKED_LIMIT = 25
+ASKED_HEADING = "Asked about - CVEs the team mailed in to be checked"
+ASKED_NOTE = ("Sent to the mailbox by a colleague. Each was looked up against "
+              "the scanner, and is listed here whatever its severity; a "
+              "status of UNKNOWN means the scanner has no mapping for it yet, "
+              "not that we are clean.")
+
+
+def asked_findings(findings):
+    """The findings a colleague asked about, in the enriched order."""
+    return [f for f in findings if f.get("asked") is True]
+
+
 MIXED_NOTE = {
     "Sev3": ("These are being actively exploited and the scanner has no QID "
              "mapping for them, so it could not tell us whether we are exposed. "
@@ -351,15 +370,21 @@ def products_by_cve(data):
     return out
 
 
-def finding_block(f, tickets=None):
+def finding_block(f, tickets=None, band=False):
     # tickets defaults to empty so every existing caller and test keeps
     # working, and a finding with no ticket renders exactly as it did before.
+    # band adds the severity as a badge, for the Asked about section, where
+    # rows of every band sit together under one heading.
     color, bg, _ = PRI[f["priority"]]
     cve = esc(f["cve"])
     product = product_html(f)
     product = f"&nbsp;{product}" if product else ""
     link = f"https://nvd.nist.gov/vuln/detail/{cve}"
     badges = []
+    if band:
+        badges.append(f"<span style='background:{color};color:#fff;padding:2px 6px;"
+                      f"border-radius:3px;font-size:11px;font-weight:700'>"
+                      f"{esc(f['priority'])}</span>")
     if f.get("kev"):
         due = f" &middot; due {esc(f['kev_due'])}" if f.get("kev_due") else ""
         badges.append(f"<span style='background:#b3001b;color:#fff;padding:2px 6px;"
@@ -764,14 +789,41 @@ def render(data, kind):
         for p in SEV_ORDER)
 
     sections = []
+    asked = asked_findings(findings)
+    if asked:
+        a_shown, a_hidden = asked[:ASKED_LIMIT], max(0, len(asked) - ASKED_LIMIT)
+        a_more = (f"<tr><td style='font:400 12px -apple-system,Segoe UI,Arial,sans-serif;"
+                  f"color:#718096;padding:0 0 14px 2px'>+{a_hidden} more asked about "
+                  f"in the full report.</td></tr>") if a_hidden else ""
+        a_fg = tone("blue")[0]
+        sections.append(f"""
+      <tr><td style="padding:6px 0 8px 0">
+        <div style="font:700 13px -apple-system,Segoe UI,Arial,sans-serif;
+                    color:{a_fg};letter-spacing:.6px;text-transform:uppercase;
+                    border-bottom:2px solid {a_fg};padding-bottom:5px">
+          {esc(ASKED_HEADING)} ({len(asked)})
+        </div></td></tr>
+      <tr><td style="padding:0 0 6px 0">
+        <div style="font:400 12px/1.5 -apple-system,Segoe UI,Arial,sans-serif;
+                    color:#4a5568;background:#f7fafc;border-left:3px solid {a_fg};
+                    padding:7px 10px">{esc(ASKED_NOTE)}</div></td></tr>{''.join(finding_block(f, data.get('_tickets'), band=True) for f in a_shown)}{a_more}""")
+    asked_ids = {f["cve"] for f in asked[:ASKED_LIMIT]}
     for p in SEV_ORDER:
         group = [f for f in findings if f["priority"] == p]
         if not group or limits[p] == 0:
             continue
-        shown, hidden = group[:limits[p]], max(0, len(group) - limits[p])
+        # Counted in the heading, shown once: a row already listed under
+        # "Asked about" is not repeated, and the band says so.
+        rows_p = [f for f in group if f["cve"] not in asked_ids]
+        above = len(group) - len(rows_p)
+        shown, hidden = rows_p[:limits[p]], max(0, len(rows_p) - limits[p])
         more = (f"<tr><td style='font:400 12px -apple-system,Segoe UI,Arial,sans-serif;"
                 f"color:#718096;padding:0 0 14px 2px'>+{hidden} more {p} "
                 f"in the full report.</td></tr>") if hidden else ""
+        if above:
+            more += (f"<tr><td style='font:400 12px -apple-system,Segoe UI,Arial,sans-serif;"
+                     f"color:#718096;padding:0 0 14px 2px'>{above} more {p} listed "
+                     f"under Asked about, above.</td></tr>")
         note = ""
         if p in MIXED_NOTE and band_needs_caveat(group):
             note = f"""
@@ -976,27 +1028,45 @@ def render_text(data, kind):
             lines.append(f"  overdue: {', '.join(kev['overdue_cves'][:8])}")
     lines.append("")
     limits = ROW_LIMITS[kind]
+
+    def text_row(f, band=False):
+        prod = product_label(f)
+        prod = "" if prod is None else f"  [{prod or 'product not identified'}]"
+        sev = f"  {f.get('priority')}" if band else ""
+        out = [f"  {f['cve']}{sev}{prod}  {f.get('status')}  "
+               f"{f.get('host_count') or 0} host(s)",
+               f"    {f.get('rationale')}"]
+        tl = ticket_cell_text(f, data.get("_tickets") or {})
+        if tl:
+            out.append(tl)
+        return out
+
+    asked = asked_findings(data["findings"])
+    if asked:
+        lines += [f"{ASKED_HEADING} ({len(asked)})", "-" * 68, f"  {ASKED_NOTE}"]
+        for f in asked[:ASKED_LIMIT]:
+            lines += text_row(f, band=True)
+        if len(asked) > ASKED_LIMIT:
+            lines.append(f"  +{len(asked) - ASKED_LIMIT} more asked about in the full report.")
+        lines.append("")
+    asked_ids = {f["cve"] for f in asked[:ASKED_LIMIT]}
     for p in SEV_ORDER:
         group = [f for f in data["findings"] if f["priority"] == p]
         if not group or limits[p] == 0:
             continue
+        rows_p = [f for f in group if f["cve"] not in asked_ids]
         lines += [f"{p} - {PRI[p][2]} ({len(group)})", "-" * 68]
         if p in MIXED_NOTE and band_needs_caveat(group):
             lines.append("  NOTE: UNKNOWN rows below are unverified coverage, "
                          "not confirmed exposure.")
-        for f in group[:limits[p]]:
-            prod = product_label(f)
-            prod = "" if prod is None else f"  [{prod or 'product not identified'}]"
-            lines.append(f"  {f['cve']}{prod}  {f.get('status')}  "
-                         f"{f.get('host_count') or 0} host(s)")
-            lines.append(f"    {f.get('rationale')}")
-            tl = ticket_cell_text(f, data.get("_tickets") or {})
-            if tl:
-                lines.append(tl)
+        for f in rows_p[:limits[p]]:
+            lines += text_row(f)
         # Truncation is stated, as it is in the HTML. A list that silently
         # stops is one the reader believes is complete.
-        if len(group) > limits[p]:
-            lines.append(f"  +{len(group) - limits[p]} more {p} in the full report.")
+        if len(rows_p) > limits[p]:
+            lines.append(f"  +{len(rows_p) - limits[p]} more {p} in the full report.")
+        if len(group) > len(rows_p):
+            lines.append(f"  {len(group) - len(rows_p)} more {p} listed under Asked about, above.")
         lines.append("")
     lines += held_text(data)
     lines += fleet_tickets_text(data)

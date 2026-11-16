@@ -72,6 +72,11 @@ type Config struct {
 	// for a domain. A quarantine digest holding mail from one is kept and the
 	// operator told (mailbox.HeldForFleet).
 	MailboxFeedSenders string
+	// MailboxTeamSenders is MAILBOX_TEAM_SENDERS: the people who may mail a
+	// CVE in to be checked - "name@example.com" or "@example.com", like the
+	// feed senders. Unset means the mailbox's own domain; "none" turns it
+	// off. See TeamSenders.
+	MailboxTeamSenders string
 
 	JiraBaseURL string
 	// JiraCloudID, when set, sends API calls through the Atlassian gateway
@@ -362,6 +367,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		MailboxStaleMax:      staleMax,
 		MailboxDigestSenders: os.Getenv("MAILBOX_DIGEST_SENDERS"),
 		MailboxFeedSenders:   os.Getenv("MAILBOX_FEED_SENDERS"),
+		MailboxTeamSenders:   os.Getenv("MAILBOX_TEAM_SENDERS"),
 
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),
@@ -472,4 +478,30 @@ func validStaleFolder(name string) error {
 		}
 	}
 	return nil
+}
+
+// TeamSenders is who may mail a CVE in for the digest to check and always
+// list ("Asked about"): MAILBOX_TEAM_SENDERS, or the mailbox's own domain
+// when that is unset, so a colleague's mail counts with no configuration.
+// "none" is nobody. A match also needs Exchange to have authenticated the
+// sender - the digest checks that, not this.
+func (c Config) TeamSenders() []string {
+	v := strings.TrimSpace(c.MailboxTeamSenders)
+	if strings.EqualFold(v, "none") {
+		return nil
+	}
+	if v == "" {
+		at := strings.LastIndex(c.GraphMailbox, "@")
+		if at < 0 || at == len(c.GraphMailbox)-1 {
+			return nil
+		}
+		return []string{"@" + strings.ToLower(strings.TrimSpace(c.GraphMailbox[at+1:]))}
+	}
+	var out []string
+	for _, a := range strings.Split(v, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }

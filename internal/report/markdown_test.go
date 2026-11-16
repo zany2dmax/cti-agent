@@ -338,13 +338,50 @@ func TestMailSourceIsTheLastColumn(t *testing.T) {
 	if !strings.Contains(s, "| Detection Titles | Mail Source |") {
 		t.Error("header has no Mail Source column after Detection Titles")
 	}
-	if got := row(s, r[0].CVE); !strings.HasSuffix(got, "| trusted |") {
+	if got := row(s, r[0].CVE); !strings.HasSuffix(got, "| trusted |  |") {
 		t.Errorf("trusted CVE row: %q", got)
 	}
-	if got := row(s, r[1].CVE); !strings.HasSuffix(got, "| unverified |") {
+	if got := row(s, r[1].CVE); !strings.HasSuffix(got, "| unverified |  |") {
 		t.Errorf("untrusted CVE row: %q", got)
 	}
 	if got := row(write(nil), r[0].CVE); strings.Contains(got, "unverified") || strings.Contains(got, "trusted") {
 		t.Errorf("no judgement still labelled the row: %q", got)
+	}
+}
+
+// A CVE a colleague mailed in is marked in the Asked column, after Mail
+// Source, so an older reader that stops at Mail Source still parses.
+func TestAskedIsTheLastColumn(t *testing.T) {
+	t.Setenv("REPORT_HOSTNAMES", "full")
+	r := sampleResults()
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := WriteMarkdownScan(path, "x@example.com", time.Now(),
+		Scan{Messages: 1, Trusted: map[string]bool{}, Asked: map[string]bool{r[1].CVE: true}}, "qualys", r); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "| Mail Source | Asked |") {
+		t.Error("header has no Asked column after Mail Source")
+	}
+	for _, l := range strings.Split(s, "\n") {
+		switch {
+		case strings.HasPrefix(l, "| "+r[1].CVE+" |") && !strings.HasSuffix(l, "| unverified | asked |"):
+			t.Errorf("asked row: %q", l)
+		case strings.HasPrefix(l, "| "+r[0].CVE+" |") && strings.Contains(l, "asked"):
+			t.Errorf("row nobody asked about is marked: %q", l)
+		}
+	}
+}
+
+// A Reason can be a scanner's raw error body. A newline in it must not start
+// a line of its own that parses as a table row.
+func TestACellCannotStartARowOfItsOwn(t *testing.T) {
+	if got := escape("bad gateway\n| CVE-2026-0001 | PRESENT |\r\nx"); strings.ContainsAny(got, "\r\n") ||
+		strings.Contains(got, " | CVE") {
+		t.Errorf("escape = %q", got)
 	}
 }

@@ -132,7 +132,19 @@ func FleetSender(addr string, feed []string) bool {
 			return true
 		}
 	}
-	for _, f := range feed {
+	return SenderIn(addr, feed)
+}
+
+// SenderIn reports whether addr is on list: "name@example.com" exactly, or
+// "@example.com" for that whole domain (not its subdomains). Case-insensitive.
+func SenderIn(addr string, list []string) bool {
+	addr = strings.ToLower(bareAddress(addr))
+	at := strings.LastIndex(addr, "@")
+	if at <= 0 {
+		return false
+	}
+	domain := addr[at+1:]
+	for _, f := range list {
 		f = strings.ToLower(strings.TrimSpace(f))
 		switch {
 		case f == "":

@@ -126,6 +126,11 @@ type Scan struct {
 	// not judge provenance, and the Mail Source column is left empty rather
 	// than calling every CVE unverified.
 	Trusted map[string]bool
+
+	// Asked is the CVEs a colleague mailed in to be checked (see the
+	// digest's teamSource). The Asked column says "asked" for them; the
+	// daily lists every one, whatever its band.
+	Asked map[string]bool
 }
 
 // mailSource is the Mail Source cell for cve.
@@ -221,10 +226,17 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 	// the fleet reads, authenticated by the receiving server, mentioned the
 	// CVE; "unverified" when only other senders did. cti-jira labels a
 	// ticket for an unverified one.
-	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source |\n")
-	b.WriteString("|---|---|---|---|---:|---:|---|---|---|---|---|\n")
+	//
+	// Asked is last again: "asked" when a colleague mailed the CVE in to be
+	// checked, empty otherwise.
+	b.WriteString("| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source | Asked |\n")
+	b.WriteString("|---|---|---|---|---:|---:|---|---|---|---|---|---|\n")
 	for _, r := range results {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s | %s | %s |\n",
+		asked := ""
+		if scan.Asked[r.CVE] {
+			asked = "asked"
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %d | %s | %s | %s | %s | %s | %s |\n",
 			r.CVE,
 			r.Status,
 			r.Source,
@@ -236,6 +248,7 @@ func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, 
 			escape(r.Reason),
 			cleanTitles(r.Titles),
 			scan.mailSource(r.CVE),
+			asked,
 		)
 	}
 
@@ -317,6 +330,11 @@ func cleanTitles(titles []string) string {
 	return strings.Join(out, " ; ")
 }
 
+// escape keeps s inside one table cell: a pipe is escaped, and a line break
+// becomes a space - a Reason can be a scanner's raw error body, and a line in
+// it starting "| CVE-" would otherwise parse as a row of its own, Asked
+// column and all.
 func escape(s string) string {
+	s = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(s)
 	return strings.ReplaceAll(s, "|", "\\|")
 }

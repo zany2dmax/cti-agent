@@ -299,6 +299,47 @@ class BriefRendering(unittest.TestCase):
         self.assertEqual(html.count("<table"), html.count("</table>"))
         self.assertEqual(html.count("<tr"), html.count("</tr>"))
 
+    def test_a_cve_the_team_asked_about_is_listed_whatever_its_band(self):
+        """The security team mails a CVE in to be checked. A Sev1 is a count
+        with no name, so the lookup they asked for came back as nothing they
+        could see (CVE mailed in 16 Nov 2026). An asked CVE gets its own
+        section with its band and status, and is not listed twice."""
+        def f(cve, prio, status="NOT_PRESENT", asked=False, hosts=0):
+            return {"cve": cve, "priority": prio, "status": status, "host_count": hosts,
+                    "rationale": "r", "asked": asked}
+        d = {"generated": "x", "source_meta": {}, "total": 3, "degraded": [],
+             "counts": {"Sev5": 0, "Sev4": 1, "Sev3": 0, "Sev2": 0, "Sev1": 2},
+             "findings": [f("CVE-2026-4004", "Sev4", "PRESENT", asked=True, hosts=2),
+                          f("CVE-2026-123158", "Sev1", "UNKNOWN", asked=True),
+                          f("CVE-2026-1111", "Sev1")]}
+        for kind in ("daily", "weekly"):
+            html = brief.render(d, kind)
+            text = brief.render_text(d, kind)
+            for body in (html, text):
+                self.assertIn("Asked about", body)
+                self.assertIn("CVE-2026-123158", body)
+                self.assertNotIn("CVE-2026-1111", body, "a Sev1 nobody asked about got a row")
+                self.assertEqual(body.count("CVE-2026-4004</a>" if body is html else "CVE-2026-4004  "),
+                                 1, "an asked row is listed twice")
+                self.assertIn("listed under Asked about", body)
+            self.assertIn(">Sev1</span>", html, "the asked row does not show its band")
+            self.assertIn("CVE-2026-123158  Sev1", text)
+            self.assertEqual(html.count("<tr"), html.count("</tr>"))
+        d["findings"] = [dict(x, asked=False) for x in d["findings"]]
+        self.assertNotIn("Asked about", brief.render(d, "daily"))
+        self.assertNotIn("Asked about", brief.render_text(d, "daily"))
+
+    def test_the_report_asked_column_is_read(self):
+        base = "| CVE-2026-00%02d | UNKNOWN | qualys | | 0 | 0 | | | r | | unverified |%s\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "raw.md")
+            with open(path, "w") as fh:
+                for i, cell in enumerate([" asked |", "  |", " Asked |", " maybe |", ""]):
+                    fh.write(base % (i + 1, cell))
+            got = enrich.parse_report(path)
+        self.assertEqual([got["CVE-2026-00%02d" % i]["asked"] for i in range(1, 6)],
+                         [True, False, True, False, False])
+
     def test_sev1_is_a_count_not_a_list_in_either_digest(self):
         """Awareness items get a number and no prose.
 

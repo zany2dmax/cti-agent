@@ -44,6 +44,22 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
 
 ### Added
 
+- **A CVE the team mails in is always listed in the next daily.** The security
+  team can drop a CVE in the mailbox to have it checked, but one that is not
+  exploited and that Qualys does not find lands in Sev1, which the daily shows
+  only as a count - so the lookup came back as nothing anyone could see
+  (16 Nov 2026). Mail from `MAILBOX_TEAM_SENDERS` (the mailbox's own domain by
+  default) that Exchange authenticated - as internal mail
+  (`X-MS-Exchange-Organization-AuthAs: Internal`), or by DMARC - now marks its
+  CVEs "asked": the raw report gains an `Asked` column, a Patch Tuesday hold
+  does not skip them, and the daily lists them under "Asked about" with their
+  band and what the scanner said, not repeated in their band. A message
+  naming more than 5 CVEs asks about none (a forwarded newsletter or a reply
+  to the daily is not an ask). `FLEET_SENDER_AUTH=off` does not apply to this
+  check, and a message with two `AuthAs` headers is not internal. The weekly
+  does not carry the mark. Also: a line break in a report cell is now a space,
+  so a scanner error body cannot start a table row of its own.
+
 - **Mailbox cleanup: a 30-day sweep into `Inbox/Unhandled`.** The daily plan
   only ever looked at the last 14 days (`MAILBOX_LOOKBACK_HOURS`), so anything
   still in the inbox at two weeks - a reported phish nobody answered, an

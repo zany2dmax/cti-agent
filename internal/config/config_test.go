@@ -510,3 +510,22 @@ func TestMailboxStaleSweepSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestTeamSendersDefaultToTheMailboxDomain(t *testing.T) {
+	for _, c := range []struct {
+		mailbox, env string
+		want         []string
+	}{
+		{"cyber@Corp.Example", "", []string{"@corp.example"}},
+		{"cyber@corp.example", "none", nil},
+		{"cyber@corp.example", "NONE", nil},
+		{"cyber@corp.example", " ana@corp.example, @soc.example ", []string{"ana@corp.example", "@soc.example"}},
+		{"", "", nil},
+		{"broken@", "", nil},
+	} {
+		got := Config{GraphMailbox: c.mailbox, MailboxTeamSenders: c.env}.TeamSenders()
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%q / %q: got %v, want %v", c.mailbox, c.env, got, c.want)
+		}
+	}
+}

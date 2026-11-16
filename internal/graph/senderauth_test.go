@@ -57,3 +57,22 @@ func TestOnlyTheReceivingServersAuthenticationResultsIsKept(t *testing.T) {
 		t.Errorf("a forged second Authentication-Results was trusted: %q", msgs[0].AuthenticationResults)
 	}
 }
+
+// One AuthAs header is Exchange's verdict. Two means one came with the
+// message, and the order Graph lists them in cannot say which: not internal.
+func TestADuplicatedAuthAsIsNotInternal(t *testing.T) {
+	msg := func(headers string) string {
+		return `{"id":"1","subject":"CVE-2026-0001","receivedDateTime":"2026-11-16T10:00:00Z",
+			"from":{"emailAddress":{"address":"ana@corp.example"}},
+			"body":{"contentType":"Text","content":"x"},"internetMessageHeaders":[` + headers + `]}`
+	}
+	one := fetch(t, msg(`{"name":"X-MS-Exchange-Organization-AuthAs","value":"Internal"}`))
+	if len(one) != 1 || !one[0].Internal() {
+		t.Fatalf("one AuthAs: Internal was not internal: %+v", one)
+	}
+	two := fetch(t, msg(`{"name":"X-MS-Exchange-Organization-AuthAs","value":"Internal"},
+		{"name":"x-ms-exchange-organization-authas","value":"Anonymous"}`))
+	if len(two) != 1 || two[0].Internal() {
+		t.Errorf("two AuthAs headers counted as internal: %q", two[0].AuthAs)
+	}
+}

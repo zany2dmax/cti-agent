@@ -87,6 +87,23 @@ type Message struct {
 	// below it came with the message and are the sender's to write, so they
 	// are ignored. See SenderAuthenticated.
 	AuthenticationResults string
+
+	// AuthAs is the X-MS-Exchange-Organization-AuthAs header: "Internal"
+	// when Exchange Online accepted the message from a sender signed in to
+	// this tenant. Exchange's header firewall removes X-MS-Exchange-
+	// Organization-* headers that arrive on mail from outside, so a sender
+	// outside the tenant cannot write it. Empty when there is more than one.
+	// A connector set up as OnPremises (or TreatMessagesAsInternal) stamps
+	// relayed mail Internal too - see the RUNBOOK. See Internal.
+	AuthAs string
+}
+
+// Internal reports that Exchange Online took the message from an
+// authenticated sender in this tenant. Mail between colleagues is often
+// stamped dmarc=none (not signed for itself), so SenderAuthenticated turns
+// it away; this is Exchange's own verdict for that case.
+func (m Message) Internal() bool {
+	return strings.EqualFold(strings.TrimSpace(m.AuthAs), "Internal")
 }
 
 // IsAutoReply reports whether the sending system declared this an automatic
@@ -362,6 +379,7 @@ func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, sin
 			} else {
 				msg.BodyText = m.Body.Content
 			}
+			authAsSeen := 0
 			for _, h := range m.InternetMessageHeaders {
 				switch strings.ToLower(strings.TrimSpace(h.Name)) {
 				case "authentication-results":
@@ -370,6 +388,12 @@ func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, sin
 					}
 				case "auto-submitted":
 					msg.AutoSubmitted = h.Value
+				case "x-ms-exchange-organization-authas":
+					// More than one copy means one did not come from
+					// Exchange, and which is which cannot be told from
+					// the order Graph lists them in: not internal.
+					authAsSeen++
+					msg.AuthAs = h.Value
 				case "x-auto-response-suppress":
 					msg.AutoResponseSuppress = h.Value
 				case selfHeaderLower:
@@ -378,6 +402,9 @@ func (c *Client) recentMessages(ctx context.Context, mailbox, folder string, sin
 						msg.SelfSent = true
 					}
 				}
+			}
+			if authAsSeen > 1 {
+				msg.AuthAs = ""
 			}
 			// Mail we sent before SelfHeader existed carries no header, so the
 			// sender is the backstop. The fleet sends AS this mailbox, so mail

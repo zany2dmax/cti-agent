@@ -147,13 +147,16 @@ def parse_report(path):
     """Parse the Go agent's markdown table.
 
     Columns: CVE | Status | Provider | External IDs | Host Count | Max Score |
-             Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source
+             Last Seen | Sample Hosts | Reason | Detection Titles | Mail Source |
+             Asked
 
     Detection Titles (the scanner's own names for the detections, joined
     with " ; ") and Mail Source ("trusted" or "unverified": whether a sender
     the fleet reads, authenticated by the receiving server, mentioned the
     CVE) were added last, so a report without them still parses. A missing
     or empty Mail Source is "", unknown, and cti-jira labels nothing.
+    Asked ("asked" when a colleague mailed the CVE in to be checked) is
+    after it, and anything but that one word is not asked.
     Cells are split on unescaped pipes: the agent writes a pipe inside a
     cell as \\|, and a plain split would shift every column after it.
 
@@ -204,6 +207,7 @@ def parse_report(path):
                                      (cells[9] if len(cells) >= 10 else "").split(" ; ")
                                      if t.strip()],
                 "mail_source": mail_source(cells[10] if len(cells) >= 11 else ""),
+                "asked": len(cells) >= 12 and cells[11].strip().lower() == "asked",
             }
     return findings
 
