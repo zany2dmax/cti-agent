@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.5 — 2026-11-16
 
 **Upgrade:** `sudo cti-agent-update --for-real`, then one
 `sudo cti-agent run-mailbox-cleanup --dry-run` to read what the new sweep would
