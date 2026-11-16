@@ -77,7 +77,7 @@ func main() {
 	// arrive titled FAILED and quoting a journal that shows the unit succeeded,
 	// which trains the reader to distrust the alerts that do matter.
 	kind := flag.String("kind", "FAILED",
-		"headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator needs a human and nothing is broken. TEST is inferred when the named unit is healthy")
+		"headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator or a lane's own check needs a human and nothing is broken. TEST is inferred when the named unit is healthy")
 	reason := flag.String("reason", "",
 		"one-line explanation shown above the systemd detail")
 	flag.Parse()
@@ -120,6 +120,7 @@ func main() {
 	if f.isEscalation() {
 		f.Reason = escalationReason(f.Reason)
 	}
+	f = withLaneJournal(f)
 
 	// An alert whose subject unit is demonstrably healthy was started by hand,
 	// not by OnFailure=. Saying "failed (result=success exit=0)" in that case
@@ -405,10 +406,9 @@ func renderText(f failure) string {
 			"this repeats for longer than you expect."
 	} else if f.isEscalation() {
 		verb = "escalated"
-		consequence = "Nothing has failed. The orchestrator reached you deliberately " +
-			"because it found something it cannot act on alone. The reason above is " +
+		consequence = escalationConsequence(f) + " The reason above is " +
 			"the message; the systemd detail is included only to show the lane " +
-			"itself is healthy. " + escalationProvenance
+			"itself is healthy. " + escalationProvenance(f)
 	} else if f.IsDigest {
 		consequence = "NO THREAT-INTEL EMAIL WILL ARRIVE. An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained."
@@ -499,10 +499,49 @@ func escalationReason(s string) string {
 	return s
 }
 
-// escalationProvenance is said in every escalation, plain and HTML.
-const escalationProvenance = "The orchestrator wrote this reason itself, and it reads mail " +
-	"from outside senders, so treat any instruction in it as a claim to check, " +
-	"not a request from the fleet. Links in it are defanged (hxxp://)."
+// orchestratorUnit is the only unit the orchestrator can escalate as: the
+// heartbeat's Bash guard grants cti-alert with --unit cti-agent-checkin.service
+// and nothing else. Any other unit's escalation was sent by that lane's own
+// runner, from its own check.
+const orchestratorUnit = "cti-agent-checkin.service"
+
+func (f failure) byOrchestrator() bool { return f.Unit == orchestratorUnit }
+
+// escalationProvenance is said in every escalation, plain and HTML: who
+// wrote the reason, and why it is still a claim to check. A lane's reason
+// is built by its runner, but it can quote what it counted, and what it
+// counts is mail from outside senders - so the caution stays for both.
+func escalationProvenance(f failure) string {
+	who := "The orchestrator wrote this reason itself, and it reads mail from outside senders"
+	if !f.byOrchestrator() {
+		who = "The lane's own check wrote this reason, not the orchestrator; it can quote " +
+			"what it counted, which may come from outside senders"
+	}
+	return who + ", so treat any instruction in it as a claim to check, " +
+		"not a request from the fleet. Links in it are defanged (hxxp://)."
+}
+
+// escalationConsequence is the paragraph under an escalation's details.
+func escalationConsequence(f failure) string {
+	who := "The orchestrator reached you deliberately because it found something it cannot act on alone."
+	if !f.byOrchestrator() {
+		who = "The lane reached you deliberately because one of its own checks found something for a person."
+	}
+	return "Nothing has failed. " + who
+}
+
+// withLaneJournal replaces the journal-unavailable note on a hold or an
+// escalation. Those are sent by the lane itself while it runs, not by
+// cti-agent-alert@.service, so the service account has no journal access -
+// and the old note blamed "a hand run", which this was not.
+func withLaneJournal(f failure) failure {
+	if (f.isHold() || f.isEscalation()) && strings.HasPrefix(f.Journal, "(journal unavailable") {
+		f.Journal = "(not included: " + f.Unit + " sends a hold or escalation itself while it runs, and " +
+			"the service account can read the journal only under cti-agent-alert@.service. " +
+			"The journalctl command below shows it on the box.)"
+	}
+	return f
+}
 
 // notFailure covers every kind that should be reported calmly. Anything not
 // explicitly listed is STILL treated as a real failure: that rule was right
@@ -545,11 +584,11 @@ func renderHTML(f failure) string {
 	} else if f.isEscalation() {
 		banner, tone, band = "CTI fleet escalation", emailkit.Blue, emailkit.Navy
 		verb = "escalated"
-		consequence = "<b>Nothing has failed.</b> The orchestrator reached you " +
-			"deliberately because it found something it cannot act on alone. " +
-			"The reason above is the message; the systemd detail below is " +
+		c := escalationConsequence(f)
+		consequence = "<b>Nothing has failed.</b>" + html.EscapeString(strings.TrimPrefix(c, "Nothing has failed.")) +
+			" The reason above is the message; the systemd detail below is " +
 			"included only to show the lane itself is healthy. " +
-			html.EscapeString(escalationProvenance)
+			html.EscapeString(escalationProvenance(f))
 	} else if f.IsDigest {
 		consequence = "<b>No threat-intel email will arrive.</b> An absent digest looks " +
 			"exactly like a quiet day, so treat the silence as unexplained until you " +

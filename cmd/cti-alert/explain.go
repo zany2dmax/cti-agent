@@ -21,8 +21,13 @@ func explain(f failure) string {
 	// The orchestrator and the lanes that hold themselves already wrote the
 	// message. Lead with it, whole, instead of burying it in a table row.
 	switch {
-	case f.isEscalation() && f.Reason != "":
+	case f.isEscalation() && f.Reason != "" && f.byOrchestrator():
 		return "The orchestrator needs you to look at something: " + f.Reason
+	case f.isEscalation() && f.Reason != "":
+		// A lane's runner escalating from its own check (the mailbox
+		// cleanup's never-read mail). Naming the orchestrator here sent the
+		// operator looking at the wrong thing.
+		return capFirst(what) + " needs you to look at something: " + f.Reason
 	case f.isHold() && f.Reason != "":
 		return fmt.Sprintf("%s stopped itself on purpose: %s", capFirst(what), f.Reason)
 	case f.isTest():

@@ -167,6 +167,43 @@ func TestAHoldAndAnEscalationLeadWithTheirOwnMessage(t *testing.T) {
 	}
 }
 
+// The mailbox cleanup escalates from its own weekly check. Its email said
+// the orchestrator had written it (13 Nov 2026), which sent the operator to
+// the wrong place. Only the check-in unit is the orchestrator's: the guard
+// grants it no other --unit.
+func TestALaneEscalationNamesTheLaneNotTheOrchestrator(t *testing.T) {
+	f := failure{Kind: "ESCALATION", Unit: "cti-agent-mailbox.service", Result: "success", ExitCode: "0",
+		Reason: "10 message(s) no lane has read", Journal: "(journal unavailable: exit status 1 - ...)"}
+	f = withLaneJournal(f)
+	if got := explain(f); !strings.HasPrefix(got, "Mailbox cleanup needs you to look at something: 10 message") {
+		t.Errorf("explain: %s", got)
+	}
+	for name, body := range map[string]string{"text": renderText(f), "html": renderHTML(f)} {
+		if strings.Contains(body, "orchestrator reached you") || strings.Contains(body, "orchestrator wrote") {
+			t.Errorf("%s still credits the orchestrator:\n%s", name, body)
+		}
+		for _, want := range []string{"lane reached you deliberately", "claim to check", "sends a hold or escalation itself"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %q", name, want)
+			}
+		}
+		if strings.Contains(body, "a hand run does not") {
+			t.Errorf("%s blames a hand run", name)
+		}
+	}
+	o := withLaneJournal(escalation())
+	for name, body := range map[string]string{"text": renderText(o), "html": renderHTML(o)} {
+		if !strings.Contains(body, "orchestrator reached you") || !strings.Contains(body, "orchestrator wrote this reason") {
+			t.Errorf("%s: the orchestrator's own escalation lost its provenance", name)
+		}
+	}
+	// A crash's journal note is left alone: that one can be a hand run.
+	c := withLaneJournal(failure{Kind: "FAILED", Unit: "cti-agent-mailbox.service", Journal: "(journal unavailable: x)"})
+	if !strings.HasPrefix(c.Journal, "(journal unavailable") {
+		t.Errorf("crash journal rewritten: %s", c.Journal)
+	}
+}
+
 func TestTheExplanationSaysSoWhenTheJournalCannotBeRead(t *testing.T) {
 	f := failure{Kind: "FAILED", Unit: "cti-agent-mailbox.service", Result: "timeout",
 		ExitCode: "1", Journal: "(journal unavailable: exit status 1)"}

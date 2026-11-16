@@ -115,6 +115,15 @@ by default (`MAILBOX_STALE_DAYS=0` turns it off).
   and the email shows them with a line saying the scanner sent no summary of
   this scan. No extra Qualys API calls.
 
+- **A lane's escalation email said the orchestrator sent it.** The mailbox
+  cleanup's weekly never-read alert (13 Nov 2026) read "The orchestrator needs
+  you" and "The orchestrator wrote this reason itself", and its journal section
+  blamed "a hand run". `cti-alert` now credits the orchestrator only for
+  `cti-agent-checkin.service`, the one unit its guard lets it name, and names
+  the lane otherwise, still calling the reason a claim to check. A HOLD or
+  ESCALATION says its journal was not included because the lane sent it while
+  running.
+
 ---
 
 ## 1.6.4 — 2026-11-11

@@ -110,7 +110,12 @@ Green banner, an
 line on the board. Inferred as above, or given explicitly.
 .TP
 .B ESCALATION
-Navy banner: the orchestrator needs a person and nothing is broken. On the
+Navy banner: the orchestrator, or a lane's own check, needs a person and
+nothing is broken. Sent for
+.B cti\-agent\-checkin.service
+it is the orchestrator's, the only unit its guard lets it name; for any other
+unit the email names that lane as the sender (the mailbox cleanup's
+never-read mail). On the
 board it is an
 .B INFO
 "escalated to the operator" line carrying the reason.
@@ -195,11 +200,13 @@ alert is turned into
 and no reason was given, a standard "manual test of the alert path" reason
 is supplied. On an
 .B ESCALATION
-the orchestrator wrote the reason, so links in it are defanged
+links in the reason are defanged
 .RB ( https://
 becomes
 .BR hxxps:// ),
-it is cut at 600 characters, and the email says the model wrote it.
+it is cut at 600 characters, and the email says who wrote it: the model,
+for the check-in unit, or the lane's own check, which can still quote outside
+mail. Both are called a claim to check.
 Default:\~empty.
 .TP
 .B \-\-dry\-run
@@ -282,6 +289,9 @@ with
 so it can read the failed unit's journal. Run by hand without that group,
 the journal section reads
 .IR "(journal unavailable: ...)" .
+A HOLD or ESCALATION is sent by the lane itself while it runs, without that
+group, so its journal section says it was not included and why, rather than
+blaming a hand run.
 .SH EXIT STATUS
 .TP
 .B 0
