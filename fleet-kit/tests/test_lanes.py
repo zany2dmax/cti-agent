@@ -2324,6 +2324,25 @@ class TestFileShape(unittest.TestCase):
         missing = [t for t in shipped if f"| `{t}` |" not in table]
         self.assertEqual(missing, [], "timers missing from RUNBOOK section 9's table")
 
+    def test_the_vmscan_day_setting_takes_day_names_only(self):
+        """FLEET_VMSCAN_DAY goes into an OnCalendar line, so only day names pass.
+
+        The check is run as the installer runs it, from the installer's own
+        lines, so the test cannot drift from what ships.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        self.assertIn('"cti-agent-vmscan.timer:$VMSCAN_DAY *-*-* $VMSCAN_AT"', installer)
+        dayre = [l.strip() for l in installer.splitlines() if l.strip().startswith("_dayre=")]
+        self.assertEqual(len(dayre), 1, "expected one _dayre= line in the installer")
+        check = dayre[0] + '\nprintf %s "$1" | grep -Eqx "${_dayre}(,${_dayre})*"'
+        def ok(value):
+            return subprocess.run(["bash", "-c", check, "check", value], check=False).returncode == 0
+        for good in ("Mon", "Fri", "Sun", "Mon,Fri", "Tue,Wed,Thu"):
+            self.assertTrue(ok(good), good)
+        for bad in ("", "fri", "Friday", "Fri ", "Fri,", "Fri *-*-* 00:00", "Fri;reboot", "Mon,,Fri"):
+            self.assertFalse(ok(bad), repr(bad))
+
     def test_every_runner_sources_fleet_env(self):
         """The runners load the config; the Go binaries only read the environment.
 

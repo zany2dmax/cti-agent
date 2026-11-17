@@ -43,6 +43,14 @@ Graph check to run; `mailer.py --check` still works.
 
 ### Changed
 
+- **The VM scan report's day is a setting.** `FLEET_VMSCAN_DAY` (Mon to Sun,
+  or a comma list; default Mon) sits beside `FLEET_VMSCAN_TIME`, and the
+  installer pins both to `FLEET_TIMEZONE`. Anything but day names fails the
+  install. Pick a day after both scheduled scans finish: a scan still running
+  is reported as `[NO RESULT]`. **To move it**, set the two lines in
+  `/etc/cti-agent/fleet.env`, re-run the installer, and check
+  `systemctl list-timers cti-agent-vmscan.timer`.
+
 - **The installer knows an upgrade from a new box.** It used to end every run
   with "No timer is enabled yet" and seven numbered first-deployment steps, on
   a box where the fleet had been running for weeks. With any fleet timer

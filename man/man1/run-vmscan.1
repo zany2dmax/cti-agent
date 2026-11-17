@@ -1,4 +1,4 @@
-.TH RUN-VMSCAN 1 "2026-11-07" "cti-agent 1.6" "CTI Fleet Manual"
+.TH RUN-VMSCAN 1 "2026-11-17" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 run-vmscan \- weekly Qualys VM scan report: the two scheduled scans combined into one email
 .SH SYNOPSIS
@@ -38,9 +38,11 @@ as
 .B run\-vmscan \-\-for\-real
 from
 .BR cti\-agent\-vmscan.timer ,
-Mondays at 08:00 local (the installer pins it to
+Mondays at 08:00 local by default (the installer pins it to
 .B FLEET_TIMEZONE
 with
+.B FLEET_VMSCAN_DAY
+and
 .BR FLEET_VMSCAN_TIME ).
 .SH HOW TO RUN
 \fBrun\-vmscan\fR mails a report, so it has no default: it has to be told how to run. Give exactly one of
@@ -72,6 +74,15 @@ The allowlist they are checked against.
 .TP
 .B VMSCAN_SCANS
 The scans to combine, by title.
+.TP
+.B FLEET_VMSCAN_DAY
+The day the installer pins the timer to:
+.BR Mon " to " Sun ,
+or a comma list. Default:\~\fBMon\fR. Pick a day after both scheduled scans
+finish; a scan still running is reported as
+.BR "[NO RESULT]" .
+Applied only with
+.BR FLEET_TIMEZONE .
 .TP
 .B FLEET_VMSCAN_TIME
 When the installer pins the timer, in

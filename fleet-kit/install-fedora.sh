@@ -810,6 +810,7 @@ ok "daemon-reload"
 TZFAIL=0
 FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"; MAILBOX_AT="07:00:00"
 APPOWNERS_AT="07:15:00"; APPSCAN_AT="07:30:00"; DOMAINS_AT="08:00:00"; VMSCAN_AT="08:00:00"; SUPPLIER_AT="07:45:00"
+VMSCAN_DAY="Mon"
 if [ -r "$CONF_DIR/fleet.env" ]; then
   # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
   # version did to a real install. An absent key must read as empty here: every
@@ -823,6 +824,17 @@ if [ -r "$CONF_DIR/fleet.env" ]; then
   APPSCAN_AT="$(cfgval FLEET_APPSCAN_TIME)";       APPSCAN_AT="${APPSCAN_AT:-07:30:00}"
   DOMAINS_AT="$(cfgval FLEET_DOMAINS_TIME)";       DOMAINS_AT="${DOMAINS_AT:-08:00:00}"
   VMSCAN_AT="$(cfgval FLEET_VMSCAN_TIME)";         VMSCAN_AT="${VMSCAN_AT:-08:00:00}"
+  # The VM scan report's day is a setting too: when the report can run
+  # depends on when the scheduled scans finish, which is the operator's to
+  # know. Day names only (Mon..Sun, or a comma list), so nothing else can be
+  # slipped into the OnCalendar line; anything else fails the install.
+  VMSCAN_DAY="$(cfgval FLEET_VMSCAN_DAY)";         VMSCAN_DAY="${VMSCAN_DAY:-Mon}"
+  _dayre='(Mon|Tue|Wed|Thu|Fri|Sat|Sun)'
+  if ! printf '%s' "$VMSCAN_DAY" | grep -Eqx "${_dayre}(,${_dayre})*"; then
+    bad "FLEET_VMSCAN_DAY=$VMSCAN_DAY is not a day (Mon, Tue, Wed, Thu, Fri, Sat or Sun; a comma list for more than one)"
+    TZFAIL=1
+    VMSCAN_DAY="Mon"
+  fi
   SUPPLIER_AT="$(cfgval FLEET_SUPPLIER_TIME)";     SUPPLIER_AT="${SUPPLIER_AT:-07:45:00}"
 fi
 
@@ -841,7 +853,7 @@ if [ -n "$FLEET_TZ" ]; then
                 "cti-agent-appowners.timer:*-*-* $APPOWNERS_AT" \
                 "cti-agent-appscan.timer:Fri *-*-* $APPSCAN_AT" \
                 "cti-agent-domains.timer:Tue *-*-* $DOMAINS_AT" \
-                "cti-agent-vmscan.timer:Mon *-*-* $VMSCAN_AT" \
+                "cti-agent-vmscan.timer:$VMSCAN_DAY *-*-* $VMSCAN_AT" \
                 "cti-agent-supplier.timer:*-*-* $SUPPLIER_AT" \
                 "cti-agent-patchtuesday.timer:Wed *-*-09..15 $PATCHTUE_AT"; do
       unit="${pair%%:*}"; cal="${pair#*:}"
@@ -883,6 +895,11 @@ else
   info "FLEET_TIMEZONE unset - timers use the system timezone ($(date +%Z))"
   info "On a UTC server a 06:00 digest arrives at 02:00 US Eastern. Set"
   info "FLEET_TIMEZONE in $CONF_DIR/fleet.env to pin it to local time."
+  if [ "$VMSCAN_DAY" != Mon ] || [ "$VMSCAN_AT" != 08:00:00 ]; then
+    # The FLEET_*_TIME and _DAY settings are applied only with a timezone.
+    warn "FLEET_VMSCAN_DAY/FLEET_VMSCAN_TIME are not applied without FLEET_TIMEZONE:"
+    info "the VM scan report stays on Monday 08:00 system time until it is set."
+  fi
 fi
 
 # ───────────────────────────────────────────────────────── SELinux labels ────
