@@ -707,7 +707,7 @@ S='[Sev5] CTI test comparison'
 
 sudo cti-agent mailer.py    --html "$D" --subject "$S" --dry-run > /tmp/py.json
 sudo cti-agent cti-mailer   --html "$D" --subject "$S" --dry-run > /tmp/go.json
-diff <(python3 -m json.tool /tmp/py.json) <(python3 -m json.tool /tmp/go.json)
+diff <(python3 -m json.tool --sort-keys /tmp/py.json) <(python3 -m json.tool --sort-keys /tmp/go.json)
 ```
 
 They should differ in nothing. Repeat for the cases that matter:
