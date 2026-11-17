@@ -43,6 +43,18 @@ Graph check to run; `mailer.py --check` still works.
 
 ### Changed
 
+- **Domains: a null MX is no longer proposed for a domain that receives
+  mail.** With `DOMAINS_MAIL_GATEWAY=pod` the lane now also counts the domains
+  Proofpoint delivered inbound and internal mail to (domain names only, once
+  per message). A "no mail" domain that received mail in the window gets a High
+  finding, and its null MX moves from the exact changes to To review with the
+  count; its SPF, DMARC and DKIM changes are unchanged. If the log carried no
+  recipients, every null MX goes to To review (fail closed). A domain whose MX
+  is not on Proofpoint is not checked and says so. The first live run found a
+  "no mail" domain whose MX is our own Proofpoint tenant still being told to
+  publish a null MX. The open lock-down ticket's list changes, so the next
+  weekly comments on it.
+
 - **The daily, the weekly and the Patch Tuesday synopsis send through
   `cti-mailer`.** `run-digest` and `run-patchtuesday` were the last runners
   still calling the Python `mailer.py`; every digest and report now goes

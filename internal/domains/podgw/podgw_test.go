@@ -115,3 +115,36 @@ func TestOverflowOfSenderDomainsIsIncomplete(t *testing.T) {
 		t.Fatalf("%+v err=%v", ev, err)
 	}
 }
+
+func TestReceivedDomainsAndWhenTheyCannotBeUsed(t *testing.T) {
+	delivered := `{"ts":"2026-11-01T12:00:00.000000+0000","envelope":{"rcpts":["x@example.com"]},` +
+		`"msg":{"parsedAddresses":{"from":["y@example.net"]}},` +
+		`"filter":{"qid":"4","routes":["default_inbound"],"routeDirection":"inbound","modules":{}}}`
+	g := &Gateway{Source: &fake{msgs: []string{withTS(outEv, "2026-11-01T00:30:00.000000+0000"), delivered,
+		withTS(spoofFail, "2026-11-01T23:30:00.000000+0000")}, err: io.EOF}}
+	e, err := g.Evidence(context.Background(), since, since.Add(24*time.Hour))
+	if err != nil || !e.ReceivedKnown || e.ReceivedFor("example.com") != 1 {
+		t.Fatalf("received: known=%v %v why=%q err=%v", e.ReceivedKnown, e.Received, e.ReceivedWhy, err)
+	}
+
+	// No inbound event carried a recipient: nothing can be said.
+	g = &Gateway{Source: &fake{msgs: []string{withTS(outEv, "2026-11-01T00:30:00.000000+0000"),
+		withTS(spoofFail, "2026-11-01T23:30:00.000000+0000")}, err: io.EOF}}
+	e, _ = g.Evidence(context.Background(), since, since.Add(24*time.Hour))
+	if e.ReceivedKnown || !strings.Contains(e.ReceivedWhy, "carried a recipient") || !e.Complete {
+		t.Errorf("no recipients: known=%v why=%q complete=%v (the sending evidence is still good)",
+			e.ReceivedKnown, e.ReceivedWhy, e.Complete)
+	}
+
+	// More recipient domains than the aggregate names.
+	msgs := []string{withTS(outEv, "2026-11-01T00:30:00.000000+0000")}
+	for i := 0; i <= podlog.MaxKeys; i++ {
+		msgs = append(msgs, fmt.Sprintf(`{"envelope":{"rcpts":["u@d%d.example"]},`+
+			`"filter":{"qid":"q","routes":[],"routeDirection":"inbound","modules":{}}}`, i))
+	}
+	msgs = append(msgs, withTS(spoofFail, "2026-11-01T23:30:00.000000+0000"))
+	e, _ = (&Gateway{Source: &fake{msgs: msgs, err: io.EOF}}).Evidence(context.Background(), since, since.Add(24*time.Hour))
+	if e.ReceivedKnown || !strings.Contains(e.ReceivedWhy, "recipient domains") {
+		t.Errorf("overflow: known=%v why=%q", e.ReceivedKnown, e.ReceivedWhy)
+	}
+}

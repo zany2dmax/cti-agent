@@ -297,6 +297,12 @@ func run() int {
 		} else {
 			logf("gateway: %d events read, %d outbound header-From domain(s)",
 				gwStatus.Evidence.Events, len(gwStatus.Evidence.Outbound))
+			if ev := gwStatus.Evidence; ev.ReceivedKnown {
+				logf("gateway: mail delivered to %d recipient domain(s)", len(ev.Received))
+			} else {
+				logf("gateway: no recipient data (%s) - every null MX change goes to review",
+					safelog.Line(ev.ReceivedWhy))
+			}
 		}
 	}
 	findings := domains.Evaluate(results, cmp, opt)
@@ -329,6 +335,9 @@ func run() int {
 	af.Skipped = skipped
 	if len(skipped) > 0 {
 		logf("gateway: %d lock-down domain(s) left out because the gateway shows they send", len(skipped))
+	}
+	if n := nullMXReviewed(actions); n > 0 {
+		logf("gateway: %d null MX change(s) moved to review: the domain receives mail, or the log cannot say", n)
 	}
 	logf("actions: %d exact DNS change(s), %d to review, on %d domain(s)", af.Exact, af.Review, af.Domains)
 
@@ -530,4 +539,16 @@ func stateWhen(s *domains.State) string {
 		return "nothing (first run)"
 	}
 	return s.Taken.Format("2006-01-02")
+}
+
+// nullMXReviewed counts the MX review items on "no mail" domains, which are
+// the null MX changes the gateway moved to review.
+func nullMXReviewed(acts []domains.Action) int {
+	n := 0
+	for _, a := range acts {
+		if a.Type == "MX" && !a.Exact() && a.Profile == domains.ProfileNoMail.String() {
+			n++
+		}
+	}
+	return n
 }

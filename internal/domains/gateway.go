@@ -17,6 +17,17 @@ import (
 // configured, a domain with outbound mail in the window is never asked to be
 // locked down, and the report says so loudly instead.
 //
+// WHAT IT KNOWS ABOUT MAIL RECEIVED
+//
+// A "no mail" domain is also asked to replace its MX with a null MX, which
+// makes every message sent to it fail at once. So the gateway also counts the
+// domains its inbound and internal mail was delivered to, and a null MX is
+// never an exact change for a domain that received mail in the window: it
+// moves to To review with the count. When the read carried no recipient data
+// at all, nobody can say a domain receives nothing, so every null MX goes to
+// To review. A domain whose MX is not on the gateway cannot be checked this
+// way (its mail never passes through it), and the change says so.
+//
 // THE RULE WHEN THE EVIDENCE IS MISSING
 //
 // If the gateway is configured and its read failed or was cut short, the run
@@ -61,7 +72,16 @@ type GatewayEvidence struct {
 	Unattributed int
 	Outbound     map[string]int          // header-From domain -> messages sent
 	Inbound      map[string]InboundClaim // header-From domain -> inbound mail using it
+	// Received: recipient domain -> inbound and internal messages delivered
+	// to it. Usable only when ReceivedKnown; ReceivedWhy says why not.
+	Received      map[string]int
+	ReceivedKnown bool
+	ReceivedWhy   string
 }
+
+// ReceivedFor counts the messages delivered to d itself. Exact match only: a
+// domain's MX does not carry mail for its subdomains.
+func (e *GatewayEvidence) ReceivedFor(d string) int { return e.Received[d] }
 
 // OutboundFor counts outbound mail whose header From is d or a subdomain.
 func (e *GatewayEvidence) OutboundFor(d string) int {
@@ -168,12 +188,22 @@ func EvalGateway(results []Result, gw *GatewayStatus) []Finding {
 		"%s.", ev.Gateway, ev.Since.UTC().Format("2006-01-02 15:04"), ev.To.UTC().Format("2006-01-02 15:04"),
 		days, ev.Events, countReal(ev.Outbound), unattributedNote(ev.Unattributed))
 
+	if !ev.ReceivedKnown {
+		add(gatewayFinding, Medium, "the mail gateway log cannot say which of our domains receive mail (%s): "+
+			"every null MX change is moved to To review until it can.", ev.ReceivedWhy)
+	}
+
 	inInventory := map[string]bool{}
 	for _, r := range results {
 		d := r.Entry.Name
 		inInventory[d] = true
 		p := ProfileOf(r.Entry)
 		out2 := ev.OutboundFor(d)
+		if n := ev.ReceivedFor(d); p == ProfileNoMail && n > 0 {
+			add(d, High, "the inventory says this domain receives no mail, but the gateway delivered %d "+
+				"message(s) to it in %d days. Its null MX change is moved to To review: find who uses it, "+
+				"then correct the inventory (add \"receive\") or retire those addresses.", n, days)
+		}
 		switch {
 		case p.LockedDown() && out2 == 0 && ev.InboundFor(d).Pass > 0:
 			add(d, High, "the inventory says this domain sends nothing, but %d inbound message(s) in %d days "+

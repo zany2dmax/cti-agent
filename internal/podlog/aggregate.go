@@ -21,7 +21,7 @@ import (
 // id, URLs. The fleet needs none of that to answer "does this domain send mail"
 // and "who is spoofing us", so Aggregate keeps counts keyed by things that are
 // not about a person: route names, result words, the DOMAIN part of a header
-// From, DKIM signer/selector, and a sender IP. Nothing in it can be turned
+// From and of a recipient, DKIM signer/selector, and a sender IP. Nothing in it can be turned
 // back into a recipient, a subject or an address, and the event itself is
 // dropped as soon as it is counted.
 //
@@ -51,7 +51,10 @@ const (
 // event is the part of a message record this package reads. Every field is
 // optional: the guide marks most of them so.
 type event struct {
-	TS         string `json:"ts"`
+	TS       string `json:"ts"`
+	Envelope struct {
+		Rcpts strList `json:"rcpts"`
+	} `json:"envelope"`
 	Connection struct {
 		IP string `json:"ip"`
 	} `json:"connection"`
@@ -61,6 +64,8 @@ type event struct {
 		} `json:"header"`
 		ParsedAddresses struct {
 			From strList `json:"from"`
+			To   strList `json:"to"`
+			Cc   strList `json:"cc"`
 		} `json:"parsedAddresses"`
 	} `json:"msg"`
 	Filter *struct {
@@ -147,6 +152,17 @@ type Aggregate struct {
 	SpoofIPs       map[string]int        `json:"spoofSenderIPs"`
 	SimulatedCount int                   `json:"ownSimulations"`
 
+	// Mail delivered TO a domain: the recipient domains of inbound and
+	// internal events, each counted once per event however many recipients it
+	// had there. This is what says a domain receives mail, so a null MX is
+	// never proposed for one that does. Domains only: no recipient address.
+	InboundTo map[string]int `json:"inboundRecipientDomains"`
+	// InboundEvents counts inbound and internal events; InboundWithRcpt those
+	// with at least one recipient domain read. Recipients are optional in the
+	// schema, so a read where none had any proves nothing about who receives.
+	InboundEvents   int `json:"inboundEvents"`
+	InboundWithRcpt int `json:"inboundWithRecipients"`
+
 	first, last time.Time
 }
 
@@ -163,6 +179,7 @@ func NewAggregate() *Aggregate {
 		OutboundDKIMByFrom: map[string]int{},
 		Spoof:              map[string]*SpoofStat{},
 		SpoofIPs:           map[string]int{},
+		InboundTo:          map[string]int{},
 	}
 }
 
@@ -258,6 +275,9 @@ func (a *Aggregate) addEvent(ev *event) {
 	bump(a.SPF, spf)
 
 	from := fromDomain(ev)
+	if dir == "inbound" || dir == "internal" {
+		a.countRecipients(ev)
+	}
 	switch dir {
 	case "outbound":
 		a.OutboundEvents++
@@ -309,6 +329,29 @@ func (a *Aggregate) addEvent(ev *event) {
 	}
 }
 
+// countRecipients notes which domains an inbound or internal event was
+// delivered to. The envelope recipients are the delivery; the To and Cc
+// headers are read only when the envelope has none.
+func (a *Aggregate) countRecipients(ev *event) {
+	a.InboundEvents++
+	list := ev.Envelope.Rcpts
+	if len(list) == 0 {
+		list = append(append(strList{}, ev.Msg.ParsedAddresses.To...), ev.Msg.ParsedAddresses.Cc...)
+	}
+	seen := map[string]bool{}
+	for _, r := range list {
+		d := addrDomain(r)
+		if d == "" || d == "(unparsed)" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		bump(a.InboundTo, key(d))
+	}
+	if len(seen) > 0 {
+		a.InboundWithRcpt++
+	}
+}
+
 func spfResult(ev *event) string {
 	if r := ev.Filter.Modules.Spf.Result; r != "" {
 		return key(r)
@@ -329,7 +372,13 @@ func fromDomain(ev *event) string {
 	if len(list) == 0 {
 		return ""
 	}
-	addr := strings.TrimSpace(list[0])
+	return addrDomain(list[0])
+}
+
+// addrDomain is the domain part of one address, "" when there is no @, or
+// "(unparsed)" when what follows the @ is not a plausible host name.
+func addrDomain(addr string) string {
+	addr = strings.TrimSpace(addr)
 	if pa, err := mail.ParseAddress(addr); err == nil {
 		addr = pa.Address
 	}
@@ -449,4 +498,8 @@ func (a *Aggregate) Report(w io.Writer, n int) {
 		p("  %7d  %s  [dmarc: %s]\n", st.Total, k, strings.Join(parts, " "))
 	}
 	section("sender IPs of those messages that did not pass DMARC", a.SpoofIPs)
+
+	p("\n== inbound and internal mail: %d events, %d with a recipient domain ==\n",
+		a.InboundEvents, a.InboundWithRcpt)
+	section("recipient domains (messages delivered to each)", a.InboundTo)
 }

@@ -77,6 +77,21 @@ func (g *Gateway) Evidence(ctx context.Context, since, to time.Time) (domains.Ga
 		ev.Inbound[k] = domains.InboundClaim{Total: st.Total, Pass: st.DMARC["pass"]}
 	}
 
+	ev.Received = map[string]int{}
+	for k, v := range agg.InboundTo {
+		ev.Received[k] = v
+	}
+	switch {
+	case agg.InboundWithRcpt == 0:
+		ev.ReceivedWhy = fmt.Sprintf("none of the %d inbound and internal events carried a recipient", agg.InboundEvents)
+	case agg.InboundTo[podlog.OverflowKey] > 0:
+		// Past the cap, recipient domains are pooled and unnamed; one of ours
+		// could be among them.
+		ev.ReceivedWhy = "more distinct recipient domains than the aggregate can name"
+	default:
+		ev.ReceivedKnown = true
+	}
+
 	first, last := agg.Span()
 	switch {
 	case capped:

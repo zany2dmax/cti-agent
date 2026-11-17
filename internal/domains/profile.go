@@ -141,7 +141,11 @@ func ActionsWithSkipped(results []Result, rua string, gw *GatewayStatus) ([]Acti
 				continue
 			}
 		}
-		out = append(out, actionsFor(r, rua)...)
+		acts := actionsFor(r, rua)
+		if gw.OK() && ProfileOf(r.Entry).LockedDown() {
+			acts = gateNullMX(acts, r, gw.Evidence)
+		}
+		out = append(out, acts...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Domain != out[j].Domain {
@@ -262,6 +266,54 @@ func actionsFor(r Result, rua string) []Action {
 		}
 	}
 	return out
+}
+
+// gateNullMX checks a proposed null MX against the mail the gateway delivered
+// (gateway.go, "WHAT IT KNOWS ABOUT MAIL RECEIVED"). A domain that received
+// mail, or one whose receiving the read cannot vouch for, gets a To review
+// item in place of the exact change. Only a domain with an MX today is
+// checked: with none, there is no mail path for a null MX to break.
+func gateNullMX(acts []Action, r Result, ev *GatewayEvidence) []Action {
+	days := int(ev.To.Sub(ev.Since).Hours() / 24)
+	for i := range acts {
+		x := &acts[i]
+		if x.Type != "MX" || x.Set == "" || !r.Mail.MX.Present() {
+			continue
+		}
+		n := ev.ReceivedFor(r.Entry.Name)
+		switch {
+		case n > 0:
+			x.Set = ""
+			x.Why = fmt.Sprintf("the inventory says it receives no mail, but the mail gateway delivered %d "+
+				"message(s) to it in %d days, and a null MX would bounce them - find who uses it (a mailbox, "+
+				"alias or forwarder), then mark it \"receive\" in the inventory or retire those addresses first", n, days)
+		case !mxOnGateway(r.Mail.MX):
+			x.Why += " (not checked against the mail gateway: its MX does not point at the gateway, so its " +
+				"mail does not pass through it)"
+		case !ev.ReceivedKnown:
+			x.Set = ""
+			x.Why = fmt.Sprintf("the inventory says it receives no mail, but the mail gateway could not tell "+
+				"whether mail arrives for it (%s) - confirm nothing does, then set a null MX "+
+				"(priority 0, value \".\")", ev.ReceivedWhy)
+		default:
+			x.Why += fmt.Sprintf(" (the mail gateway delivered no mail to it in %d days)", days)
+		}
+	}
+	return acts
+}
+
+// mxOnGateway reports whether every MX host is on Proofpoint on Demand, so
+// all of the domain's inbound mail passes the gateway and its log.
+func mxOnGateway(l Lookup) bool {
+	if !l.Present() {
+		return false
+	}
+	for _, v := range l.Values {
+		if !isPoDHost(mxHost(v)) {
+			return false
+		}
+	}
+	return true
 }
 
 func isNullMX(l Lookup) bool { return len(l.Values) == 1 && l.Values[0] == "." }

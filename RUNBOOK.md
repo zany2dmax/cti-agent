@@ -2160,11 +2160,14 @@ syslog licence and the token. There is no console toggle for
 | SPF | `filter.modules.spf.result` |
 | DMARC rollup and alignment | `filter.modules.dmarc` (`filterdResult`, `alignment`, `authResults`) |
 | Sending host | `connection.ip`, `connection.helo` |
+| Recipients (inbound and internal) | `envelope.rcpts`; `msg.parsedAddresses.to` and `cc` when the envelope has none |
 
 The lane keeps **aggregates only**: per domain and week, the outbound senders
-(header-From domain, DKIM selector, count) and the inbound messages that claim
-the domain but fail DMARC (count, top sending IPs). No subjects, recipients or
-per-message records are written to disk or sent in any report.
+(header-From domain, DKIM selector, count), the inbound messages that claim
+the domain but fail DMARC (count, top sending IPs), and the domains inbound and
+internal mail was delivered to (the domain part only, counted once per
+message). No subjects, recipient addresses or per-message records are written
+to disk or sent in any report.
 
 **Turning on the lane half**
 
@@ -2208,6 +2211,18 @@ keeps counts only. What changes in the report, when the evidence is usable:
 - Inbound mail using our domains in the From address gets an **Info** with the
   passed and not-passed DMARC counts: the evidence for `p=reject`. It is a
   finding line, not a ticket action.
+- **A null MX is checked against mail received.** A "no mail" domain is asked
+  to replace its MX with a null MX (`0 .`), which bounces every message sent
+  to it. If the gateway delivered mail to the domain in the window, that change
+  moves to **To review** with the count, and the report has a **High** ("find
+  who uses it, then mark it `receive` or retire those addresses"). The other
+  lock-down changes (SPF, DMARC, DKIM) stay exact. A domain whose MX is not on
+  Proofpoint cannot be checked, because its mail never passes the gateway: its
+  null MX stays exact and says "not checked against the mail gateway". If the
+  log carried no recipient data at all (or more recipient domains than it can
+  name), the report has a Medium and **every** null MX goes to To review. The
+  run prints `gateway: mail delivered to N recipient domain(s)` and, when any
+  moved, `gateway: N null MX change(s) moved to review`.
 
 **The hold rule.** If the gateway is configured but the read failed or was
 incomplete (token in use, HTTP 409; network error; the byte cap; the stream

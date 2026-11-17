@@ -233,14 +233,12 @@ is real, not before. Finished work moves out of this file into
   down, and a failed read holds the tickets. Verified live on the box
   2026-11-17 (`run-domains --to-dev`): a complete 7-day read, 313,325 events,
   27 outbound header-From domains, one lock-down domain left out because it
-  sends, nothing held. Left:
-  - **The null MX is not checked against mail received.** The gateway counts
-    mail sent *as* our domains (header From), never mail *to* them, so a
-    "no mail" domain is still told to replace its MX with a null MX while
-    mail arrives for it. The 11-17 list has one whose MX is our own PoD
-    tenant, and several on Microsoft 365. Likely shape: count inbound
-    recipient domains (aggregate only, like the rest) and move a null-MX
-    change to *To review* for any domain that received mail in the window
+  sends, nothing held. The null MX check against mail received is built
+  (see CHANGELOG). Left:
+  - A null MX on a domain whose MX is not on Proofpoint (Microsoft 365,
+    GoDaddy, others) is still not checked: its mail never passes the
+    gateway. A Graph or Exchange message trace, or moving those domains'
+    MX to PoD first, would close it
   - The `p=reject` evidence is a finding line in the report, not a ticket
     action
   - Then `domains.txt` could need only `saas` / `legacy` / `unknown`

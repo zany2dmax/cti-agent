@@ -1,4 +1,4 @@
-.TH CTI-DOMAINS 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-DOMAINS 1 "2026-11-17" "cti-agent 1.3" "CTI Fleet Manual"
 .SH NAME
 cti-domains \- weekly check of the organisation's domains: registrar, DNS, web, TLS and mail records
 .SH SYNOPSIS
@@ -435,6 +435,9 @@ sends nothing that has outbound mail is reported High and is not asked to be
 locked down; outbound domains missing from the inventory are Medium; inbound
 mail using our domains is counted as evidence for
 .BR p=reject .
+The domains mail was delivered to are counted too: a "no mail" domain that
+received mail in the window is reported High and its null MX change moves to
+To review, and if the log carried no recipients every null MX change does.
 It needs
 .B POD_CLUSTER_ID
 and

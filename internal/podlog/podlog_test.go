@@ -287,6 +287,47 @@ func TestAggregate(t *testing.T) {
 	}
 }
 
+// Inbound mail to two of our domains: the envelope has three recipients, two
+// at one domain, so each domain is counted once for the event.
+const deliveredEv = `{"ts":"2026-11-02T15:09:00.000000+0000","connection":{"ip":"198.51.100.20"},
+"envelope":{"from":"news@example.net","rcpts":["ann@example.com","bob@example.com","cy@shop.example.org"]},
+"msg":{"parsedAddresses":{"from":["news@example.net"],"to":["ann@example.com"]}},
+"filter":{"qid":"Q5","routes":["default_inbound"],"routeDirection":"inbound","modules":{}}}`
+
+// Internal mail with no envelope recipients: the To and Cc headers are read.
+const internalEv = `{"ts":"2026-11-02T15:10:00.000000+0000",
+"msg":{"parsedAddresses":{"from":["it@example.com"],"to":["Dee <dee@example.com>"],"cc":["ed@other.example"]}},
+"filter":{"qid":"Q6","routes":["internal"],"routeDirection":"internal","modules":{}}}`
+
+func TestRecipientDomainsAreCountedForInboundMailOnly(t *testing.T) {
+	a := NewAggregate()
+	for _, e := range []string{outboundEv, deliveredEv, internalEv, spoofEv} {
+		a.AddMessage([]byte(e))
+	}
+	if a.InboundTo["example.com"] != 2 || a.InboundTo["shop.example.org"] != 1 || a.InboundTo["other.example"] != 1 {
+		t.Errorf("recipient domains: %v", a.InboundTo)
+	}
+	// The outbound event's recipient (buyer@example.net) is someone else's
+	// domain and is not counted.
+	if _, ok := a.InboundTo["example.net"]; ok {
+		t.Errorf("outbound recipients must not be counted: %v", a.InboundTo)
+	}
+	// The spoof event has no recipient at all: an inbound event, without one.
+	if a.InboundEvents != 3 || a.InboundWithRcpt != 2 {
+		t.Errorf("inbound events %d, with recipients %d", a.InboundEvents, a.InboundWithRcpt)
+	}
+	var b bytes.Buffer
+	a.Report(&b, 20)
+	for _, banned := range []string{"ann", "bob", "dee", "ed@", "@"} {
+		if strings.Contains(b.String(), banned) {
+			t.Errorf("report leaks %q:\n%s", banned, b.String())
+		}
+	}
+	if !strings.Contains(b.String(), "recipient domains") {
+		t.Errorf("report lacks the recipient section:\n%s", b.String())
+	}
+}
+
 func TestReportHoldsNoMessageContent(t *testing.T) {
 	a := NewAggregate()
 	for _, e := range []string{outboundEv, spoofEv, simEv, signedEv} {
