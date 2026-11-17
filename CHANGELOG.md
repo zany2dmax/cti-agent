@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.6 — 2026-11-17
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing has to be configured.
 `sudo cti-agent cti-mailer --check` is now the Graph check to run;
