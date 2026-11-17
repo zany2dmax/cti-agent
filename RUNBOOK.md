@@ -504,6 +504,8 @@ The rest of the lanes, with the gate before each, are in the table below.
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
 | 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | owners moved into `owners.db` and `fleet-owners check` clean ([11f](#application-owners-in-ownersdb)), one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
+| 10 | `cti-agent-vmscan.timer` | weekly VM scan report, both scheduled scans in one email, Mondays | `VMSCAN_TO`, `VMSCAN_ALLOW_TO` and `VMSCAN_SCANS` set, one `--dry-run` and one `--to-dev` read; for its coverage check, `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` set and `sudo cti-agent cti-vmscan --check` OK ([11f](#the-weekly-vm-scan-report-run-vmscan)) |
+| 11 | `cti-agent-supplier.timer` | supplier-request triage, daily | `SUPPLIER_ADDRESS`, `SUPPLIER_TO`, `SUPPLIER_ALLOW_TO` and the Jira settings set, a `--dry-run` whose digest and items you have read, then one `--to-dev` ([11f](#the-supplier-request-lane-run-supplier)) |
 
 ```bash
 systemctl list-timers 'cti-agent-*' --all

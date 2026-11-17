@@ -2309,6 +2309,21 @@ class TestFileShape(unittest.TestCase):
                      "sudo ausearch -m avc -ts recent"):
             self.assertIn(step, section, f"RUNBOOK section 9 lost: {step}")
 
+    def test_every_shipped_timer_is_in_the_runbook_enable_order(self):
+        """RUNBOOK section 9's table is the order and the gate for each timer.
+
+        It listed 9 of the 11 timers: vmscan and supplier were documented
+        further down but never given a place in the order, so an operator
+        enabling lanes from the table would never turn them on.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        runbook = (root / "RUNBOOK.md").read_text(encoding="utf-8")
+        table = runbook.split("### Every timer, and its gate", 1)[1].split("```", 1)[0]
+        shipped = sorted(t.name for t in (root / "fleet-kit" / "fleet" / "systemd-fedora").glob("*.timer"))
+        self.assertTrue(shipped, "no timers found - the path moved")
+        missing = [t for t in shipped if f"| `{t}` |" not in table]
+        self.assertEqual(missing, [], "timers missing from RUNBOOK section 9's table")
+
     def test_every_runner_sources_fleet_env(self):
         """The runners load the config; the Go binaries only read the environment.
 
