@@ -388,3 +388,14 @@ func TestCheckNamesGroupsOnDecommissionedSitesAndGroupsNoScanTargets(t *testing.
 		t.Errorf("the idle branch's network is still a gap: %+v", res.Findings)
 	}
 }
+
+// The question text goes to the network team, in the email and the help-desk
+// ticket; the rules file is the security team's, so the text never mentions it.
+func TestQuestionsDoNotSendTheNetworkTeamToTheRulesFile(t *testing.T) {
+	_, qs := SelectCorp(ParseSites(sample), Rules{})
+	for _, q := range qs {
+		if strings.Contains(strings.ToLower(q.Why), "rule") {
+			t.Errorf("%s: %q", q.Location, q.Why)
+		}
+	}
+}

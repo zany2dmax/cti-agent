@@ -203,6 +203,11 @@ func vmscanFixesBody(ff vmscan.FixesFile, now time.Time) string {
 	last := ""
 	for _, x := range ff.Fixes {
 		if x.Title != last {
+			// A blank line ends the list above: without it Jira can run the
+			// bullets into the heading.
+			if last != "" {
+				b.WriteString("\n")
+			}
 			fmt.Fprintf(&b, "h3. %s\n%s\n\n", wikiEscape(x.Title), wikiEscape(x.Action))
 			last = x.Title
 		}

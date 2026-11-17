@@ -223,8 +223,8 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 				if !within(blocks, s.Prefix) {
 					bad = ""
 					qs = append(qs, Question{Location: loc, Kind: QOutside, Row: s.Row,
-						Why: fmt.Sprintf("its corp network %s is outside the location's own block (%s); "+
-							"either the sheet has a typo or say so with a rule", s.Prefix, headerBlockList(blocks))})
+						Why: fmt.Sprintf("its corp network %s is outside the location's own block (%s)",
+							s.Prefix, headerBlockList(blocks))})
 					picked = nil
 					break
 				}
@@ -241,7 +241,7 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 				Why: fmt.Sprintf("its corp network %q is not a valid network", bad)})
 		case len(picked) == 0:
 			qs = append(qs, Question{Location: loc, Kind: QNoCorpRow, Row: headRow,
-				Why: fmt.Sprintf("no row counts as its corp network (rows: %s); say which with a rule",
+				Why: fmt.Sprintf("no row counts as its corp network (rows: %s)",
 					strings.Join(dedupe(seenRoles), ", "))})
 		default:
 			for _, s := range picked {

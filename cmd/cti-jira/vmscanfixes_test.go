@@ -69,3 +69,14 @@ func TestTheSpreadsheetTicketHasItsOwnKindInTheList(t *testing.T) {
 		t.Errorf("kind = %q", k)
 	}
 }
+
+// Seen in the first preview: a list ran straight into the next heading.
+func TestEachHeadingAfterTheFirstFollowsABlankLine(t *testing.T) {
+	ff := fixesOf(1)
+	ff.Fixes = append(ff.Fixes, vmscan.SheetFix{Location: "Naples", Kind: "invalid-network",
+		Title: "Corp network that is not a valid CIDR", Problem: "not valid", Action: "Network team: correct it."})
+	body := vmscanFixesBody(ff, time.Now())
+	if !strings.Contains(body, "\n\nh3. Corp network that is not a valid CIDR") {
+		t.Errorf("no blank line before the second heading:\n%s", body)
+	}
+}
