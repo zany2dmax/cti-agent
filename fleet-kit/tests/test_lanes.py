@@ -2343,6 +2343,38 @@ class TestFileShape(unittest.TestCase):
         for bad in ("", "fri", "Friday", "Fri ", "Fri,", "Fri *-*-* 00:00", "Fri;reboot", "Mon,,Fri"):
             self.assertFalse(ok(bad), repr(bad))
 
+    def test_a_disabled_timer_is_reported_once(self):
+        """`systemctl is-enabled` prints its state AND exits non-zero.
+
+        The installer's `... || echo disabled` therefore printed "disabled"
+        twice, on two lines, for every disabled timer in its Timer status.
+        unit_state is run here, from the installer's own text, against a fake
+        systemctl that behaves like the real one.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        m = re.search(r"^unit_state\(\) \{\n.*?^\}\n", installer, re.S | re.M)
+        self.assertIsNotNone(m, "unit_state() not found in the installer")
+        # The helper and the comment above it are the only place it may appear.
+        start = installer.rfind("\n\n", 0, m.start()) + 2
+        outside = installer[:start] + installer[m.end():]
+        self.assertNotIn("systemctl is-enabled", outside,
+                         "call unit_state, not systemctl is-enabled, so the state is read one way")
+        with tempfile.TemporaryDirectory() as d:
+            fake = pathlib.Path(d) / "systemctl"
+            fake.write_text('#!/bin/sh\ncase "$2" in\n'
+                            '  on.timer) echo enabled; exit 0 ;;\n'
+                            '  off.timer) echo disabled; exit 1 ;;\n'
+                            '  *) echo "Failed to get unit file state" >&2; exit 1 ;;\n'
+                            'esac\n', encoding="utf-8")
+            fake.chmod(0o755)
+            env = dict(os.environ, PATH=d + os.pathsep + os.environ["PATH"])
+            for unit, want in (("on.timer", "enabled"), ("off.timer", "disabled"),
+                               ("gone.timer", "not-found")):
+                out = subprocess.run(["bash", "-c", m.group(0) + 'unit_state "$1"', "t", unit],
+                                     capture_output=True, text=True, env=env, check=False)
+                self.assertEqual(out.stdout, want, unit)
+
     def test_every_runner_sources_fleet_env(self):
         """The runners load the config; the Go binaries only read the environment.
 

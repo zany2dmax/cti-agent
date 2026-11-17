@@ -28,8 +28,8 @@
 # exits 2 without touching anything. --uninstall and --purge with --dry-run
 # only say what they would remove.
 #
-# It does NOT enable any timer. Enabling is a separate, deliberate step; see the
-# staged rollout it prints at the end.
+# It does NOT enable any timer. Enabling is a separate, deliberate step: the
+# staged rollout is RUNBOOK.md section 9.
 set -euo pipefail
 set -E   # so the ERR trap below also fires inside functions and subshells
 
@@ -1249,12 +1249,22 @@ fi
 # specifically because the weekly carries them, so with the weekly disabled
 # they were being dropped from human view entirely by a config gap rather than
 # a bug.
+# A unit's enabled state, as one word. `systemctl is-enabled` prints the state
+# AND exits non-zero for anything but enabled, so an echo fallback after ||
+# printed "disabled" twice (on two lines) for every disabled timer. Empty
+# output - the unit is not installed - reads as "not-found".
+unit_state() {
+  local s
+  s="$(systemctl is-enabled "$1" 2>/dev/null)" || true
+  printf '%s' "${s:-not-found}"
+}
+
 if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
   bold "Timer status"
   _enabled_any=0
   for t in "$SRC"/fleet/systemd-fedora/*.timer; do
     unit="$(basename "$t")"
-    state="$(systemctl is-enabled "$unit" 2>/dev/null || echo disabled)"
+    state="$(unit_state "$unit")"
     if [ "$state" = enabled ]; then
       nxt="$(systemctl list-timers --all --no-legend "$unit" 2>/dev/null \
              | awk '{print $1, $2, $3}')"
@@ -1269,7 +1279,7 @@ if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
   fi
   # Named specifically, because this pair loses information silently rather
   # than failing.
-  if [ "$(systemctl is-enabled cti-agent-weekly.timer 2>/dev/null || echo disabled)" != enabled ]; then
+  if [ "$(unit_state cti-agent-weekly.timer)" != enabled ]; then
     info "cti-agent-weekly.timer is off: Sev1 findings are suppressed from the"
     info "daily digest on the assumption the weekly carries them, so right now"
     info "they reach nobody. Enable it or raise the daily Sev1 limit."
@@ -1298,7 +1308,7 @@ EXPECTED_EXIT=1
 _enabled=0
 if command -v systemctl >/dev/null; then
   for t in "$SRC"/fleet/systemd-fedora/*.timer; do
-    if [ "$(systemctl is-enabled "$(basename "$t")" 2>/dev/null || true)" = enabled ]; then
+    if [ "$(unit_state "$(basename "$t")")" = enabled ]; then
       _enabled=$((_enabled + 1))
     fi
   done

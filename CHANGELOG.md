@@ -35,6 +35,18 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
+
+### Fixed
+
+- **The installer's Timer status said "disabled" twice.** `systemctl
+  is-enabled` prints the state and also exits non-zero for a disabled unit, so
+  the fallback after it printed a second `disabled` on its own line. Every
+  enabled-state check in the installer now goes through one helper, and a
+  timer that is not installed reads `not-found`.
+
 ## 1.6.6 — 2026-11-17
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing has to be configured.
