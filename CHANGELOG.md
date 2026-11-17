@@ -43,6 +43,14 @@ Graph check to run; `mailer.py --check` still works.
 
 ### Changed
 
+- **The installer knows an upgrade from a new box.** It used to end every run
+  with "No timer is enabled yet" and seven numbered first-deployment steps, on
+  a box where the fleet had been running for weeks. With any fleet timer
+  enabled it now ends `Updated. The fleet is running: N timer(s) enabled -
+  nothing else to do.`; with none, it says no timer is enabled and points at
+  RUNBOOK section 9. The steps moved there unchanged ("On a new deployment"),
+  so there is one copy of them.
+
 - **Domains: a null MX is no longer proposed for a domain that receives
   mail.** With `DOMAINS_MAIL_GATEWAY=pod` the lane now also counts the domains
   Proofpoint delivered inbound and internal mail to (domain names only, once

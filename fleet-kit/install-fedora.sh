@@ -1274,70 +1274,22 @@ fi
 # all ran. Anything that ends the script before here is a partial install and
 # the EXIT trap will say so.
 EXPECTED_EXIT=1
-cat <<NEXT
-
-$(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m')
-
-1. Fill in the config, then confirm Graph can see the mailbox:
-
-     sudo vi $CONF_DIR/fleet.env
-     sudo cti-agent cti-mailer --check
-
-   Mail.Read is required. Mail.Send is required to send the digest.
-   Missing "grant admin consent" is the usual cause of a 403.
-
-2. Dry run the whole pipeline by hand. Sends nothing:
-
-     sudo cti-agent run-digest daily --dry-run
-
-   First run downloads the Qualys KnowledgeBase - several minutes.
-
-3. Enable ONLY the daily digest. Live with it for a few days:
-
-     sudo systemctl enable --now cti-agent-digest.timer
-     systemctl list-timers 'cti-agent-*'
-     journalctl -u cti-agent-digest -f
-
-4. Once the digest is trustworthy, add the orchestrator heartbeat. This is the
-   part that needs Claude Code authenticated as $FLEET_USER:
-
-     sudo systemctl enable --now cti-agent-checkin.timer
-
-5. Trim $CONF_DIR/feeds.txt to vendors you run, then:
-
-     sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
-
-6. The monthly Patch Tuesday synopsis. Run by HAND for now - both article
-   sites block Azure addresses, so save the two articles into
-   /var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/ first (CHEATSHEET 7a).
-   Leave its timer disabled. A replay cannot send:
-
-     sudo cti-agent run-patchtuesday --month 2026-10 --dry-run
-
-   Needs outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com
-   (blog.qualys.com is optional; it refuses Azure addresses).
-
-7. LAST, and only when the digest has been running for a few days: mailbox
-   cleanup. It moves mail in a shared mailbox, so it is the one lane whose
-   mistakes other people see.
-
-   It needs Mail.ReadWrite as an APPLICATION permission with admin consent -
-   Mail.Read cannot move a message. Apply the Application Access Policy first
-   if you have not: without it that role is tenant-wide.
-
-     sudo cti-agent cti-mailer --check         # expect OK Mail.ReadWrite
-     sudo cti-agent cti-mailbox --dry-run      # moves nothing
-     sudo systemctl enable --now cti-agent-mailbox.timer
-
-   The first dry run reports everything as "leave". That is correct: the lane
-   only touches messages a completed digest recorded, and the log starts
-   filling from the next digest. Run the dry run again tomorrow before
-   enabling the timer.
-
-$(printf '\033[1mIf something is denied for no visible reason\033[0m')
-
-   sudo ausearch -m avc -ts recent          # SELinux denials
-   systemd-analyze security cti-agent-digest.service
-   journalctl -u cti-agent-digest -n 50 --no-pager
-
-NEXT
+# An upgrade or a new box? A box with any fleet timer enabled is a running
+# fleet, and the first-deployment steps would only be noise there: say it is
+# running and stop. A new box gets one line pointing at the steps, which live
+# in RUNBOOK.md section 9 so there is one copy of them.
+_enabled=0
+if command -v systemctl >/dev/null; then
+  for t in "$SRC"/fleet/systemd-fedora/*.timer; do
+    if [ "$(systemctl is-enabled "$(basename "$t")" 2>/dev/null || true)" = enabled ]; then
+      _enabled=$((_enabled + 1))
+    fi
+  done
+fi
+if [ "$_enabled" -gt 0 ]; then
+  printf '\n\033[1mUpdated. The fleet is running: %d timer(s) enabled - nothing else to do.\033[0m\n' "$_enabled"
+  info "To enable another lane, follow RUNBOOK.md section 9 (the gate for each timer)."
+else
+  printf '\n\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m\n'
+  info "To enable the lanes, follow RUNBOOK.md section 9, \"On a new deployment\"."
+fi

@@ -2283,6 +2283,32 @@ class TestFileShape(unittest.TestCase):
                 missing.append(f"cmd/{c} is never built by the Taskfile build target")
         self.assertEqual(missing, [], "\n" + "\n".join(missing))
 
+    def test_the_first_deployment_steps_live_in_the_runbook(self):
+        """The installer used to end with seven numbered steps, on every run.
+
+        On a box where the fleet already runs, that told the operator "No timer
+        is enabled yet" after an upgrade. The steps now live once, in RUNBOOK
+        section 9, and the installer points there: it says the fleet is running
+        when any timer is enabled, and names the section on a new box.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        runbook = (root / "RUNBOOK.md").read_text(encoding="utf-8")
+        self.assertNotIn("Enable ONLY the daily digest", installer,
+                         "the steps belong in RUNBOOK section 9, not the installer")
+        self.assertIn("The fleet is running", installer)
+        self.assertIn("RUNBOOK.md section 9", installer)
+        section = runbook.split("## 9. Enabling the timers, in order", 1)[1].split("\n## 10.", 1)[0]
+        for step in ("### On a new deployment", "sudo cti-agent cti-mailer --check",
+                     "sudo cti-agent run-digest daily --dry-run",
+                     "sudo systemctl enable --now cti-agent-digest.timer",
+                     "sudo systemctl enable --now cti-agent-checkin.timer",
+                     "sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer",
+                     "sudo cti-agent run-patchtuesday --month",
+                     "sudo systemctl enable --now cti-agent-mailbox.timer",
+                     "sudo ausearch -m avc -ts recent"):
+            self.assertIn(step, section, f"RUNBOOK section 9 lost: {step}")
+
     def test_every_runner_sources_fleet_env(self):
         """The runners load the config; the Go binaries only read the environment.
 

@@ -374,6 +374,12 @@ Read its verification output rather than its exit code. It reports which timers
 are enabled, which is how you find out that only one of six is running — a
 fleet where the weekly timer is off will never tell you it is off.
 
+Its last line says which kind of box this is. With any fleet timer enabled it
+is an upgrade: `Updated. The fleet is running: N timer(s) enabled`, and nothing
+else is asked of you. With none it is a new deployment: `Installed. No timer is
+enabled yet`, and it points at [section 9](#9-enabling-the-timers-in-order),
+which holds the steps that follow an install.
+
 **One path the installer builds but does not verify:** the ingest binary at
 `$CTI_AGENT_DIR/cti-agent`, which is what `run-digest` actually executes. It is
 built from the same source as the rest, but it lives outside
@@ -393,6 +399,99 @@ sudo git -C "$D" log --oneline -1
 
 One primitive at a time. Each of these should run, and be read, before the next
 one is enabled.
+
+### On a new deployment: the steps after the installer
+
+The installer enables no timer, on purpose. On a new box it ends by pointing
+here; on a box where the fleet is already running it says so and how many
+timers are enabled. Take these steps in order, reading each one's output before
+the next.
+
+1. **Fill in the config, then confirm Graph can see the mailbox:**
+
+   ```bash
+   sudo vi /etc/cti-agent/fleet.env
+   sudo cti-agent cti-mailer --check
+   ```
+
+   Mail.Read is required. Mail.Send is required to send the digest. Missing
+   "grant admin consent" is the usual cause of a 403.
+
+2. **Dry run the whole pipeline by hand.** Sends nothing:
+
+   ```bash
+   sudo cti-agent run-digest daily --dry-run
+   ```
+
+   The first run downloads the Qualys KnowledgeBase, which takes several
+   minutes.
+
+3. **Enable ONLY the daily digest.** Live with it for a few days:
+
+   ```bash
+   sudo systemctl enable --now cti-agent-digest.timer
+   systemctl list-timers 'cti-agent-*'
+   journalctl -u cti-agent-digest -f
+   ```
+
+4. **Once the digest is trustworthy, add the orchestrator heartbeat.** This is
+   the part that needs Claude Code authenticated as the service account
+   (`ctiagent`):
+
+   ```bash
+   sudo systemctl enable --now cti-agent-checkin.timer
+   ```
+
+5. **Trim `/etc/cti-agent/feeds.txt` to vendors you run, then:**
+
+   ```bash
+   sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
+   ```
+
+6. **The monthly Patch Tuesday synopsis.** Run it by HAND for now: both article
+   sites block Azure addresses, so save the two articles into
+   `/var/lib/cti-agent/inbox/patchtuesday/YYYY-MM/` first (CHEATSHEET 7a).
+   Leave its timer disabled. A replay cannot send:
+
+   ```bash
+   sudo cti-agent run-patchtuesday --month 2026-10 --dry-run
+   ```
+
+   It needs outbound 443 to `api.msrc.microsoft.com` and
+   `www.bleepingcomputer.com` (`blog.qualys.com` is optional; it refuses Azure
+   addresses).
+
+7. **LAST, and only when the digest has been running for a few days: mailbox
+   cleanup.** It moves mail in a shared mailbox, so it is the one lane whose
+   mistakes other people see ([section 10](#10-rolling-out-mailbox-cleanup)).
+
+   It needs Mail.ReadWrite as an APPLICATION permission with admin consent:
+   Mail.Read cannot move a message. Apply the Application Access Policy first
+   if you have not ([section 1](#confine-it-to-one-mailbox-first)): without it
+   that role is tenant-wide.
+
+   ```bash
+   sudo cti-agent cti-mailer --check         # expect OK Mail.ReadWrite
+   sudo cti-agent cti-mailbox --dry-run      # moves nothing
+   sudo systemctl enable --now cti-agent-mailbox.timer
+   ```
+
+   The first dry run reports everything as "leave". That is correct: the lane
+   only touches messages a completed digest recorded, and the log starts
+   filling from the next digest. Run the dry run again the next day before
+   enabling the timer.
+
+**If something is denied for no visible reason:**
+
+```bash
+sudo ausearch -m avc -ts recent          # SELinux denials
+systemd-analyze security cti-agent-digest.service
+journalctl -u cti-agent-digest -n 50 --no-pager
+```
+
+The rest of the lanes, with the gate before each, are in the table below.
+
+### Every timer, and its gate
 
 | Order | Timer | What it does | Gate before enabling |
 |---|---|---|---|
