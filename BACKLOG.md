@@ -230,10 +230,20 @@ is real, not before. Finished work moves out of this file into
   `DOMAINS_MAIL_GATEWAY=pod` (off by default; `domains.MailGateway` with
   `podgw` as the first implementation, see [INTERFACES.md](INTERFACES.md) and
   RUNBOOK 11g part 7). A domain with outbound mail is never asked to be locked
-  down, and a failed read holds the tickets. Left: live verification on the
-  box (token, window size and read time against a real week); the `p=reject`
-  evidence is a finding line in the report, not a ticket action; and then
-  `domains.txt` could need only `saas` / `legacy` / `unknown`.
+  down, and a failed read holds the tickets. Verified live on the box
+  2026-11-17 (`run-domains --to-dev`): a complete 7-day read, 313,325 events,
+  27 outbound header-From domains, one lock-down domain left out because it
+  sends, nothing held. Left:
+  - **The null MX is not checked against mail received.** The gateway counts
+    mail sent *as* our domains (header From), never mail *to* them, so a
+    "no mail" domain is still told to replace its MX with a null MX while
+    mail arrives for it. The 11-17 list has one whose MX is our own PoD
+    tenant, and several on Microsoft 365. Likely shape: count inbound
+    recipient domains (aggregate only, like the rest) and move a null-MX
+    change to *To review* for any domain that received mail in the window
+  - The `p=reject` evidence is a finding line in the report, not a ticket
+    action
+  - Then `domains.txt` could need only `saas` / `legacy` / `unknown`
 - Certificate expiry lane (build it behind a `certs.Source` interface from
   the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
   expire, from Qualys Certificate View (CertView; the subscription has it and
