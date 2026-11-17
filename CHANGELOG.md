@@ -37,9 +37,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
-**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure, and
-nobody receives different mail. `sudo cti-agent cti-mailer --check` is now the
-Graph check to run; `mailer.py --check` still works.
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing has to be configured.
+`sudo cti-agent cti-mailer --check` is now the Graph check to run;
+`mailer.py --check` still works. Two things look different afterwards:
+
+- With `DOMAINS_MAIL_GATEWAY=pod`, a "no mail" domain that received mail has
+  its null MX moved to To review, so the lock-down list changes and the next
+  weekly comments on the open ticket. Check the new run's output for
+  `gateway: mail delivered to N recipient domain(s)`; `no recipient data`
+  instead means every null MX went to review.
+- The installer's last line is now `Updated. The fleet is running: N timer(s)
+  enabled` on a box with timers enabled.
+
+To move the VM scan report off Monday, add `FLEET_VMSCAN_DAY` (and
+`FLEET_VMSCAN_TIME`) to `/etc/cti-agent/fleet.env` with `FLEET_TIMEZONE` set,
+re-run the installer, then `systemctl list-timers cti-agent-vmscan.timer`.
 
 ### Changed
 

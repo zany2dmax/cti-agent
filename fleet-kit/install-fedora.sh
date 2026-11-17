@@ -1265,7 +1265,7 @@ if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
     fi
   done
   if [ "$_enabled_any" = 0 ]; then
-    info "Nothing is scheduled yet. See the numbered steps below."
+    info "Nothing is scheduled yet. RUNBOOK.md section 9 has the steps, in order."
   fi
   # Named specifically, because this pair loses information silently rather
   # than failing.

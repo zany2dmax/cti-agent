@@ -38,7 +38,7 @@ document assumes you have decided to run it.
 
 | You need | Why | Notes |
 |---|---|---|
-| Go 1.23+ | builds the eleven binaries | stdlib only; `go.mod` has no dependencies |
+| Go 1.23+ | builds the fourteen binaries | stdlib only; `go.mod` has no dependencies |
 | [Task](https://taskfile.dev) | every build, test and gate target | `task --list` shows all of them |
 | Python 3.9+ | the enrich, scout, brief and mailer lanes | stdlib only |
 | A shared M365 mailbox | where the CTI advisories arrive | the agent reads it; it never replies |
@@ -251,7 +251,7 @@ go run ./cmd/cti-agent
 Or with Task:
 
 ```bash
-task build               # all eleven binaries into bin/
+task build               # all fourteen binaries into bin/
 task run
 ```
 
@@ -357,7 +357,7 @@ installer moves the old copies from `/var/lib/cti-agent` into
 could steer the beat" or "REFUSING ... is missing", re-run the installer, then
 check with `sudo cti-agent run-checkin --audit`.
 
-The installer builds all eleven binaries, installs 17 systemd units and the
+The installer builds all fourteen binaries, installs 23 systemd units and the
 man pages, writes the `/usr/local/bin/cti-agent` wrapper, relabels for SELinux,
 and then verifies
 the paths it just created. It refuses to install from inside the tree it

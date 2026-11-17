@@ -315,7 +315,7 @@ the board.
 | `@appscan` | `$FLEET_CODE/bin/run-appscan` | Fridays (`cti-agent-appscan.timer`) | `$WAS_TO` |
 | `@appowners` | `$FLEET_CODE/bin/run-appowners` | Daily 07:15 (`cti-agent-appowners.timer`) | each application's owners and watchers |
 | `@domains` | `$FLEET_CODE/bin/run-domains` | Tuesdays 08:00 (`cti-agent-domains.timer`) | `$DOM_TO`, plus one Jira ticket for IT |
-| `@vmscan` | `$FLEET_CODE/bin/run-vmscan` | Mondays (`cti-agent-vmscan.timer`, held off for now) | `$VMSCAN_TO` |
+| `@vmscan` | `$FLEET_CODE/bin/run-vmscan` | Weekly, on `FLEET_VMSCAN_DAY` (Monday unless the box sets another day; `cti-agent-vmscan.timer`) | `$VMSCAN_TO` |
 | `@supplier` | `$FLEET_CODE/bin/run-supplier` | Daily 07:45 UTC (`cti-agent-supplier.timer`) | `$SUPPLIER_TO`, plus Jira Kanban items |
 | `@mailbox` | `$FLEET_CODE/bin/run-mailbox-cleanup` | Daily 07:00 (`cti-agent-mailbox.timer`) | nobody: moves mail |
 
