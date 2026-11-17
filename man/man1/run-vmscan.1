@@ -44,6 +44,15 @@ with
 .B FLEET_VMSCAN_DAY
 and
 .BR FLEET_VMSCAN_TIME ).
+.PP
+The spreadsheet rows the coverage check cannot read go to the help desk as ONE
+Jira ticket, unassigned, for the network team
+.RB ( "cti\-jira \-\-vmscan\-fixes" ):
+a real run files it, or comments on the open one only when the list changed;
+a dry run and a test send only preview it. It is written only when its project
+is in
+.BR JIRA_ALLOW_CREATE ,
+and a Jira failure never stops the report.
 .SH HOW TO RUN
 \fBrun\-vmscan\fR mails a report, so it has no default: it has to be told how to run. Give exactly one of
 \fB\-\-dry\-run\fR (render and print the subject, send nothing), \fB\-\-for\-real\fR (send the report and record the notices as used),
@@ -151,5 +160,6 @@ sudo cti\-agent run\-vmscan \-\-to\-dev
 .EE
 .SH SEE ALSO
 .BR cti\-vmscan (1),
+.BR cti\-jira (1),
 .BR cti\-mailer (1),
 .BR cti\-mailbox (1)

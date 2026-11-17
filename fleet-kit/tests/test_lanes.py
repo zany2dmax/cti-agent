@@ -4159,7 +4159,7 @@ for a in "$@"; do
   esac
   next=""
   case "$a" in
-    --out|--text-out|--csv-out|--actions-out|--seen-out|--tickets-out|--websites-out) next=out ;;
+    --out|--text-out|--csv-out|--actions-out|--seen-out|--tickets-out|--websites-out|--fixes-out) next=out ;;
     --subject-out) next=subj ;;
     --json) next=json ;;
     --auth-fail-out) next=authfail ;;
@@ -4655,7 +4655,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
     def test_vmscan_rehearsal_leaves_the_seen_list_and_report_alone(self):
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         real = [self.plant(f"state/vmscan-{n}-{stamp}.{e}")
-                for n, e in (("seen", "json"), ("subject", "txt"), ("findings", "csv"))]
+                for n, e in (("seen", "json"), ("subject", "txt"), ("findings", "csv"), ("fixes", "json"))]
         real += [self.plant(f"state/vmscan-{stamp}.html"), self.plant(f"state/vmscan-{stamp}.txt")]
         out = self.home / "dryrun" / "vmscan"
         for args in (["--dry-run"], ["--to-dev"]):
@@ -4667,11 +4667,16 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 scan = [c for c in calls if c.startswith("cti-vmscan --out")][0]
                 self.assertIn(f"--seen-out {out}/vmscan-seen-{stamp}.json", scan)
                 self.assertFalse(any("--commit-seen" in c for c in calls), calls)
+                # The spreadsheet ticket is only previewed by a rehearsal.
+                jira = [c for c in calls if c.startswith("cti-jira --vmscan-fixes")]
+                self.assertEqual(jira, [f"cti-jira --vmscan-fixes {out}/vmscan-fixes-{stamp}.json --dry-run"])
         self.log.write_text("")
         r, calls = self.run_lane("run-vmscan", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         scan = [c for c in calls if c.startswith("cti-vmscan --out")][0]
         self.assertIn(f"--seen-out {self.home}/state/vmscan-seen-{stamp}.json", scan)
+        jira = [c for c in calls if c.startswith("cti-jira --vmscan-fixes")]
+        self.assertEqual(jira, [f"cti-jira --vmscan-fixes {self.home}/state/vmscan-fixes-{stamp}.json --for-real"])
 
     def test_patchtuesday_rehearsal_leaves_the_sent_synopsis_alone(self):
         # The stub's subject is October 2026, so the tag is 2026-October.

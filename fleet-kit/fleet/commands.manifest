@@ -137,6 +137,7 @@ flag: --appscan-test STRING | with --appscan-tickets: preview, or with --for-rea
 flag: --appscan-tickets STRING | file or update ONE ticket per application from this cti-appscan --tickets-out JSON, assigned to the owner in app-owners.txt
 flag: --check | read-only: verify credentials, project, issue type and required fields
 flag: --domains-actions STRING | file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down ticket, or comment on the one already open when the list has changed
+flag: --vmscan-fixes STRING | file the spreadsheet rows in this cti-vmscan --fixes-out JSON as ONE ticket for the help desk to assign to the network team, or comment on the one already open when the list has changed
 flag: --json | with --list: machine-readable output
 flag: --list | read-only: list the fleet's tickets (key, status, age, assignee, kind, summary): open ones, or every one with --all. Needs no mode and not the write gate
 flag: --follow-up | with --from-enriched: also re-check every open fleet ticket against the scanner, whether or not its CVE is in today's mail, and comment on spread, on reaching zero, or once on closed-but-still-detected
@@ -258,6 +259,7 @@ flag: --seen-out FILE | write the notices this report covered here, for --commit
 flag: --no-coverage | skip the check of the network spreadsheet against the Asset Groups the scans cover
 flag: --subnets-file FILE | read the network spreadsheet (.xlsx) from this file instead of SharePoint, for testing
 flag: --csv-out FILE | write the coverage findings as a worksheet (CSV) here, for the runner to attach: one row per network not scanned or spreadsheet row to fix, with its sheet row and a blank column for the teams to say why
+flag: --fixes-out STRING | write the spreadsheet rows the network team has to correct as JSON here, for cti-jira --vmscan-fixes to file as one help-desk ticket
 flag: --commit-seen FILE | record a --seen-out file in the processed log the mailbox cleanup reads, then exit
 
 command: enrich.py

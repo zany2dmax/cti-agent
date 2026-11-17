@@ -94,6 +94,11 @@ type Config struct {
 	// DomainsProject and DomainsIssueType.
 	JiraDomainsProject   string
 	JiraDomainsIssueType string
+	// JiraVMScanProject and JiraVMScanIssueType send the VM scan lane's
+	// spreadsheet-fixes ticket elsewhere; unset, it goes where JiraProjectKey
+	// puts tickets (the help desk), unassigned, for the help desk to assign.
+	JiraVMScanProject   string
+	JiraVMScanIssueType string
 	// JiraAllowCreate is the project-key allowlist, and it is deliberately the
 	// same shape as VM_ALLOW_TO: a comma-separated list the fleet may write
 	// to, with no default. A ticket filed into the wrong project is the same
@@ -163,6 +168,23 @@ func (c Config) DomainsProject() string {
 // not assumed to exist there.
 func (c Config) DomainsIssueType() string {
 	if t := strings.TrimSpace(c.JiraDomainsIssueType); t != "" {
+		return t
+	}
+	return c.JiraIssueType
+}
+
+// VMScanProject is where the VM scan lane files its spreadsheet-fixes ticket.
+func (c Config) VMScanProject() string {
+	if k := strings.TrimSpace(c.JiraVMScanProject); k != "" {
+		return k
+	}
+	return c.JiraProjectKey
+}
+
+// VMScanIssueType is that ticket's issue type; like DomainsIssueType, it
+// follows its project.
+func (c Config) VMScanIssueType() string {
+	if t := strings.TrimSpace(c.JiraVMScanIssueType); t != "" {
 		return t
 	}
 	return c.JiraIssueType
@@ -385,6 +407,8 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 
 		JiraDomainsProject:   os.Getenv("JIRA_DOMAINS_PROJECT_KEY"),
 		JiraDomainsIssueType: os.Getenv("JIRA_DOMAINS_ISSUE_TYPE"),
+		JiraVMScanProject:    os.Getenv("JIRA_VMSCAN_PROJECT_KEY"),
+		JiraVMScanIssueType:  os.Getenv("JIRA_VMSCAN_ISSUE_TYPE"),
 
 		JiraAllowClose:      os.Getenv("JIRA_ALLOW_CLOSE"),
 		JiraCloseTransition: os.Getenv("JIRA_CLOSE_TRANSITION"),

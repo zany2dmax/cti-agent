@@ -33,7 +33,7 @@ func listJQL(projectKey string, all bool) string {
 
 // ticketKind names a ticket from the labels the fleet set on it.
 func ticketKind(labels []string) string {
-	var cve, app, dom bool
+	var cve, app, dom, sheet bool
 	for _, l := range labels {
 		l = strings.ToLower(strings.TrimSpace(l))
 		switch {
@@ -45,6 +45,8 @@ func ticketKind(labels []string) string {
 			app = true
 		case l == domainsLabel:
 			dom = true
+		case l == vmscanFixesLabel:
+			sheet = true
 		}
 	}
 	switch {
@@ -54,6 +56,8 @@ func ticketKind(labels []string) string {
 		return "AppSec"
 	case dom:
 		return "lock-down"
+	case sheet:
+		return "spreadsheet"
 	}
 	return "other"
 }

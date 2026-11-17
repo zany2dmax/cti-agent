@@ -1,4 +1,4 @@
-.TH CTI-JIRA 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-JIRA 1 "2026-11-17" "cti-agent 1.3" "CTI Fleet Manual"
 .SH NAME
 cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5, CVSS 9.0+ or QDS 91+ exposure
 .SH SYNOPSIS
@@ -25,6 +25,10 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5, CVSS 9.0+ o
 .RB [ \-\-for\-real ]
 .RB [ \-\-ref\-out
 .IR FILE ]
+.PP
+.B cti-jira \-\-vmscan\-fixes
+.I FILE
+.RB [ \-\-for\-real ]
 .PP
 .B cti-jira \-\-appscan\-tickets
 .I FILE
@@ -321,6 +325,26 @@ Also file new tickets for Sev5 findings that are not on CISA KEV and are
 below CVSS 9.0. Without it they are logged as held for approval. Only affects new tickets.
 Default:\~off.
 .TP
+.BI \-\-vmscan\-fixes " FILE"
+File the network spreadsheet rows in this
+.B cti\-vmscan \-\-fixes\-out
+file (the rows the VM scan coverage check cannot read) as ONE ticket in
+.B JIRA_VMSCAN_PROJECT_KEY
+(else
+.BR JIRA_PROJECT_KEY ),
+unassigned, for the help desk to route to the network team (labels
+.B cti\-agent
+and
+.BR cti\-vmscan\-sheet\-fixes ).
+The same cadence as
+.BR \-\-domains\-actions :
+a new ticket only when none is open, a comment only when the list changed
+(sheet row numbers moving is not a change), one "nothing is left" comment when
+it empties, and nothing at all when the list is held because the coverage
+check did not run. Without
+.B \-\-for\-real
+it prints the ticket and writes nothing.
+.TP
 .BI \-\-domains\-actions " FILE"
 File the DNS changes in this
 .B cti\-domains \-\-actions\-out
@@ -574,6 +598,15 @@ The project must also be in
 .B JIRA_DOMAINS_ISSUE_TYPE
 Optional. The issue type for that ticket in its project; unset means
 .BR JIRA_ISSUE_TYPE .
+.TP
+.BR JIRA_VMSCAN_PROJECT_KEY ", " JIRA_VMSCAN_ISSUE_TYPE
+Optional. The project and issue type of the VM scan lane's spreadsheet ticket;
+unset means
+.B JIRA_PROJECT_KEY
+and
+.BR JIRA_ISSUE_TYPE .
+The project must also be in
+.BR JIRA_ALLOW_CREATE .
 .TP
 .B JIRA_ALLOW_CREATE
 The write allowlist. Optional; empty means write nothing to Jira.

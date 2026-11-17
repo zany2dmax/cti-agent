@@ -72,6 +72,9 @@ func run() int {
 	domainsActions := flag.String("domains-actions", "",
 		"file the DNS changes in this cti-domains --actions-out JSON as ONE lock-down "+
 			"ticket, or comment on the one already open when the list has changed")
+	vmscanFixes := flag.String("vmscan-fixes", "",
+		"file the spreadsheet rows in this cti-vmscan --fixes-out JSON as ONE ticket for the help desk "+
+			"to assign to the network team, or comment on the one already open when the list has changed")
 	appscanTickets := flag.String("appscan-tickets", "",
 		"file or update ONE ticket per application from this cti-appscan --tickets-out JSON, "+
 			"assigned to the owner in app-owners.txt")
@@ -105,7 +108,7 @@ func run() int {
 	if (*listAll || *listJSON) && !*list {
 		return die("--all and --json go with --list")
 	}
-	if *list && (*check || *testTicket || *fromEnriched != "" || *followUpFlag || *domainsActions != "" ||
+	if *list && (*check || *testTicket || *fromEnriched != "" || *followUpFlag || *domainsActions != "" || *vmscanFixes != "" ||
 		*appscanTickets != "" || *appscanCloseTest != "" || *dryRun || *forReal) {
 		return die("--list reads and stops: it cannot be combined with another action or with --dry-run/--for-real")
 	}
@@ -116,10 +119,10 @@ func run() int {
 		return die("--appscan-test needs --appscan-tickets (the cti-appscan --tickets-out file)")
 	}
 	if !*check && !*list && !*testTicket && *fromEnriched == "" && !*followUpFlag && *domainsActions == "" &&
-		*appscanTickets == "" && *appscanCloseTest == "" {
+		*vmscanFixes == "" && *appscanTickets == "" && *appscanCloseTest == "" {
 		flag.Usage()
 		return die("nothing to do - pass --check, --list, --test-ticket, --from-enriched, --follow-up, " +
-			"--domains-actions, --appscan-tickets or --appscan-close-test")
+			"--domains-actions, --vmscan-fixes, --appscan-tickets or --appscan-close-test")
 	}
 	// --check and --list only read. Everything else writes tickets, so it is told how.
 	if !*check && !*list {
@@ -182,6 +185,9 @@ func run() int {
 	}
 	if *domainsActions != "" {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
+	}
+	if *vmscanFixes != "" {
+		return doVMScanFixes(ctx, c, cfg, *vmscanFixes, *forReal, time.Now())
 	}
 	if *appscanCloseTest != "" {
 		return doAppscanCloseTest(ctx, c, cfg, *appscanCloseTest, *forReal)

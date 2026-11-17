@@ -61,7 +61,8 @@ func TestCheck(t *testing.T) {
 
 	code, out := checkOut(t, cfg)
 	if code != exitOK || !strings.Contains(out, "1 Asset Group(s)") || !strings.Contains(out, "2 row(s)") ||
-		!strings.Contains(out, "2 scan(s) launched in 7 days, 1 scheduled") {
+		!strings.Contains(out, "2 scan(s) launched in 7 days, 1 scheduled") ||
+		!strings.Contains(out, "network row(s) under") || strings.Contains(out, "site(s)") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	if strings.Contains(out, "Secret Scan") {

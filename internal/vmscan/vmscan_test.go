@@ -202,7 +202,7 @@ func TestTheCombinedReportSaysTheyRanAndWhatTheyCoveredAndNothingMore(t *testing
 	w := Combine(both(t), weeklies)
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
 	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR MAIN SITES", "NORTH/EAST WEEKLY", "South Site 1", "East Site 1",
-		"Locations covered (24)", "Locations covered (21)", "9730", "7168"} {
+		"Asset Groups targeted (24)", "Asset Groups targeted (21)", "9730", "7168"} {
 		if !strings.Contains(b.Text, want) {
 			t.Errorf("text lacks %q", want)
 		}
@@ -427,5 +427,23 @@ func TestAWeekWithNoScanAtAllSaysSo(t *testing.T) {
 	txt := w.Text("Acme", time.Now())
 	if !strings.Contains(txt, "No scheduled scan's results notice arrived") || !strings.Contains(txt, "HTTP 401") {
 		t.Errorf("without the scan list, the text must blame the notices and say why:\n%s", txt)
+	}
+}
+
+// "All 2 scheduled scans" read oddly, and the subject called Asset Groups
+// locations: their names are often not the spreadsheet's locations.
+func TestTheLeadAndSubjectCountScansAndAssetGroups(t *testing.T) {
+	w := Combine(both(t), weeklies)
+	txt := w.Text("Acme", time.Now())
+	if !strings.Contains(txt, "Both scheduled scans ran and finished") || strings.Contains(txt, "All 2") {
+		t.Errorf("lead:\n%s", txt)
+	}
+	sub := w.Subject("Acme", time.Now())
+	if !strings.Contains(sub, "2 scheduled scans ran, 45 Asset Groups targeted") || strings.Contains(sub, "locations covered") {
+		t.Errorf("subject = %q", sub)
+	}
+	one := Combine(both(t)[:1], nil)
+	if s := one.Subject("Acme", time.Now()); !strings.Contains(s, "1 scheduled scan ran,") {
+		t.Errorf("one scan: %q", s)
 	}
 }

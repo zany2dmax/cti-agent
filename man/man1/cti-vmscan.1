@@ -20,6 +20,8 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .IR FILE ]
 .RB [ \-\-csv\-out
 .IR FILE ]
+.RB [ \-\-fixes\-out
+.IR FILE ]
 .PP
 .B cti-vmscan \-\-commit\-seen
 .I FILE
@@ -181,6 +183,13 @@ for a manual test.
 Write the coverage findings as a worksheet (CSV) here: category, location, sheet
 row, network, asset group and what to do. Written only when there is something to
 work through. Cells that would open as a formula are made inert.
+.TP
+.BI \-\-fixes\-out " FILE"
+Write the spreadsheet rows the network team has to correct (the FIX IN THE
+SPREADSHEET findings) as JSON here, for
+.B cti\-jira \-\-vmscan\-fixes
+to file as one help-desk ticket. When the coverage check did not run the list
+is marked held, and that ticket is left alone.
 .TP
 .BI \-\-commit\-seen " FILE"
 Record a

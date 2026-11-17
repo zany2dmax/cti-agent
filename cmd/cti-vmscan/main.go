@@ -75,6 +75,9 @@ func run() int {
 	csvOut := flag.String("csv-out", "",
 		"write the coverage findings as a worksheet (CSV) here, for the runner to attach: "+
 			"one row per network not scanned or spreadsheet row to fix, with its sheet row and a blank column for the teams to say why")
+	fixesOut := flag.String("fixes-out", "",
+		"write the spreadsheet rows the network team has to correct as JSON here, for "+
+			"cti-jira --vmscan-fixes to file as one help-desk ticket")
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	check := flag.Bool("check", false,
@@ -175,6 +178,17 @@ func run() int {
 			}
 		}
 	}
+	if *fixesOut != "" && week.Coverage != nil {
+		f := week.Coverage.Fixes(time.Now())
+		if err := os.WriteFile(*fixesOut, f.JSON(), 0o600); err != nil {
+			logf("warn   : could not write %s: %s - no spreadsheet ticket this week",
+				safelog.Line(*fixesOut), safelog.Line(err.Error()))
+		} else if f.Held {
+			logf("fixes  : held (%s) - the spreadsheet ticket is left alone", safelog.Line(f.HeldWhy))
+		} else {
+			logf("fixes  : %d spreadsheet row(s) for the network team (list %s)", len(f.Fixes), f.Hash)
+		}
+	}
 	if *seenOut != "" {
 		if err := writeSeen(*seenOut, seen); err != nil {
 			logf("warn   : could not write %s: %s - these notices will not be archived this week",
@@ -242,8 +256,13 @@ func doCheck(cfg config.Config, scansFlag string) int {
 			failed++
 			break
 		}
-		logf("OK     : network spreadsheet, sheet %q, %d row(s), %d site(s)",
-			safelog.Line(sheetName), len(rows), len(netmap.ParseSiteRows(rows)))
+		subs := netmap.ParseSiteRows(rows)
+		locs := map[string]bool{}
+		for _, s := range subs {
+			locs[s.Location] = true
+		}
+		logf("OK     : network spreadsheet, sheet %q, %d row(s), %d network row(s) under %d location(s)",
+			safelog.Line(sheetName), len(rows), len(subs), len(locs))
 	}
 
 	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" || cfg.QualysPassword == "" {

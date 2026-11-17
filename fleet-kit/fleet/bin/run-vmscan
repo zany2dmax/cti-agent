@@ -17,6 +17,16 @@
 #   run-vmscan --for-real   render, send, and record the notices as used
 #   run-vmscan --dry-run    render, print the subject, send nothing
 #   run-vmscan --to-dev     test send: FLEET_DEV_EMAIL only, [DEV TEST] subject
+#
+# THE SPREADSHEET TICKET
+#
+# The rows of the network spreadsheet the coverage check cannot read go to the
+# help desk as ONE Jira ticket, unassigned, for the network team (cti-jira
+# --vmscan-fixes; cti-vmscan --fixes-out writes the list). A real run files it,
+# or comments on the open one only when the list changed; a dry run and a test
+# send only preview it. Written to Jira only when its project
+# (JIRA_VMSCAN_PROJECT_KEY, else JIRA_PROJECT_KEY) is in JIRA_ALLOW_CREATE, and
+# never fatal: the report goes out whatever Jira does.
 set -euo pipefail
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
@@ -59,6 +69,7 @@ fi
 
 VMSCAN="$FLEET_CODE/bin/cti-vmscan"
 MAILER="$FLEET_CODE/bin/cti-mailer"
+JIRA="$FLEET_CODE/bin/cti-jira"
 [ -x "$VMSCAN" ] || fail "cti-vmscan not found at $VMSCAN - rerun the installer"
 [ -x "$MAILER" ] || fail "cti-mailer not found at $MAILER - rerun the installer"
 
@@ -89,13 +100,14 @@ TXT="$OUTDIR/vmscan-$STAMP.txt"
 SUBJFILE="$OUTDIR/vmscan-subject-$STAMP.txt"
 SEEN="$OUTDIR/vmscan-seen-$STAMP.json"
 FINDINGS="$OUTDIR/vmscan-findings-$STAMP.csv"
+FIXES="$OUTDIR/vmscan-fixes-$STAMP.json"
 # Mode set before anything is written: the report names which scans found what.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
-rm -f "$SUBJFILE" "$SEEN" "$FINDINGS"
+rm -f "$SUBJFILE" "$SEEN" "$FINDINGS" "$FIXES"
 
 "$VMSCAN" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJFILE" --seen-out "$SEEN" \
-  --csv-out "$FINDINGS" \
+  --csv-out "$FINDINGS" --fixes-out "$FIXES" \
   || fail "cti-vmscan exited non-zero (check outbound 443 to Graph)"
 [ -s "$SUBJFILE" ] || fail "cti-vmscan wrote no subject line"
 SUBJECT="$(head -n 1 "$SUBJFILE")"
@@ -104,6 +116,20 @@ log "subject: $SUBJECT"
 # attached when there is anything to work through.
 ATTACH=()
 [ -s "$FINDINGS" ] && ATTACH=(--attach "$FINDINGS")
+
+# The spreadsheet ticket. Every failure is logged and survived.
+if [ ! -x "$JIRA" ]; then
+  log "cti-jira not installed - no spreadsheet ticket"
+elif [ ! -s "$FIXES" ]; then
+  log "no spreadsheet fixes list written - no spreadsheet ticket"
+elif [ -z "$REAL" ]; then
+  log "ticket: rehearsal, previewing the spreadsheet ticket only"
+  "$JIRA" --vmscan-fixes "$FIXES" --dry-run \
+    || log "WARNING: spreadsheet ticket preview failed"
+else
+  "$JIRA" --vmscan-fixes "$FIXES" --for-real \
+    || log "WARNING: spreadsheet ticket not filed or updated - see the lines above"
+fi
 
 if [ -n "$TODEV" ]; then
   # FLEET_DEV_EMAIL only. VMSCAN_TO / VMSCAN_ALLOW_TO are not consulted, so a

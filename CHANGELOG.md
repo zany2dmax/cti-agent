@@ -69,12 +69,27 @@ Scheduled Scan for Main Sites" and "North/East Weekly" no longer exist). The rep
   theirs `inside` and Bell Cabinetry `Employee LAN`, so they were checked
   against the wrong network or none. A location with no 10.X.30 network inside
   its own /16 falls back to `corp`; a `netrules.txt` line still decides.
+- **The spreadsheet fixes go to the help desk as a Jira ticket.** The rows
+  of the network spreadsheet the coverage check cannot read (blank or invalid
+  networks, one outside its location's block, a location with no network to
+  check) are filed by the fleet as ONE ticket, unassigned, for the help desk to
+  route to the network team, and commented on only when the list changes - the
+  domains lock-down ticket's cadence. New `cti-vmscan --fixes-out`,
+  `cti-jira --vmscan-fixes`, and optional `JIRA_VMSCAN_PROJECT_KEY` /
+  `JIRA_VMSCAN_ISSUE_TYPE` (default: the `JIRA_PROJECT_KEY` project, which must
+  be in `JIRA_ALLOW_CREATE`). Dry runs and test sends preview it.
 - **New "check in Qualys" lines:** a scanned Asset Group whose addresses are
   only under decommissioned locations, and every Asset Group with addresses
   that no scan targeted in the week.
 
 ### Fixed
 
+- **The VM scan weekly counts what it says it counts.** The subject and the
+  scan cards said "locations covered" for what are Qualys Asset Groups (their
+  names often are not the spreadsheet's locations); they now say "Asset Groups
+  targeted". "All 2 scheduled scans" reads "Both", and `cti-vmscan --check`
+  reports network rows and locations instead of calling every network row a
+  site.
 - **"Decommissioned" is read from the start of a location's header.** A
   header that mentioned the old site it replaced ("Formally TRJ - Norwood
   Decommissioned 8/1/2025") closed an open site, and the misspelling

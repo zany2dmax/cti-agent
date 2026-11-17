@@ -1347,6 +1347,19 @@ decommissioned locations, a scanned group whose addresses are nowhere in the
 sheet, and every Asset Group with addresses that no scan targeted this week). The same findings are attached as a CSV worksheet,
 and the email ends with a note on how the spreadsheet has to be laid out.
 
+**The spreadsheet fixes are also a Jira ticket.** The "fix in the spreadsheet"
+rows go to the help desk as ONE ticket, filed by the fleet, unassigned, for the
+help desk to route to the network team (`cti-jira --vmscan-fixes`, labels
+`cti-agent` and `cti-vmscan-sheet-fixes`). The domains lock-down ticket's
+cadence: a new ticket only when none is open, a comment only when the list
+changed (rows moving in the sheet is not a change), one "nothing is left"
+comment when it empties, and nothing when the coverage check did not run. It
+goes to `JIRA_PROJECT_KEY` unless `JIRA_VMSCAN_PROJECT_KEY` names another
+project, and is written only when that project is in `JIRA_ALLOW_CREATE`. A dry
+run and a test send print the ticket; check it before the first real run with
+`sudo cti-agent run-vmscan --dry-run`. The "not scanned" networks are not in
+it: they are for the network and M&A teams to explain, in the email.
+
 It only reads, and beyond the 10.X.30 convention it never guesses which row is
 a location's network. The
 spreadsheet belongs to the network team and the security team is only a consumer
