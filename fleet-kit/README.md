@@ -80,7 +80,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
       │  orchestrator/CLAUDE.md    standing behavior + autonomy    │
       └────────────────────────────────────────────────────────────┘
                                             │
-               mailer.py / cti-mailer → Graph sendMail (allowlisted)
+               cti-mailer → Graph sendMail (allowlisted)
                                             ↓
                    each lane's own audience (DIGEST_TO, WAS_TO, DOM_TO)
 ```
@@ -275,7 +275,7 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent run-patchtuesday --dry-run` | The monthly synopsis, sent nowhere, manifest untouched. **Run by hand for now** - see [The monthly Patch Tuesday synopsis](#the-monthly-patch-tuesday-synopsis) |
 | `sudo cti-agent run-<lane> --to-dev` | Test send for `run-digest`, `run-patchtuesday`, `run-appscan`, `run-vmscan`, `run-supplier` and `run-domains`: the real lane, mailed to `FLEET_DEV_EMAIL` only (subject `[DEV TEST] ...`), with everything else a dry run - nothing recorded, no tickets, no baseline. `cti-alert --to-dev` likewise |
 | `sudo cti-agent cti-mailer --to-dev --html FILE --subject S` | Send any rendered file to `FLEET_DEV_EMAIL` only, subject `[DEV TEST] ...`, to see it in a real mail client without mailing the team |
-| `sudo cti-agent mailer.py --check` | Decode the token, list granted app roles |
+| `sudo cti-agent cti-mailer --check` | Decode the token, list granted app roles |
 | `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |
 | `sudo cti-agent fleet-board tail 30` | Recent board lines |
 | `systemctl list-timers 'cti-agent-*'` | What is scheduled and when |
@@ -292,7 +292,7 @@ Via the `cti-agent` wrapper the installer writes:
 | `QUALYS_KB_MAX_AGE_HOURS` | integer, default `168` | When the CVE→QID cache refreshes |
 | `--provider` | on `dev-run ingest` | Overrides `LOOKUP_PROVIDER` for one run |
 | `--for-real` | on `dev-run send` | Required to actually send; absent = dry run |
-| `--approve` | on `mailer.py` | Required for any recipient outside the allowlist |
+| `--approve` | on `cti-mailer` | Required for any recipient outside the allowlist |
 
 ---
 
@@ -434,7 +434,7 @@ quietest kind of missing.
 
 ```bash
 # ── 3. verify credentials and permissions BEFORE trusting a timer ────────────
-sudo cti-agent mailer.py --check
+sudo cti-agent cti-mailer --check
 ```
 
 This decodes the real token and reports the granted application roles. Read all
@@ -483,7 +483,7 @@ is tenant-wide.
 | | Mac | Fedora |
 |---|---|---|
 | `task ship` | yes — the push gate | no |
-| `task dev:doctor` | yes — live token check | `sudo cti-agent mailer.py --check` |
+| `task dev:doctor` | yes — live token check | `sudo cti-agent cti-mailer --check` |
 | Unit tests | yes | run by the installer's own gate |
 | `gosec` / `govulncheck` | yes | no — code is already proven by then |
 | Timers | never | yes, one at a time |
@@ -582,7 +582,7 @@ sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh --for-real
 sudo vi /etc/cti-agent/fleet.env
 
 # 4. Verify Graph permissions BEFORE trusting the morning timer
-sudo cti-agent mailer.py --check
+sudo cti-agent cti-mailer --check
 
 # 5. Dry run the whole pipeline - renders and validates, sends nothing
 sudo cti-agent run-digest daily --dry-run
@@ -763,7 +763,7 @@ would have to special-case.
 variables, so the installer writes a wrapper:
 
 ```bash
-sudo cti-agent mailer.py --check
+sudo cti-agent cti-mailer --check
 sudo cti-agent run-digest daily --dry-run
 sudo cti-agent run-digest daily --for-real
 sudo cti-agent run-checkin --for-real
@@ -797,7 +797,7 @@ send the digest:
 
 Entra ID → App registrations → your CTI app → API permissions → Add permission
 → Microsoft Graph → Application permissions → `Mail.Send` → **Grant admin
-consent**. Consent is the step people skip; `mailer.py --check` decodes the
+consent**. Consent is the step people skip; `cti-mailer --check` decodes the
 token and reports which roles are actually present, so you find out now rather
 than at 6am.
 
@@ -833,11 +833,11 @@ for reading before you start, that file is for editing.
 **Check your work rather than discovering a gap one lane at a time:**
 
 ```bash
-fleet mailer.py --check      # every required setting, its state, then the Graph token
+fleet cti-mailer --check      # every required setting, its state, then the Graph token
 fleet cti-budget status      # the quota ceilings, as actually parsed
 ```
 
-`mailer.py --check` reports *all* missing settings at once and names the
+`cti-mailer --check` reports *all* missing settings at once and names the
 resolved config path. Run it before anything else.
 
 **Syntax.** `KEY=value`, one per line, no `export`, no spaces around `=`.
@@ -1357,7 +1357,7 @@ produces findings rather than an article. This lane adds a different axis: the
 this release land on us, and what do we tell the people who have to patch it".
 
 It reuses rather than reinvents: the Qualys KnowledgeBase cache for CVE→QID,
-Host Detection for presence, the Sev5–Sev1 bands, and `mailer.py` as the single
+Host Detection for presence, the Sev5–Sev1 bands, and `cti-mailer` as the single
 outbound channel. Presence still comes only from the scanner.
 
 ### What the email contains
@@ -1486,7 +1486,7 @@ So the daily holds them back. Not by guessing:
 
 ```
 cti-patchtuesday  ->  $FLEET_HOME/state/patchtuesday-2026-09.json   {"sent": false}
-mailer.py         ->  synopsis delivered
+cti-mailer        ->  synopsis delivered
 run-patchtuesday  ->  cti-patchtuesday --mark-sent                  {"sent": true}
 cti-agent (daily) ->  reads the manifest, holds back only what is in it
 ```
@@ -1723,7 +1723,7 @@ enforced in three independent places, because a prompt alone isn't a control.
 | Layer | Enforces |
 |---|---|
 | `CLAUDE.md` | The orchestrator's standing instructions — what it may and may not do |
-| `mailer.py` recipient allowlist | `VM_ALLOW_TO` in `fleet.env`. Any recipient not on it **exits non-zero** unless `--approve` is passed. Not advisory. |
+| `cti-mailer` recipient allowlist | `VM_ALLOW_TO` in `fleet.env`. Any recipient not on it **exits non-zero** unless `--approve` is passed. Not advisory. |
 | systemd hardening | `ProtectSystem=strict`, `ProtectHome=yes`, `ReadWritePaths` limited to the state directory; the code in `/opt/cti-agent` is root-owned and read-only to the service |
 
 **No approval needed:** running lanes; reading mailbox, scanner, NVD, EPSS, KEV,
@@ -1776,8 +1776,8 @@ address is added to the allowlist automatically. Every other non-scheduled
 recipient still requires `--approve`.
 
 ```bash
-# what the orchestrator runs
-python3 ~/fleet/lanes/mailer.py --to-operator --board-id q17 \
+# an escalation by hand (the orchestrator itself escalates through cti-alert)
+sudo cti-agent cti-mailer --to-operator --board-id q17 --for-real \
   --subject "Approve off-cycle notice?" \
   --message "CVE-2026-1234 is on KEV and present on 305 hosts."
 ```
@@ -1914,7 +1914,7 @@ fleet-kit/
     │   ├── enrich.py              NVD + EPSS + KEV → Sev5–Sev1, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
     │   ├── brief.py               HTML + plain-text digest renderer
-    │   ├── mailer.py              Graph sendMail + recipient allowlist
+    │   ├── mailer.py              the old Python mailer; nothing calls it since 1.6.6 (bin/cti-mailer sends)
     │   └── feeds.txt              feed list — trim to your estate
     ├── skills/
     │   ├── checkin/SKILL.md       the heartbeat's brain
@@ -1973,7 +1973,7 @@ fleet fleet-db findings --severity Sev5
 fleet fleet-db findings --stale-days 7
 
 # Confirm Graph still sees the mailbox, and which roles the token actually has
-fleet mailer.py --check
+fleet cti-mailer --check
 ```
 
 Logs go to journald — the units set `StandardOutput=journal` deliberately, so
@@ -1997,7 +1997,7 @@ sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env 
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `403` on sendMail | `Mail.Send` missing or unconsented | `mailer.py --check` shows actual token roles |
+| `403` on sendMail | `Mail.Send` missing or unconsented | `cti-mailer --check` shows actual token roles |
 | `403` with `MailboxNotEnabled` | Application Access Policy excludes the mailbox | `Test-ApplicationAccessPolicy` |
 | Enrich takes ~5 min | No NVD API key → 5 req/30s | Free key at nvd.nist.gov/developers/request-an-api-key → 50 req/30s |
 | Everything `UNKNOWN` | KB cache predates the CVEs, so the mapping is missing | The agent now auto-refreshes past `QUALYS_KB_MAX_AGE_HOURS`. To force it: delete the cache JSON and rerun (the full build is large). A stale-cache UNKNOWN says "coverage UNVERIFIED" in its reason; a real one says "No Qualys KnowledgeBase mapping" |
@@ -2110,14 +2110,15 @@ Defender, Tenable or Rapid7 is a change upstream in the Go code, not in the
 fleet. The lanes only ever see `PRESENT` / `NOT_PRESENT` / `UNKNOWN` plus
 normalized evidence, so nothing here needs to know which scanner answered.
 
-**A different mail transport.** `lanes/mailer.py` is the only component that
-sends. Swap Graph for SMTP by replacing `token()` and `graph_post()` — keep the
+**A different mail transport.** `cti-mailer` (`cmd/cti-mailer`, over
+`internal/graph`) is the only component that sends digests. Swap Graph for SMTP
+behind it — keep the
 `VM_ALLOW_TO` allowlist and the `--approve` gate, since those are the control,
 not the transport.
 
 **A chat channel instead of email.** The orchestrator reaches you by email and
 nothing else — one transport, one allowlist, one thing to audit. Adding Teams,
-Slack, or SMS means a second sender in `mailer.py`'s place; keep the
+Slack, or SMS means a second sender in `cti-mailer`'s place; keep the
 `VM_ALLOW_TO` gate and the `--approve` flag wherever it lands, since those
 are the control and the transport is not.
 
@@ -2139,8 +2140,9 @@ added. A `REPORT_JSON_PATH` env var writing `[]vulnlookup.Result` straight out
 of `main.go` would be roughly 15 lines in `internal/report/`, and `enrich.py`
 would read it directly instead.
 
-**2. Port the mailer to Go.** `lanes/mailer.py` implements the "email the report
-to a distribution list" feature request, but in Python. The same logic ports to
+**2. Port the mailer to Go.** Done: `cmd/cti-mailer` is the port, and every
+runner sends through it since 1.6.6. `lanes/mailer.py` implemented the "email
+the report to a distribution list" feature request in Python. The same logic ports to
 Go using the token already fetched in `internal/graph`; the endpoint is
 `POST /users/{mailbox}/sendMail`. Worth doing alongside the Docker packaging
 request, since one binary containerizes more cleanly than a binary plus four

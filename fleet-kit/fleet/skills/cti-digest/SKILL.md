@@ -80,7 +80,7 @@ broke. Read them as reference, not as a recipe.
 
 5. **Send.** Only for `--daily` and `--weekly`, which are pre-approved.
    ```
-   python3 $FLEET_CODE/lanes/mailer.py \
+   $FLEET_CODE/bin/cti-mailer --for-real \
      --html $FLEET_HOME/reports/digest-$(date +%F).html \
      --subject "$(python3 $FLEET_CODE/lanes/brief.py --subject-only \
                     --enriched $FLEET_HOME/state/enriched-$(date +%F).json)"

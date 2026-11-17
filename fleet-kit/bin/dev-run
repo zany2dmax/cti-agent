@@ -67,6 +67,17 @@ bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 
+# The mailer the box uses, cti-mailer, built from this checkout. Rebuilt on
+# every call for the same reason the agent is (see stage_ingest); the build
+# cache makes that near-instant. Callers capture it with $(...), so a cached
+# path would not survive the subshell anyway.
+mailer() {
+  local bin="$FLEET_HOME/cti-mailer-dev"
+  ( cd "$REPO" && go build -o "$bin" ./cmd/cti-mailer ) >&2 \
+    || { bad "go build ./cmd/cti-mailer failed - fix the compile error above"; return 1; }
+  "$bin" "$@"
+}
+
 mkdir -p "$FLEET_HOME"/{state,reports,logs}
 
 # Load the Go agent's .env - the same file it already uses. No duplicate config.
@@ -119,7 +130,7 @@ stage_doctor() {
   fi
 
   bold "Microsoft Graph"
-  # mailer.py --check decodes the token and reports the granted app roles, so a
+  # cti-mailer --check decodes the token and reports the granted app roles, so a
   # permissions problem is named here rather than surfacing as a 403 later.
   #
   # Three outcomes, and they are NOT equivalent. An earlier version treated
@@ -130,25 +141,24 @@ stage_doctor() {
   #   Mail.Read missing     -> ingest cannot work. Hard fail.
   #   Mail.Send missing     -> only the send stage cares. Warn and continue.
   local graph_out
-  graph_out=$(python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 || true)
+  graph_out=$(mailer --check 2>&1 || true)
   echo "$graph_out" | sed 's/^\[mailer\] /    /'
 
   if echo "$graph_out" | grep -q "token request failed"; then
     bad "could not get a token from Entra - ingest will not work"
     fail=1
     case "$graph_out" in
-      *"Connection reset by peer"*|*"Connection refused"*|*"Temporary failure"*|*timed\ out*)
+      *[Cc]"onnection reset by peer"*|*[Cc]"onnection refused"*|*"Temporary failure"*|*timed\ out*|*"i/o timeout"*|*"no such host"*|*"certificate signed by unknown authority"*)
         info "This is a NETWORK failure, not a credentials failure - the request"
         info "never got an answer. Usual causes, in order:"
         info "  1. TLS-inspecting proxy or VPN (Zscaler, Netskope, corporate MITM)"
-        info "     python does not read the macOS keychain, so a proxy's root CA"
-        info "     that Safari trusts can still break it."
-        info "  2. A proxy set for the shell but not for python, or vice versa:"
+        info "     whose root CA this machine does not trust."
+        info "  2. A proxy set for one program and not another:"
         info "       env | grep -i proxy"
         info "  3. Confirm reachability independent of this tool:"
         info "       curl -sS -o /dev/null -w '%{http_code}\\n' \\\\"
         info "         https://login.microsoftonline.com/common/discovery/keys"
-        info "     A 200 there with a failure here points at python's TLS trust."
+        info "     A 200 there with a failure here points at TLS trust or a proxy."
         ;;
       *HTTP\ 400*|*invalid_client*|*AADSTS*)
         info "Entra answered and rejected the request - this IS a credentials"
@@ -160,7 +170,7 @@ stage_doctor() {
     # --check stops before the token when, for example, FLEET_OPERATOR_EMAIL
     # is unset. No roles line means nothing was checked - which used to fall
     # through to "both granted".
-    bad "mailer.py --check did not report the token's roles - see its output above"
+    bad "cti-mailer --check did not report the token's roles - see its output above"
     fail=1
   elif echo "$graph_out" | grep -Eq "MISSING +Mail\.Read"; then
     bad "Mail.Read is not granted - ingest cannot read the mailbox"
@@ -287,7 +297,7 @@ stage_send() {
   # it before attempting a send and name the fix if it is missing.
   info "checking Mail.Send..."
   local roles
-  roles=$(python3 "$KIT/fleet/lanes/mailer.py" --check 2>&1 || true)
+  roles=$(mailer --check 2>&1 || true)
   echo "$roles" | sed 's/^\[mailer\] /    /'
   if echo "$roles" | grep -Eq "MISSING +Mail\.Send"; then
     bad "Mail.Send is not granted to this app registration"
@@ -319,7 +329,7 @@ stage_send() {
     info "add --for-real to actually send"
   fi
 
-  if python3 "$KIT/fleet/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+  if mailer --html "$HTML" --text "$TXT" \
        --subject "$subject" --to "$to" --attach "$RAW" "${dry:---for-real}" \
        2>&1 | sed 's/^\[mailer\] /    /'; then
     if [ "$FOR_REAL" = "yes" ]; then

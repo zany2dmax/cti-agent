@@ -62,20 +62,22 @@ sends one message through Microsoft Graph
 .BR sendMail ,
 as the fleet mailbox. It is the Go port of
 .IR lanes/mailer.py ,
-flag for flag and output for output.
+flag for flag and output for output, and since 1.6.6 every runner sends
+through it:
+.B run\-digest
+and
+.B run\-patchtuesday
+to the digest audience,
 .BR run\-appscan (1)
-calls it with
+with
 .B \-\-lane was
 and
 .BR run\-domains (1)
 with
-.BR "\-\-lane dom" ;
-.B run\-digest
-and
-.B run\-patchtuesday
-still call
+.BR "\-\-lane dom" .
 .I mailer.py
-until the switch described in RUNBOOK.md section 11b.
+is still installed for a rollback (RUNBOOK.md section 11b) and is called by
+nothing.
 .PP
 It never guesses a recipient. Every address on To and Cc must pass a
 recipient gate, checked before anything is rendered, and the gate is the same
@@ -645,7 +647,7 @@ line with the binary. Absent is not an error.
 .I /opt/cti\-agent/bin/cti\-mailer
 The binary.
 .I /opt/cti\-agent/lanes/mailer.py
-is the Python original it replaces.
+is the Python original it replaced, kept for a rollback until it is retired.
 .SH EXIT STATUS
 .TP
 .B 0

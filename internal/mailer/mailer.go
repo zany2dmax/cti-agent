@@ -268,8 +268,10 @@ func Subject(raw, boardID string, isMessage bool, now time.Time) string {
 		}
 	}
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > MaxSubject {
-		s = s[:MaxSubject]
+	// Characters, not bytes, as mailer.py's s[:255] did: a byte cut can split
+	// a multi-byte character and leave invalid UTF-8 in the subject.
+	if r := []rune(s); len(r) > MaxSubject {
+		s = string(r[:MaxSubject])
 	}
 	return s
 }

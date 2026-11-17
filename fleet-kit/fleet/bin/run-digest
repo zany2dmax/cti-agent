@@ -321,7 +321,6 @@ SUBJECT=$(python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" --subject-only --enrich
 # ── 4. send ──────────────────────────────────────────────────────────────────
 say "send: $SUBJECT"
 if [ -n "$TODEV" ]; then
-  # cti-mailer holds the --to-dev path; mailer.py does not have one.
   say "send: TEST to FLEET_DEV_EMAIL ($FLEET_DEV_EMAIL) only"
   ATTACH=()
   [ -s "$RAW" ] && ATTACH=(--attach "$RAW")
@@ -331,7 +330,7 @@ if [ -n "$TODEV" ]; then
   say "test send complete - nothing recorded, no tickets touched. $HTML"
   exit 0
 fi
-RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+RESULT=$("$FLEET_CODE/bin/cti-mailer" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" --attach "$RAW" "${DRY:---for-real}") || fail "send failed"
 echo "$RESULT"
 

@@ -704,8 +704,9 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
 
-  # The Go port of mailer.py. Built and installed, but nothing calls it yet -
-  # the runners still use the Python one until RUNBOOK 11b says otherwise.
+  # The mailer every runner sends through (since 1.6.6). The Go port of
+  # mailer.py, which stays installed, called by nothing, for a rollback
+  # (RUNBOOK 11b).
   #
   # The chmod is not decorative. This script runs as root, the wrapper runs
   # the binary as $FLEET_USER, and root's umask decides whether that is
@@ -961,7 +962,7 @@ if [ "$MODE" != dryrun ]; then
 # Every command that changes something needs --dry-run or --for-real; with
 # neither it prints usage and exits 2. `cti-agent` alone lists the commands.
 #
-#   cti-agent mailer.py --check
+#   cti-agent cti-mailer --check
 #   cti-agent fleet-db recent
 #   cti-agent fleet-board tail 30
 #   cti-agent cti-alert --unit cti-agent-digest.service --dry-run
@@ -1280,7 +1281,7 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
 1. Fill in the config, then confirm Graph can see the mailbox:
 
      sudo vi $CONF_DIR/fleet.env
-     sudo cti-agent mailer.py --check
+     sudo cti-agent cti-mailer --check
 
    Mail.Read is required. Mail.Send is required to send the digest.
    Missing "grant admin consent" is the usual cause of a 403.
@@ -1324,7 +1325,7 @@ $(printf '\033[1mInstalled. No timer is enabled yet - that is deliberate.\033[0m
    Mail.Read cannot move a message. Apply the Application Access Policy first
    if you have not: without it that role is tenant-wide.
 
-     sudo cti-agent mailer.py --check          # expect OK Mail.ReadWrite
+     sudo cti-agent cti-mailer --check         # expect OK Mail.ReadWrite
      sudo cti-agent cti-mailbox --dry-run      # moves nothing
      sudo systemctl enable --now cti-agent-mailbox.timer
 

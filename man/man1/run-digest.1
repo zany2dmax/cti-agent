@@ -124,7 +124,7 @@ then is run again with
 for the subject line. Fatal on failure.
 .TP
 .B 4. Send
-.B python3 lanes/mailer.py
+.B bin/cti\-mailer
 with the HTML, the text, the subject and
 .I reports/raw\-DATE.md
 attached, plus
@@ -291,7 +291,7 @@ Default:\~\fB7\fR.
 .TP
 .BR DIGEST_TO ", " DIGEST_CC ", " VM_ALLOW_TO
 Recipients and the send allowlist, read by
-.B mailer.py
+.BR cti\-mailer (1)
 (section 4).
 .TP
 .B REPORT_PATH
@@ -452,10 +452,11 @@ journalctl \-u cti\-agent\-digest.service \-n 50
 .PP
 The lanes
 .IR lanes/enrich.py ,
-.I lanes/brief.py
 and
-.I lanes/mailer.py
+.I lanes/brief.py
 under
-.IR /opt/cti\-agent .
+.IR /opt/cti\-agent ,
+and the mailer
+.IR bin/cti\-mailer .
 .PP
 RUNBOOK.md sections 9, 11a and 12; fleet\-kit/README.md, "Schedule".

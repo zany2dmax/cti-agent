@@ -64,8 +64,8 @@ and
 are set (the secret's length is shown, never its value); the Qualys
 credentials when the provider is
 .BR qualys ;
-and then runs
-.B "mailer.py \-\-check"
+and then builds and runs
+.B "cti\-mailer \-\-check"
 and interprets it: no token is a hard failure, with a hint telling a network
 or TLS-inspecting proxy problem apart from rejected credentials; a missing
 .B Mail.Read
@@ -79,7 +79,7 @@ or
 .BR "fix the above before continuing" .
 .IP
 If
-.B "mailer.py \-\-check"
+.B "cti\-mailer \-\-check"
 printed no role list at all (it stops before requesting a token when, for
 example,
 .B FLEET_OPERATOR_EMAIL
@@ -125,13 +125,13 @@ nothing.
 .TP
 .B send
 Mails today's digest with
-.BR mailer.py (1),
+.BR cti\-mailer (1),
 to
 .BR \-\-to ,
 else
 .BR DIGEST_TO .
 It first runs
-.B "mailer.py \-\-check"
+.B "cti\-mailer \-\-check"
 and stops if
 .B Mail.Send
 is reported missing. The allowlist is set to exactly the recipient
@@ -333,7 +333,7 @@ GRAPH_LOOKBACK_HOURS=168 fleet\-kit/bin/dev\-run ingest
 .SH SEE ALSO
 .BR enrich.py (1),
 .BR brief.py (1),
-.BR mailer.py (1),
+.BR cti\-mailer (1),
 .BR fleet\-db (1),
 .BR run\-digest (1)
 .PP

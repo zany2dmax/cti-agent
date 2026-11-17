@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // ---------------------------------------------------------------- the gate
@@ -300,5 +301,13 @@ func TestToDevGoesOnlyToTheDeveloper(t *testing.T) {
 		if _, _, err := bad.Resolve(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestALongSubjectIsCutAtACharacterNotAByte(t *testing.T) {
+	s := Subject(strings.Repeat("é", MaxSubject+10), "", false, time.Now())
+	if !utf8.ValidString(s) || utf8.RuneCountInString(s) != MaxSubject {
+		t.Fatalf("got %d runes, valid=%v; want %d valid runes",
+			utf8.RuneCountInString(s), utf8.ValidString(s), MaxSubject)
 	}
 }

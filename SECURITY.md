@@ -430,7 +430,7 @@ Application permissions, each optional except the first. The first three are mai
 | Permission | Needed by | Notes |
 |---|---|---|
 | `Mail.Read` | reading the CTI mailbox | not needed if you grant `Mail.ReadWrite`, which supersedes it |
-| `Mail.Send` | sending digests and alerts | required by `mailer.py --check`; omit only if you want markdown reports and nothing else |
+| `Mail.Send` | sending digests and alerts | required by `cti-mailer --check`; omit only if you want markdown reports and nothing else |
 | `Mail.ReadWrite` | mailbox cleanup only | omit if you are not running that lane |
 | `Sites.Selected` | the VM scan report's coverage check only | read access to ONE file (the network spreadsheet) through a per-site grant; omit and the check reports that it did not run. `Files.Read.All` or `Sites.Read.All` also work and are tenant-wide, so prefer the narrow one |
 
@@ -456,7 +456,7 @@ implements move-to-folder and nothing else; Graph's `DELETE /messages/{id}`
 and the purge endpoints are deliberately absent. "Delete" means Deleted Items,
 which is recoverable, and emptying that folder stays a person's job.
 
-`mailer.py --check` decodes the token and reports which roles were actually
+`cti-mailer --check` decodes the token and reports which roles were actually
 granted, including any that are consented but unused. Consent is the step
 people skip, and an unused permission is standing risk with no benefit.
 
@@ -514,9 +514,9 @@ rather than run beside another real one, or goes ahead past a rehearsal.
 
 ### There are two outbound paths, and only one is gated
 
-`mailer.py` is the path for every digest and report, and it is gated as above.
-No lane sends mail directly; the orchestrator invokes the mailer rather than
-reimplementing it.
+`cti-mailer` is the path for every digest and report, and it is gated as above.
+No lane sends mail directly; the runners invoke the mailer rather than
+reimplementing it, and the orchestrator is not granted it.
 
 **`cti-alert` is the exception.** It calls Graph `sendMail` directly
 (`cmd/cti-alert/main.go`), because the thing it reports on may be the mailer
@@ -955,7 +955,7 @@ about where:
 | `fleet-db` | yes | Python | yes |
 | `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |
 | `brief.py` | no | Python | **no** — historical |
-| `mailer.py` | no | Python | being retired — see below |
+| `mailer.py` | no | Python | called by nothing since 1.6.6, kept for a rollback; being retired — see below |
 | `cti-mailer` | no | Go | yes |
 | the other six `cti-*` binaries | no | Go | yes |
 
@@ -999,9 +999,9 @@ functions, so the allowlist is tested against a table of cases rather than by
 sending mail — in Python it could only be exercised by sending, which is why
 it never was.
 
-**The runners still call `mailer.py`.** Both exist until a side-by-side
-`--dry-run` comparison on real digests says they agree; see
-[RUNBOOK → Switching the mailer](RUNBOOK.md#11b-switching-the-mailer).
+**Since 1.6.6 every runner calls `cti-mailer`.** `mailer.py` stays installed,
+called by nothing, so the switch can be undone; it is deleted in a later
+release. See [RUNBOOK → Switching the mailer](RUNBOOK.md#11b-switching-the-mailer).
 
 `brief.py` is 689 lines of email layout. The case for moving it is weaker and
 mostly about `html/template` being a better escaping story than string
@@ -1213,7 +1213,7 @@ nor the portal reports the effective scope.
 - **Three `fmt.Printf` calls at the end of the ingest lane** print a
   configured path without the sanitiser the `log` calls in the same file use.
   They reach the journal identically.
-- **`mailer.py --attach` has no path allowlist.** The send gate covers
+- **`cti-mailer --attach` (and `mailer.py --attach`) has no path allowlist.** The send gate covers
   recipients, not payloads; any readable file up to 3 MB can be attached.
 
 **Accepted, with reasons**
@@ -1240,7 +1240,7 @@ nor the portal reports the effective scope.
   A future EOS is silent until it is not, so it is worth a calendar reminder
   rather than discovering it in a digest.
 - **The Application Access Policy is the operator's job.** No code here can
-  verify the app is confined to one mailbox. `mailer.py --check` reports
+  verify the app is confined to one mailbox. `cti-mailer --check` reports
   granted roles, not tenant scoping.
 - **The orchestrator's prohibitions are instructions, not enforcement.** They
   live in a markdown file the agent reads. The controls that are actually

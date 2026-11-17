@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // tokenAndSend stands up a server that answers both the Entra token request
@@ -289,5 +290,92 @@ func TestSaveToSentItemsDefaultsToTrue(t *testing.T) {
 	if payload["saveToSentItems"] != true {
 		t.Errorf("saveToSentItems = %v, want true when unset",
 			payload["saveToSentItems"])
+	}
+}
+
+// A throttled or unavailable sendMail was not accepted, so it is tried again,
+// up to three times in all, honouring Retry-After.
+func TestSendMailRetriesThrottlingThenSucceeds(t *testing.T) {
+	var waits []time.Duration
+	old := sendRetrySleep
+	sendRetrySleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	t.Cleanup(func() { sendRetrySleep = old })
+
+	calls := 0
+	c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			w.Header().Set("request-id", "abc")
+			w.WriteHeader(http.StatusAccepted)
+		}
+	})
+	defer srv.Close()
+
+	res, err := c.SendMail(context.Background(), validReq())
+	if err != nil {
+		t.Fatalf("SendMail: %v", err)
+	}
+	if calls != 3 || res.RequestID != "abc" {
+		t.Fatalf("calls=%d request-id=%q, want 3 and abc", calls, res.RequestID)
+	}
+	if len(waits) != 2 || waits[0] != 7*time.Second || waits[1] != 40*time.Second {
+		t.Fatalf("waits=%v, want [7s 40s]", waits)
+	}
+}
+
+func TestSendMailGivesUpAfterThreeThrottles(t *testing.T) {
+	old := sendRetrySleep
+	sendRetrySleep = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() { sendRetrySleep = old })
+
+	calls := 0
+	c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	defer srv.Close()
+
+	if _, err := c.SendMail(context.Background(), validReq()); err == nil {
+		t.Fatal("a send throttled three times reported success")
+	}
+	if calls != 3 {
+		t.Fatalf("calls=%d, want 3", calls)
+	}
+}
+
+// Anything else is final: a 400 or 403 will not change on a retry, and
+// retrying a send that may have been accepted could deliver it twice.
+func TestSendMailDoesNotRetryOtherFailures(t *testing.T) {
+	old := sendRetrySleep
+	sendRetrySleep = func(context.Context, time.Duration) error { t.Fatal("slept"); return nil }
+	t.Cleanup(func() { sendRetrySleep = old })
+
+	for _, code := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusInternalServerError} {
+		calls := 0
+		c, srv := tokenAndSend(t, func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.WriteHeader(code)
+		})
+		if _, err := c.SendMail(context.Background(), validReq()); err == nil || calls != 1 {
+			t.Fatalf("HTTP %d: err=%v calls=%d, want an error after 1 call", code, err, calls)
+		}
+		srv.Close()
+	}
+}
+
+func TestRetryAfterIsCapped(t *testing.T) {
+	for h, want := range map[string]time.Duration{
+		"5": 5 * time.Second, "99999": maxRetryWait, "": 20 * time.Second,
+		"Wed, 21 Oct 2026 07:28:00 GMT": 20 * time.Second, "-3": 20 * time.Second,
+	} {
+		if got := retryAfter(h, 1); got != want {
+			t.Errorf("retryAfter(%q) = %v, want %v", h, got, want)
+		}
 	}
 }

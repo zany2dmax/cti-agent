@@ -35,6 +35,44 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure, and
+nobody receives different mail. `sudo cti-agent cti-mailer --check` is now the
+Graph check to run; `mailer.py --check` still works.
+
+### Changed
+
+- **The daily, the weekly and the Patch Tuesday synopsis send through
+  `cti-mailer`.** `run-digest` and `run-patchtuesday` were the last runners
+  still calling the Python `mailer.py`; every digest and report now goes
+  through the one Go mailer and its recipient gate (`cti-alert` escalations
+  to the operator still send on their own, as before). The flags and the JSON
+  the runners read are the same, so nothing else in either runner moved.
+  `mailer.py` stays installed, called by nothing, so the switch can be undone
+  in one line per runner (RUNBOOK 11b); it is deleted in a later release, after
+  a Patch Tuesday has gone out this way. A test fails if a runner calls
+  `mailer.py` again.
+- **`cti-mailer` retries a throttled send, as `mailer.py` did.** A 429 or 503
+  from Graph means the message was not accepted; the send is tried up to three
+  times in all, waiting as long as `Retry-After` says (at most two minutes),
+  else 20s then 40s. Other failures, and a connection that drops mid-send, are
+  not retried, so the team cannot get a digest twice. Found while switching:
+  the port had dropped this, and the comparison harness, which only dry-runs,
+  could not see it.
+- A token request that never got an answer (proxy, DNS, TLS) now says
+  "graph token request failed", like one Entra refused.
+- A subject over 255 characters is cut at a character, not a byte, so a
+  multi-byte character at the cut no longer leaves invalid UTF-8. `cti-alert`
+  shares the send code, so its escalations get the same throttling retry.
+- **`dev-run` builds and uses `cti-mailer`** for its Graph check and its send,
+  so a local run tests the mailer the box uses. Its token-failure hints
+  recognise Go's network errors (lower-case "connection reset", "i/o
+  timeout", "no such host", an untrusted certificate).
+- The docs, man pages, cheat sheet and installer messages name
+  `cti-mailer --check` as the Graph check, and the `cti-digest` playbook sends
+  with `cti-mailer`.
+
 ## 1.6.5 — 2026-11-16
 
 **Upgrade:** `sudo cti-agent-update --for-real`, then one

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -210,7 +211,9 @@ func (c *Client) token(ctx context.Context) (string, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		// Named, so an operator (and dev-run's hints) can tell a token that
+		// never arrived - proxy, DNS, TLS - from one that was refused.
+		return "", fmt.Errorf("graph token request failed: %w", err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -606,22 +609,41 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailRes
 
 	endpoint := fmt.Sprintf("%s/users/%s/sendMail",
 		c.graphBase, url.PathEscape(req.From))
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
-		strings.NewReader(string(body)))
-	if err != nil {
-		return SendMailResult{}, err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+tok)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return SendMailResult{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return SendMailResult{}, fmt.Errorf("failed to read sendMail response: %w", err)
+	// Graph throttles sendMail (429) and has short outages (503). Both mean
+	// the message was NOT accepted, so sending again cannot deliver it twice;
+	// mailer.py retried them, and a daily digest lost to one 429 at 06:00 is
+	// the failure this avoids. A transport error is NOT retried: the POST may
+	// have reached Graph, and a second one could mail the team twice.
+	var resp *http.Response
+	var respBody []byte
+	for attempt := 1; ; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
+			strings.NewReader(string(body)))
+		if err != nil {
+			return SendMailResult{}, err
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+tok)
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err = c.http.Do(httpReq)
+		if err != nil {
+			return SendMailResult{}, err
+		}
+		respBody, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return SendMailResult{}, fmt.Errorf("failed to read sendMail response: %w", err)
+		}
+		if (resp.StatusCode != http.StatusTooManyRequests &&
+			resp.StatusCode != http.StatusServiceUnavailable) || attempt >= sendMailAttempts {
+			break
+		}
+		wait := retryAfter(resp.Header.Get("Retry-After"), attempt)
+		if err := sendRetrySleep(ctx, wait); err != nil {
+			return SendMailResult{}, fmt.Errorf("sendMail HTTP %d, gave up waiting to retry: %w",
+				resp.StatusCode, err)
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return SendMailResult{}, sendMailError(resp.StatusCode, respBody, req.From)
@@ -632,6 +654,39 @@ func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailRes
 		reqID = resp.Header.Get("client-request-id")
 	}
 	return SendMailResult{RequestID: reqID, Status: resp.StatusCode}, nil
+}
+
+// sendMailAttempts is how many times a throttled (429) or unavailable (503)
+// sendMail is tried in all: the same three as mailer.py.
+const sendMailAttempts = 3
+
+// maxRetryWait caps a Retry-After, so a hostile or broken header cannot park
+// the digest for hours.
+const maxRetryWait = 2 * time.Minute
+
+// retryAfter reads Retry-After as whole seconds; without one it waits 20s,
+// then 40s, as mailer.py did. An HTTP-date or junk value gets the default.
+func retryAfter(h string, attempt int) time.Duration {
+	if n, err := strconv.Atoi(strings.TrimSpace(h)); err == nil && n >= 0 {
+		if d := time.Duration(n) * time.Second; d < maxRetryWait {
+			return d
+		}
+		return maxRetryWait
+	}
+	return time.Duration(attempt) * 20 * time.Second
+}
+
+// sendRetrySleep waits between sendMail attempts, or stops when ctx does.
+// A variable so tests do not sleep.
+var sendRetrySleep = func(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // sendMailError annotates the failures that actually happen in practice,

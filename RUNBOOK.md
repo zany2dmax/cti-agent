@@ -75,11 +75,11 @@ permissions, not delegated ones, and each needs admin consent.
 Then prove it, rather than assuming:
 
 ```bash
-sudo cti-agent mailer.py --check     # on the fleet box
+sudo cti-agent cti-mailer --check    # on the fleet box
 ./fleet-kit/bin/dev-run doctor       # from a checkout
 ```
 
-`mailer.py --check` decodes the token and prints the roles actually granted,
+`cti-mailer --check` decodes the token and prints the roles actually granted,
 which is the only reliable answer. It also reports roles that are consented but
 that nothing in this codebase calls — worth pruning.
 
@@ -325,7 +325,7 @@ task ship           # fmt, build, test, lint, scan, gosec, govulncheck, ruff, ba
 # under sudo and $HOME is then root's.
 sudo "$KIT/fleet-kit/update-fedora.sh" --for-real   # pull the kit, then install (= sudo cti-agent-update --for-real)
 sudo vi /etc/cti-agent/fleet.env            # any new settings
-sudo cti-agent mailer.py --check            # token + granted roles
+sudo cti-agent cti-mailer --check           # token + granted roles
 sudo cti-agent run-digest daily --dry-run   # read it before enabling anything
 sudo systemctl enable --now cti-agent-digest.timer
 ```
@@ -424,7 +424,7 @@ Timers use the **system** timezone, not `FLEET_TIMEZONE`. See
 This is the only thing in the fleet that modifies the mailbox, on a timer, with
 nobody watching. Treat the rollout accordingly.
 
-1. **Grant `Mail.ReadWrite`** and confirm it with `mailer.py --check`. Without
+1. **Grant `Mail.ReadWrite`** and confirm it with `cti-mailer --check`. Without
    it the lane can read and plan but every move fails.
 2. **Dry run, by hand, for several days:**
    ```bash
@@ -562,7 +562,7 @@ does after the mailer reports success and at no other time.
 
 ```
 cti-patchtuesday   ->  state/patchtuesday-2026-10.json   {"sent": false}
-mailer.py          ->  synopsis delivered
+cti-mailer         ->  synopsis delivered
 run-patchtuesday   ->  cti-patchtuesday --mark-sent      {"sent": true}
 cti-agent (daily)  ->  holds back only CVEs in a manifest marked sent
 ```
@@ -669,11 +669,15 @@ older than 7 days are deleted by `run-checkin`.
 
 ## 11b. Switching the mailer
 
-`mailer.py` has been ported to `cmd/cti-mailer`. **Both exist**, and the
-runners still call the Python one, because this is the component where a
-subtle difference is discovered by somebody not receiving a security finding.
+`mailer.py` was ported to `cmd/cti-mailer`, and **since 1.6.6 every runner
+sends through `cti-mailer`**: `run-digest` and `run-patchtuesday` were the last
+two. `mailer.py` is still installed so the switch can be undone with one line
+per runner and a redeploy, and nothing calls it. A test (`EverySendGoesThroughCtiMailer`) fails if a
+runner goes back to it.
 
-Switch it when, and only when, the two agree on real digests.
+The switch waited until the two agreed on real digests, because this is the
+component where a subtle difference is discovered by somebody not receiving a
+security finding.
 
 ### Compare them
 
@@ -695,7 +699,7 @@ mutually exclusive flag combinations. **Those are the cases worth reading.** A
 port that sends identical mail but has quietly loosened the gate looks like
 success from the happy path.
 
-To compare a single case by hand:
+To compare a real report by hand on the box (nothing is sent):
 
 ```bash
 D=/var/lib/cti-agent/reports/digest-daily-$(date +%F).html
@@ -716,39 +720,35 @@ They should differ in nothing. Repeat for the cases that matter:
 | `--require-approval` without `--approve` | both must refuse |
 | the role report | `--check` on both |
 
-The refusals matter more than the successes. A port that sends the same mail
-but has quietly loosened the gate is the failure mode worth looking for.
+### Rolling back
 
-### Then switch
-
-**Two runners send mail, not four.** `run-digest` and `run-patchtuesday`
-each have one line to change:
+In `run-digest` and `run-patchtuesday` the send is one line:
 
 ```bash
-grep -n 'lanes/mailer\.py' $FLEET_CODE/bin/run-*
-#   run-digest:102
-#   run-patchtuesday:135
+grep -n 'RESULT=$("$FLEET_CODE/bin/cti-mailer"' $FLEET_CODE/bin/run-digest $FLEET_CODE/bin/run-patchtuesday
 ```
 
-Change `python3 "$FLEET_CODE/lanes/mailer.py"` to `"$FLEET_CODE/bin/cti-mailer"`
-in each. The flags and the parsed JSON are identical, so nothing else in
-either runner moves.
+Change `"$FLEET_CODE/bin/cti-mailer"` back to `python3 "$FLEET_CODE/lanes/mailer.py"`
+in each, in the repo (the test above has to go with it), and redeploy. The flags
+and the parsed JSON are identical, so nothing else in either runner moves.
 
-`run-checkin` and `run-mailbox-cleanup` do **not** call `mailer.py` — they
+`run-checkin` and `run-mailbox-cleanup` do **not** call either mailer — they
 escalate through `cti-alert`, which talks to `internal/graph` directly and has
-its own recipient handling. Switching the mailer does not touch them, and
-looking for a line there that does not exist is how somebody concludes they
-missed a step. (`cti-alert` bypassing `VM_ALLOW_TO` is a separate known gap,
-recorded in SECURITY.md.)
+its own recipient handling. (`cti-alert` bypassing `VM_ALLOW_TO` is a separate
+known gap, recorded in SECURITY.md.)
 
-Keep `mailer.py` on disk for a couple of weeks; deleting it is a separate,
-reversible decision. Until it goes, `task compare:mailers` still works and the
-two ST1005 suppressions in `internal/mailer` still earn their place.
+Deleting `mailer.py` is a separate release, after a few weeks of dailies, a
+weekly and one Patch Tuesday through `cti-mailer`. Until it goes,
+`task compare:mailers` still works and the two ST1005 suppressions in
+`internal/mailer` still earn their place.
 
 ### What the port changed on purpose
 
-Nothing about who receives mail. Two things are better by accident of the
-language:
+Nothing about who receives mail. A throttled send (429 or 503) is retried as
+it was in `mailer.py`, up to three attempts, honouring `Retry-After`; unlike
+`mailer.py`, a connection that drops mid-send is **not** retried, because the
+POST may have been accepted and a retry would mail the team twice. Two things
+are better by accident of the language:
 
 - `fleet.env` is read through `internal/fleetenv`, which also handles
   `export KEY=value`. `mailer.py`'s own parser turned that into a variable

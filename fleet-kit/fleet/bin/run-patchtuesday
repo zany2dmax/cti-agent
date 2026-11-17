@@ -194,7 +194,7 @@ if [ -n "$TODEV" ]; then
   say "test send complete - manifest untouched, nothing recorded. $HTML"
   exit 0
 fi
-RESULT=$(python3 "$FLEET_CODE/lanes/mailer.py" --html "$HTML" --text "$TXT" \
+RESULT=$("$FLEET_CODE/bin/cti-mailer" --html "$HTML" --text "$TXT" \
            --subject "$SUBJECT" "${DRY:---for-real}") || fail "send failed"
 echo "$RESULT"
 

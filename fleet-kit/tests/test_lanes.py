@@ -1345,6 +1345,31 @@ class DigestSendLedger(unittest.TestCase):
         self.assertIn('"$READ_START_FILE"', rec)
 
 
+class EverySendGoesThroughCtiMailer(unittest.TestCase):
+    """Since 1.6.6 every runner sends through the Go cti-mailer. mailer.py
+    stays on disk for a rollback, so nothing would fail if a runner drifted
+    back to it - the two would just quietly diverge again."""
+
+    def test_no_runner_calls_the_python_mailer(self):
+        # The box's runners and the checkout's dev tools. Any mention on a
+        # line that is not a comment counts, however the path is spelled.
+        for d in (KIT / "fleet" / "bin", KIT / "bin"):
+            for p in sorted(d.iterdir()):
+                if not p.is_file():
+                    continue
+                src = p.read_text(encoding="utf-8", errors="replace")
+                code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+                with self.subTest(script=f"{d.name}/{p.name}"):
+                    self.assertEqual([l for l in code if "mailer.py" in l], [],
+                                     f"{p.name} calls mailer.py; use cti-mailer")
+
+    def test_the_digest_and_patch_tuesday_send_with_cti_mailer(self):
+        for name in ("run-digest", "run-patchtuesday"):
+            src = (KIT / "fleet" / "bin" / name).read_text(encoding="utf-8")
+            with self.subTest(runner=name):
+                self.assertRegex(src, r'RESULT=\$\("\$FLEET_CODE/bin/cti-mailer"\s+--html')
+
+
 class DigestTicketLinks(unittest.TestCase):
     """The digest must quote the ticket, and must render without one.
 
@@ -4422,8 +4447,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
 
     def setUp(self):
         RunnersToDev.setUp(self)
-        # The digest's real and dry sends go through mailer.py.
-        (self.code / "lanes" / "mailer.py").write_text(_LANE_STUB)
+        # The digest's real and dry sends go through cti-mailer, stubbed in BIN.
         p = self.code / "bin" / "cti-vmscan"
         p.write_text(_STUB)
         p.chmod(0o755)

@@ -117,7 +117,7 @@ equals the
 value exactly. A confirmed back-dated send also posts a WARN line.
 .TP
 .B 7. Send
-.B python3 lanes/mailer.py
+.B bin/cti\-mailer
 with the HTML, text and subject, plus
 .B \-\-dry\-run
 on a dry run. Recipients are the digest audience
@@ -241,7 +241,7 @@ for the one run does.
 .TP
 .BR DIGEST_TO ", " DIGEST_CC ", " VM_ALLOW_TO
 Recipients and the send gate, read by
-.B mailer.py
+.BR cti\-mailer (1)
 (section 4).
 .B DIGEST_TO
 is also named in both back-dated messages of step 6, and the runner stops
@@ -374,7 +374,7 @@ sudo cti\-agent run\-patchtuesday
 .BR cti\-agent (1)
 .PP
 The mailer,
-.I lanes/mailer.py
+.I bin/cti\-mailer
 under
 .IR /opt/cti\-agent .
 .PP
