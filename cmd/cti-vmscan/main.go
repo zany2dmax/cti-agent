@@ -5,15 +5,16 @@
 //	cti-vmscan --commit-seen w.seen.json     # after the send: let cleanup archive them
 //
 // It reads the notices that arrived in the CTI mailbox over the last week
-// (Graph, read-only), takes the newest result for each scheduled scan it is
-// told to expect (--scans, or VMSCAN_SCANS), and renders ONE report with the
-// scans kept separate. A scheduled scan with no result is the first thing the
-// report says. It sends nothing: run-vmscan hands the files to cti-mailer.
+// (Graph, read-only), takes the newest result of every scheduled scan (and of
+// any scan named in --scans or VMSCAN_SCANS), and renders ONE report with the
+// scans kept separate. A scan named there with no result, or a week with no
+// scan at all, is the first thing the report says. A scan launched by hand is
+// listed, not counted. It sends nothing: run-vmscan hands the files to
+// cti-mailer.
 //
 // # WHAT "USED" MEANS FOR THE MAILBOX CLEANUP
 //
-// --seen-out lists the results notices of the expected scans this report
-// covered. run-vmscan commits that file only after a real send, so "the lane
+// --seen-out lists the results notices of the scans this report covered. run-vmscan commits that file only after a real send, so "the lane
 // has used it" means the report reached its audience, and the mailbox cleanup
 // archives those notices 48 hours later. Of the other Qualys notices for the
 // same scan, "Scan Completed" and the task-owner "Completed Vulnerability Scan
@@ -59,8 +60,9 @@ func die(format string, a ...any) int {
 func run() int {
 	since := flag.Duration("since", 7*24*time.Hour, "how far back to look for scan-result notices")
 	scansFlag := flag.String("scans", "",
-		"comma-separated titles of the scheduled scans to combine (default VMSCAN_SCANS, "+
-			"else the two weekly scans)")
+		"comma-separated titles of the scheduled scans you expect each week (default VMSCAN_SCANS); "+
+			"one that sends no result is reported as missing. Every scheduled scan that reported is "+
+			"included either way")
 	out := flag.String("out", "", "write the HTML here")
 	textOut := flag.String("text-out", "", "write the plain-text version here")
 	subjectOut := flag.String("subject-out", "", "write the subject line here")
@@ -76,8 +78,8 @@ func run() int {
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	check := flag.Bool("check", false,
-		"read-only: check the Graph credentials, the network spreadsheet and the Qualys Asset Group list "+
-			"the coverage check needs, print counts, and exit")
+		"read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list "+
+			"and the Qualys scan list the report needs, print counts, and exit")
 	flag.Parse()
 
 	if *commitSeen != "" {
@@ -107,7 +109,31 @@ func run() int {
 	for _, p := range problems {
 		logf("warn   : %s", safelog.Line(p))
 	}
+	// Which scans ran comes from Qualys; the notices add their detail. Without
+	// the list, the notices alone, and the report says so.
+	listErr := ""
+	switch {
+	case cfg.QualysBaseURL == "" || cfg.QualysUsername == "":
+		listErr = "QUALYS_BASE_URL and QUALYS_USERNAME are not set"
+	default:
+		list, err := fetchScans(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, time.Now().Add(-*since))
+		if err != nil {
+			listErr = safelog.Line(err.Error())
+		} else {
+			logf("list   : Qualys lists %d scan(s) launched in the last %s", len(list), *since)
+			scans = vmscan.WithNotices(list, scans)
+		}
+	}
+	if listErr != "" {
+		logf("warn   : Qualys scan list not read, using the notices alone: %s", listErr)
+	}
 	week := vmscan.Combine(scans, expected)
+	week.ListUnavailable = listErr
+	for _, s := range week.Scans {
+		if s.NoNotice {
+			logf("warn   : %q ran (Qualys lists it) but its results notice did not arrive", safelog.Line(s.Title))
+		}
+	}
 	if !*noCoverage {
 		week.Coverage = coverage(ctx, cfg, g, week, *subnetsFile)
 		if c := week.Coverage; c.Unavailable != "" {
@@ -120,8 +146,8 @@ func run() int {
 	for _, m := range week.Missing {
 		logf("warn   : no result for %q in the last %s", safelog.Line(m), *since)
 	}
-	logf("scans  : %d notice(s) read, %d scheduled scan(s) reported, %d missing, %d other",
-		len(scans), len(week.Scans), len(week.Missing), len(week.Other))
+	logf("scans  : %d scheduled scan(s) reported, %d missing, %d launched by hand",
+		len(week.Scans), len(week.Missing), len(week.Other))
 
 	org := strings.TrimSpace(os.Getenv("FLEET_ORG"))
 	if org == "" {
@@ -168,6 +194,7 @@ var (
 		return g.DriveItemContent(ctx, drive, item, 32<<20)
 	}
 	fetchGroups = netmap.FetchGroups
+	fetchScans  = vmscan.FetchScans
 )
 
 // doCheck answers "would the weekly get its inputs?" without reading the
@@ -227,6 +254,19 @@ func doCheck(cfg config.Config, scansFlag string) int {
 		failed++
 	} else {
 		logf("OK     : Qualys credentials work, %d Asset Group(s)", len(groups))
+		if list, err := fetchScans(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword,
+			time.Now().Add(-7*24*time.Hour)); err != nil {
+			logf("FAIL   : Qualys scan list: %s", safelog.Line(err.Error()))
+			failed++
+		} else {
+			sched := 0
+			for _, sc := range list {
+				if sc.Scheduled() {
+					sched++
+				}
+			}
+			logf("OK     : Qualys scan list, %d scan(s) launched in 7 days, %d scheduled", len(list), sched)
+		}
 	}
 
 	if failed > 0 {
@@ -288,6 +328,12 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
 		return unavailable("QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD are not set, so the Asset Groups cannot be listed")
 	}
+	// With no scan reported there is nothing to compare against: every location
+	// would read as unscanned. Say the check could not be judged instead.
+	if len(week.Scans) == 0 {
+		return unavailable("no scheduled scan's results notice arrived in the window, so there are no " +
+			"Target Groups to compare the spreadsheet with")
+	}
 	groups, err := netmap.FetchGroups(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
 	if err != nil {
 		return unavailable("the Qualys Asset Groups could not be listed: %s", safelog.Line(err.Error()))
@@ -306,15 +352,16 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	return &vmscan.Coverage{Checked: res.Checked, Covered: res.Covered, Findings: res.Findings, Questions: questions}
 }
 
-// expectedScans is the scan titles to combine: the flag, else VMSCAN_SCANS,
-// else the two weeklies.
+// expectedScans is the scan titles expected each week: the flag, else
+// VMSCAN_SCANS, else none (every scheduled scan that reports is still
+// included; with none expected, only a week with no scan at all is flagged).
 func expectedScans(flagValue string) []string {
 	raw := strings.TrimSpace(flagValue)
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("VMSCAN_SCANS"))
 	}
 	if raw == "" {
-		return vmscan.DefaultScans
+		return nil
 	}
 	var out []string
 	for _, t := range strings.Split(raw, ",") {
@@ -333,10 +380,6 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 	var seen []mailbox.Processed
 	var problems []string
 	var done []vmscan.Scan // claimed runs that finished; their companions go too
-	want := map[string]bool{}
-	for _, t := range expected {
-		want[strings.ToLower(strings.Join(strings.Fields(t), " "))] = true
-	}
 	for _, m := range msgs {
 		// Before the self-sent skip: a lookalike From the mailbox's own address
 		// would otherwise fall into it silently. A correctly signed message
@@ -373,8 +416,9 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 		scans = append(scans, s)
 		// Claimed for the cleanup only when it is one of the scans this report
 		// covers and it parsed into a scan: a notice that did not parse was not
-		// reported on, and stays in the inbox for a person.
-		if s.Ref != "" && want[strings.ToLower(strings.Join(strings.Fields(s.Title), " "))] {
+		// reported on, and stays in the inbox for a person, and so does a scan
+		// launched by hand.
+		if s.Ref != "" && vmscan.Reported(s, expected) {
 			seen = append(seen, mailbox.Processed{
 				ID: m.ID, Subject: m.Subject, Received: m.ReceivedDateTime,
 				AutoReply: m.IsAutoReply(), Owner: mailbox.OwnerVMScan,

@@ -7,10 +7,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/graph"
 	"github.com/zany2dmax/cti-agent/internal/netmap"
+	"github.com/zany2dmax/cti-agent/internal/vmscan"
 	"github.com/zany2dmax/cti-agent/internal/xlsx/xlsxtest"
 )
 
@@ -34,8 +36,11 @@ func checkOut(t *testing.T, cfg config.Config) (int, string) {
 // check needs, print counts and never a network or group name, and fail when
 // the weekly would say its coverage check did not run.
 func TestCheck(t *testing.T) {
-	oldTok, oldDrive, oldGroups := graphToken, driveContent, fetchGroups
-	t.Cleanup(func() { graphToken, driveContent, fetchGroups = oldTok, oldDrive, oldGroups })
+	oldTok, oldDrive, oldGroups, oldScans := graphToken, driveContent, fetchGroups, fetchScans
+	t.Cleanup(func() { graphToken, driveContent, fetchGroups, fetchScans = oldTok, oldDrive, oldGroups, oldScans })
+	fetchScans = func(context.Context, string, string, string, time.Time) ([]vmscan.Scan, error) {
+		return []vmscan.Scan{{Title: "Secret Scan", LaunchType: "Scheduled"}, {Title: "By hand", LaunchType: "On-Demand"}}, nil
+	}
 
 	sheet := xlsxtest.Build(t, map[string][][]string{"Sites": {
 		{"Site", "Subnet"}, {"Secret Plant", "10.1.30.0/24"}}}, []string{"Sites"})
@@ -55,8 +60,12 @@ func TestCheck(t *testing.T) {
 	cfg := config.Config{QualysBaseURL: "https://qualys.example", QualysUsername: "u", QualysPassword: "p"}
 
 	code, out := checkOut(t, cfg)
-	if code != exitOK || !strings.Contains(out, "1 Asset Group(s)") || !strings.Contains(out, "2 row(s)") {
+	if code != exitOK || !strings.Contains(out, "1 Asset Group(s)") || !strings.Contains(out, "2 row(s)") ||
+		!strings.Contains(out, "2 scan(s) launched in 7 days, 1 scheduled") {
 		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if strings.Contains(out, "Secret Scan") {
+		t.Errorf("--check prints counts only, never a scan title:\n%s", out)
 	}
 	for _, name := range []string{"Secret Plant", "Secret Group", "10.1.30"} {
 		if strings.Contains(out, name) {

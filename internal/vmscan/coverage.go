@@ -42,16 +42,23 @@ func (c *Coverage) Gaps() []netmap.Finding {
 	return out
 }
 
-// Oddities are findings about the scans' own groups: a scanned group whose
-// addresses are not in the spreadsheet, or a Target Group Qualys does not list.
+// oddOrder is the order the Qualys-side findings are listed in.
+var oddOrder = []netmap.Kind{netmap.UnknownTargetGroup, netmap.ScannedDecommissioned,
+	netmap.ScannedNotInSheet, netmap.GroupNotTargeted}
+
+// Oddities are findings about the Qualys side: a Target Group Qualys does not
+// list, a scanned group that is only decommissioned locations or is not in the
+// spreadsheet, and an Asset Group no scan targeted.
 func (c *Coverage) Oddities() []netmap.Finding {
 	var out []netmap.Finding
 	if c == nil {
 		return nil
 	}
-	for _, f := range c.Findings {
-		if f.Kind == netmap.ScannedNotInSheet || f.Kind == netmap.UnknownTargetGroup {
-			out = append(out, f)
+	for _, k := range oddOrder {
+		for _, f := range c.Findings {
+			if f.Kind == k {
+				out = append(out, f)
+			}
 		}
 	}
 	return out
@@ -70,9 +77,9 @@ func gapLine(f netmap.Finding) string {
 	case netmap.NotInAnyGroup:
 		return fmt.Sprintf("%s%s: %s is in no Qualys Asset Group.", f.Location, rowRef(f.Row), f.Subnet)
 	case netmap.GroupNotScanned:
-		return fmt.Sprintf("%s%s: %s is in the Asset Group %q, which neither weekly scan covers.", f.Location, rowRef(f.Row), f.Subnet, f.Group)
+		return fmt.Sprintf("%s%s: %s is in the Asset Group %q, which no scan targeted this week.", f.Location, rowRef(f.Row), f.Subnet, f.Group)
 	default:
-		return fmt.Sprintf("%s%s: only part of %s is in the groups the weekly scans cover.", f.Location, rowRef(f.Row), f.Subnet)
+		return fmt.Sprintf("%s%s: only part of %s is in the groups this week's scans targeted.", f.Location, rowRef(f.Row), f.Subnet)
 	}
 }
 
@@ -149,10 +156,10 @@ var gapOrder = []netmap.Kind{netmap.NotInAnyGroup, netmap.GroupNotScanned, netma
 // the email because the people who maintain the sheet are on it.
 var layoutGuide = []string{
 	"One header row per location: the name on its own in the first column, ideally ending with the location's /16 block, for example \"Example Site - ST - 10.4.0.0/16\".",
-	"Under it, a row labelled corp with the corporate network as a CIDR, for example 10.4.30.0/24. Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check.",
+	"Under it, the location's user network as a CIDR: the 10.X.30 network inside its own block, for example 10.4.30.0/24, whatever the row is labelled. A location with no 10.X.30 network needs a row labelled corp instead. Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check.",
 	"Do not leave the network cell blank or write it without a mask length: \"10.29.30\" cannot be read.",
-	"A location that has been retired: put DECOMMISSIONED in its header. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
-	"Every location needs one, including headquarters and the datacenter: a location with no row labelled corp cannot be checked, and is listed for the network team to correct.",
+	"A location that has been retired: START its header with DECOMMISSIONED. A word later in the header (\"formerly X, decommissioned\") does not close the location. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
+	"Every location needs one, including headquarters and the datacenter: a location with neither a 10.X.30 network nor a row labelled corp cannot be checked, and is listed for the network team to correct.",
 }
 
 // text is the coverage section of the plain-text report.
@@ -168,7 +175,7 @@ func (c *Coverage) text() string {
 	}
 	fmt.Fprintf(&b, "  %d corporate networks checked, %d fully inside the groups the scans cover.\n", c.Checked, c.Covered)
 	if g := c.Gaps(); len(g) > 0 {
-		fmt.Fprintf(&b, "\nNOT SCANNED (%d) - networks in the spreadsheet that no weekly scan reaches\n%s\n", len(g), strings.Repeat("-", 72))
+		fmt.Fprintf(&b, "\nNOT SCANNED (%d) - networks in the spreadsheet that no scan this week reached\n%s\n", len(g), strings.Repeat("-", 72))
 		b.WriteString("  The security team does not know why in each case. The network and M&A teams are\n  asked to find out and say.\n")
 		for _, k := range gapOrder {
 			for _, f := range c.gapsOf(k) {
@@ -221,7 +228,7 @@ func (c *Coverage) html(b *strings.Builder) {
 			}
 		}
 		emailkit.Card(b, emailkit.Red, fmt.Sprintf("NOT SCANNED (%d)", len(g)),
-			"Networks in the spreadsheet that no weekly scan reaches. The security team does not know why "+
+			"Networks in the spreadsheet that no scan this week reached. The security team does not know why "+
 				"in each case; the network and M&amp;A teams are asked to find out and say.<br><br>"+l.String())
 	}
 	if len(c.Questions) > 0 {

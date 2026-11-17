@@ -98,3 +98,29 @@ func TestAnUnfinishedRunKeepsItsCompanions(t *testing.T) {
 // qualysAuth is Exchange Online's verdict on a genuine notice (synthetic).
 const qualysAuth = "spf=pass smtp.mailfrom=qualys.net; dkim=pass header.d=qualys.net;" +
 	"dmarc=pass action=none header.from=qualys.net;compauth=pass reason=100"
+
+// A scheduled scan is reported, and its notice handed to the cleanup, whether
+// or not VMSCAN_SCANS names it. A scan launched by hand is neither.
+func TestEveryScheduledScanIsClaimedButNotOneLaunchedByHand(t *testing.T) {
+	body := results(t)
+	manual := strings.Replace(body, "Scheduled", "On Demand", 1)
+	if manual == body {
+		t.Fatal("the fixture has no Launch Type to change")
+	}
+	msgs := []graph.Message{
+		{ID: "sched", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Results", BodyHTML: body},
+		{ID: "manual", From: "qualys@qualys.net", AuthenticationResults: qualysAuth, Subject: "Qualys: Scan Results",
+			BodyHTML: strings.ReplaceAll(manual, "1793275220.51060", "1793000000.00001")},
+	}
+	_, seen, _ := collect(msgs, nil)
+	got := map[string]bool{}
+	for _, s := range seen {
+		got[s.ID] = true
+	}
+	if !got["sched"] {
+		t.Error("a scheduled scan's notice not named in VMSCAN_SCANS was not claimed")
+	}
+	if got["manual"] {
+		t.Error("a scan launched by hand was claimed for the cleanup")
+	}
+}

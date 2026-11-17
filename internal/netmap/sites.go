@@ -55,6 +55,17 @@ func inactiveText(s string) bool {
 		strings.Contains(l, "open to use")
 }
 
+// inactiveHeader reports a location header that marks the location itself as
+// closed. Only a header that STARTS with it counts, and the common misspelling
+// too: "DECOMISSIONED - Cumberland" is closed, while "Charleston Warehouse -
+// Formally TRJ - Norwood Decommissioned 8/1/2025" is an open site naming the
+// one it replaced. A word anywhere in the header used to count, which dropped
+// the open site and kept the misspelled closed one.
+func inactiveHeader(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(l, "decom") || strings.Contains(l, "<<<free>>>") || strings.Contains(l, "open to use")
+}
+
 func cell(row []string, i int) string {
 	if i < len(row) {
 		return strings.TrimSpace(row[i])
@@ -139,7 +150,7 @@ func ParseSiteRows(rows []xlsx.Row) []Subnet {
 			continue // a device row: an address and its name
 		}
 		if b == "" && c == "" && !isRoleLabel(a) {
-			loc, locInactive, locRow = a, inactiveText(a), r.Num
+			loc, locInactive, locRow = a, inactiveHeader(a), r.Num
 			continue
 		}
 		if roleSkip(a) {

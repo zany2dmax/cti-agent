@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 #
-# run-vmscan - the weekly Qualys VM scan report, the two scheduled scans
-# combined into one email.
+# run-vmscan - the weekly Qualys VM scan report, the scheduled scans combined
+# into one email.
 #
 # Reads the "Qualys: Scan Results" notices that arrived in the CTI mailbox over
-# the last week, takes the newest result for each scheduled scan (VMSCAN_SCANS,
-# by default "Weekly Scheduled Scan for Main Sites" and "North/East Weekly"),
-# renders one report with the scans kept separate, and mails it through
-# cti-mailer --lane vmscan. A scheduled scan with no result is the first thing
-# the report says.
+# the last week, takes the newest result of every scheduled scan, renders one
+# report with the scans kept separate, and mails it through cti-mailer --lane
+# vmscan. A scan named in VMSCAN_SCANS (the ones you expect) that left no
+# result, or a week with no scan at all, is the first thing the report says.
 #
 # Recipients are VMSCAN_TO, checked against VMSCAN_ALLOW_TO, which has no
 # fallback: unset means the mailer refuses. Set VMSCAN_ALLOW_TO=$VM_ALLOW_TO to

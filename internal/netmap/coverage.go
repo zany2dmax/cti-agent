@@ -125,6 +125,12 @@ const (
 	// UnknownTargetGroup: a scan names a Target Group Qualys has no Asset Group
 	// of that title for.
 	UnknownTargetGroup Kind = "unknown-target-group"
+	// ScannedDecommissioned: a scanned Asset Group whose addresses are in the
+	// spreadsheet only under locations marked decommissioned.
+	ScannedDecommissioned Kind = "scanned-decommissioned"
+	// GroupNotTargeted: an Asset Group that holds addresses but that no scan
+	// targeted in the window.
+	GroupNotTargeted Kind = "group-not-targeted"
 )
 
 // Finding is one thing the check found.
@@ -211,14 +217,18 @@ func Check(corp []Corp, all []Subnet, groups []Group, scanned []string) Result {
 		}
 	}
 
-	// A scanned group whose addresses appear nowhere in the spreadsheet.
-	var sheet []Range
+	// A scanned group whose addresses appear nowhere in the spreadsheet, or
+	// only under decommissioned locations.
+	var sheet, active []Range
 	for _, s := range all {
 		if s.Valid {
 			sheet = append(sheet, PrefixRange(s.Prefix))
+			if !s.Inactive {
+				active = append(active, PrefixRange(s.Prefix))
+			}
 		}
 	}
-	mSheet := Merge(sheet)
+	mSheet, mActive := Merge(sheet), Merge(active)
 	var keys []string
 	for k := range scannedGroups {
 		keys = append(keys, k)
@@ -231,17 +241,41 @@ func Check(corp []Corp, all []Subnet, groups []Group, scanned []string) Result {
 				Detail: "this Asset Group holds no IP ranges, so it cannot be checked"})
 			continue
 		}
-		found := false
+		found, live := false, false
 		for _, r := range g.Ranges {
 			if coverage(mSheet, r) != none {
 				found = true
-				break
+			}
+			if coverage(mActive, r) != none {
+				live = true
 			}
 		}
-		if !found {
+		switch {
+		case !found:
 			res.Findings = append(res.Findings, Finding{Kind: ScannedNotInSheet, Group: g.Title,
 				Detail: "none of this scanned group's addresses appear in the spreadsheet"})
+		case !live:
+			res.Findings = append(res.Findings, Finding{Kind: ScannedDecommissioned, Group: g.Title,
+				Detail: "this scanned group's addresses are only under locations the spreadsheet marks decommissioned"})
 		}
+	}
+
+	// Asset Groups no scan targeted. A group with no addresses is a label,
+	// not a network, and is left out.
+	var idle []string
+	for _, g := range groups {
+		if len(g.Ranges) == 0 {
+			continue
+		}
+		if _, ok := scannedGroups[titleKey(g.Title)]; ok {
+			continue
+		}
+		idle = append(idle, g.Title)
+	}
+	sort.Strings(idle)
+	for _, t := range idle {
+		res.Findings = append(res.Findings, Finding{Kind: GroupNotTargeted, Group: t,
+			Detail: "no scan targeted this Asset Group this week"})
 	}
 	return res
 }

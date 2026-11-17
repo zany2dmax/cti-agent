@@ -37,9 +37,53 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
-**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
+**Upgrade:** `sudo cti-agent-update --for-real`, then set `VMSCAN_SCANS` in
+`/etc/cti-agent/fleet.env` to the scan titles Qualys uses now,
+`Weekly Scheduled Scan for non-UMI/TRJ,UMI/TRJ Weekly` (the old "Weekly
+Scheduled Scan for Main Sites" and "North/East Weekly" no longer exist). The report works without it; with stale titles it leads with
+`[NO RESULT]` for scans that were only renamed.
+
+### Changed
+
+- **The VM scan weekly reports every scheduled scan, whatever it is called.**
+  It used to report only the scans named in `VMSCAN_SCANS`. When the scans
+  were renamed in Qualys ("Weekly Scheduled Scan for non-UMI/TRJ"), the real
+  scan was filed as "other" and the coverage check compared all 65 locations
+  against nothing: "0 covered, 65 gaps". Now every scheduled scan whose notice
+  arrived in the week is reported and its Target Groups count for coverage; a
+  scan launched by hand is listed, not counted. `VMSCAN_SCANS` is now the
+  optional list of scans you expect: one named there with no result still
+  leads the report as `[NO RESULT]`. **Update it on the box** to the current
+  titles in `/etc/cti-agent/fleet.env`:
+  `VMSCAN_SCANS=Weekly Scheduled Scan for non-UMI/TRJ,UMI/TRJ Weekly`.
+
+- **Which VM scans ran comes from Qualys, not the mailbox.** The weekly lists
+  the scans launched in the week through the Qualys API, with the Asset Groups
+  each targeted, and matches each to its results notice by scan reference. A
+  scan whose notice never arrived (the UMI/TRJ weekly's, lost in the 11-13
+  Microsoft outage) is still reported and still counts for coverage; its card
+  says the notice did not arrive. Without the scan list the week is built from
+  the notices and the report says so. `cti-vmscan --check` now lists the scans.
+- **The coverage check picks each location's 10.X.30 network, whatever its
+  label.** It used to take only rows labelled `corp`: HQ and 3000 Pine label
+  theirs `inside` and Bell Cabinetry `Employee LAN`, so they were checked
+  against the wrong network or none. A location with no 10.X.30 network inside
+  its own /16 falls back to `corp`; a `netrules.txt` line still decides.
+- **New "check in Qualys" lines:** a scanned Asset Group whose addresses are
+  only under decommissioned locations, and every Asset Group with addresses
+  that no scan targeted in the week.
 
 ### Fixed
+
+- **"Decommissioned" is read from the start of a location's header.** A
+  header that mentioned the old site it replaced ("Formally TRJ - Norwood
+  Decommissioned 8/1/2025") closed an open site, and the misspelling
+  "DECOMISSIONED" kept a closed one. Now only a header that starts with it,
+  either spelling, closes the location.
+- **No scan, no coverage verdict.** A week where no scheduled scan reported
+  now says `[NO RESULT]: no scheduled scan reported this week`, and the
+  coverage section says it was not run, instead of reporting every location
+  as unscanned.
 
 - **The installer's Timer status said "disabled" twice.** `systemctl
   is-enabled` prints the state and also exits non-zero for a disabled unit, so

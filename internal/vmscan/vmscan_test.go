@@ -143,6 +143,9 @@ func TestATemplateChangeAnnouncesItself(t *testing.T) {
 	}
 }
 
+// weeklies are the titles of the two fixture notices, expected in this order.
+var weeklies = []string{"Weekly Scheduled Scan for Main Sites", "North/East Weekly"}
+
 func both(t *testing.T) []Scan {
 	t.Helper()
 	a, _ := Provider{}.Parse(fixture(t, "results-main.html"))
@@ -151,11 +154,11 @@ func both(t *testing.T) []Scan {
 }
 
 func TestCombineKeepsBothWeekliesInTheExpectedOrder(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	if len(w.Scans) != 2 || len(w.Missing) != 0 {
 		t.Fatalf("scans %d, missing %v", len(w.Scans), w.Missing)
 	}
-	if w.Scans[0].Title != DefaultScans[0] || w.Scans[1].Title != DefaultScans[1] {
+	if w.Scans[0].Title != weeklies[0] || w.Scans[1].Title != weeklies[1] {
 		t.Errorf("order: %q, %q", w.Scans[0].Title, w.Scans[1].Title)
 	}
 }
@@ -165,7 +168,7 @@ func TestCombineCountsADuplicateNoticeOnceAndTakesTheNewestRun(t *testing.T) {
 	older := s[1]
 	older.Ref, older.Start = "scan/1", older.Start.Add(-7*24*time.Hour)
 	dup := s[1] // same Ref as the newest
-	w := Combine(append(s, older, dup), DefaultScans)
+	w := Combine(append(s, older, dup), weeklies)
 	if len(w.Scans) != 2 || !w.Scans[0].Start.Equal(s[1].Start) {
 		t.Errorf("did not keep the newest run once: %+v", w.Scans)
 	}
@@ -173,8 +176,8 @@ func TestCombineCountsADuplicateNoticeOnceAndTakesTheNewestRun(t *testing.T) {
 
 // A scheduled scan that left no notice is the first thing to say.
 func TestAMissingScanIsReportedFirst(t *testing.T) {
-	w := Combine(both(t)[:1], DefaultScans) // only North/East
-	if len(w.Missing) != 1 || w.Missing[0] != DefaultScans[0] {
+	w := Combine(both(t)[:1], weeklies) // only North/East
+	if len(w.Missing) != 1 || w.Missing[0] != weeklies[0] {
 		t.Fatalf("missing = %v", w.Missing)
 	}
 	sub := w.Subject("Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
@@ -189,14 +192,14 @@ func TestAMissingScanIsReportedFirst(t *testing.T) {
 func TestAnUnfinishedScanIsFlagged(t *testing.T) {
 	s := both(t)
 	s[0].Status = "Canceled"
-	w := Combine(s, DefaultScans)
+	w := Combine(s, weeklies)
 	if sub := w.Subject("Acme", time.Now()); !strings.HasPrefix(sub, "[INCOMPLETE]") {
 		t.Errorf("subject = %q", sub)
 	}
 }
 
 func TestTheCombinedReportSaysTheyRanAndWhatTheyCoveredAndNothingMore(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
 	for _, want := range []string{"WEEKLY SCHEDULED SCAN FOR MAIN SITES", "NORTH/EAST WEEKLY", "South Site 1", "East Site 1",
 		"Locations covered (24)", "Locations covered (21)", "9730", "7168"} {
@@ -231,7 +234,7 @@ func TestLocationsAreCountedOnceAcrossScans(t *testing.T) {
 	// "North Data Center" and "Data Center" are different groups; the same group
 	// named in both scans counts once.
 	s[0].TargetGroups = append(s[0].TargetGroups, "Data Center")
-	w := Combine(s, DefaultScans)
+	w := Combine(s, weeklies)
 	if got := w.groups(); got != 24+21 {
 		t.Errorf("distinct groups = %d, want %d", got, 24+21)
 	}
@@ -253,7 +256,7 @@ func sampleCoverage() *Coverage {
 }
 
 func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	w.Coverage = sampleCoverage()
 	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
 	if !strings.Contains(b.Subject, "2 network(s) NOT SCANNED") {
@@ -263,7 +266,7 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 		"NOT SCANNED (2)",
 		"Alpha Site (sheet row 12): 10.1.30.0/24 is in no Qualys Asset Group.",
 		"Network or M&A team: say why this is not scanned.",
-		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which neither weekly scan covers.",
+		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which no scan targeted this week.",
 		"FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "The security team only reads this spreadsheet",
 		"Delta Site (sheet row 41)", "Network team: fill in this location's corp network.",
 		"Zeta Site (sheet row 50)", "not a valid CIDR",
@@ -324,7 +327,7 @@ func TestAWorksheetCellCannotRunAsAFormula(t *testing.T) {
 }
 
 func TestACoverageCheckThatCouldNotRunSaysSoAndIsNotACleanResult(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	w.Coverage = &Coverage{Unavailable: "the spreadsheet could not be read"}
 	b := Render(w, "Acme", time.Now())
 	if !strings.Contains(b.Text, "Not run this week: the spreadsheet could not be read") {
@@ -336,7 +339,7 @@ func TestACoverageCheckThatCouldNotRunSaysSoAndIsNotACleanResult(t *testing.T) {
 }
 
 func TestACleanCoverageCheckSaysNothingIsMissing(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	w.Coverage = &Coverage{Checked: 40, Covered: 40}
 	b := Render(w, "Acme", time.Now())
 	if !strings.Contains(b.Text, "40 corporate networks checked, 40 fully inside") || !strings.Contains(b.Text, "Nothing missing") {
@@ -348,7 +351,7 @@ func TestACleanCoverageCheckSaysNothingIsMissing(t *testing.T) {
 }
 
 func TestNoCoverageCheckLeavesTheReportAsItWas(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	b := Render(w, "Acme", time.Now())
 	if strings.Contains(b.Text, "COVERAGE CHECK") || strings.Contains(b.HTML, "Coverage check") {
 		t.Error("a coverage section appeared with no check asked for")
@@ -356,10 +359,73 @@ func TestNoCoverageCheckLeavesTheReportAsItWas(t *testing.T) {
 }
 
 func TestTheHTMLHeadingIsInCapitalsWithoutHelpFromCSS(t *testing.T) {
-	w := Combine(both(t), DefaultScans)
+	w := Combine(both(t), weeklies)
 	w.Coverage = &Coverage{Checked: 1, Covered: 1}
 	h := Render(w, "Acme", time.Now()).HTML
 	if !strings.Contains(h, "COVERAGE CHECK: THE NETWORK SPREADSHEET AGAINST WHAT THE SCANS COVER") {
 		t.Error("the section heading is not written in capitals; Outlook ignores text-transform")
+	}
+}
+
+// The scans were renamed in Qualys and VMSCAN_SCANS still named the old
+// titles: the real scan was filed as "other" and the coverage check compared
+// every location against nothing. Every scheduled scan now counts.
+func TestEveryScheduledScanIsReportedWhateverItIsCalled(t *testing.T) {
+	s := both(t)
+	s[0].Title, s[1].Title = "Weekly Scheduled Scan for non-UMI/TRJ", "UMI and TRJ Weekly"
+	w := Combine(s, nil)
+	if len(w.Scans) != 2 || len(w.Missing) != 0 || len(w.Other) != 0 {
+		t.Fatalf("scans %d missing %v other %d", len(w.Scans), w.Missing, len(w.Other))
+	}
+	// Unexpected scans are ordered by title.
+	if w.Scans[0].Title != "UMI and TRJ Weekly" {
+		t.Errorf("order: %q, %q", w.Scans[0].Title, w.Scans[1].Title)
+	}
+	if strings.HasPrefix(w.Subject("Acme", time.Now()), "[NO RESULT]") {
+		t.Errorf("two scans reported, yet: %q", w.Subject("Acme", time.Now()))
+	}
+}
+
+func TestAnExpectedScanStillComesFirstAndIsMissedWhenSilent(t *testing.T) {
+	s := both(t) // North/East, then Main Sites
+	s[1].Title = "Renamed Main Sites"
+	w := Combine(s, weeklies)
+	if len(w.Missing) != 1 || w.Missing[0] != weeklies[0] {
+		t.Fatalf("missing = %v", w.Missing)
+	}
+	if len(w.Scans) != 2 || w.Scans[0].Title != weeklies[1] || w.Scans[1].Title != "Renamed Main Sites" {
+		t.Errorf("expected scans first, then the rest: %q, %q", w.Scans[0].Title, w.Scans[1].Title)
+	}
+}
+
+func TestAScanLaunchedByHandIsListedButNotCounted(t *testing.T) {
+	s := both(t)
+	s[0].LaunchType, s[0].Title = "On Demand", "Jeff's test scan"
+	w := Combine(s, nil)
+	if len(w.Scans) != 1 || len(w.Other) != 1 || w.Other[0].Title != "Jeff's test scan" {
+		t.Fatalf("scans %d other %+v", len(w.Scans), w.Other)
+	}
+	if !strings.Contains(w.Text("Acme", time.Now()), "launched by hand") {
+		t.Error("the text does not list the hand-launched scan")
+	}
+	// Named in the expected list, it counts however it was launched.
+	if w := Combine(s, []string{"Jeff's test scan"}); len(w.Other) != 0 {
+		t.Errorf("an expected scan was set aside: %+v", w.Other)
+	}
+}
+
+func TestAWeekWithNoScanAtAllSaysSo(t *testing.T) {
+	w := Combine(nil, nil)
+	if sub := w.Subject("Acme", time.Now()); !strings.HasPrefix(sub, "[NO RESULT]") ||
+		!strings.Contains(sub, "no scheduled scan reported") {
+		t.Errorf("subject = %q", sub)
+	}
+	if !strings.Contains(w.Text("Acme", time.Now()), "Qualys lists no scheduled scan") {
+		t.Error("with the scan list read, the text must say Qualys lists none")
+	}
+	w.ListUnavailable = "HTTP 401"
+	txt := w.Text("Acme", time.Now())
+	if !strings.Contains(txt, "No scheduled scan's results notice arrived") || !strings.Contains(txt, "HTTP 401") {
+		t.Errorf("without the scan list, the text must blame the notices and say why:\n%s", txt)
 	}
 }

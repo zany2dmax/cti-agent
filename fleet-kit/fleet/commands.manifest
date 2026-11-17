@@ -248,9 +248,9 @@ command: cti-vmscan
 about: Combine the week's Qualys VM scan-result notices into one report
 runs: local
 risk: --commit-seen writes
-flag: --check | read-only: check the Graph credentials, the network spreadsheet and the Qualys Asset Group list the coverage check needs, print counts, and exit
+flag: --check | read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list and the Qualys scan list the report needs, print counts, and exit
 flag: --since DURATION | how far back to look for scan-result notices
-flag: --scans STRING | comma-separated titles of the scheduled scans to combine (default VMSCAN_SCANS, else the two weeklies)
+flag: --scans STRING | comma-separated titles of the scheduled scans you expect each week (default VMSCAN_SCANS); one that sends no result is reported as missing. Every scheduled scan that reported is included either way
 flag: --out FILE | write the HTML here
 flag: --text-out FILE | write the plain-text version here
 flag: --subject-out FILE | write the subject line here

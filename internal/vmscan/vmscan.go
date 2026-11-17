@@ -94,6 +94,12 @@ type Scan struct {
 	// MessageID and Received identify the message, for the mailbox cleanup.
 	MessageID string
 	Received  time.Time
+
+	// FromList: this run is in Qualys's scan list (qualysapi.go). NoNotice: it
+	// is in the list but its results notice did not arrive, so the hosts and
+	// vulnerability counts are unknown, not zero.
+	FromList bool
+	NoNotice bool
 }
 
 // Finished reports whether the scan ran to completion.

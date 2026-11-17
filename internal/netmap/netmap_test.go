@@ -62,7 +62,10 @@ func TestOnlyClearCorpNetworksAreSelectedAndTheRestBecomeQuestions(t *testing.T)
 	for _, c := range corp {
 		have = append(have, c.Location+"="+c.Subnet.Prefix.String())
 	}
-	if len(corp) != 2 || !strings.HasPrefix(have[0], "Alpha Site") || !strings.HasPrefix(have[1], "Beta Site") {
+	// Eta labels its 10.17.30 network "inside": the 10.X.30 convention picks
+	// it without a rule.
+	if len(corp) != 3 || !strings.HasPrefix(have[0], "Alpha Site") || !strings.HasPrefix(have[1], "Beta Site") ||
+		have[2] != "Eta Site - 10.17.0.0/16=10.17.30.0/24" {
 		t.Errorf("corp = %v", have)
 	}
 	why := map[string]string{}
@@ -283,5 +286,105 @@ func TestPrefixRangeEdges(t *testing.T) {
 		if r.Lo != c.lo || r.Hi != c.hi {
 			t.Errorf("%s = %08x-%08x, want %08x-%08x", c.cidr, r.Lo, r.Hi, c.lo, c.hi)
 		}
+	}
+}
+
+// The cases from the real sheet (2026-11-17), with invented names.
+func TestTheTenX30NetworkIsPickedWhateverItsLabel(t *testing.T) {
+	rows := [][]string{
+		// HQ: corp is a 192.168 /23, the 10.6.30 network is labelled "inside".
+		{"Head Office - 10.6.0.0/16"}, {"corp", "192.168.0.0/23", "vlan1"}, {"inside", "10.6.30.0/24", "vlan30"},
+		// No corp row at all; the 10.20.30 network is "Employee LAN".
+		{"Cabinet Shop - 10.20.0.0/16"}, {"Servers", "10.20.10.0/24", "vlan10"},
+		{"Employee LAN", "10.20.30.0/24", "vlan30"},
+		// A setup row inside ANOTHER location's block, and its own corp row.
+		{"Norcross Branch - 10.14.0.0/16"}, {"setup", "10.20.30.0/24", "vlan1"}, {"corp", "10.14.30.0/24", "vlan30"},
+		// Sizes other than /24.
+		{"Paper Mill - 10.45.0.0/16"}, {"corp", "10.45.30.0/23", "vlan1"},
+		{"Small Branch - 10.62.0.0/16"}, {"corp", "10.62.30.0/26", "vlan30"},
+		// A typo in the corp cell and nothing else at 10.27.30: still a question.
+		{"Naples Branch - 10.27.0.0/16"}, {"corp", "10.29.30", "vlan1"},
+	}
+	corp, qs := SelectCorp(ParseSites(rows), Rules{})
+	got := map[string]string{}
+	for _, c := range corp {
+		got[c.Location] += c.Subnet.Prefix.String() + " "
+	}
+	want := map[string]string{
+		"Head Office - 10.6.0.0/16":      "10.6.30.0/24 ",
+		"Cabinet Shop - 10.20.0.0/16":    "10.20.30.0/24 ",
+		"Norcross Branch - 10.14.0.0/16": "10.14.30.0/24 ",
+		"Paper Mill - 10.45.0.0/16":      "10.45.30.0/23 ",
+		"Small Branch - 10.62.0.0/16":    "10.62.30.0/26 ",
+	}
+	for loc, w := range want {
+		if got[loc] != w {
+			t.Errorf("%s: got %q, want %q", loc, got[loc], w)
+		}
+	}
+	if _, ok := got["Naples Branch - 10.27.0.0/16"]; ok {
+		t.Error("an invalid corp cell must stay a question")
+	}
+	var naples bool
+	for _, q := range qs {
+		naples = naples || (q.Location == "Naples Branch - 10.27.0.0/16" && q.Kind == QInvalid)
+	}
+	if !naples {
+		t.Errorf("questions: %+v", qs)
+	}
+}
+
+func TestARuleStillDecidesOverTheConvention(t *testing.T) {
+	rows := [][]string{{"Head Office - 10.6.0.0/16"}, {"corp", "192.168.0.0/23", "vlan1"}, {"inside", "10.6.30.0/24", "vlan30"}}
+	rules, _ := ParseRules("Head Office | use corp,inside\n")
+	corp, _ := SelectCorp(ParseSites(rows), rules)
+	if len(corp) != 2 {
+		t.Errorf("a 'use corp,inside' rule must check both networks: %+v", corp)
+	}
+}
+
+func TestOnlyAHeaderThatStartsWithDecommissionedIsClosed(t *testing.T) {
+	rows := [][]string{
+		{"DECOMISSIONED - Old Branch - GA - 10.2.0.0/16"}, {"corp", "10.2.30.0/24", "vlan1"},
+		{"Decommissioned?? - Maybe Branch - 10.35.0.0/16"}, {"corp", "10.35.30.0/24", "vlan1"},
+		{"Charleston Store - 10.44.0.0/16 - Formally Old Store Decommissioned 8/1/2025"}, {"corp", "10.44.30.0/24", "vlan30"},
+	}
+	corp, _ := SelectCorp(ParseSites(rows), Rules{})
+	if len(corp) != 1 || corp[0].Subnet.Prefix.String() != "10.44.30.0/24" {
+		t.Errorf("only the open store should be checked: %+v", corp)
+	}
+}
+
+// A scanned group that only holds a closed site, and a group no scan targets.
+func TestCheckNamesGroupsOnDecommissionedSitesAndGroupsNoScanTargets(t *testing.T) {
+	all := ParseSites([][]string{
+		{"Open Branch - 10.4.0.0/16"}, {"corp", "10.4.30.0/24", "vlan1"},
+		{"DECOMISSIONED - Old Branch - 10.2.0.0/16"}, {"corp", "10.2.30.0/24", "vlan1"},
+		{"Idle Branch - 10.9.0.0/16"}, {"corp", "10.9.30.0/24", "vlan1"},
+	})
+	corp, _ := SelectCorp(all, Rules{})
+	r := func(s string) Range { x, _ := ParseRange(s); return x }
+	groups := []Group{
+		{Title: "Open", Ranges: []Range{r("10.4.30.0-10.4.30.255")}},
+		{Title: "Old", Ranges: []Range{r("10.2.30.0-10.2.30.255")}},
+		{Title: "Idle", Ranges: []Range{r("10.9.30.0-10.9.30.255")}},
+		{Title: "Empty label"},
+	}
+	res := Check(corp, all, groups, []string{"Open", "Old"})
+	kinds := map[string]Kind{}
+	for _, f := range res.Findings {
+		kinds[f.Group+"|"+f.Location] = f.Kind
+	}
+	if kinds["Old|"] != ScannedDecommissioned {
+		t.Errorf("the group on the closed site: %+v", res.Findings)
+	}
+	if kinds["Idle|"] != GroupNotTargeted {
+		t.Errorf("the group no scan targets: %+v", res.Findings)
+	}
+	if _, ok := kinds["Empty label|"]; ok {
+		t.Error("a group with no addresses is a label, not a network")
+	}
+	if kinds["Idle|Idle Branch - 10.9.0.0/16"] != GroupNotScanned {
+		t.Errorf("the idle branch's network is still a gap: %+v", res.Findings)
 	}
 }

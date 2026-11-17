@@ -110,3 +110,18 @@ func TestAnythingThatStopsTheCheckIsReportedNotHidden(t *testing.T) {
 		t.Errorf("a refusal: %q", c.Unavailable)
 	}
 }
+
+// With no scan reported there is nothing to compare against. The first real
+// run did exactly that and reported every location as a gap ("0 covered, 65
+// gaps"); the check now says it could not be judged, and asks Qualys nothing.
+func TestNoScanReportedMeansCoverageIsNotJudged(t *testing.T) {
+	cfg := config.Config{QualysBaseURL: "http://127.0.0.1:1", QualysUsername: "u", QualysPassword: "p"}
+	t.Setenv("NETRULES_FILE", "/nonexistent")
+	c := coverage(context.Background(), cfg, nil, vmscan.Week{}, "testdata/subnets.xlsx")
+	if c.Unavailable == "" || !strings.Contains(c.Unavailable, "no scheduled scan") {
+		t.Fatalf("expected the check to be not judged, got %+v", c)
+	}
+	if len(c.Gaps()) != 0 || c.Checked != 0 {
+		t.Errorf("no gaps may be reported without a scan: %+v", c)
+	}
+}

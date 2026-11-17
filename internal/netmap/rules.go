@@ -182,11 +182,22 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		var seenRoles []string
 		bad, blank := "", false
 		badRow, headRow := 0, 0
+		// Without a rule, the location's user network is its 10.X.30 network:
+		// the sheet's own convention, whatever the row is labelled (HQ and 3000
+		// Pine call it "inside", Bell Cabinetry "Employee LAN"). Only when it
+		// has none does the "corp" label decide.
+		thirty := []Subnet(nil)
+		if key == "" {
+			thirty = userNetworks(rows, headerBlocks(loc))
+		}
 		for _, s := range rows {
 			if headRow == 0 {
 				headRow = s.LocRow
 			}
 			seenRoles = append(seenRoles, s.Role)
+			if len(thirty) > 0 {
+				continue
+			}
 			if s.Inactive || !hasRole(roles, s.Role) {
 				continue
 			}
@@ -200,6 +211,9 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 				continue
 			}
 			picked = append(picked, s)
+		}
+		if len(thirty) > 0 {
+			picked = thirty
 		}
 		// A corp network outside the location's own block is probably a typo in
 		// the sheet. An operator rule for the location says it is meant, so it
@@ -265,6 +279,27 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		corp = kept
 	}
 	return corp, qs
+}
+
+// userNetworks are a location's valid, active 10.X.30 networks inside its
+// own block (the /16 its header names): 10.45.30.0/23 and 10.62.30.0/26
+// qualify, 10.20.30.0/24 under a location whose block is 10.14.0.0/16 does
+// not. A location whose header names no block has none.
+func userNetworks(rows []Subnet, blocks []netip.Prefix) []Subnet {
+	if len(blocks) == 0 {
+		return nil
+	}
+	var out []Subnet
+	for _, s := range rows {
+		if s.Inactive || !s.Valid || !s.Prefix.Addr().Is4() || s.Prefix.Bits() < 16 {
+			continue
+		}
+		b := s.Prefix.Addr().As4()
+		if b[0] == 10 && b[2] == 30 && within(blocks, s.Prefix) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func headerBlockList(blocks []netip.Prefix) string {

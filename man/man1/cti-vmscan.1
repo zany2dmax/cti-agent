@@ -1,4 +1,4 @@
-.TH CTI-VMSCAN 1 "2026-11-07" "cti-agent 1.6" "CTI Fleet Manual"
+.TH CTI-VMSCAN 1 "2026-11-17" "cti-agent 1.6" "CTI Fleet Manual"
 .SH NAME
 cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .SH SYNOPSIS
@@ -28,13 +28,16 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .RI [ options ]
 .SH DESCRIPTION
 .B cti-vmscan
-reads the
+lists the VM scans launched over the last week from the Qualys API
+(read-only), with the Asset Groups each targeted, and matches each to its
 .B "Qualys: Scan Results"
-notices that arrived in the CTI mailbox over the last week (Graph, read-only),
-takes the newest result for each scheduled scan it is told to expect, and
-renders one notice with the scans kept separate: that each ran, when and for
-how long, how many addresses it scanned and how many were alive, and the
-locations it covered (its Qualys Target Groups).
+notice in the CTI mailbox (Graph, read-only) by scan reference. It renders one
+notice with every scheduled scan kept separate: that each ran, when and for how
+long, how many addresses it scanned and how many were alive, and the locations
+it covered (its Qualys Target Groups). A scan Qualys lists whose notice never
+arrived is still reported and still counts for coverage, without host counts.
+If the scan list cannot be read, the week is built from the notices alone and
+the report says so. A scan launched by hand is listed, not counted.
 .PP
 It carries no vulnerability counts or severities, on purpose. The report goes
 to people who do not act on them from here, and the two scans overlap, so the
@@ -44,13 +47,15 @@ the report does not show them.
 It also checks the network spreadsheet (the source of authority for what
 networks exist) against the Qualys Asset Groups the scans cover, by ADDRESS, not
 by name, because the scans' Target Group names and the spreadsheet's location
-names do not match. For each active location it takes the networks that count as
-its corporate network (the rows labelled
-.BR corp ,
-or whichever rows an operator rule names) and reports:
+names do not match. For each active location it takes its 10.X.30 network inside
+the /16 the location's header names, whatever the row is labelled; with none, the
+rows labelled
+.BR corp ;
+or whichever rows an operator rule names. A location is closed when its header
+starts with DECOMMISSIONED (or the misspelling DECOMISSIONED). It reports:
 .TP
 .B NOT SCANNED
-A corp network in no Asset Group, in a group no weekly scan covers, or only partly
+A location's network in no Asset Group, in a group no scan targeted this week, or only partly
 inside the scanned groups. This is how a missed location shows up. The lane
 records only that it is not scanned: why differs from one location to the next
 (not set up yet, not reachable, no network architecture yet) and the security team
@@ -66,15 +71,16 @@ rule in FILES says which rows count. The lane never guesses, and the fix is the
 network team's: the security team only reads the spreadsheet.
 .TP
 .B CHECK IN QUALYS
-A scanned Asset Group whose addresses appear nowhere in the spreadsheet, a group
-with no IP ranges (so it cannot be checked), or a Target Group the scan names
-that Qualys has no Asset Group for.
+A Target Group a scan names that Qualys has no Asset Group for, a scanned Asset
+Group whose addresses are only under decommissioned locations, a scanned group
+whose addresses appear nowhere in the spreadsheet (or that has no IP ranges),
+and every Asset Group with addresses that no scan targeted this week.
 .PP
 Every line names the location, the spreadsheet row to look at, and what to do, so
 the report can go to the network and acquisitions teams as well as security. The
 email ends with a short note on how the spreadsheet has to be laid out to be read
-(a header row per location, a row labelled corp with a CIDR, DECOMMISSIONED for
-retired locations), and the same findings come as a worksheet
+(a header row per location, the 10.X.30 network or a row labelled corp with a
+CIDR, DECOMMISSIONED at the start of a retired location's header), and the same findings come as a worksheet
 .RB ( \-\-csv\-out ,
 attached by
 .BR run\-vmscan ).
@@ -127,8 +133,9 @@ Read-only: request a Graph token, read the network spreadsheet
 .RB ( SUBNETS_DRIVE_ID ,
 .BR SUBNETS_ITEM_ID ,
 .BR SUBNETS_SHEET )
-and find its sheet, and list the Qualys Asset Groups once: everything the
-coverage check needs. It does not read the mailbox (the mailbox roles are
+and find its sheet, list the Qualys Asset Groups once, and list the VM scans
+launched in the last seven days: everything the report and its coverage check
+need. It does not read the mailbox (the mailbox roles are
 .BR "cti\-mailer \-\-check" 's),
 writes nothing, and prints counts only, never a network, group or scan name,
 because the heartbeat runs it. A coverage input that is not configured is a
@@ -139,15 +146,16 @@ all of it works, 1 otherwise.
 How far back to look for scan-result notices. Default 168h.
 .TP
 .BI \-\-scans " TITLES"
-Comma-separated titles of the scheduled scans to combine. Default
+Comma-separated titles of the scheduled scans you expect each week. Default
 .BR VMSCAN_SCANS ,
-else
-.B Weekly Scheduled Scan for Main Sites
-and
-.BR "North/East Weekly" ,
-which are examples: set
-.B VMSCAN_SCANS
-to the real titles. Titles are compared ignoring case and spacing.
+else none. One named here that left no result is reported first as
+.BR "[NO RESULT]" .
+Every scheduled scan that reported is included either way, and its Target
+Groups count for the coverage check; a scan launched by hand is listed, not
+counted. With no scan at all the subject says
+.B [NO RESULT]
+and the coverage check is not run. Titles are compared ignoring case and
+spacing.
 .TP
 .BI \-\-out " FILE"
 Write the HTML report here (mode 0600).
@@ -184,7 +192,7 @@ does this only after a real send.
 .SH ENVIRONMENT
 .TP
 .B VMSCAN_SCANS
-The scans to combine, by title, comma separated.
+The scans expected each week, by title, comma separated. Optional.
 .TP
 .B FLEET_SENDER_AUTH
 Set to

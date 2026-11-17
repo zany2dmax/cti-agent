@@ -504,7 +504,7 @@ The rest of the lanes, with the gate before each, are in the table below.
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
 | 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | owners moved into `owners.db` and `fleet-owners check` clean ([11f](#application-owners-in-ownersdb)), one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
-| 10 | `cti-agent-vmscan.timer` | weekly VM scan report, both scheduled scans in one email, Mondays unless `FLEET_VMSCAN_DAY` says otherwise | `VMSCAN_TO`, `VMSCAN_ALLOW_TO` and `VMSCAN_SCANS` set, one `--dry-run` and one `--to-dev` read; for its coverage check, `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` set and `sudo cti-agent cti-vmscan --check` OK ([11f](#the-weekly-vm-scan-report-run-vmscan)) |
+| 10 | `cti-agent-vmscan.timer` | weekly VM scan report, both scheduled scans in one email, Mondays unless `FLEET_VMSCAN_DAY` says otherwise | `VMSCAN_TO` and `VMSCAN_ALLOW_TO` set (`VMSCAN_SCANS` naming the scans you expect), one `--dry-run` and one `--to-dev` read; for its coverage check, `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` set and `sudo cti-agent cti-vmscan --check` OK ([11f](#the-weekly-vm-scan-report-run-vmscan)) |
 | 11 | `cti-agent-supplier.timer` | supplier-request triage, daily | `SUPPLIER_ADDRESS`, `SUPPLIER_TO`, `SUPPLIER_ALLOW_TO` and the Jira settings set, a `--dry-run` whose digest and items you have read, then one `--to-dev` ([11f](#the-supplier-request-lane-run-supplier)) |
 
 ```bash
@@ -1282,10 +1282,12 @@ map of where to look, and it is handled like the VM reports for that reason.
 
 `cti-agent-vmscan.timer`, Mondays 08:00 by default (`FLEET_VMSCAN_DAY` and
 `FLEET_VMSCAN_TIME`, applied by the installer when `FLEET_TIMEZONE` is set),
-runner `run-vmscan`. The two scheduled
-Qualys VM scans ("Weekly Scheduled Scan for Main Sites" and "North/East Weekly")
-each email a "Qualys: Scan Results" notice when they finish. This lane reads
-those notices from the CTI mailbox and sends **one** email with both scans, kept
+runner `run-vmscan`. The scheduled Qualys VM scans (in 2026-11, "Weekly
+Scheduled Scan for non-UMI/TRJ" and "UMI/TRJ Weekly", both starting Thursday
+13:00 UTC; the UMI/TRJ one runs about a day, so its notice arrives Friday
+around 13:00 UTC) each email a "Qualys:
+Scan Results" notice when they finish. This lane reads those notices from the
+CTI mailbox and sends **one** email with every scheduled scan, kept
 in separate sections: that it ran, when and for how long, addresses scanned and
 alive, and the locations it covered (its Qualys Target Groups). It carries no
 severity counts, on purpose: the audience does not act on them from this email,
@@ -1299,11 +1301,21 @@ sudo cti-agent run-vmscan --for-real  # send, and record the notices as used
 
 Recipients are `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO`; neither has a
 fallback (unset = refuses). To send to the VM audience, reference it in both:
-`VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO`. `VMSCAN_SCANS` names the scans to combine, by their Qualys titles. Set it: the two titles above are examples, and unset the report says both are missing.
+`VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO`. Every scheduled scan that reported in the last week is included, and its Target Groups count for the coverage check, whatever it is called; a scan launched by hand is listed, not counted. `VMSCAN_SCANS` is the optional list of scans you **expect**, by their Qualys titles: one named there that sent no result is the first thing the report says. Name them, and update the list when a scan is renamed in Qualys. With no scan at all the subject says `[NO RESULT]` and the coverage check says it was not run, rather than calling every location unscanned.
 
-What the subject can say first: `[NO RESULT]` when a scheduled scan left no
-notice (it did not finish, or its mail never arrived), `[INCOMPLETE]` when one
-did not finish, otherwise how many scans ran and how many locations they covered.
+**Which scans ran comes from Qualys, not the mailbox.** The lane lists the VM
+scans launched in the last week through the Qualys API (read-only, the same
+account as the other Qualys lanes), with the Asset Groups each targeted, and
+then looks for each scan's results notice by its scan reference. A scan Qualys
+lists whose notice never arrived (mail lost in an outage, or late) is still
+reported and still counts for coverage; its card says the notice did not arrive
+and shows no host counts. If the scan list cannot be read, the report is built
+from the notices alone and says so. `cti-vmscan --check` lists the scans too.
+
+What the subject can say first: `[NO RESULT]` when a scan named in
+`VMSCAN_SCANS` did not run (or, without the scan list, sent no notice) or no
+scheduled scan ran at all, `[INCOMPLETE]` when one did not finish, otherwise
+how many scans ran and how many locations they covered.
 
 **Getting the notices into the mailbox.** Qualys sends them to the people on
 each schedule's notification list and, for the owner-only notice, to the scan's
@@ -1316,20 +1328,27 @@ reads nothing.
 
 **The coverage check.** The same email checks the network spreadsheet against the
 Qualys Asset Groups the scans cover, by address (the scans' group names and the
-spreadsheet's location names do not match, so names are only for display). It
-reports three things, each line naming the location, the spreadsheet row and
+spreadsheet's location names do not match, so names are only for display).
+Each location's network is its **10.X.30 network** inside the /16 its header
+names, whatever the row is labelled (the sheet's own convention: HQ and 3000
+Pine label it `inside`); a location with none falls back to the row labelled
+`corp`. A location is closed only when its header **starts** with
+DECOMMISSIONED (the misspelling DECOMISSIONED counts too); a header that only
+mentions an old site it replaced stays open. It reports three things, each line naming the location, the spreadsheet row and
 what to do, so the email can go to the network and acquisitions teams as well as
 security: **not scanned** (a corp network in no Asset Group, in a group no scan
 covers, or only partly covered; the lane records only that, because why differs
 per location and it cannot check, so the network and M&A teams are asked to say,
 in a blank column of the CSV), **fix in the spreadsheet** (a corp row
 with no network, one that is not a valid CIDR, one outside its location's own
-block, an overlap, or no clear corp row), and **check in Qualys** (a scanned group
-whose addresses are nowhere in the sheet, a group with no IP ranges, a Target
-Group Qualys does not list). The same findings are attached as a CSV worksheet,
+block, an overlap, or no clear corp row), and **check in Qualys** (a Target Group
+Qualys does not list, a scanned group whose addresses are only under
+decommissioned locations, a scanned group whose addresses are nowhere in the
+sheet, and every Asset Group with addresses that no scan targeted this week). The same findings are attached as a CSV worksheet,
 and the email ends with a note on how the spreadsheet has to be laid out.
 
-It only reads, and it never guesses which row is a location's corp network. The
+It only reads, and beyond the 10.X.30 convention it never guesses which row is
+a location's network. The
 spreadsheet belongs to the network team and the security team is only a consumer
 of it, so when it is wrong or unclear (a location with no `corp` row, a corp
 network that is not a valid CIDR, one outside its location's block, an overlap)
@@ -1340,7 +1359,7 @@ record that in `/etc/cti-agent/netrules.txt` (root-owned, optional):
 
 ```text
 # location (the start of its header in the sheet) | what to do
-HQ - Example Site - GA | use inside,corp
+HQ - Example Site - GA | use inside,corp     # a rule replaces the 10.X.30 choice
 Datacenter - Example - GA | use Servers,VMs
 Azure - 172.16.0.0/16 | ignore
 ```
