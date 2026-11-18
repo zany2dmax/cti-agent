@@ -89,9 +89,11 @@ GitHub for scanning (the gates are described in
 **A daily digest.** Reads the mailbox, extracts CVEs, asks the scanner what is
 present, enriches with NVD CVSS, EPSS and CISA KEV, prioritises Sev5–Sev1, and
 mails an HTML digest with the exploited-and-present findings at the top. A
-FLEET TICKETS section lists every open fleet ticket in Jira (and those closed
-in the last 30 days) with its status, the hosts the scanner sees today and what
-that morning's re-check did.
+FLEET TICKETS section lists every ticket any lane has filed (open, and those
+closed in the last 30 days): each CVE ticket with its status, the hosts the
+scanner sees today and what that morning's re-check did; the domains lock-down
+and VM scan spreadsheet tickets with their status; and one line counting the
+supplier requests opened for TPRM evaluation.
 
 **A monthly Patch Tuesday synopsis.** Reads Microsoft's own release data,
 cross-checks it against BleepingComputer (and the Qualys blog when it can be
@@ -127,18 +129,38 @@ asks Qualys for every web application, reports each one with no owner, and
 applies only the changes that follow from owners already on file.
 
 **A weekly vulnerability-scan report.** Mondays, to the vulnerability-management
-audience (and the network and M&A teams if you add them). It combines the week's
-two scheduled Qualys VM scans into one email from the scanner's own "Scan
-Results" notices: that each ran, when and for how long, how many addresses it
-scanned and how many were alive, and the locations it covered. It carries no
-severity counts, on purpose. Then it checks the network team's spreadsheet of
-subnets against the Qualys Asset Groups the scans cover, by address, and lists
-the corporate networks no scan reaches (the lane records only that, and asks the
-network and M&A teams to say why), the spreadsheet rows the network team has to
-fix, by row, and anything odd in Qualys. The findings also come as a CSV
-worksheet. It reads the spreadsheet through Microsoft Graph and the Asset Groups
-through the Qualys API, both read-only. A scheduled scan with no result leads
-the email.
+audience (and the network and M&A teams if you add them).
+
+- **Which scans ran comes from Qualys itself.** The lane lists the week's VM
+  scans and their Asset Groups through the Qualys API, and every scan schedule,
+  so an active schedule that launched nothing is reported by name, and a
+  switched-off one is named as such. Each scan's "Scan Results" notice is
+  matched by scan reference for its host counts; a scan whose notice was lost
+  in the mail is still reported and still counts. Nothing has to be kept in step
+  when a scan is renamed (`VMSCAN_SCANS` only adds titles). It carries no
+  severity counts, on purpose.
+- **The coverage check** compares the network team's spreadsheet of subnets
+  (read through Microsoft Graph) with the Asset Groups the scans targeted, by
+  address. Each site's network is its 10.X.30 range inside the site's /16,
+  whatever the row is labelled, else its `corp` row; `netrules.txt` decides
+  where the sheet is unclear. A site is closed only when its header starts with
+  DECOMMISSIONED. It lists the networks no scan reaches (the lane records only
+  that, and asks the network and M&A teams to say why), the rows the check
+  cannot read, clean-up the sheet needs (overlapping networks, rows outside
+  their block, a public IP under two sites, header problems, and the
+  operator's cross-check notes in `sheet-notes.txt`), and anything odd in
+  Qualys: a scanned group that is only closed sites or is not in the sheet, and
+  every Asset Group no scan targeted. The findings also come as a CSV worksheet.
+- **The network team's ticket.** The rows to correct and the clean-up go to the
+  help desk as one Jira ticket, unassigned, for the network team (`cti-jira
+  --vmscan-fixes`): filed when none is open, commented on only when the list
+  changes, told once when nothing is left, and listed in the Daily Brief's
+  FLEET TICKETS.
+
+Everything it reads (Graph, the Qualys VM API) is read-only; the only write is
+the ticket, behind `JIRA_ALLOW_CREATE`. A scheduled scan that did not run leads
+the email. `cti-vmscan --check` tests every input: the Graph token, the sheet,
+the Asset Groups, the scan list and the schedules.
 
 **A weekly domains check.** Tuesdays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
