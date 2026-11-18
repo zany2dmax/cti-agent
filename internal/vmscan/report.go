@@ -388,5 +388,6 @@ func (w Week) HTML(org string, weekEnding time.Time) string {
 
 // Render builds the report block.
 func Render(w Week, org string, weekEnding time.Time) Block {
-	return Block{Subject: w.Subject(org, weekEnding), Text: w.Text(org, weekEnding), HTML: w.HTML(org, weekEnding)}
+	return Block{Subject: w.Subject(org, weekEnding), Text: fixSlot(w.Text(org, weekEnding)),
+		HTML: fixSlot(w.HTML(org, weekEnding))}
 }

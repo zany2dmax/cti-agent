@@ -52,7 +52,18 @@ a real run files it, or comments on the open one only when the list changed;
 a dry run and a test send only preview it. It is written only when its project
 is in
 .BR JIRA_ALLOW_CREATE ,
-and a Jira failure never stops the report.
+and a Jira failure never stops the report. The report names the ticket: it is
+rendered with
+.BR \-\-ticket\-slot ,
+.B cti\-jira
+writes what it did with
+.BR \-\-ref\-out ,
+and
+.B "cti\-vmscan \-\-stamp\-ticket"
+fills in the ticket's key, status, what happened this week and its link
+before the send. With no ticket step (no
+.B cti\-jira
+or no fixes list) the slot is removed.
 .SH HOW TO RUN
 \fBrun\-vmscan\fR mails a report, so it has no default: it has to be told how to run. Give exactly one of
 \fB\-\-dry\-run\fR (render and print the subject, send nothing), \fB\-\-for\-real\fR (send the report and record the notices as used),

@@ -27,6 +27,11 @@
 # send only preview it. Written to Jira only when its project
 # (JIRA_VMSCAN_PROJECT_KEY, else JIRA_PROJECT_KEY) is in JIRA_ALLOW_CREATE, and
 # never fatal: the report goes out whatever Jira does.
+#
+# The report names the ticket. It is rendered with a slot (--ticket-slot),
+# cti-jira says what happened to the ticket (--ref-out), and cti-vmscan
+# --stamp-ticket fills the slot with its key, status and link before the send:
+# "filed HD-12", "HD-12 already has this exact list", "NOT updated - why".
 set -euo pipefail
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
@@ -101,13 +106,14 @@ SUBJFILE="$OUTDIR/vmscan-subject-$STAMP.txt"
 SEEN="$OUTDIR/vmscan-seen-$STAMP.json"
 FINDINGS="$OUTDIR/vmscan-findings-$STAMP.csv"
 FIXES="$OUTDIR/vmscan-fixes-$STAMP.json"
+TICKET="$OUTDIR/vmscan-ticket-$STAMP.json"
 # Mode set before anything is written: the report names which scans found what.
 : > "$HTML"; chmod 0600 "$HTML"
 : > "$TXT";  chmod 0600 "$TXT"
-rm -f "$SUBJFILE" "$SEEN" "$FINDINGS" "$FIXES"
+rm -f "$SUBJFILE" "$SEEN" "$FINDINGS" "$FIXES" "$TICKET"
 
 "$VMSCAN" --out "$HTML" --text-out "$TXT" --subject-out "$SUBJFILE" --seen-out "$SEEN" \
-  --csv-out "$FINDINGS" --fixes-out "$FIXES" \
+  --csv-out "$FINDINGS" --fixes-out "$FIXES" --ticket-slot \
   || fail "cti-vmscan exited non-zero (check outbound 443 to Graph)"
 [ -s "$SUBJFILE" ] || fail "cti-vmscan wrote no subject line"
 SUBJECT="$(head -n 1 "$SUBJFILE")"
@@ -124,12 +130,25 @@ elif [ ! -s "$FIXES" ]; then
   log "no spreadsheet fixes list written - no spreadsheet ticket"
 elif [ -z "$REAL" ]; then
   log "ticket: rehearsal, previewing the spreadsheet ticket only"
-  "$JIRA" --vmscan-fixes "$FIXES" --dry-run \
+  "$JIRA" --vmscan-fixes "$FIXES" --dry-run --ref-out "$TICKET" \
     || log "WARNING: spreadsheet ticket preview failed"
 else
-  "$JIRA" --vmscan-fixes "$FIXES" --for-real \
+  "$JIRA" --vmscan-fixes "$FIXES" --for-real --ref-out "$TICKET" \
     || log "WARNING: spreadsheet ticket not filed or updated - see the lines above"
 fi
+# Then its line in the report. A missing ref file (cti-jira died before
+# writing it) stamps "status unavailable"; no ticket step at all just clears
+# the slot. The report goes out either way.
+if [ -x "$JIRA" ] && [ -s "$FIXES" ]; then
+  "$VMSCAN" --stamp-ticket "$TICKET" --out "$HTML" --text-out "$TXT" \
+    || { log "WARNING: could not stamp the ticket into the report; removing the slot"
+         sed -i.bak 's/<!--CTI_VMSCAN_TICKET-->//g' "$HTML" "$TXT" 2>/dev/null || true
+         rm -f "$HTML.bak" "$TXT.bak"; }
+else
+  sed -i.bak 's/<!--CTI_VMSCAN_TICKET-->//g' "$HTML" "$TXT" 2>/dev/null || true
+  rm -f "$HTML.bak" "$TXT.bak"
+fi
+rm -f "$TICKET"
 
 if [ -n "$TODEV" ]; then
   # FLEET_DEV_EMAIL only. VMSCAN_TO / VMSCAN_ALLOW_TO are not consulted, so a

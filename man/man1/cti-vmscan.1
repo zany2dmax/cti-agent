@@ -22,6 +22,14 @@ cti-vmscan \- combine the week's Qualys VM scan-result notices into one report
 .IR FILE ]
 .RB [ \-\-fixes\-out
 .IR FILE ]
+.RB [ \-\-ticket\-slot ]
+.PP
+.B cti-vmscan \-\-stamp\-ticket
+.I FILE
+.B \-\-out
+.I FILE
+.B \-\-text\-out
+.I FILE
 .PP
 .B cti-vmscan \-\-commit\-seen
 .I FILE
@@ -200,6 +208,32 @@ SPREADSHEET findings) as JSON here, for
 .B cti\-jira \-\-vmscan\-fixes
 to file as one help-desk ticket. When the coverage check did not run the list
 is marked held, and that ticket is left alone.
+.TP
+.B \-\-ticket\-slot
+Leave a slot after the network team's sections of the coverage check (in the
+HTML an invisible comment) for
+.B \-\-stamp\-ticket
+to fill with the spreadsheet ticket. The marker text arriving inside the
+spreadsheet itself is removed first, so only the renderer's own slot is
+filled.
+.TP
+.BI \-\-stamp\-ticket " FILE"
+Fill the ticket slot in the
+.B \-\-out
+and
+.B \-\-text\-out
+reports already written, from this
+.B "cti\-jira \-\-vmscan\-fixes \-\-ref\-out"
+file, then exit: the ticket's key, status and what happened this week
+("filed", "the list changed", "already has this exact list", "NOT updated"
+and why), with a link to it when the link is a well-formed https Jira browse
+URL for that key. A missing or unreadable
+.I FILE
+stamps "status unavailable"; a week with no ticket and nothing to correct
+stamps nothing. Each report is replaced through a temporary file, so a failed
+write leaves the unstamped report.
+.B run\-vmscan
+does this before the send.
 .TP
 .BI \-\-commit\-seen " FILE"
 Record a

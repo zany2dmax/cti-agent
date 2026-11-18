@@ -28,6 +28,16 @@ type Coverage struct {
 	// Unavailable is why the check did not run; empty when it did. A check that
 	// could not run is said so in the report, never presented as a clean result.
 	Unavailable string
+	// TicketSlot leaves the spreadsheet ticket's slot after the network
+	// team's sections, for run-vmscan to stamp (ticketref.go).
+	TicketSlot bool
+}
+
+// slot writes the ticket slot's sentinel when one was asked for.
+func (c *Coverage) slot(b *strings.Builder) {
+	if c.TicketSlot {
+		b.WriteString(slotSentinel)
+	}
 }
 
 // Gaps are the findings that mean a network is not being scanned.
@@ -183,7 +193,9 @@ func (c *Coverage) text() string {
 	var b strings.Builder
 	b.WriteString("COVERAGE CHECK: THE NETWORK SPREADSHEET AGAINST WHAT THE SCANS COVER\n" + strings.Repeat("=", 72) + "\n")
 	if c.Unavailable != "" {
-		fmt.Fprintf(&b, "  Not run this week: %s\n\n", c.Unavailable)
+		fmt.Fprintf(&b, "  Not run this week: %s\n", c.Unavailable)
+		c.slot(&b)
+		b.WriteString("\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "  %d corporate networks checked, %d fully inside the groups the scans cover.\n", c.Checked, c.Covered)
@@ -214,6 +226,7 @@ func (c *Coverage) text() string {
 			}
 		}
 	}
+	c.slot(&b)
 	if o := c.Oddities(); len(o) > 0 {
 		fmt.Fprintf(&b, "\nCHECK IN QUALYS (%d)\n%s\n", len(o), strings.Repeat("-", 72))
 		for _, f := range o {
@@ -239,6 +252,7 @@ func (c *Coverage) html(b *strings.Builder) {
 	emailkit.Section(b, "Coverage check: the network spreadsheet against what the scans cover", emailkit.Navy)
 	if c.Unavailable != "" {
 		emailkit.Item(b, "Not run this week: "+c.Unavailable)
+		c.slot(b)
 		return
 	}
 	emailkit.Item(b, fmt.Sprintf("%d corporate networks checked, %d fully inside the groups the scans cover.", c.Checked, c.Covered))
@@ -286,6 +300,7 @@ func (c *Coverage) html(b *strings.Builder) {
 		emailkit.Card(b, emailkit.Grey, fmt.Sprintf("FOR THE NETWORK TEAM: CLEAN UP IN THE SPREADSHEET (%d)", len(c.Cleanup)),
 			"These do not stop the check, but the sheet is wrong or unclear here.<br><br>"+l.String())
 	}
+	c.slot(b)
 	if o := c.Oddities(); len(o) > 0 {
 		var l strings.Builder
 		for _, f := range o {

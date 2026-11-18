@@ -29,6 +29,8 @@ cti-jira \- file and follow one Jira ticket per confirmed KEV, Sev5, CVSS 9.0+ o
 .B cti-jira \-\-vmscan\-fixes
 .I FILE
 .RB [ \-\-for\-real ]
+.RB [ \-\-ref\-out
+.IR FILE ]
 .PP
 .B cti-jira \-\-appscan\-tickets
 .I FILE
@@ -545,6 +547,13 @@ action
 the key, its browse URL, its status and, on failure, why. Written on every
 path, failures included, for
 .BR "cti\-domains \-\-stamp\-ticket" .
+With
+.BR \-\-vmscan\-fixes ,
+the same for the spreadsheet ticket, for
+.B "cti\-vmscan \-\-stamp\-ticket"
+(run by
+.BR run\-vmscan (1),
+so the weekly VM scan report names the ticket).
 Default:\~not written.
 .TP
 .B \-\-follow\-up
@@ -552,7 +561,13 @@ Re-check every open fleet ticket against the scanner as described above,
 after today's findings. On its own (no
 .BR \-\-from\-enriched )
 no ticket map is written. Raises the run's time limit from two minutes to
-fifteen.
+fifteen. When the scanner cannot be loaded, nothing is re-checked or filed,
+but a real run with
+.B \-\-from\-enriched
+still writes the map, listing every fleet ticket marked
+.BR listed_only ,
+so the daily digest (and the weekly, which borrows the newest daily map) still
+shows them.
 Default:\~off.
 .SH ENVIRONMENT
 .I fleet.env

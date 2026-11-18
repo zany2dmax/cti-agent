@@ -626,7 +626,10 @@ const slotSentinel = "\x00cti-ticket-slot\x00"
 // Render builds both forms.
 func (r Report) Render() Block {
 	fix := func(s string) string {
-		s = strings.ReplaceAll(s, TicketSlot, "")
+		// Repeated: one pass over a nested marker would rebuild one.
+		for strings.Contains(s, TicketSlot) {
+			s = strings.ReplaceAll(s, TicketSlot, "")
+		}
 		return strings.ReplaceAll(s, slotSentinel, TicketSlot)
 	}
 	return Block{Subject: r.Subject(), Text: fix(r.text()), HTML: fix(r.html())}

@@ -356,6 +356,51 @@ func TestAScannerThatWillNotLoadStopsTheFollowUpAndSaysSo(t *testing.T) {
 	}
 }
 
+// With no scanner the daily cannot re-check, but it still lists every fleet
+// ticket - the spreadsheet ticket needs no scanner - and says so.
+func TestAScannerThatWillNotLoadStillListsTheTicketsForTheDigest(t *testing.T) {
+	fj, c := newFakeJira(t, ticket("SEC-23", "CVE-2026-2323", "indeterminate"), sheetTicket())
+	saved := scannerFor
+	scannerFor = func(context.Context, config.Config) (hostFiller, error) {
+		return nil, errors.New("kb cache: permission denied")
+	}
+	t.Cleanup(func() { scannerFor = saved })
+	path := writeEnriched(t, `{"findings":[]}`)
+
+	doFromEnriched(context.Background(), c, testCfg, path, true, false, true)
+	b, err := os.ReadFile(TicketMapPath(path))
+	if err != nil {
+		t.Fatalf("no ticket map: %v", err)
+	}
+	var tm TicketMap
+	if err := json.Unmarshal(b, &tm); err != nil {
+		t.Fatal(err)
+	}
+	if !tm.ListedOnly || tm.Tickets[sheetFixesRefKey].Key != "SEC-77" || tm.Tickets["CVE-2026-2323"].Key != "SEC-23" {
+		t.Errorf("map = %+v", tm)
+	}
+	if len(fj.comments) != 0 {
+		t.Error("tickets were touched with no scanner to compare against")
+	}
+
+	// Never over a map already written today (a re-checked one, say).
+	real := TicketMap{Generated: "x", Tickets: map[string]TicketRef{"CVE-2026-9": {Key: "SEC-9", Checked: true}}}
+	if err := writeTicketMap(TicketMapPath(path), real); err != nil {
+		t.Fatal(err)
+	}
+	doFromEnriched(context.Background(), c, testCfg, path, true, false, true)
+	if b, _ := os.ReadFile(TicketMapPath(path)); !strings.Contains(string(b), "SEC-9") {
+		t.Error("the fallback replaced a map already written today")
+	}
+
+	// A dry run still writes nothing.
+	_ = os.Remove(TicketMapPath(path))
+	doFromEnriched(context.Background(), c, testCfg, path, false, false, true)
+	if _, err := os.Stat(TicketMapPath(path)); err == nil {
+		t.Error("a dry run wrote the ticket map")
+	}
+}
+
 func TestAHeldSev5ReachesTheDigestsTicketMap(t *testing.T) {
 	// CVE-2026-111497 was held for approval and the only trace was one journal
 	// line. The map the digest reads must name it, with its host count.

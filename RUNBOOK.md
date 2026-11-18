@@ -1022,8 +1022,12 @@ HTML and text parts, until the scanner stops finding it. Its **FLEET TICKETS**
 section lists every ticket the follow-up re-checked - key and link, CVE, Jira
 status, hosts the scanner sees today, and what the re-check did ("commented:
 no detections remain", "no change - no comment", "not re-checked: the scanner
-lookup failed") - with tickets closed in the last 30 days below, and the
-domains lane's lock-down ticket ([11g](#3b-what-the-report-contains-and-the-lock-down-ticket)).
+lookup failed") - with tickets closed in the last 30 days below, the
+domains lane's lock-down ticket ([11g](#3b-what-the-report-contains-and-the-lock-down-ticket))
+and the VM scan lane's spreadsheet ticket. The weekly shows the same list from
+the newest daily, headed "as the latest daily re-checked them". When the scanner
+cannot be loaded nothing is re-checked, and the daily lists every ticket anyway,
+headed "not re-checked against the scanner this run".
 
 ### Filing tickets for findings that are already outstanding
 
@@ -1367,6 +1371,24 @@ project, and is written only when that project is in `JIRA_ALLOW_CREATE`. A dry
 run and a test send print the ticket; check it before the first real run with
 `sudo cti-agent run-vmscan --dry-run`. The "not scanned" networks are not in
 it: they are for the network and M&A teams to explain, in the email.
+
+**The weekly email names the ticket.** After the network team's sections it
+says which ticket and what happened to it this week, with a link: "filed
+HD-12", "HD-12 - the list changed, so this week's version was added as a
+comment", "HD-12 already has this exact list", "HD-12 was NOT updated this run -
+why". The report is rendered with a slot (`cti-vmscan --ticket-slot`), the
+ticket step writes what it did (`cti-jira --vmscan-fixes --ref-out`), and
+`cti-vmscan --stamp-ticket` fills the slot before the send, the way the domains
+lane names its lock-down ticket. A dry run and a test send show the would-be
+line ("Jira (preview): would add this week's changed list to HD-12"). If Jira
+fails the line says so, and the report still goes. The link appears only when
+Jira's browse URL is https and for that ticket's key.
+
+The ticket is also in every **Daily Brief's FLEET TICKETS** list (the daily's
+follow-up finds it by its label and lists it, never re-checking or commenting),
+and in the **Weekly Brief's**, which uses the newest daily's list. On a day the
+scanner cannot be loaded the daily still lists every ticket, headed "not
+re-checked against the scanner this run".
 
 The same ticket has a second section, **clean-up (does not stop the check)**:
 what is wrong or unclear in the sheet although it can still be read. The lane

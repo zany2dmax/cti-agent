@@ -1615,6 +1615,37 @@ class DigestFleetTickets(unittest.TestCase):
         self.assertIn("not re-checked", html)
 
 
+    def test_the_heading_claims_only_the_recheck_that_happened(self):
+        # The spreadsheet ticket is in every list; the heading differs by
+        # where the map came from.
+        sheet = {"key": "HD-7", "url": "https://x/browse/HD-7", "status": "Open",
+                 "kind": "vmscan-sheet-fixes",
+                 "outcome": "the network team's spreadsheet ticket - updated by the weekly VM scan run"}
+        for extra, want in (({}, "re-checked against the scanner today"),
+                            ({"_kind": "weekly"}, "as the latest daily re-checked them"),
+                            ({"_tickets_listed_only": True}, "not re-checked against the scanner this run")):
+            d = dict(self.data({"VM scan spreadsheet": sheet}), **extra)
+            html = brief.fleet_tickets_section(d)
+            text = "\n".join(brief.fleet_tickets_text(d))
+            for out in (html, text):
+                with self.subTest(extra=extra):
+                    self.assertIn(want, out)
+                    self.assertIn("HD-7", out)
+                    self.assertIn("spreadsheet fixes for the network team", out)
+            if extra:
+                self.assertNotIn("re-checked against the scanner today", html)
+            self.assertIn('href="https://x/browse/HD-7"', html)
+
+    def test_the_listed_only_flag_is_read_from_the_map(self):
+        with tempfile.TemporaryDirectory() as d:
+            enriched = os.path.join(d, "weekly-enriched-2026-11-16.json")
+            with open(enriched[:-5] + "-tickets.json", "w") as fh:
+                json.dump({"generated": "now", "listed_only": True,
+                           "tickets": {"x": {"key": "HD-7", "kind": "vmscan-sheet-fixes"}}}, fh)
+            self.assertTrue(brief._ticket_map(enriched).get("listed_only"))
+            self.assertEqual(brief.load_tickets(enriched)["x"]["key"], "HD-7")
+
+
 class HeldForApproval(unittest.TestCase):
     """A Sev5 held for approval is named in the digest, with the command.
 
@@ -4666,6 +4697,14 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                          'echo "cti-agent processed=${FLEET_PROCESSED_LOG:-} report=$REPORT_PATH" >> "$STUB_LOG"\n'
                          'echo "| CVE-2026-1 |" > "$REPORT_PATH"\n')
 
+    def test_the_weekly_files_and_comments_on_nothing(self):
+        # It borrows the newest daily's ticket map instead (run-digest 1b).
+        self.agent_logs_its_env()
+        self.plant("state/products.json", "{}")
+        r, calls = self.run_lane("run-digest", "weekly", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([c for c in calls if c.startswith("cti-jira ")], [])
+
     def test_digest_daily_rehearsal_writes_no_processed_log_no_db_and_no_real_file(self):
         self.agent_logs_its_env()
         day = datetime.date.today().isoformat()
@@ -4772,14 +4811,36 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 self.assertFalse(any("--commit-seen" in c for c in calls), calls)
                 # The spreadsheet ticket is only previewed by a rehearsal.
                 jira = [c for c in calls if c.startswith("cti-jira --vmscan-fixes")]
-                self.assertEqual(jira, [f"cti-jira --vmscan-fixes {out}/vmscan-fixes-{stamp}.json --dry-run"])
+                self.assertEqual(jira, [f"cti-jira --vmscan-fixes {out}/vmscan-fixes-{stamp}.json --dry-run "
+                                        f"--ref-out {out}/vmscan-ticket-{stamp}.json"])
+                self.assertTicketStampedBeforeTheSend(calls, out, stamp)
         self.log.write_text("")
         r, calls = self.run_lane("run-vmscan", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         scan = [c for c in calls if c.startswith("cti-vmscan --out")][0]
         self.assertIn(f"--seen-out {self.home}/state/vmscan-seen-{stamp}.json", scan)
         jira = [c for c in calls if c.startswith("cti-jira --vmscan-fixes")]
-        self.assertEqual(jira, [f"cti-jira --vmscan-fixes {self.home}/state/vmscan-fixes-{stamp}.json --for-real"])
+        self.assertEqual(jira, [f"cti-jira --vmscan-fixes {self.home}/state/vmscan-fixes-{stamp}.json --for-real "
+                                f"--ref-out {self.home}/state/vmscan-ticket-{stamp}.json"])
+        self.assertTicketStampedBeforeTheSend(calls, self.home / "state", stamp)
+
+    def assertTicketStampedBeforeTheSend(self, calls, out, stamp):
+        """The report names the spreadsheet ticket: rendered with a slot, the
+        ticket step, the stamp, then the mailer - in that order."""
+        def idx(pred):
+            got = [i for i, c in enumerate(calls) if pred(c)]
+            self.assertTrue(got, calls)
+            return got[0]
+        render = idx(lambda c: c.startswith("cti-vmscan --out"))
+        self.assertIn("--ticket-slot", calls[render])
+        jira = idx(lambda c: c.startswith("cti-jira --vmscan-fixes"))
+        st = idx(lambda c: c.startswith("cti-vmscan --stamp-ticket"))
+        self.assertEqual(calls[st], f"cti-vmscan --stamp-ticket {out}/vmscan-ticket-{stamp}.json "
+                                    f"--out {out}/vmscan-{stamp}.html --text-out {out}/vmscan-{stamp}.txt")
+        send = idx(lambda c: c.startswith("cti-mailer "))
+        self.assertLess(render, jira)
+        self.assertLess(jira, st)
+        self.assertLess(st, send)
 
     def test_patchtuesday_rehearsal_leaves_the_sent_synopsis_alone(self):
         # The stub's subject is October 2026, so the tag is 2026-October.

@@ -43,7 +43,25 @@ func vmscanFixesJQL(projectKey string) string {
 		projectKey, vmscanFixesLabel)
 }
 
-func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path string, forReal bool, now time.Time) int {
+func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config,
+	path string, forReal bool, now time.Time, refOut string) int {
+
+	// What happened, for the weekly report (cti-vmscan --stamp-ticket).
+	// Written on every path that reaches Jira, failures included: "not
+	// updated, and why" is worth saying in the report.
+	ref := func(action string, is *jira.Issue, note string) {
+		if refOut == "" {
+			return
+		}
+		r := vmscan.TicketRef{Action: action, Note: note}
+		if is != nil {
+			r.Key, r.URL, r.Status = is.Key, c.BrowseURL(is.Key), is.Fields.Status.Name
+		}
+		if err := vmscan.WriteTicketRef(refOut, r); err != nil {
+			logf("WARNING: could not write %s: %s", safelog.Line(refOut), safelog.Line(err.Error()))
+		}
+	}
+
 	// path is the runner-supplied --vmscan-fixes file.
 	b, err := os.ReadFile(path) // #nosec G304 -- operator-supplied path, read-only
 	if err != nil {
@@ -55,6 +73,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 	}
 	project := cfg.VMScanProject()
 	if strings.TrimSpace(project) == "" {
+		ref("error", nil, "no Jira project is configured")
 		return die("no Jira project: set JIRA_PROJECT_KEY (or JIRA_VMSCAN_PROJECT_KEY)")
 	}
 	logf("vmscan: %d spreadsheet row(s) to correct and %d to clean up, for the network team (list %s)",
@@ -62,6 +81,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 
 	issues, err := c.Search(ctx, vmscanFixesJQL(project), 5)
 	if err != nil {
+		ref("error", nil, "Jira could not be searched for the open ticket")
 		return die("searching for an open spreadsheet ticket: %s", safelog.Line(err.Error()))
 	}
 	var open *jira.Issue
@@ -77,6 +97,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 			// Unknown is not "never posted": commenting now could repeat the list.
 			logf("WARNING: could not read what %s was last told (%s) - leaving it alone this run",
 				open.Key, safelog.Line(err.Error()))
+			ref("error", open, "could not read what it was last told, so it was left alone")
 			return exitOK
 		}
 	}
@@ -84,10 +105,28 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 	plan, why := planVMScanFixes(open, prev, ff)
 	logf("vmscan: %s", why)
 	if plan == domainsNothing {
+		switch {
+		case ff.Held:
+			ref("held", open, "")
+		case open == nil:
+			ref("none", nil, "")
+		case prev.Resolved:
+			ref("resolved-earlier", open, "")
+		default:
+			ref("unchanged", open, "")
+		}
 		emit(map[string]any{"mode": modeName(forReal), "action": "nothing", "reason": why})
 		return exitOK
 	}
 	if !forReal {
+		switch plan {
+		case domainsCreate:
+			ref("would-create", nil, "")
+		case domainsComment:
+			ref("would-comment", open, "")
+		case domainsDone:
+			ref("would-resolve", open, "")
+		}
 		logf("DRY RUN - nothing written to Jira. Add --for-real to %s.", vmscanPlanWords(plan))
 		if plan != domainsDone {
 			fmt.Println(vmscanFixesSummary(ff, now))
@@ -97,6 +136,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 	}
 	if err := jira.CheckAllowed(project, cfg.JiraAllowCreate); err != nil {
 		logf("WRITE GATE CLOSED - spreadsheet ticket not written: %s", safelog.Line(err.Error()))
+		ref("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
 		return exitOK
 	}
 
@@ -116,6 +156,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 			err = nil
 		}
 		if err != nil {
+			ref("error", nil, "Jira refused to create it")
 			return die("creating the spreadsheet ticket: %s", safelog.Line(err.Error()))
 		}
 		if err := c.SetProperty(ctx, res.Key, vmscanFixesPropKey, st); err != nil {
@@ -123,18 +164,21 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 				res.Key, safelog.Line(err.Error()))
 		}
 		logf("filed %s - %s", res.Key, c.BrowseURL(res.Key))
+		ref("created", &jira.Issue{Key: res.Key}, "")
 		emit(map[string]any{"mode": "for-real", "action": "created", "key": res.Key, "url": c.BrowseURL(res.Key)})
 
 	case domainsComment:
 		text := "The weekly VM scan coverage check found a different list of spreadsheet rows to " +
 			"correct. This replaces the list above.\n\n" + vmscanFixesBody(ff, now)
 		if err := c.AddComment(ctx, open.Key, text); err != nil {
+			ref("error", open, "the comment with this week's list was refused")
 			return die("commenting on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		if err := c.SetProperty(ctx, open.Key, vmscanFixesPropKey, st); err != nil {
 			logf("WARNING: could not record the list on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		logf("commented on %s with the updated list", open.Key)
+		ref("commented", open, "")
 		emit(map[string]any{"mode": "for-real", "action": "commented", "key": open.Key, "url": c.BrowseURL(open.Key)})
 
 	case domainsDone:
@@ -142,6 +186,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 			"network spreadsheet and found nothing to clean up: nothing in this ticket is left. It can be closed.",
 			now.Format("2 January 2006"))
 		if err := c.AddComment(ctx, open.Key, text); err != nil {
+			ref("error", open, "the closing comment was refused")
 			return die("commenting on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		st.Resolved = true
@@ -149,6 +194,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 			logf("WARNING: could not record the list on %s: %s", open.Key, safelog.Line(err.Error()))
 		}
 		logf("told %s that nothing is left to correct", open.Key)
+		ref("resolved", open, "")
 		emit(map[string]any{"mode": "for-real", "action": "resolved", "key": open.Key, "url": c.BrowseURL(open.Key)})
 	}
 	return exitOK

@@ -59,6 +59,17 @@ only adds to the schedules, and stale titles are reported as missing. Then
   `gh workflow run release.yml -f tag=1.6.5`) backfills an older tag. RUNBOOK
   11i and cheat sheet 11a have the steps; tag before `task ship`, since ship
   checks the cheat sheet's stamp against the newest tag.
+- **The VM scan weekly names its Jira ticket.** The network team's
+  spreadsheet ticket was filed after the email was rendered, so the email never
+  said which ticket it was. Now, after the network team's sections, it says
+  which ticket and what happened to it this week, with a link: filed, the list
+  changed and was added as a comment, already has this exact list, told every
+  row is corrected, or NOT updated and why. `run-vmscan` renders with
+  `cti-vmscan --ticket-slot`, `cti-jira --vmscan-fixes --ref-out` writes what
+  it did, and `cti-vmscan --stamp-ticket` fills the line in before the send -
+  the domains lane's mechanism. A dry run and a test send show the would-be
+  line. A Jira failure says so in the line and never holds the report; the link
+  is used only when it is an https browse URL for that key.
 
 ### Changed
 
@@ -127,6 +138,21 @@ only adds to the schedules, and stale titles are reported as missing. Then
   that no scan targeted in the week.
 
 ### Fixed
+
+- **Every fleet ticket is listed even when the scanner will not load.**
+  `cti-jira --from-enriched --follow-up` used to stop before writing the
+  digest's ticket map, so on such a day FLEET TICKETS was empty - the
+  spreadsheet and lock-down tickets included, though they need no scanner. It
+  now lists every ticket, re-checks and comments on none, and the heading says
+  "not re-checked against the scanner this run". A dry run still writes no map.
+- **A nested slot marker in observed data can no longer rebuild a slot.** The
+  domains report removed the ticket-slot marker from DNS and page text in one
+  pass, so `<!--CTI_DOMAINS_<!--CTI_DOMAINS_TICKET-->TICKET-->` left a whole
+  marker behind and the ticket line was stamped there too. The removal now
+  repeats until none is left; the new VM scan slot does the same.
+- **The weekly's FLEET TICKETS heading no longer claims today's re-check.**
+  The weekly borrows the newest daily's ticket list; it now says "as the latest
+  daily re-checked them".
 
 - **The VM scan weekly counts what it says it counts.** The subject and the
   scan cards said "locations covered" for what are Qualys Asset Groups (their

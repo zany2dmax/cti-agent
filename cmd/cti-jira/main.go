@@ -20,8 +20,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
@@ -81,6 +83,7 @@ func run() int {
 	refOut := flag.String("ref-out", "",
 		"with --domains-actions: write what happened to the lock-down ticket (key, "+
 			"status, action) here as JSON, for cti-domains --stamp-ticket; with "+
+			"--vmscan-fixes, the same for the spreadsheet ticket, for cti-vmscan --stamp-ticket; with "+
 			"--appscan-tickets, one entry per application for cti-appscan --stamp-tickets")
 	appscanReports := flag.String("appscan-reports", "",
 		"with --appscan-tickets: a cti-appreport --out-dir; each application's zipped "+
@@ -187,7 +190,7 @@ func run() int {
 		return doDomainsActions(ctx, c, cfg, *domainsActions, *forReal, time.Now(), *refOut)
 	}
 	if *vmscanFixes != "" {
-		return doVMScanFixes(ctx, c, cfg, *vmscanFixes, *forReal, time.Now())
+		return doVMScanFixes(ctx, c, cfg, *vmscanFixes, *forReal, time.Now(), *refOut)
 	}
 	if *appscanCloseTest != "" {
 		return doAppscanCloseTest(ctx, c, cfg, *appscanCloseTest, *forReal)
@@ -642,6 +645,23 @@ func doFromEnriched(ctx context.Context, c *jira.Client, cfg config.Config,
 			"the directory the command was run from, so set it to an absolute path in fleet.env. "+
 			"For anything else, check LOOKUP_PROVIDER",
 			safelog.Line(err.Error()), skipped, safelog.Line(cfg.QualysKBCachePath))
+		// The digest still lists every fleet ticket - the spreadsheet and
+		// lock-down tickets need no scanner at all - marked listed-only so
+		// it does not claim a re-check. Only where a real run would have
+		// written the map: a dry run must not touch it.
+		// Never over a map already written today: a second run with a broken
+		// scanner would replace that run's re-check results (and its held
+		// list) with a bare listing.
+		_, statErr := os.Stat(TicketMapPath(path))
+		if withFollowUp && forReal && path != "" && errors.Is(statErr, fs.ErrNotExist) {
+			tm := TicketMap{Generated: now.Format(time.RFC3339), ListedOnly: true,
+				Tickets: followUp(ctx, c, cfg, nil, nil, now, false)}
+			if err := writeTicketMap(TicketMapPath(path), tm); err != nil {
+				logf("WARNING: %s - the digest will render without ticket keys", safelog.Line(err.Error()))
+			} else {
+				logf("listed %d fleet ticket(s) for the digest without a re-check", len(tm.Tickets))
+			}
+		}
 		return exitOK
 	}
 

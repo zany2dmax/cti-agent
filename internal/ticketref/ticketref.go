@@ -17,7 +17,8 @@ import (
 // Ref is one ticket's outcome.
 type Ref struct {
 	// Action is one of: created, commented, unchanged, resolved, none,
-	// would-create, would-comment, would-resolve, error, gate-closed, skipped.
+	// would-create, would-comment, would-resolve, error, gate-closed, skipped;
+	// the VM scan lane also uses resolved-earlier.
 	Action string `json:"action"`
 	Key    string `json:"key,omitempty"`
 	URL    string `json:"url,omitempty"`

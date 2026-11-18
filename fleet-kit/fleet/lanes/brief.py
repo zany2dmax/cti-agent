@@ -545,6 +545,22 @@ def _ticket_hosts(t):
     return "no hosts" if n == 0 else f"{n} host{'s' if n != 1 else ''}"
 
 
+def _tickets_heading(data, n_open):
+    """What the FLEET TICKETS heading may claim.
+
+    The daily's map comes from cti-jira's follow-up, which re-checked each
+    ticket against the scanner that morning. The weekly borrows the newest
+    daily's map, so its re-check is that daily's, not "today". And when the
+    scanner would not load, cti-jira lists the tickets without re-checking
+    any (listed_only): claiming a re-check there would be false.
+    """
+    if data.get("_tickets_listed_only"):
+        return f"{n_open} open, listed from Jira - not re-checked against the scanner this run"
+    if data.get("_kind") == "weekly":
+        return f"{n_open} open, as the latest daily re-checked them against the scanner"
+    return f"{n_open} open, re-checked against the scanner today"
+
+
 def fleet_tickets_section(data):
     """FLEET TICKETS: every open fleet ticket and what today's re-check found."""
     open_, closed = _fleet_tickets(data)
@@ -594,7 +610,7 @@ def fleet_tickets_section(data):
   <tr><td style="padding:4px 20px 14px 20px;border-top:1px solid #e2e8f0">
     <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
                 color:#4a5568;margin:12px 0 8px 0;letter-spacing:.5px">
-      FLEET TICKETS &mdash; {len(open_)} open, re-checked against the scanner today</div>
+      FLEET TICKETS &mdash; {esc(_tickets_heading(data, len(open_)))}</div>
     <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
            style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
       {''.join(parts)}
@@ -669,7 +685,7 @@ def fleet_tickets_text(data):
     sup = supplier_line(data)
     if not open_ and not closed and not sup:
         return []
-    lines = [f"FLEET TICKETS - {len(open_)} open, re-checked against the scanner today",
+    lines = [f"FLEET TICKETS - {_tickets_heading(data, len(open_))}",
              "-" * 68]
     products = products_by_cve(data)
 
@@ -1134,9 +1150,11 @@ def main():
     # Underscore-prefixed: renderer state, not part of the enriched
     # contract that enrich.py owns.
     data["_tickets"] = load_tickets(args.enriched)
+    data["_tickets_listed_only"] = bool(_ticket_map(args.enriched).get("listed_only"))
     data["_held"] = load_held(args.enriched)
     data["_products"] = load_products(args.enriched)
     data["_enriched"] = args.enriched
+    data["_kind"] = kind
 
     if args.subject_only:
         print(subject(data, kind))

@@ -143,7 +143,7 @@ flag: --list | read-only: list the fleet's tickets (key, status, age, assignee, 
 flag: --follow-up | with --from-enriched: also re-check every open fleet ticket against the scanner, whether or not its CVE is in today's mail, and comment on spread, on reaching zero, or once on closed-but-still-detected
 flag: --for-real | write to Jira: create, comment, close
 flag: --from-enriched STRING | file tickets for the present KEV, Sev5 and CVSS 9.0+ findings in this enriched JSON
-flag: --ref-out STRING | with --domains-actions: write what happened to the lock-down ticket (key, status, action) here as JSON, for cti-domains --stamp-ticket; with --appscan-tickets, one entry per application for cti-appscan --stamp-tickets
+flag: --ref-out STRING | with --domains-actions: write what happened to the lock-down ticket (key, status, action) here as JSON, for cti-domains --stamp-ticket; with --vmscan-fixes, the same for the spreadsheet ticket, for cti-vmscan --stamp-ticket; with --appscan-tickets, one entry per application for cti-appscan --stamp-tickets
 flag: --test-ticket | build a clearly-labelled test ticket
 flag: --dry-run | show what would be written to Jira, write nothing
 
@@ -249,6 +249,7 @@ command: cti-vmscan
 about: Combine the week's Qualys VM scan-result notices into one report
 runs: local
 risk: --commit-seen writes
+risk: --stamp-ticket writes
 flag: --check | read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list, scan list and scan schedules the report needs, print counts, and exit
 flag: --since DURATION | how far back to look for scan-result notices
 flag: --scans STRING | comma-separated extra scan titles to expect each week, on top of Qualys's active scan schedules (default VMSCAN_SCANS); one that launched no scan is reported as missing. Every scheduled scan that ran is included either way
@@ -261,6 +262,8 @@ flag: --subnets-file FILE | read the network spreadsheet (.xlsx) from this file 
 flag: --csv-out FILE | write the coverage findings as a worksheet (CSV) here, for the runner to attach: one row per network not scanned or spreadsheet row to fix, with its sheet row and a blank column for the teams to say why
 flag: --fixes-out STRING | write the spreadsheet rows the network team has to correct as JSON here, for cti-jira --vmscan-fixes to file as one help-desk ticket
 flag: --commit-seen FILE | record a --seen-out file in the processed log the mailbox cleanup reads, then exit
+flag: --ticket-slot | leave a slot after the network team's sections for --stamp-ticket to fill with the spreadsheet ticket
+flag: --stamp-ticket FILE | fill the ticket slot in the --out and --text-out reports already written, from this cti-jira --vmscan-fixes --ref-out file (missing or unreadable: the line says the status is unavailable); then exit
 
 command: enrich.py
 about: Enrich CVEs with NVD, EPSS and KEV

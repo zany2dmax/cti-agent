@@ -114,6 +114,8 @@ func followUpVerdict(res vulnlookup.Result, err error) (ok bool, why string) {
 
 // followUp re-checks the fleet's tickets. done holds the CVEs the morning
 // path already handled this run, so no ticket is compared twice in one run.
+// A nil look lists every ticket and checks none (the digest's ticket list
+// when the scanner will not load); it must come with forReal false.
 //
 // Every failure is a warning. This runs inside run-digest, before the email
 // is rendered, so a Jira or scanner problem must cost follow-up comments and
@@ -242,6 +244,15 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			continue
 		}
 
+		if look == nil {
+			// No scanner this run: listed for the digest, not compared and
+			// never commented on.
+			if r, ok := refs[cve]; ok && r.Key == issue.Key {
+				r.Outcome = "listed only - not re-checked this run (the scanner was unavailable)"
+				refs[cve] = r
+			}
+			continue
+		}
 		res, err := look(ctx, cve)
 		if ok, why := followUpVerdict(res, err); !ok {
 			unanswered++

@@ -311,6 +311,10 @@ type TicketMap struct {
 	Generated string               `json:"generated"`
 	Tickets   map[string]TicketRef `json:"tickets"`
 	Held      []HeldCVE            `json:"held,omitempty"`
+	// ListedOnly: the scanner could not be loaded, so every ticket is
+	// listed and none was re-checked this run; the digest says so rather
+	// than "re-checked today".
+	ListedOnly bool `json:"listed_only,omitempty"`
 }
 
 // TicketMapPath is where it goes: next to the enriched file it describes, so

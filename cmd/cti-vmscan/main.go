@@ -84,10 +84,18 @@ func run() int {
 	check := flag.Bool("check", false,
 		"read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list, "+
 			"scan list and scan schedules the report needs, print counts, and exit")
+	ticketSlot := flag.Bool("ticket-slot", false,
+		"leave a slot after the network team's sections for --stamp-ticket to fill with the spreadsheet ticket")
+	stampTicket := flag.String("stamp-ticket", "",
+		"fill the ticket slot in the --out and --text-out reports already written, from this "+
+			"cti-jira --vmscan-fixes --ref-out file (missing or unreadable: the line says the status is unavailable); then exit")
 	flag.Parse()
 
 	if *commitSeen != "" {
 		return doCommitSeen(*commitSeen)
+	}
+	if *stampTicket != "" {
+		return doStampTicket(*stampTicket, *out, *textOut)
 	}
 
 	fleetenv.Load()
@@ -162,6 +170,7 @@ func run() int {
 	}
 	if !*noCoverage {
 		week.Coverage = coverage(ctx, cfg, g, week, *subnetsFile)
+		week.Coverage.TicketSlot = *ticketSlot
 		if c := week.Coverage; c.Unavailable != "" {
 			logf("warn   : coverage check not run: %s", safelog.Line(c.Unavailable))
 		} else {
@@ -587,5 +596,49 @@ func doCommitSeen(path string) int {
 		return die("saving %s: %s", safelog.Line(dest), safelog.Line(err.Error()))
 	}
 	logf("seen   : %d notice(s) recorded for the mailbox cleanup", len(pending.Entries))
+	return exitOK
+}
+
+// doStampTicket fills the ticket slot in reports already written.
+func doStampTicket(refPath, htmlPath, textPath string) int {
+	ref, err := vmscan.ReadTicketRef(refPath)
+	if err != nil {
+		logf("ticket : %s unreadable (%s) - the report says the status is unavailable",
+			safelog.Line(refPath), safelog.Line(err.Error()))
+		ref = nil
+	}
+	for _, p := range []struct {
+		path   string
+		isHTML bool
+	}{{htmlPath, true}, {textPath, false}} {
+		if p.path == "" {
+			continue
+		}
+		// #nosec G304 -- the runner's own report under $FLEET_HOME/state.
+		b, err := os.ReadFile(p.path)
+		if err != nil {
+			return die("reading %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+		out := vmscan.StampTicket(string(b), p.isHTML, ref)
+		// Temp file and rename: a write that fails half-way must leave the
+		// unstamped report, not a truncated one the runner then sends.
+		tmp := p.path + ".stamp"
+		// #nosec G703 -- tmp is the runner's own --out / --text-out report
+		// (under $FLEET_HOME/state) plus a fixed suffix, given on the command
+		// line by run-vmscan; nothing read from outside chooses it.
+		if err := os.WriteFile(tmp, []byte(out), 0o600); err != nil {
+			_ = os.Remove(tmp)
+			return die("writing %s: %s", safelog.Line(tmp), safelog.Line(err.Error()))
+		}
+		if err := os.Rename(tmp, p.path); err != nil {
+			_ = os.Remove(tmp)
+			return die("replacing %s: %s", safelog.Line(p.path), safelog.Line(err.Error()))
+		}
+	}
+	line, _ := vmscan.TicketLine(ref)
+	if line == "" {
+		line = "no spreadsheet ticket to mention"
+	}
+	logf("ticket : %s", safelog.Line(line))
 	return exitOK
 }
