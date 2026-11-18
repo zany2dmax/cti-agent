@@ -49,6 +49,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   **Upgrade:** nothing until you want it. Then create the read-only API
   client, add the three `FALCON_*` settings to `fleet.env`, and run
   `sudo cti-agent cti-falcon --check`.
+- `cti-falcon --find-app NAME` and `--new-apps DAYS`: the inventory half of
+  advisory triage, from Falcon Discover. `--find-app` lists the installed
+  applications matching a name, with host, version and platform counts.
+  `--new-apps` lists applications first seen in the window that the estate
+  never had before: the systems nobody told us about. Neither prints a host
+  name or ID. Names pass a strict character check before they reach a
+  filter, so a name taken from an advisory can't change the query.
+  RUNBOOK §11j.
 
 ---
 

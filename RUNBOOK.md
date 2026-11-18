@@ -2629,6 +2629,36 @@ work. It never prints the token, the secret, an ID or a record.
 | `IOC Management: READ OK ... no hosts for the test value` | Expected. The probe asks about `example.com`, a reserved name no host should have seen. |
 | `IOC Management: READ ERROR ... HTTP 404` | The route answered 404 without the service's own JSON, or the message is about the route. The lookup triage needs doesn't work. Check the scope, then whether CrowdStrike has moved the route. |
 
+**What we run (Falcon Discover).** Discover keeps one record per application
+per host, hundreds of thousands of them, so nothing copies it wholesale. Two
+read-only questions instead:
+
+```bash
+sudo cti-agent cti-falcon --find-app chrome
+sudo cti-agent cti-falcon --find-app "Google Chrome" --exact --vendor "Google LLC"
+sudo cti-agent cti-falcon --new-apps 7
+```
+
+- `--find-app` answers "do we run this?": each matching application with its
+  host count, top versions and platforms. Over `--max-rows` (2,000 records by
+  default) it says the counts are a lower bound. This is the lookup triage
+  will make when an advisory names a product.
+- `--new-apps 7` answers "what appeared this week that we never had?". It
+  reads the records first seen in the window, groups them, and asks for each
+  whether any record predates the window. It lists the **new** ones, and the
+  ones it **could not check**, which you should treat as possibly new: records
+  with no vendor, names with characters a lookup refuses, or anything over its
+  200-lookup cap. Updates and new hosts for something we already run are only
+  counted. An app whose name includes its version (`Zoom 5.17.1`) shows as new
+  after every update. That's noise, but on the safe side.
+
+Names typed or found in advisories are hostile input to the filter. Only
+letters, digits, space and `. _ - ( ) / &` are allowed, 2 to 80 characters.
+Anything else, including `+`, `*` and `,`, is refused before any request, so a
+name can't add a clause to the query. For an app like `Notepad++`, search for
+`notepad`. Names coming back from Discover are cleaned of control characters
+before they're printed. Neither mode ever prints a host name or ID.
+
 ---
 
 ## 12. Verifying a run

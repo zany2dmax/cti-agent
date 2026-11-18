@@ -318,6 +318,8 @@ sudo cti-agent fleet-db recent 20              # recent memories, open tasks, co
 sudo cti-agent fleet-db findings --priority Sev5
 sudo cti-agent cti-kev --horizon 30            # KEV deadlines due in 30 days
 sudo cti-agent cti-falcon --check              # CrowdStrike API client: token and the four Read scopes, counts only
+sudo cti-agent cti-falcon --find-app chrome    # do we run it? hosts, versions, platforms (no host names)
+sudo cti-agent cti-falcon --new-apps 7         # apps first seen this week that the estate never had before
 sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500   # PoD Log API counts, read only
 ```
 

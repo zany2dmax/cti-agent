@@ -1,7 +1,10 @@
 // cti-falcon checks the fleet's CrowdStrike Falcon API client.
 //
-//	cti-falcon --check           # token, then one read per scope
-//	cti-falcon --check --json    # the same as JSON
+//	cti-falcon --check                     # token, then one read per scope
+//	cti-falcon --find-app chrome           # do we run it? hosts, versions
+//	cti-falcon --find-app "Google Chrome" --exact --vendor "Google LLC"
+//	cti-falcon --new-apps 7                # apps first seen this week that we never had
+//	add --json to any of them for JSON
 //
 // # WHAT IT IS FOR
 //
@@ -14,8 +17,9 @@
 // Assets usually means Falcon Discover is not licensed, which decides where
 // the inventory comes from.
 //
-// It reads with limit=1 and prints counts at most. It never prints the token,
-// the secret, an ID or a record, and it revokes its token before it exits.
+// --check reads with limit=1 and prints counts at most. --find-app and
+// --new-apps print application names, versions and host counts, never a host
+// name or ID. Every mode revokes its token before it exits.
 //
 // # SETTINGS
 //
@@ -34,10 +38,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/falcon"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
+	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
 const (
@@ -65,16 +72,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cti-falcon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	check := fs.Bool("check", false, "get a token and run one read per scope; prints counts only")
-	asJSON := fs.Bool("json", false, "with --check: print the result as JSON")
-	timeout := fs.Duration("timeout", 2*time.Minute, "give up after this long")
+	findApp := fs.String("find-app", "", "list installed applications whose name contains this, with host counts")
+	vendor := fs.String("vendor", "", "with --find-app: the vendor must contain this too")
+	exact := fs.Bool("exact", false, "with --find-app: name and vendor must match exactly, not contain")
+	newApps := fs.Int("new-apps", 0, "list applications first seen in the last N days that the estate never had before")
+	maxRows := fs.Int("max-rows", 0, "stop reading after this many records (default 2000 for --find-app, 10000 for --new-apps)")
+	asJSON := fs.Bool("json", false, "print the result as JSON")
+	timeout := fs.Duration("timeout", 2*time.Minute, "give up after this long (--new-apps: at least 15m)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: cti-falcon --check [--json] [--timeout DURATION]")
+		_, _ = fmt.Fprintln(stderr, "usage: cti-falcon --check | --find-app NAME [--vendor V] [--exact] | --new-apps DAYS  [--json] [--max-rows N] [--timeout D]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-	if !*check || fs.NArg() > 0 {
+	modes := 0
+	for _, on := range []bool{*check, *findApp != "", *newApps != 0} {
+		if on {
+			modes++
+		}
+	}
+	if modes != 1 || fs.NArg() > 0 || *newApps < 0 || *newApps > 90 || *maxRows < 0 ||
+		((*vendor != "" || *exact) && *findApp == "") {
 		fs.Usage()
 		return exitUsage
 	}
@@ -85,6 +104,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logf("error  : %v", err)
 		logf("set FALCON_BASE_URL, FALCON_CLIENT_ID and FALCON_CLIENT_SECRET in fleet.env (RUNBOOK: the CrowdStrike API client)")
 		return exitErr
+	}
+
+	if *findApp != "" || *newApps != 0 {
+		d := *timeout
+		if *newApps != 0 && d < 15*time.Minute {
+			d = 15 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), d)
+		defer cancel()
+		defer revoke(c, logf)
+		if *findApp != "" {
+			return findApps(ctx, c, *findApp, falcon.FindOpts{Vendor: *vendor, Exact: *exact, MaxRows: *maxRows}, *asJSON, stdout, logf)
+		}
+		return listNewApps(ctx, c, *newApps, *maxRows, *asJSON, stdout, logf)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
@@ -163,4 +196,124 @@ func upper(s string) string {
 		return "DENIED"
 	}
 	return "ERROR"
+}
+
+func revoke(c *falcon.Client, logf func(string, ...any)) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := c.Revoke(ctx); err != nil {
+		logf("warn   : %v (the token expires on its own)", err)
+	}
+}
+
+func writeJSON(w io.Writer, v any) int {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return exitErr
+	}
+	return exitOK
+}
+
+func findApps(ctx context.Context, c *falcon.Client, name string, o falcon.FindOpts, asJSON bool, w io.Writer, logf func(string, ...any)) int {
+	res, err := c.FindApps(ctx, name, o)
+	if err != nil {
+		logf("error  : %v", err)
+		return exitErr
+	}
+	if asJSON {
+		return writeJSON(w, res)
+	}
+	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format+"\n", a...) }
+	p("filter : %s", res.Filter)
+	capped := ""
+	if res.Truncated {
+		capped = fmt.Sprintf(" - read the first %d, so host counts below are a lower bound (raise --max-rows)", res.Read)
+	}
+	p("matched: %d records%s", res.Total, capped)
+	if len(res.Apps) == 0 {
+		p("no installed application matched")
+		return exitOK
+	}
+	for _, a := range res.Apps {
+		printApp(w, a, "")
+	}
+	return exitOK
+}
+
+func listNewApps(ctx context.Context, c *falcon.Client, days, maxRows int, asJSON bool, w io.Writer, logf func(string, ...any)) int {
+	since := now().Add(-time.Duration(days) * 24 * time.Hour)
+	rep, err := c.NewApps(ctx, since, falcon.NewAppsOpts{MaxRows: maxRows})
+	if err != nil {
+		logf("error  : %v", err)
+		return exitErr
+	}
+	if asJSON {
+		return writeJSON(w, rep)
+	}
+	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format+"\n", a...) }
+	p("window : since %s (%d days)", rep.Since.Format(time.RFC3339), days)
+	capped := ""
+	if rep.Truncated {
+		capped = fmt.Sprintf(" - read the first %d only (raise --max-rows)", rep.Read)
+	}
+	p("records: %d first seen in the window%s", rep.Total, capped)
+	p("new to the estate: %d", len(rep.New))
+	for _, a := range rep.New {
+		printApp(w, a.AppSummary, "  ")
+	}
+	if len(rep.NotChecked) > 0 {
+		p("not checked: %d (a name a lookup cannot use, or over the check cap) - treat as possibly new", len(rep.NotChecked))
+		for _, a := range rep.NotChecked {
+			printApp(w, a.AppSummary, "  ")
+		}
+	}
+	p("seen before: %d applications (updates, or new hosts for something we already run)", rep.SeenBefore)
+	return exitOK
+}
+
+// now is a seam for --new-apps' window.
+var now = time.Now
+
+func printApp(w io.Writer, a falcon.AppSummary, indent string) {
+	// Names come from Discover, and anyone who can install software on an
+	// endpoint chooses them: no control character reaches the terminal.
+	name := safelog.LineMax(a.Name, 120)
+	if a.Vendor != "" {
+		name = safelog.LineMax(a.Vendor, 80) + " / " + name
+	}
+	extra := ""
+	if a.NoHost > 0 {
+		extra = fmt.Sprintf(", plus %d record(s) naming no host", a.NoHost)
+	}
+	_, _ = fmt.Fprintf(w, "%s%s - %d host(s)%s\n", indent, name, a.Hosts, extra)
+	_, _ = fmt.Fprintf(w, "%s    versions : %s\n", indent, top(a.Versions, 5))
+	_, _ = fmt.Fprintf(w, "%s    platforms: %s\n", indent, top(a.Platforms, 5))
+}
+
+// top prints the n largest entries of a count map, "value (count)".
+func top(m map[string]int, n int) string {
+	type kv struct {
+		k string
+		v int
+	}
+	xs := make([]kv, 0, len(m))
+	for k, v := range m {
+		xs = append(xs, kv{k, v})
+	}
+	sort.Slice(xs, func(i, j int) bool {
+		if xs[i].v != xs[j].v {
+			return xs[i].v > xs[j].v
+		}
+		return xs[i].k < xs[j].k
+	})
+	parts := []string{}
+	for i, x := range xs {
+		if i == n {
+			parts = append(parts, fmt.Sprintf("+%d more", len(xs)-n))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s (%d)", safelog.LineMax(x.k, 60), x.v))
+	}
+	return strings.Join(parts, ", ")
 }

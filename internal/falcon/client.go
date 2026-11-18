@@ -175,7 +175,8 @@ type Envelope struct {
 	Meta struct {
 		TraceID    string `json:"trace_id"`
 		Pagination *struct {
-			Total int `json:"total"`
+			Total int    `json:"total"`
+			After string `json:"after"`
 		} `json:"pagination"`
 	} `json:"meta"`
 	Resources json.RawMessage `json:"resources"`

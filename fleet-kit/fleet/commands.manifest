@@ -124,11 +124,16 @@ flag: --timeout DURATION | per-request web timeout (default 10s)
 flag: --websites-out STRING | write the domains with a live website of their own (not landers, parked pages, redirects or domains marked landing) as JSON, for the AppSec lane's coverage check
 
 command: cti-falcon
-about: Check the CrowdStrike Falcon API client: token, then one read per scope
+about: CrowdStrike Falcon: check the API client, find installed apps, list apps new this week
 runs: read
 flag: --check | get a token and run one read per scope; prints counts only
-flag: --json | with --check: print the result as JSON
-flag: --timeout DURATION | give up after this long (default 2m0s)
+flag: --exact | with --find-app: name and vendor must match exactly, not contain
+flag: --find-app STRING | list installed applications whose name contains this, with host counts
+flag: --json | print the result as JSON
+flag: --max-rows INT | stop reading after this many records (default 2000 for --find-app, 10000 for --new-apps)
+flag: --new-apps INT | list applications first seen in the last N days that the estate never had before
+flag: --timeout DURATION | give up after this long (--new-apps: at least 15m) (default 2m0s)
+flag: --vendor STRING | with --find-app: the vendor must contain this too
 
 command: cti-jira
 about: File and update the fleet's Jira tickets

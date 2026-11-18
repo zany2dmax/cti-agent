@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/zany2dmax/cti-agent/internal/falcon"
 )
 
 func TestWithoutCheckItPrintsUsage(t *testing.T) {
@@ -47,5 +49,40 @@ func TestALookAlikeHostIsRefusedBeforeAnyRequest(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "not a CrowdStrike API host") {
 		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+func TestModesAreExclusiveAndFindOptionsNeedFindApp(t *testing.T) {
+	for _, args := range [][]string{
+		{"--check", "--find-app", "chrome"},
+		{"--check", "--new-apps", "7"},
+		{"--vendor", "Google", "--check"},
+		{"--exact", "--new-apps", "7"},
+		{"--new-apps", "-1"},
+		{"--new-apps", "91"},
+	} {
+		var out, errb bytes.Buffer
+		if code := run(args, &out, &errb); code != exitUsage {
+			t.Errorf("%v: exit %d, want %d", args, code, exitUsage)
+		}
+	}
+}
+
+func TestTopListsTheLargestFirstAndCountsTheRest(t *testing.T) {
+	got := top(map[string]int{"a": 1, "b": 5, "c": 3, "d": 3}, 2)
+	if got != "b (5), c (3), +2 more" {
+		t.Fatalf("top = %q", got)
+	}
+}
+
+func TestAHostileAppNameCannotForgeALine(t *testing.T) {
+	var b bytes.Buffer
+	printApp(&b, falcon.AppSummary{
+		Vendor: "Evil\x1b[2J", Name: "x\nnew to the estate: 0",
+		Hosts: 1, Versions: map[string]int{"1\r\nforged": 1}, Platforms: map[string]int{"Windows": 1},
+	}, "")
+	out := b.String()
+	if strings.Contains(out, "\x1b") || strings.Contains(out, "\r") || strings.Count(out, "\n") != 3 {
+		t.Fatalf("output = %q", out)
 	}
 }

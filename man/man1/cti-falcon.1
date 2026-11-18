@@ -1,11 +1,26 @@
 .TH CTI-FALCON 1 "2026-11-18" "cti-agent" "CTI Fleet Manual"
 .SH NAME
-cti-falcon \- check the fleet's CrowdStrike Falcon API client
+cti-falcon \- check the fleet's CrowdStrike Falcon API client, and ask Falcon Discover what we run
 .SH SYNOPSIS
 .B cti\-falcon \-\-check
 .RB [ \-\-json ]
 .RB [ \-\-timeout
 .IR DURATION ]
+.br
+.B cti\-falcon \-\-find\-app
+.I NAME
+.RB [ \-\-vendor
+.IR VENDOR ]
+.RB [ \-\-exact ]
+.RB [ \-\-max\-rows
+.IR N ]
+.RB [ \-\-json ]
+.br
+.B cti\-falcon \-\-new\-apps
+.I DAYS
+.RB [ \-\-max\-rows
+.IR N ]
+.RB [ \-\-json ]
 .PP
 .B sudo cti\-agent cti\-falcon \-\-check
 .SH DESCRIPTION
@@ -42,17 +57,76 @@ anything in front of the service, is an ERROR.
 .PP
 For each it prints OK, DENIED or ERROR, with a count at most. It then revokes
 its token. It never prints the token, the secret, an ID or a record.
+.PP
+.B \-\-find\-app
+answers "do we run this?" from Falcon Discover: every installed application
+whose name contains
+.I NAME
+(or equals it, with
+.BR \-\-exact ),
+with its host count, top versions and platforms. Over
+.B \-\-max\-rows
+it says the counts are a lower bound.
+.PP
+.B \-\-new\-apps
+answers "what appeared that we never had?": applications first seen in the
+last
+.I DAYS
+(1 to 90) with no record from before the window. It also lists the ones it
+could not check (no vendor, a name a lookup refuses, or over the cap), which
+should be treated as possibly new, and counts the rest (updates, or new hosts for something already run). It makes at most 200
+of those lookups.
+.PP
+Neither prints a host name or ID. A name or vendor may hold only letters,
+digits, space and
+.BR ". _ - ( ) / &" ,
+2 to 80 characters; anything else is refused before a request, so a name
+cannot change the query.
 .SH OPTIONS
 Go's flag syntax: each option may also be written with a single dash.
+Exactly one of
+.BR \-\-check ,
+.B \-\-find\-app
+or
+.B \-\-new\-apps
+is required.
 .TP
 .B \-\-check
-Required. Run the check.
+Check the API client.
+.TP
+.BI \-\-find\-app " NAME"
+List installed applications matching
+.IR NAME .
+.TP
+.BI \-\-vendor " VENDOR"
+With
+.BR \-\-find\-app :
+the vendor must match too.
+.TP
+.B \-\-exact
+With
+.BR \-\-find\-app :
+name and vendor must equal the values, not contain them.
+.TP
+.BI \-\-new\-apps " DAYS"
+List applications new to the estate in the last
+.I DAYS
+days.
+.TP
+.BI \-\-max\-rows " N"
+Stop reading after
+.I N
+records. Default: 2000 for
+.BR \-\-find\-app ,
+10000 for
+.BR \-\-new\-apps .
 .TP
 .B \-\-json
 Print the result as JSON instead of text.
 .TP
 .BI \-\-timeout " DURATION"
-Give up after this long. Default: 2m.
+Give up after this long. Default: 2m, and at least 15m for
+.BR \-\-new\-apps .
 .SH ENVIRONMENT
 Read from the environment, or from
 .I fleet.env
@@ -80,15 +154,21 @@ The API client, created with Read scopes only.
 .SH EXIT STATUS
 .TP
 .B 0
-The token and all four scopes work.
+.BR \-\-check :
+the token and all four scopes work.
+.BR \-\-find\-app ,
+.BR \-\-new\-apps :
+the lookup finished, whether or not anything matched.
 .TP
 .B 1
-A setting is missing or refused, the token failed, or a scope is denied or
-failed.
+A setting is missing or refused, the token failed, a scope is denied or
+failed, a name was refused, or a lookup failed.
 .TP
 .B 2
-Bad usage, including running without
-.BR \-\-check .
+Bad usage: no mode, two modes, or a
+.B \-\-find\-app
+option without
+.BR \-\-find\-app .
 .SH EXAMPLES
 Check the client on the box:
 .PP
@@ -100,6 +180,18 @@ The same, as JSON, for a script:
 .PP
 .RS
 .B sudo cti\-agent cti\-falcon \-\-check \-\-json
+.RE
+.PP
+Do we run Chrome, and which versions?
+.PP
+.RS
+.B sudo cti\-agent cti\-falcon \-\-find\-app chrome
+.RE
+.PP
+What appeared this week that we never had before?
+.PP
+.RS
+.B sudo cti\-agent cti\-falcon \-\-new\-apps 7
 .RE
 .SH SEE ALSO
 .BR cti\-agent (1),
