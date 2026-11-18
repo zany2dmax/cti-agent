@@ -27,6 +27,7 @@ document assumes you have decided to run it.
 - [11f. The weekly application-security lane](#11f-the-weekly-application-security-lane)
 - [11g. The weekly domains lane](#11g-the-weekly-domains-lane)
 - [11h. Man pages](#11h-man-pages)
+- [11i. Cutting a release](#11i-cutting-a-release)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -2465,6 +2466,91 @@ man -k cti        # list them all (after mandb has indexed them)
 They are written from the source. `fleet-kit/tests/test_lanes.py` fails if a
 command gains a flag, argument or subcommand its page does not document, and
 `task man:lint` checks they render cleanly. Conventions are in `man/STYLE.md`.
+
+---
+
+## 11i. Cutting a release
+
+A **tag** and a **release** are different things. The tag is git's: a name for
+one commit, pushed with `git push origin 1.6.7`. The release is GitHub's page
+on top of a tag, with a title and notes, and pushing a tag never makes one. Until
+1.6.6 nothing made them, so the Releases page said 1.6.1 was "Latest" while
+1.6.6 was tagged and deployed.
+
+`.github/workflows/release.yml` makes them now. When a release tag (`1.6.7`,
+`v1.7`) reaches GitHub, it creates the release for it, titled with the tag, and
+the notes are that version's section of `CHANGELOG.md` with a link to the
+whole file. Only the highest version is marked **Latest**.
+
+### The steps
+
+On the Mac, in `~/code/cti-agent`, clean and on `main`:
+
+1. In `CHANGELOG.md`, rename `## Unreleased` to `## 1.6.7 — YYYY-MM-DD`
+   (today), and put the release in the cheat sheet's stamp line
+   (`**This copy is for release 1.6.7 (YYYY-MM-DD).**`). Commit both as
+   `Release 1.6.7`.
+2. Check the notes the release will get:
+   ```bash
+   scripts/release-notes.sh 1.6.7
+   ```
+   It prints the section, or fails if the heading is missing or misspelt.
+3. Tag the release commit, then push the branch and the tag:
+   ```bash
+   git tag -a 1.6.7 -m "Release 1.6.7"
+   task ship
+   git push origin 1.6.7
+   ```
+   `task ship` runs every check and pushes `main`; it does not push tags, so
+   the second push is not optional. `cheatsheet:check` (inside `task ship`)
+   fails if the tag and the stamp line disagree.
+4. About a minute later the release is on the Releases page. If not, look at
+   **Actions → Release**.
+5. Update the box: `sudo cti-agent-update --for-real`.
+
+### When it fails
+
+The run fails, visibly, and makes nothing, when:
+
+| Message | Cause | Fix |
+|---|---|---|
+| `CHANGELOG.md has no section for 1.6.7` | the heading was not renamed, or is spelt differently from the tag | fix the heading, commit, push `main`, then make it by hand (below) |
+| `could not read CHANGELOG.md at ...` | the run started from a commit older than this workflow's notes script | make it by hand (below), which reads `main` |
+| `tag 1.6.7 is not on GitHub` | a backfill was asked for before the tag was pushed | `git push origin 1.6.7` |
+| `'x' is not a release tag` | a backfill typed something other than `1.6.7` or `v1.7` | type the tag |
+
+A release that already exists is left as it is, so running it again is safe,
+and notes edited by hand on GitHub are never overwritten. **Do not use "Re-run
+jobs"** on a failed run: it reuses the tag's commit, so it reads the same
+CHANGELOG and fails the same way.
+
+### Making one by hand (backfill, or after a failed run)
+
+**Actions → Release → Run workflow**, type the tag (`1.6.5`). A run started
+this way reads `CHANGELOG.md` from `main`, which has every section, so it
+works for old tags too and does not take the Latest badge from a newer
+release. Or from the Mac:
+
+```bash
+gh workflow run release.yml --repo zany2dmax/cti-agent -f tag=1.6.5
+```
+
+One tag per run. Push release tags one at a time too, never with
+`git push --tags`: GitHub sends no push event at all when more than three
+tags arrive in one push, so none of them would get a release.
+
+### What it does not do
+
+- **Run in the company repo.** That repo merges these tags into its `main`, so
+  it gets this file too, but `sync-upstream.yml` there already makes its
+  releases. The job is skipped unless the repository is
+  `zany2dmax/cti-agent`.
+- **Create or move a tag.** It refuses a tag that is not already on GitHub.
+- **Attach binaries.** The box builds from source (`cti-agent-update`), so a
+  release is notes only.
+- **Use third-party actions.** It reads two files through the GitHub API at the
+  run's commit and uses the `gh` CLI the runner already has, with the
+  workflow's own token, limited to `contents: write`.
 
 ---
 

@@ -1370,6 +1370,74 @@ class EverySendGoesThroughCtiMailer(unittest.TestCase):
                 self.assertRegex(src, r'RESULT=\$\("\$FLEET_CODE/bin/cti-mailer"\s+--html')
 
 
+class ReleaseNotesAndWorkflow(unittest.TestCase):
+    """A tag's GitHub Release takes its notes from CHANGELOG.md through
+    scripts/release-notes.sh (.github/workflows/release.yml, RUNBOOK 11i)."""
+
+    ROOT = KIT.parent
+    SCRIPT = KIT.parent / "scripts" / "release-notes.sh"
+    WORKFLOW = KIT.parent / ".github" / "workflows" / "release.yml"
+    LOG = ("# Changelog\n\n## Unreleased\n\nnext\n\n---\n\n"
+           "## 1.6.10 — 2026-12-01\n\nten\n\n---\n\n"
+           "## 1.6.1 — 2026-11-09\n\n**Upgrade:** nothing.\n\n- one fix\n\n---\n\n"
+           "## 1.6 — 2026-11-08\n\nsix\n\n## 1.5 — 2026-11-01\n\n")
+
+    def notes(self, ver, text=None):
+        with tempfile.TemporaryDirectory() as d:
+            f = pathlib.Path(d) / "CHANGELOG.md"
+            f.write_text(self.LOG if text is None else text, encoding="utf-8")
+            return subprocess.run(["bash", str(self.SCRIPT), ver, str(f)],
+                                  capture_output=True, text=True, check=False)
+
+    def test_a_version_gets_its_own_section_and_nothing_else(self):
+        r = self.notes("1.6.1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "**Upgrade:** nothing.\n\n- one fix\n")
+
+    def test_a_shorter_version_is_not_matched_inside_a_longer_one(self):
+        self.assertEqual(self.notes("1.6").stdout, "six\n")
+        self.assertEqual(self.notes("1.6.1").stdout.count("ten"), 0)
+
+    def test_a_v_prefix_on_the_tag_is_ignored(self):
+        self.assertEqual(self.notes("v1.6.10").stdout, "ten\n")
+
+    def test_a_version_with_no_section_or_an_empty_one_fails(self):
+        for ver in ("1.6.7", "1.5"):
+            with self.subTest(ver=ver):
+                r = self.notes(ver)
+                self.assertEqual(r.returncode, 1)
+                self.assertEqual(r.stdout, "")
+                self.assertIn("date its heading", r.stderr)
+
+    def test_something_that_is_not_a_version_is_refused(self):
+        for ver in ("1.6.*", "Unreleased", "1.6.1; rm -rf /", ""):
+            with self.subTest(ver=ver):
+                self.assertEqual(self.notes(ver).returncode, 2)
+
+    def test_every_tagged_version_in_the_real_changelog_has_notes(self):
+        text = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        versions = re.findall(r"^## (\d+(?:\.\d+){1,2}) ", text, flags=re.M)
+        self.assertIn("1.0", versions)
+        for v in versions:
+            with self.subTest(version=v):
+                r = subprocess.run(["bash", str(self.SCRIPT), v, str(self.ROOT / "CHANGELOG.md")],
+                                   capture_output=True, text=True, check=False)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_workflow_is_guarded(self):
+        wf = self.WORKFLOW.read_text(encoding="utf-8")
+        # Skipped in the company repo, which merges this file into its main.
+        self.assertIn("if: github.repository == 'zany2dmax/cti-agent'", wf)
+        self.assertIn("contents: write", wf)
+        self.assertNotRegex(wf, r"(?m)^\s*-?\s*uses:", "no third-party actions")
+        # Event data reaches the script as env, never spliced into it.
+        run = wf[wf.index("run: |"):]
+        self.assertNotIn("${{", run)
+        self.assertIn("--verify-tag", run)
+        self.assertIn("already exists - left as it is", run)
+        self.assertIn('release-notes.sh" "$tag"', run)
+
+
 class DigestTicketLinks(unittest.TestCase):
     """The digest must quote the ticket, and must render without one.
 

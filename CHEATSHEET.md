@@ -408,20 +408,35 @@ and you have decided the number):
 ```bash
 gh auth switch --user <personal-account>   # the account that owns origin
 git status                                 # clean, on main
-# 1. CHANGELOG: date the heading ("## 1.5.1 - YYYY-MM-DD"), commit it
-GOSEC_GOTOOLCHAIN=go1.26.9 task ship       # checks, then pushes main to origin
-# 2. Tag the commit and push the tag
-git tag -a v1.5.1 -m "v1.5.1"
-git push origin v1.5.1
+# 1. CHANGELOG: "## Unreleased" -> "## 1.6.7 — YYYY-MM-DD"; stamp line at the
+#    top of this sheet -> "release 1.6.7 (YYYY-MM-DD)". Commit: "Release 1.6.7"
+scripts/release-notes.sh 1.6.7             # 2. the notes the release will get
+git tag -a 1.6.7 -m "Release 1.6.7"        # 3. tag first: ship checks the stamp against it
+GOSEC_GOTOOLCHAIN=go1.26.9 task ship       #    checks, then pushes main (not tags)
+git push origin 1.6.7                      # 4. the tag; its GitHub Release follows
 ```
 
-Then wait for the next window, or run it now: company repo, Actions, "Sync
+Pushing the tag makes the **GitHub Release** on the personal repo
+(`.github/workflows/release.yml`): titled with the tag, notes from that
+version's CHANGELOG section, Latest only for the highest version. A tag is
+git's, a release is GitHub's page on top of it; the push alone never made one.
+If the run fails (Actions, Release) it is almost always a heading that does not
+match the tag: fix it, push `main`, then make it by hand. Backfill or retry:
+
+```bash
+gh workflow run release.yml --repo zany2dmax/cti-agent -f tag=1.6.7
+```
+
+Full steps and failures: RUNBOOK 11i.
+
+For the company copy, wait for the next window, or run it now: company repo, Actions, "Sync
 upstream releases", Run workflow (type the tag, or leave it blank for all new
 tags). Check the result:
 
 ```bash
-git ls-remote --tags origin v1.5.1         # personal
-gh release view v1.5.1 --repo <company-org>/cti-agent   # company, work account
+git ls-remote --tags origin 1.6.7                         # personal: the tag
+gh release view 1.6.7 --repo zany2dmax/cti-agent          # personal: the release
+gh release view 1.6.7 --repo <company-org>/cti-agent      # company, work account
 ```
 
 Then update the box (section 11); it records the tag in
@@ -441,8 +456,9 @@ Rules:
   protection blocking the `SYNC_PAT` push) the job fails visibly in the
   Actions tab and `main` stays as it was; the tags are already copied.
 - A tag that is wrong and only local: `git tag -d v1.5.1`. Already pushed:
+  `gh release delete v1.5.1 --repo zany2dmax/cti-agent`, then
   `git push origin :refs/tags/v1.5.1`, and delete the release and tag in the
-  company repo, then tag again. Never move a tag the box has installed.
+  company repo, then tag again (the new push makes a new release). Never move a tag the box has installed.
 - Workflow secrets (company repo, Settings, Secrets and variables, Actions):
   `SYNC_PAT` (a work-account token that can write contents and workflows) and,
   only if the personal repo ever goes private, `UPSTREAM_READ_TOKEN`.

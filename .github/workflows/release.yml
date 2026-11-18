@@ -1,0 +1,106 @@
+# release.yml - a GitHub Release for every release tag, notes from CHANGELOG.md.
+#
+# A tag is git's; a Release is GitHub's page on top of one, and pushing a tag
+# never makes one. Without this the Releases page showed 1.6.1 as "Latest"
+# while 1.6.6 was tagged and deployed. Now: push a tag, and within a minute
+# its Release exists, with that version's CHANGELOG section as the notes.
+#
+#   push of a tag like 1.6.7 or v1.7   -> Release for that tag
+#   Actions > Release > Run workflow   -> Release for the tag you type (backfill)
+#
+# What it will not do:
+#   - replace a Release that already exists (yours to edit or delete by hand);
+#   - make a Release with no notes: a tag whose version has no "## X.Y.Z"
+#     heading in CHANGELOG.md fails the run, visibly. Fix the CHANGELOG, push
+#     main, then Actions > Release > Run workflow with the tag. NOT "Re-run
+#     jobs": that reuses the tag's commit and reads the same CHANGELOG;
+#   - run anywhere but the personal repo. The company repo merges these tags
+#     into its main, workflows included, and its own sync-upstream.yml already
+#     makes its Releases; a second maker there would race it.
+#
+# No third-party actions and no checkout: it reads two files at the run's
+# commit through the API and uses the gh CLI the runner already has.
+# RUNBOOK.md section 11i has the release steps; CHEATSHEET.md 11a the commands.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]*"
+      - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to make a Release for (e.g. 1.6.5)"
+        required: true
+
+permissions:
+  contents: write
+
+# One group per tag. A single shared group keeps one pending run and cancels
+# the rest, so a burst of tags or backfills would silently lose a Release.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'zany2dmax/cti-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Make the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # Never interpolated into the script below: passed as data.
+          PUSHED_TAG: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then tag="$INPUT_TAG"; else tag="$PUSHED_TAG"; fi
+          if ! printf '%s' "$tag" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,2}$'; then
+            echo "::error::'$tag' is not a release tag (1.6.7, v1.7); nothing made"
+            exit 1
+          fi
+
+          # The tag must already be on GitHub; this never creates one.
+          if ! gh api "repos/$REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::tag $tag is not on GitHub - push it first: git push origin $tag"
+            exit 1
+          fi
+          if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $tag already exists - left as it is"
+            exit 0
+          fi
+
+          # Notes from CHANGELOG.md at this run's commit: the tag's own commit
+          # on a push, the default branch on a backfill (which has every
+          # section). The extractor comes from the same commit.
+          raw() { gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$1?ref=$SHA"; }
+          for f in CHANGELOG.md scripts/release-notes.sh; do
+            if ! raw "$f" > "$RUNNER_TEMP/${f##*/}"; then
+              echo "::error::could not read $f at $SHA - start this from main: Actions > Release > Run workflow, tag=$tag"
+              exit 1
+            fi
+          done
+          if ! bash "$RUNNER_TEMP/release-notes.sh" "$tag" "$RUNNER_TEMP/CHANGELOG.md" > "$RUNNER_TEMP/notes.md"; then
+            echo "::error::CHANGELOG.md has no section for $tag - fix its heading, push main, then Actions > Release > Run workflow, tag=$tag (not Re-run jobs)"
+            exit 1
+          fi
+          printf '\n---\nFull history: [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md)\n' \
+            "$REPO" "$tag" >> "$RUNNER_TEMP/notes.md"
+
+          # "Latest" only for the highest version: a backfill of an old tag
+          # must not take the badge from the current one.
+          newest="$(gh api "repos/$REPO/tags" --paginate -q '.[].name' \
+            | grep -E '^v?[0-9]+(\.[0-9]+){1,2}$' | sed 's/^v//' | sort -V | tail -1)"
+          latest=false
+          [ "${tag#v}" = "$newest" ] && latest=true
+
+          gh release create "$tag" --repo "$REPO" --verify-tag \
+            --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest"
+          echo "Release $tag made (latest: $latest)"

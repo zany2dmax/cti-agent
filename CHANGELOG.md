@@ -44,6 +44,22 @@ VM scans should have run now comes from Qualys's own scan schedules. If
 only adds to the schedules, and stale titles are reported as missing. Then
 `sudo cti-agent cti-vmscan --check` should list the scan schedules.
 
+### Added
+
+- **Every release tag gets its GitHub Release.** A tag is git's and a Release
+  is GitHub's page on top of it; pushing a tag never made one, so the Releases
+  page still said 1.6.1 was Latest at 1.6.6. `.github/workflows/release.yml`
+  now makes the Release when a tag like `1.6.7` or `v1.7` is pushed: titled
+  with the tag, notes from that version's CHANGELOG section
+  (`scripts/release-notes.sh`, also runnable on the Mac to preview them), and
+  Latest only for the highest version. It never creates or moves a tag, never
+  replaces a Release that exists, fails visibly when the CHANGELOG has no
+  section for the tag, and is skipped in the company repo, whose own sync
+  makes its Releases. **Actions → Release → Run workflow** (or
+  `gh workflow run release.yml -f tag=1.6.5`) backfills an older tag. RUNBOOK
+  11i and cheat sheet 11a have the steps; tag before `task ship`, since ship
+  checks the cheat sheet's stamp against the newest tag.
+
 ### Changed
 
 - **The VM scan weekly reports every scheduled scan, whatever it is called.**
