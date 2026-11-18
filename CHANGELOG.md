@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.6.7 — 2026-11-18
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: which
 VM scans should have run now comes from Qualys's own scan schedules. If
