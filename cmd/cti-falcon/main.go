@@ -3,7 +3,8 @@
 //	cti-falcon --check                     # token, then one read per scope
 //	cti-falcon --find-app chrome           # do we run it? hosts, versions
 //	cti-falcon --find-app "Google Chrome" --exact --vendor "Google LLC"
-//	cti-falcon --new-apps 7                # apps first seen this week that we never had
+//	cti-falcon --new-apps 1                # apps first seen today that we never had
+//	cti-falcon --fields                    # the field names of one Discover record, no values
 //	add --json to any of them for JSON
 //
 // # WHAT IT IS FOR
@@ -76,18 +77,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	vendor := fs.String("vendor", "", "with --find-app: the vendor must contain this too")
 	exact := fs.Bool("exact", false, "with --find-app: name and vendor must match exactly, not contain")
 	newApps := fs.Int("new-apps", 0, "list applications first seen in the last N days that the estate never had before")
+	fields := fs.Bool("fields", false, "print the field names of one Discover record (no values)")
 	maxRows := fs.Int("max-rows", 0, "stop reading after this many records (default 2000 for --find-app, 10000 for --new-apps)")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	timeout := fs.Duration("timeout", 2*time.Minute, "give up after this long (--new-apps: at least 15m)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: cti-falcon --check | --find-app NAME [--vendor V] [--exact] | --new-apps DAYS  [--json] [--max-rows N] [--timeout D]")
+		_, _ = fmt.Fprintln(stderr, "usage: cti-falcon --check | --find-app NAME [--vendor V] [--exact] | --new-apps DAYS | --fields  [--json] [--max-rows N] [--timeout D]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	modes := 0
-	for _, on := range []bool{*check, *findApp != "", *newApps != 0} {
+	for _, on := range []bool{*check, *findApp != "", *newApps != 0, *fields} {
 		if on {
 			modes++
 		}
@@ -106,6 +108,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitErr
 	}
 
+	if *fields {
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		defer revoke(c, logf)
+		names, err := c.FieldNames(ctx)
+		if err != nil {
+			logf("error  : %v", err)
+			return exitErr
+		}
+		if *asJSON {
+			return writeJSON(stdout, names)
+		}
+		for _, n := range names {
+			_, _ = fmt.Fprintln(stdout, n)
+		}
+		return exitOK
+	}
 	if *findApp != "" || *newApps != 0 {
 		d := *timeout
 		if *newApps != 0 && d < 15*time.Minute {
@@ -230,7 +249,11 @@ func findApps(ctx context.Context, c *falcon.Client, name string, o falcon.FindO
 	if res.Truncated {
 		capped = fmt.Sprintf(" - read the first %d, so host counts below are a lower bound (raise --max-rows)", res.Read)
 	}
-	p("matched: %d records%s", res.Total, capped)
+	if res.Total < 0 {
+		p("matched: %d records read (the API did not say how many there were)%s", res.Read, capped)
+	} else {
+		p("matched: %d records%s", res.Total, capped)
+	}
 	if len(res.Apps) == 0 {
 		p("no installed application matched")
 		return exitOK
@@ -253,22 +276,32 @@ func listNewApps(ctx context.Context, c *falcon.Client, days, maxRows int, asJSO
 	}
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format+"\n", a...) }
 	p("window : since %s (%d days)", rep.Since.Format(time.RFC3339), days)
-	capped := ""
-	if rep.Truncated {
-		capped = fmt.Sprintf(" - read the first %d only (raise --max-rows)", rep.Read)
+	if rep.Total < 0 {
+		p("records: %d read (the API did not say how many there were)", rep.Read)
+	} else {
+		p("records: %d first seen in the window, %d read", rep.Total, rep.Read)
 	}
-	p("records: %d first seen in the window%s", rep.Total, capped)
+	if rep.Truncated {
+		share := "an unknown share"
+		if rep.Total > 0 {
+			share = fmt.Sprintf("%d%%", rep.Read*100/rep.Total)
+		}
+		p("WARNING: INCOMPLETE - only %s of the window's records were read. Apps first", share)
+		p("         seen in the rest are missing from every list below. Use a shorter")
+		p("         window (--new-apps 1) or raise --max-rows.")
+	}
 	p("new to the estate: %d", len(rep.New))
 	for _, a := range rep.New {
 		printApp(w, a.AppSummary, "  ")
 	}
 	if len(rep.NotChecked) > 0 {
-		p("not checked: %d (a name a lookup cannot use, or over the check cap) - treat as possibly new", len(rep.NotChecked))
+		p("not checked: %d - treat as possibly new (%s)", len(rep.NotChecked), reasons(rep.Reasons))
 		for _, a := range rep.NotChecked {
 			printApp(w, a.AppSummary, "  ")
 		}
 	}
-	p("seen before: %d applications (updates, or new hosts for something we already run)", rep.SeenBefore)
+	p("seen before: %d applications (updates, or new hosts for something we already run; %d matched only at another version)",
+		rep.SeenBefore, rep.SeenAsOtherVersion)
 	return exitOK
 }
 
@@ -314,6 +347,23 @@ func top(m map[string]int, n int) string {
 			break
 		}
 		parts = append(parts, fmt.Sprintf("%s (%d)", safelog.LineMax(x.k, 60), x.v))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// reasons spells out why applications were not checked.
+func reasons(m map[string]int) string {
+	words := map[string]string{
+		falcon.ReasonNoVendor: "no vendor",
+		falcon.ReasonOverCap:  "over the check cap",
+		falcon.ReasonRefused:  "a name a lookup cannot carry",
+		falcon.ReasonRejected: "the API rejected the lookup",
+	}
+	var parts []string
+	for _, k := range []string{falcon.ReasonNoVendor, falcon.ReasonOverCap, falcon.ReasonRefused, falcon.ReasonRejected} {
+		if m[k] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", m[k], words[k]))
+		}
 	}
 	return strings.Join(parts, ", ")
 }

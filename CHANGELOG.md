@@ -57,6 +57,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   name or ID. Names pass a strict character check before they reach a
   filter, so a name taken from an advisory can't change the query.
   RUNBOOK §11j.
+- `cti-falcon --new-apps` now reads like a list you can act on. On the box,
+  one week showed 130 apps "not checked", lumped together.
+  - **Reasons are counted**: no vendor, over the cap (raised from 200 to 500,
+    looked up 4 at a time), or a name holding a quote, backslash, `*` or
+    control character.
+  - **Names Discover returned are checked loosely**: `®`, `+`, `:`, `<>`, `@`
+    and non-Latin names no longer stop the lookup. Names taken from
+    advisories keep the strict check.
+  - **A version number in the name no longer makes an update look new.**
+    `Microsoft .NET 8.0.34 - Windows Server Hosting` matches its earlier
+    versions. The earlier record's name must differ in version numbers alone.
+  - **A short read says so**: `WARNING: INCOMPLETE` with the share of the
+    window read. Run it daily, `--new-apps 1`.
+  - **New `--fields`** prints one Discover record's field names and types,
+    never values.
 
 ---
 

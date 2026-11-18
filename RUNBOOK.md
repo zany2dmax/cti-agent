@@ -2636,27 +2636,49 @@ read-only questions instead:
 ```bash
 sudo cti-agent cti-falcon --find-app chrome
 sudo cti-agent cti-falcon --find-app "Google Chrome" --exact --vendor "Google LLC"
-sudo cti-agent cti-falcon --new-apps 7
+sudo cti-agent cti-falcon --new-apps 1
+sudo cti-agent cti-falcon --fields
 ```
 
 - `--find-app` answers "do we run this?": each matching application with its
   host count, top versions and platforms. Over `--max-rows` (2,000 records by
   default) it says the counts are a lower bound. This is the lookup triage
   will make when an advisory names a product.
-- `--new-apps 7` answers "what appeared this week that we never had?". It
-  reads the records first seen in the window, groups them, and asks for each
-  whether any record predates the window. It lists the **new** ones, and the
-  ones it **could not check**, which you should treat as possibly new: records
-  with no vendor, names with characters a lookup refuses, or anything over its
-  200-lookup cap. Updates and new hosts for something we already run are only
-  counted. An app whose name includes its version (`Zoom 5.17.1`) shows as new
-  after every update. That's noise, but on the safe side.
+- `--new-apps 1` answers "what appeared today that we never had?". It reads
+  the records first seen in the window, groups them, and asks for each whether
+  the same vendor had it before the window: first by the exact name, then, if
+  the name carries a version number (`Microsoft .NET 8.0.34 - Windows Server
+  Hosting`), by the same name at any version. An earlier record counts only if
+  its name differs in the version numbers alone, so `Zoom Rooms` never makes a
+  new `Zoom 6.1` look known. Up to 500 apps, 4 lookups at a time.
+- It lists the **new** ones, and the ones it **could not check**, by reason,
+  which you should treat as possibly new: no vendor (a name-only lookup would
+  match look-alikes), over the 500 cap, a name holding a quote, backslash,
+  `*` or control character, or a lookup the API rejected. One rejected
+  lookup marks that one app, never the whole run. Updates and new hosts for
+  something we already run are only counted.
+- Two limits, both erring towards "new". The any-version match reads up to
+  300 earlier records, so a product with many look-alikes from the same
+  vendor can be called new when it isn't. Only a short list of build tags
+  (`-x64`, `-beta`, `rc1` and so on) can follow a version number, so
+  `Agent 2.0-client` is never matched with `Agent 1.0-server`.
+- **Run it daily, `--new-apps 1`.** About 32,500 records were first seen in
+  one week of November 2026, more than the 10,000 it reads by default. When it
+  can't read the whole window it prints `WARNING: INCOMPLETE` with the share
+  it did read. Apps first seen in the rest are missing from every list.
+- `--fields` prints the field names of one Discover record, with their types
+  and never their values. Use it to see where a field lives. It was added
+  because the platform came back `unknown`.
 
-Names typed or found in advisories are hostile input to the filter. Only
+Names typed or found in advisories are hostile input to the filter. For
+`--find-app` only
 letters, digits, space and `. _ - ( ) / &` are allowed, 2 to 80 characters.
 Anything else, including `+`, `*` and `,`, is refused before any request, so a
 name can't add a clause to the query. For an app like `Notepad++`, search for
-`notepad`. Names coming back from Discover are cleaned of control characters
+`notepad`. The exact lookups `--new-apps` makes use names Discover itself
+returned, which carry `®`, `+`, `:` and non-Latin scripts. They're checked
+only for the characters that could leave the quoted filter value (quote,
+backslash, `*`, control characters). Names coming back from Discover are cleaned of control characters
 before they're printed. Neither mode ever prints a host name or ID.
 
 ---

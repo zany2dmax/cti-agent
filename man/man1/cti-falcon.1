@@ -21,6 +21,9 @@ cti-falcon \- check the fleet's CrowdStrike Falcon API client, and ask Falcon Di
 .RB [ \-\-max\-rows
 .IR N ]
 .RB [ \-\-json ]
+.br
+.B cti\-falcon \-\-fields
+.RB [ \-\-json ]
 .PP
 .B sudo cti\-agent cti\-falcon \-\-check
 .SH DESCRIPTION
@@ -72,10 +75,18 @@ it says the counts are a lower bound.
 answers "what appeared that we never had?": applications first seen in the
 last
 .I DAYS
-(1 to 90) with no record from before the window. It also lists the ones it
-could not check (no vendor, a name a lookup refuses, or over the cap), which
-should be treated as possibly new, and counts the rest (updates, or new hosts for something already run). It makes at most 200
-of those lookups.
+(1 to 90) with no record from the same vendor before the window, by exact
+name or, when the name carries a version number, by the same name at any
+version. It lists, with the reason, the ones it could not check (no vendor,
+over the cap of 500, or a name holding a quote, backslash,
+.B *
+or control character), which should be treated as possibly new, and counts
+the rest. When it could not read the whole window it prints
+.BR "WARNING: INCOMPLETE" .
+Run it daily, with 1.
+.PP
+.B \-\-fields
+prints the field names and types of one Discover record, never a value.
 .PP
 Neither prints a host name or ID. A name or vendor may hold only letters,
 digits, space and
@@ -86,9 +97,10 @@ cannot change the query.
 Go's flag syntax: each option may also be written with a single dash.
 Exactly one of
 .BR \-\-check ,
-.B \-\-find\-app
-or
+.BR \-\-find\-app ,
 .B \-\-new\-apps
+or
+.B \-\-fields
 is required.
 .TP
 .B \-\-check
@@ -112,6 +124,9 @@ name and vendor must equal the values, not contain them.
 List applications new to the estate in the last
 .I DAYS
 days.
+.TP
+.B \-\-fields
+Print one Discover record's field names.
 .TP
 .BI \-\-max\-rows " N"
 Stop reading after
@@ -188,10 +203,10 @@ Do we run Chrome, and which versions?
 .B sudo cti\-agent cti\-falcon \-\-find\-app chrome
 .RE
 .PP
-What appeared this week that we never had before?
+What appeared today that we never had before?
 .PP
 .RS
-.B sudo cti\-agent cti\-falcon \-\-new\-apps 7
+.B sudo cti\-agent cti\-falcon \-\-new\-apps 1
 .RE
 .SH SEE ALSO
 .BR cti\-agent (1),

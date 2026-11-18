@@ -124,10 +124,11 @@ flag: --timeout DURATION | per-request web timeout (default 10s)
 flag: --websites-out STRING | write the domains with a live website of their own (not landers, parked pages, redirects or domains marked landing) as JSON, for the AppSec lane's coverage check
 
 command: cti-falcon
-about: CrowdStrike Falcon: check the API client, find installed apps, list apps new this week
+about: CrowdStrike Falcon: check the API client, find installed apps, list apps new to the estate
 runs: read
 flag: --check | get a token and run one read per scope; prints counts only
 flag: --exact | with --find-app: name and vendor must match exactly, not contain
+flag: --fields | print the field names of one Discover record (no values)
 flag: --find-app STRING | list installed applications whose name contains this, with host counts
 flag: --json | print the result as JSON
 flag: --max-rows INT | stop reading after this many records (default 2000 for --find-app, 10000 for --new-apps)

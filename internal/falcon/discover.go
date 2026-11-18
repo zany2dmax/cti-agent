@@ -9,17 +9,18 @@ package falcon
 //
 //   - FindApps: "do we run X?" - asked when an advisory names a product. A few
 //     calls, always current.
-//   - NewApps: "what appeared this week that we never had before?" - the
-//     systems nobody told us about. Weekly.
+//   - NewApps: "what appeared today that we never had before?" - the
+//     systems nobody told us about. Daily.
 //
-// Every product or vendor name that reaches a filter comes, eventually, from
-// threat-intel text or a model's reading of it. It is hostile. Literal admits
-// only a narrow character set. It refuses the quote and backslash, so a value
-// cannot leave the single-quoted FQL string it is placed in, and it refuses
-// FQL's operators (+ , * : ! ~ [ ] < > = |) outright, so even a parser that
-// looked inside the quotes would find no clause to add and no wildcard to
-// widen. Names that come back from Discover are hostile too (anyone who can
-// install software names it), so everything printed is sanitised.
+// Names are hostile either way. A name typed or taken from an advisory goes
+// through Literal: a narrow character set with no quote, no backslash and
+// none of FQL's operators (+ , * : ! ~ [ ] < > = |), so even a parser that
+// looked inside the quotes would find no clause to add. A name Discover
+// returned (anyone who can install software chooses it) goes through
+// apiLiteral, which refuses only what could leave the single-quoted value or
+// act as a wildcard: the quote, the backslash, * and control characters. If
+// FQL rejects such a name anyway, that one app is "not checked - lookup
+// rejected", never the whole run. Everything printed is sanitised.
 
 import (
 	"context"
@@ -27,10 +28,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // appsRoute is the one Discover route this package reads.
@@ -46,14 +51,63 @@ func Literal(s string) (string, error) {
 	return literal(strings.Join(strings.Fields(s), " "))
 }
 
-// exactLiteral is Literal without the folding, for a name Discover itself
-// returned: an exact match must use the stored spelling, double spaces and
-// all, or it finds nothing.
-func exactLiteral(s string) (string, error) {
-	if s != strings.TrimSpace(s) {
-		return "", fmt.Errorf("name %q has leading or trailing space", trimForError(s))
+// apiLiteral checks a name Discover itself returned, for an exact or
+// pattern lookup inside an FQL quoted string. Such names are chosen by
+// whoever packaged the software, so they are hostile too, but they carry
+// ®, +, :, <>, @ and non-Latin scripts that real products use. Only what
+// could leave the quoted string or act as a wildcard is refused: the quote,
+// the backslash, *, and control characters. The stored spelling is kept
+// exactly, double spaces and all, or an exact match finds nothing.
+func apiLiteral(s string) (string, error) {
+	if s == "" || s != strings.TrimSpace(s) {
+		return "", errors.New("empty, or leading or trailing space")
 	}
-	return literal(s)
+	if len(s) > 300 {
+		return "", errors.New("longer than 300 bytes")
+	}
+	if !utf8.ValidString(s) {
+		return "", errors.New("not valid UTF-8")
+	}
+	for _, r := range s {
+		if r == '\'' || r == '\\' || r == '*' || unicode.IsControl(r) {
+			return "", fmt.Errorf("has %q", r)
+		}
+	}
+	return s, nil
+}
+
+// versionToken is a word that is only a version number: 8.0.34, v2.1,
+// 14.51.36247, (1018.5.5). A bare number like 2015 or v14 is left alone:
+// it is as likely to be part of the product's name.
+var versionToken = regexp.MustCompile(`^\(?v?\d+(\.\d+)+` + versionSuffix + `\)?$`)
+
+// versionSuffix is what may follow the numbers: a build or architecture tag
+// from a short known list, never free text - "1.0-server" and "2.0-client"
+// are different products, not two versions of one.
+const versionSuffix = `([-_.]?(x64|x86|amd64|arm64|win64|win32|beta\d*|alpha\d*|rc\d*|preview\d*|\d+))*`
+
+// versionPattern turns a name with version numbers in it into an FQL wildcard
+// pattern for the same product at any version: "Microsoft .NET 8.0.34 -
+// Windows Server Hosting" becomes "Microsoft .NET * - Windows Server
+// Hosting". It returns "" when the name has no version in it, or when too
+// little of the name would be left to mean anything.
+func versionPattern(name string) string {
+	words := strings.Split(name, " ")
+	changed := false
+	for i, w := range words {
+		if versionToken.MatchString(strings.ToLower(w)) {
+			words[i] = "*"
+			changed = true
+		}
+	}
+	if !changed {
+		return ""
+	}
+	p := strings.Join(words, " ")
+	if lit := strings.NewReplacer("*", "", " ", "", "-", "").Replace(p); utf8.RuneCountInString(lit) < 4 {
+		return ""
+	}
+	return p
 }
 
 func literal(t string) (string, error) {
@@ -112,7 +166,7 @@ type AppSummary struct {
 // AppSearch is FindApps' answer.
 type AppSearch struct {
 	Filter    string       `json:"filter"`
-	Total     int          `json:"total"` // records the API matched
+	Total     int          `json:"total"` // records the API matched; -1 when it did not say
 	Read      int          `json:"read"`  // records read before the cap
 	Truncated bool         `json:"truncated"`
 	Apps      []AppSummary `json:"apps"`
@@ -159,9 +213,10 @@ func clause(field, v string, exact bool) string {
 }
 
 // readApps pages through one filter, up to max records.
+// The total is -1 when the API sent none.
 func (c *Client) readApps(ctx context.Context, filter string, max int) ([]app, int, bool, error) {
 	var rows []app
-	total, after := 0, ""
+	total, known, after := 0, false, ""
 	for {
 		// facet=host_info adds the host's details (platform among them) to
 		// each record; without it the host is an ID only. Host names arrive
@@ -182,20 +237,22 @@ func (c *Client) readApps(ctx context.Context, filter string, max int) ([]app, i
 		}
 		rows = append(rows, page...)
 		if t, ok := resp.Total(); ok {
-			total = t
+			total, known = t, true
 		}
 		next := ""
 		if p := resp.Envelope.Meta.Pagination; p != nil {
 			next = p.After
 		}
 		if len(rows) >= max {
-			more := total > max
-			if total == 0 { // no total came back: only the cursor can say
-				more = next != ""
+			if !known { // only the cursor can say
+				return rows[:max], -1, next != "", nil
 			}
-			return rows[:max], max0(total, len(rows)), more, nil
+			return rows[:max], max0(total, len(rows)), total > max, nil
 		}
 		if next == "" || len(page) == 0 || next == after {
+			if !known {
+				return rows, -1, false, nil
+			}
 			return rows, max0(total, len(rows)), false, nil
 		}
 		after = next
@@ -278,80 +335,305 @@ func orUnknown(s string) string {
 
 // New-app outcomes.
 const (
-	NewToEstate = "new"         // no record of it before the window
-	SeenBefore  = "seen-before" // already somewhere in the estate: an update or a new host
-	NotChecked  = "not-checked" // no vendor, a name that cannot go in a filter, or the cap was hit
+	NewToEstate = "new"         // no record of it, at any version, before the window
+	SeenBefore  = "seen-before" // already in the estate: an update or a new host
+	NotChecked  = "not-checked" // see Reason
 )
+
+// Why an application was not checked.
+const (
+	ReasonNoVendor = "no-vendor"       // a name-only lookup would match look-alikes from any vendor
+	ReasonOverCap  = "over-cap"        // more applications than MaxChecks
+	ReasonRefused  = "name-refused"    // the name or vendor holds a character a lookup cannot carry
+	ReasonRejected = "lookup-rejected" // the API refused this one lookup (4xx), so it could not be checked
+)
+
+// rejected: the API itself refused one lookup - a filter it could not parse,
+// say. That marks one app not checked. Anything else (no connection, a
+// refused token, rate limits that did not clear, a 5xx) fails the run, since
+// it says nothing about the app.
+func rejected(err error) bool {
+	var he *HTTPError
+	if !errors.As(err, &he) || !he.FromAPI {
+		return false
+	}
+	switch he.Status {
+	case 400, 404, 422:
+		return true
+	}
+	return false
+}
 
 // NewApp is one application first seen inside the window.
 type NewApp struct {
 	AppSummary
 	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"` // for not-checked
 }
 
 // NewAppsReport is NewApps' answer.
 type NewAppsReport struct {
-	Since      time.Time `json:"since"`
-	Total      int       `json:"total"` // records first seen in the window
-	Read       int       `json:"read"`
-	Truncated  bool      `json:"truncated"`
-	New        []NewApp  `json:"new"`
-	NotChecked []NewApp  `json:"not_checked"`
-	SeenBefore int       `json:"seen_before"` // applications, not records
+	Since      time.Time      `json:"since"`
+	Total      int            `json:"total"` // records first seen in the window; -1 when the API did not say
+	Read       int            `json:"read"`
+	Truncated  bool           `json:"truncated"`
+	New        []NewApp       `json:"new"`
+	NotChecked []NewApp       `json:"not_checked"`
+	Reasons    map[string]int `json:"not_checked_reasons"`
+	SeenBefore int            `json:"seen_before"` // applications, not records
+	// SeenAsOtherVersion is the part of SeenBefore that matched only once the
+	// version number was taken out of the name.
+	SeenAsOtherVersion int `json:"seen_as_other_version"`
 }
 
 // NewAppsOpts caps the work.
 type NewAppsOpts struct {
 	MaxRows   int // records first seen in the window to read; 0 = 10000
-	MaxChecks int // "was it here before?" lookups; 0 = 200
+	MaxChecks int // applications to look up; 0 = 500
+	Workers   int // lookups at a time; 0 = 4
 }
 
 // NewApps lists applications first seen since `since` that the estate had
 // never had before. It reads the window's records, groups them, then asks for
-// each group whether any record predates the window: one limit=1 call each,
-// largest groups first, up to MaxChecks.
+// each group whether any record from the same vendor predates the window:
+// first by the exact name, then, if the name carries a version number, by
+// the same name at any version. Largest groups first, up to MaxChecks,
+// Workers at a time.
 func (c *Client) NewApps(ctx context.Context, since time.Time, o NewAppsOpts) (*NewAppsReport, error) {
 	if o.MaxRows <= 0 {
 		o.MaxRows = 10000
 	}
 	if o.MaxChecks <= 0 {
-		o.MaxChecks = 200
+		o.MaxChecks = 500
+	}
+	if o.Workers <= 0 {
+		o.Workers = 4
 	}
 	ts := since.UTC().Format(time.RFC3339)
 	rows, total, truncated, err := c.readApps(ctx, "first_seen_timestamp:>'"+ts+"'", o.MaxRows)
 	if err != nil {
 		return nil, err
 	}
-	rep := &NewAppsReport{Since: since.UTC(), Total: total, Read: len(rows), Truncated: truncated}
-	checks := 0
-	for _, s := range summarise(rows) {
-		// No vendor: a name-only lookup would match the same name from any
-		// vendor and call a look-alike "seen before", the wrong way round for
-		// this report. So it is listed as not checked.
-		n, nerr := exactLiteral(s.Name)
-		v, verr := exactLiteral(s.Vendor)
-		if nerr != nil || verr != nil || checks >= o.MaxChecks {
-			rep.NotChecked = append(rep.NotChecked, NewApp{s, NotChecked})
+	rep := &NewAppsReport{Since: since.UTC(), Total: total, Read: len(rows), Truncated: truncated, Reasons: map[string]int{}}
+
+	type job struct {
+		i       int
+		s       AppSummary
+		n, v, p string
+	}
+	apps := summarise(rows)
+	results := make([]NewApp, len(apps))
+	otherVersion := make([]bool, len(apps))
+	var jobs []job
+	for i, s := range apps {
+		reason := ""
+		n, nerr := apiLiteral(s.Name)
+		v, verr := apiLiteral(s.Vendor)
+		switch {
+		case strings.TrimSpace(s.Vendor) == "":
+			reason = ReasonNoVendor
+		case nerr != nil || verr != nil:
+			reason = ReasonRefused
+		case len(jobs) >= o.MaxChecks:
+			reason = ReasonOverCap
+		}
+		if reason != "" {
+			results[i] = NewApp{AppSummary: s, Status: NotChecked, Reason: reason}
 			continue
 		}
-		filter := clause("name", n, true) + "+" + clause("vendor", v, true) +
-			"+first_seen_timestamp:<='" + ts + "'"
-		checks++
-		resp, err := c.Get(ctx, appsRoute, url.Values{"filter": {filter}, "limit": {"1"}})
-		if err != nil {
-			return nil, err
+		jobs = append(jobs, job{i: i, s: s, n: n, v: v, p: versionPattern(n)})
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	work := make(chan job)
+	for w := 0; w < o.Workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range work {
+				seen, other, err := c.seenBefore(ctx, j.n, j.v, j.p, ts)
+				if rejected(err) {
+					results[j.i] = NewApp{AppSummary: j.s, Status: NotChecked, Reason: ReasonRejected}
+					continue
+				}
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+						cancel()
+					}
+					mu.Unlock()
+					continue
+				}
+				st := NewToEstate
+				if seen {
+					st = SeenBefore
+				}
+				results[j.i] = NewApp{AppSummary: j.s, Status: st}
+				otherVersion[j.i] = other
+			}
+		}()
+	}
+feed:
+	for _, j := range jobs {
+		select {
+		case work <- j:
+		case <-ctx.Done():
+			break feed
 		}
-		if t, ok := resp.Total(); (ok && t > 0) || hasResources(resp) {
+	}
+	close(work)
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	for i, r := range results {
+		switch r.Status {
+		case NewToEstate:
+			rep.New = append(rep.New, r)
+		case SeenBefore:
 			rep.SeenBefore++
-			continue
+			if otherVersion[i] {
+				rep.SeenAsOtherVersion++
+			}
+		case NotChecked:
+			rep.NotChecked = append(rep.NotChecked, r)
+			rep.Reasons[r.Reason]++
 		}
-		rep.New = append(rep.New, NewApp{s, NewToEstate})
 	}
 	return rep, nil
+}
+
+// seenBefore asks whether the same vendor had this application before the
+// window: by exact name, then by pattern (any version), if there is one.
+func (c *Client) seenBefore(ctx context.Context, name, vendor, pattern, ts string) (seen, otherVersion bool, err error) {
+	ask := func(nameClause string) (bool, error) {
+		filter := nameClause + "+" + clause("vendor", vendor, true) + "+first_seen_timestamp:<='" + ts + "'"
+		resp, err := c.Get(ctx, appsRoute, url.Values{"filter": {filter}, "limit": {"1"}})
+		if err != nil {
+			return false, err
+		}
+		t, ok := resp.Total()
+		return (ok && t > 0) || hasResources(resp), nil
+	}
+	if seen, err = ask(clause("name", name, true)); err != nil || seen || pattern == "" {
+		return seen, false, err
+	}
+	// The wildcard matches any text, so "Zoom *" would also find "Zoom
+	// Rooms": a different product, which would make a new one look known.
+	// So the earlier records' names are read back and only one that differs
+	// from this name in its version numbers alone counts.
+	// Discover keeps a record per host, so many copies of one look-alike can
+	// fill a page; up to 300 records are read. Past that the app is called
+	// new - the safe way to be wrong.
+	filter := "name:*'" + pattern + "'+" + clause("vendor", vendor, true) + "+first_seen_timestamp:<='" + ts + "'"
+	earlier, _, _, err := c.readApps(ctx, filter, 300)
+	if err != nil {
+		return false, false, err
+	}
+	re := patternRegexp(pattern)
+	for _, e := range earlier {
+		if re.MatchString(e.Name) {
+			return true, true, nil
+		}
+	}
+	return false, false, nil
+}
+
+// patternRegexp is versionPattern's pattern as a strict regexp: every * must
+// be a version number, everything else must match exactly.
+func patternRegexp(pattern string) *regexp.Regexp {
+	parts := strings.Split(pattern, "*")
+	for i, p := range parts {
+		parts[i] = regexp.QuoteMeta(p)
+	}
+	return regexp.MustCompile(`(?i)^` + strings.Join(parts, `\(?v?\d+(\.\d+)+`+versionSuffix+`\)?`) + `$`)
 }
 
 // hasResources: the answer carried at least one record, whatever its meta said.
 func hasResources(r *Response) bool {
 	var xs []json.RawMessage
-	return json.Unmarshal(r.Envelope.Resources, &xs) == nil && len(xs) > 0
+	return len(r.Envelope.Resources) > 0 && json.Unmarshal(r.Envelope.Resources, &xs) == nil && len(xs) > 0
+}
+
+// FieldNames reads one Discover record and returns the names of its fields,
+// nested ones as host.platform_name, each with its JSON type - never a value.
+// It exists to find where a field lives (the platform, at first) without
+// printing anything about a host. An object with more than 40 keys is not
+// opened: its keys are likely data (one per host or group), not field names.
+func (c *Client) FieldNames(ctx context.Context) ([]string, error) {
+	resp, err := c.Get(ctx, appsRoute, url.Values{"limit": {"1"}, "facet": {"host_info"}})
+	if err != nil {
+		return nil, err
+	}
+	var recs []map[string]any
+	if len(resp.Envelope.Resources) == 0 || json.Unmarshal(resp.Envelope.Resources, &recs) != nil {
+		return nil, errors.New("falcon discover: resources are not records")
+	}
+	if len(recs) == 0 {
+		return nil, errors.New("falcon discover: no record to read the fields of")
+	}
+	var out []string
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			if prefix != "" {
+				if len(t) > 40 {
+					out = append(out, fmt.Sprintf("%s (object of %d keys, not opened)", prefix, len(t)))
+					return
+				}
+				out = append(out, prefix+" (object)")
+			}
+			for k, x := range t {
+				name := cleanKey(k)
+				if prefix != "" {
+					name = prefix + "." + name
+				}
+				walk(name, x)
+			}
+		case []any:
+			out = append(out, fmt.Sprintf("%s (array of %d)", prefix, len(t)))
+			if len(t) > 0 {
+				walk(prefix+"[]", t[0])
+			}
+		case string:
+			out = append(out, prefix+" (string)")
+		case float64:
+			out = append(out, prefix+" (number)")
+		case bool:
+			out = append(out, prefix+" (bool)")
+		case nil:
+			out = append(out, prefix+" (null)")
+		}
+	}
+	walk("", recs[0])
+	sort.Strings(out)
+	return out, nil
+}
+
+// cleanKey makes one JSON key safe to print: control and invisible
+// formatting characters (bidi overrides among them) become "?", and a key
+// longer than 64 runes is cut.
+func cleanKey(k string) string {
+	r := []rune(k)
+	if len(r) > 64 {
+		r = append(r[:64], '…')
+	}
+	for i, c := range r {
+		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
+			r[i] = '?'
+		}
+	}
+	return string(r)
 }

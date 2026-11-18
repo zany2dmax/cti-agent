@@ -47,8 +47,10 @@ type appsFake struct {
 	filters []string
 	pages   [][]app
 	total   int
-	// before answers the "was it here before the window?" lookups by name.
-	before map[string]int
+	// before answers the "was it here before the window?" lookups by exact
+	// name; beforePattern the any-version ones, keyed by pattern.
+	before        map[string]int
+	beforePattern map[string][]string // pattern -> earlier names it returns
 }
 
 func (a *appsFake) handler(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +67,19 @@ func (a *appsFake) handler(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(f, "first_seen_timestamp:<=") {
 		n := 0
 		for name, c := range a.before {
-			if strings.Contains(f, "name:'"+name+"'") {
+			if strings.HasPrefix(f, "name:'"+name+"'+") {
 				n = c
+			}
+		}
+		for pat, names := range a.beforePattern {
+			if strings.HasPrefix(f, "name:*'"+pat+"'+") {
+				var rs []app
+				for _, nm := range names {
+					rs = append(rs, rec("x", nm, "", "h9", "Windows"))
+				}
+				b, _ := json.Marshal(rs)
+				_, _ = fmt.Fprintf(w, `{"meta":{"pagination":{"total":%d}},"resources":%s}`, len(rs), b)
+				return
 			}
 		}
 		_, _ = fmt.Fprintf(w, `{"meta":{"pagination":{"total":%d}},"resources":[]}`, n)
@@ -159,7 +172,7 @@ func TestNewAppsSeparatesNewFromUpdatesAndUnusableNames(t *testing.T) {
 		rec("Acme", "Remote Helper", "2.0", "h1", "Windows"),
 		rec("Acme", "Remote Helper", "2.0", "h2", "Windows"),
 		rec("Google LLC", "Google Chrome", "132", "h1", "Windows"),
-		rec("Odd", "Notepad++", "8", "h3", "Windows"),
+		rec("Odd", "Bad'Name", "8", "h3", "Windows"),
 	}}, before: map[string]int{"Google Chrome": 2000}}
 	f.routes[appsRoute] = af.handler
 	since := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
@@ -173,7 +186,7 @@ func TestNewAppsSeparatesNewFromUpdatesAndUnusableNames(t *testing.T) {
 	if rep.SeenBefore != 1 {
 		t.Errorf("seen before = %d, want 1", rep.SeenBefore)
 	}
-	if len(rep.NotChecked) != 1 || rep.NotChecked[0].Name != "Notepad++" {
+	if len(rep.NotChecked) != 1 || rep.NotChecked[0].Name != "Bad'Name" || rep.Reasons[ReasonRefused] != 1 {
 		t.Errorf("not checked = %+v", rep.NotChecked)
 	}
 	if af.filters[0] != "first_seen_timestamp:>'2026-11-11T00:00:00Z'" {
@@ -196,8 +209,8 @@ func TestNewAppsRespectsTheCheckCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.New) != 1 || len(rep.NotChecked) != 2 {
-		t.Fatalf("new %d, not checked %d; want 1 and 2", len(rep.New), len(rep.NotChecked))
+	if len(rep.New) != 1 || len(rep.NotChecked) != 2 || rep.Reasons[ReasonOverCap] != 2 {
+		t.Fatalf("new %d, not checked %d (%v); want 1 and 2 over the cap", len(rep.New), len(rep.NotChecked), rep.Reasons)
 	}
 }
 
@@ -241,7 +254,7 @@ func TestAnAppWithNoVendorIsNotCheckedAgainstEveryVendor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.SeenBefore != 0 || len(rep.NotChecked) != 1 {
+	if rep.SeenBefore != 0 || len(rep.NotChecked) != 1 || rep.Reasons[ReasonNoVendor] != 1 {
 		t.Fatalf("a vendorless name was matched against other vendors: %+v", rep)
 	}
 	if len(af.filters) != 1 {
@@ -249,14 +262,165 @@ func TestAnAppWithNoVendorIsNotCheckedAgainstEveryVendor(t *testing.T) {
 	}
 }
 
-func TestStoredSpellingIsUsedForTheExactLookup(t *testing.T) {
-	if v, err := exactLiteral("Some  App"); err != nil || v != "Some  App" {
-		t.Fatalf("exactLiteral folded or refused: %q %v", v, err)
+func TestNamesDiscoverReturnedAreCheckedLooselyButSafely(t *testing.T) {
+	for _, ok := range []string{"Some  App", "Keeper® Password Manager & Digital Vault", "iCloud+.app",
+		"Adobe Acrobat: PDF edit, convert, sign tools", "Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>",
+		"Microsoft 365 企业应用版 - zh-cn", "엔터프라이즈용 Microsoft 365 앱 - ko-kr"} {
+		if v, err := apiLiteral(ok); err != nil || v != ok {
+			t.Errorf("apiLiteral(%q) = %q, %v", ok, v, err)
+		}
 	}
-	if _, err := exactLiteral(" App"); err == nil {
-		t.Fatal("leading space accepted")
+	for _, bad := range []string{"", " App", "App ", "it's", `a\b`, "a*b", "a\nb", "a\x1bb", "\xff\xfe", strings.Repeat("a", 301)} {
+		if _, err := apiLiteral(bad); err == nil {
+			t.Errorf("apiLiteral(%q) accepted", bad)
+		}
 	}
 	if _, err := Literal("a,b"); err == nil {
-		t.Fatal("comma (FQL OR) accepted")
+		t.Fatal("comma (FQL OR) accepted from an advisory")
+	}
+}
+
+func TestVersionPatterns(t *testing.T) {
+	cases := map[string]string{
+		"Microsoft .NET 8.0.34 - Windows Server Hosting":               "Microsoft .NET * - Windows Server Hosting",
+		"Microsoft Visual C++ v14 Redistributable (x64) - 14.51.36247": "Microsoft Visual C++ v14 Redistributable (x64) - *",
+		"Dash ddxPrinter 8.20.6.26.1":                                  "Dash ddxPrinter *",
+		"PowerShell 7.6.10.0-x64":                                      "PowerShell *",
+		"Bluebeam Vu x64 2015":                                         "", // a year, not a version
+		"Google Chrome":                                                "",
+		"1.2 3.4":                                                      "", // nothing left
+	}
+	for in, want := range cases {
+		if got := versionPattern(in); got != want {
+			t.Errorf("versionPattern(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAnUpdateWithTheVersionInItsNameIsSeenBefore(t *testing.T) {
+	f, c := newFake(t)
+	af := &appsFake{total: 2, pages: [][]app{{
+		rec("Microsoft Corporation", "Microsoft .NET 8.0.34 - Windows Server Hosting", "8.0.34", "h1", "Windows"),
+		rec("Acme", "Remote Helper 2.0.1", "2.0.1", "h2", "Windows"),
+		rec("Zoom Video", "Zoom 6.1.0", "6.1.0", "h3", "Windows"),
+	}}, beforePattern: map[string][]string{
+		"Microsoft .NET * - Windows Server Hosting": {"Microsoft .NET 8.0.33 - Windows Server Hosting"},
+		// Only a different product matches the wildcard: not seen before.
+		"Zoom *": {"Zoom Rooms", "Zoom Outlook Plugin"},
+	}}
+	f.routes[appsRoute] = af.handler
+	rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.SeenBefore != 1 || rep.SeenAsOtherVersion != 1 {
+		t.Errorf("seen %d, other version %d; want 1 and 1", rep.SeenBefore, rep.SeenAsOtherVersion)
+	}
+	if len(rep.New) != 2 {
+		t.Errorf("new = %+v, want Remote Helper and Zoom", rep.New)
+	}
+}
+
+func TestALookupFailureFailsTheRunInsteadOfCallingItNew(t *testing.T) {
+	f, c := newFake(t)
+	af := &appsFake{total: 1, pages: [][]app{{rec("Acme", "Remote Helper", "1", "h1", "Windows")}}}
+	f.routes[appsRoute] = func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("filter"), "first_seen_timestamp:<=") {
+			w.WriteHeader(500)
+			_, _ = w.Write([]byte(`{"errors":[{"code":500,"message":"boom"}]}`))
+			return
+		}
+		af.handler(w, r)
+	}
+	if rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{}); err == nil {
+		t.Fatalf("want an error, got %+v", rep)
+	}
+}
+
+func TestFieldNamesNeverCarryValues(t *testing.T) {
+	f, c := newFake(t)
+	f.routes[appsRoute] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"meta":{},"resources":[{"name":"SecretApp","host":{"hostname":"HOST-42","platform_name":"Windows","groups":["g1"]}}]}`))
+	}
+	got, err := c.FieldNames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(got, "\n")
+	for _, v := range []string{"SecretApp", "HOST-42", "Windows", "g1"} {
+		if strings.Contains(all, v) {
+			t.Fatalf("a value leaked: %q", all)
+		}
+	}
+	if !strings.Contains(all, "host.platform_name (string)") || !strings.Contains(all, "host.groups (array of 1)") {
+		t.Fatalf("fields = %q", all)
+	}
+}
+
+func TestOneRejectedLookupMarksOneAppNotTheRun(t *testing.T) {
+	f, c := newFake(t)
+	af := &appsFake{total: 2, pages: [][]app{{
+		rec("Acme", "Odd+Name", "1", "h1", "Windows"),
+		rec("Acme", "Remote Helper", "1", "h2", "Windows"),
+	}}}
+	f.routes[appsRoute] = func(w http.ResponseWriter, r *http.Request) {
+		if fl := r.URL.Query().Get("filter"); strings.Contains(fl, "Odd+Name") {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"meta":{"trace_id":"t"},"errors":[{"code":400,"message":"invalid filter"}]}`))
+			return
+		}
+		af.handler(w, r)
+	}
+	rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{})
+	if err != nil {
+		t.Fatalf("one bad name failed the run: %v", err)
+	}
+	if rep.Reasons[ReasonRejected] != 1 || len(rep.New) != 1 {
+		t.Fatalf("rep = %+v", rep)
+	}
+}
+
+func TestADifferentEditionIsNotAnotherVersion(t *testing.T) {
+	// "-client" is not a known suffix, so "2.0-client" is not a version
+	// token and the name gets no pattern at all.
+	if p := versionPattern("Acme Agent 2.0-client"); p != "" {
+		t.Fatalf("pattern = %q, want none", p)
+	}
+	re := patternRegexp(versionPattern("PowerShell 7.6.10.0-x64"))
+	if !re.MatchString("PowerShell 7.4.1.0-x64") || re.MatchString("PowerShell Preview") {
+		t.Fatal("x64 build suffix not handled")
+	}
+}
+
+func TestFieldNamesDoNotOpenDataKeyedObjectsOrPrintBidi(t *testing.T) {
+	f, c := newFake(t)
+	keys := []string{}
+	for i := 0; i < 50; i++ {
+		keys = append(keys, fmt.Sprintf(`"HOST-%d":1`, i))
+	}
+	f.routes[appsRoute] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"meta":{},"resources":[{"by_host":{%s},"na\u202eme":"x"}]}`, strings.Join(keys, ","))
+	}
+	got, err := c.FieldNames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(got, "\n")
+	if strings.Contains(all, "HOST-") || strings.Contains(all, "\u202e") || !strings.Contains(all, "not opened") {
+		t.Fatalf("fields = %q", all)
+	}
+}
+
+func TestATotalTheAPIDidNotSendIsUnknownNotTheReadCount(t *testing.T) {
+	f, c := newFake(t)
+	f.routes[appsRoute] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"meta":{},"resources":[{"name":"App","vendor":"Vv","host":{"id":"h1"}}]}`))
+	}
+	res, err := c.FindApps(context.Background(), "App", FindOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != -1 || res.Read != 1 {
+		t.Fatalf("res = %+v", res)
 	}
 }
