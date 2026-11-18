@@ -520,6 +520,8 @@ def _fleet_tickets(data):
 def _ticket_hosts(t):
     if t.get("kind") == "domains-lockdown":
         return "DNS changes for IT"
+    if t.get("kind") == "vmscan-sheet-fixes":
+        return "spreadsheet fixes for the network team"
     if not t.get("checked"):
         return "not re-checked"
     n = t.get("hosts") or 0
@@ -534,7 +536,8 @@ def fleet_tickets_section(data):
     products = products_by_cve(data)
 
     def row(t):
-        product = products.get(t.get("cve") or "") if t.get("kind") != "domains-lockdown" else ""
+        # Only a CVE ticket has a product; the lane tickets have a kind.
+        product = products.get(t.get("cve") or "") if not t.get("kind") else ""
         product = (f'<span style="background:#fff4c2;color:#1a202c;padding:0 4px;'
                    f'border-radius:3px;font-weight:700">{esc(product)}</span> &middot; '
                    if product else "")
@@ -651,7 +654,7 @@ def fleet_tickets_text(data):
     def add(t):
         lines.append(f"  {t['key']:<10} {t.get('cve') or '':<16} "
                      f"{t.get('status') or '':<14} {_ticket_hosts(t)}")
-        p = products.get(t.get("cve") or "") if t.get("kind") != "domains-lockdown" else ""
+        p = products.get(t.get("cve") or "") if not t.get("kind") else ""
         if p:
             lines.append(f"    Product: {p}")
         if t.get("outcome"):

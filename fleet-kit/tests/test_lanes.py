@@ -1500,6 +1500,19 @@ class DigestFleetTickets(unittest.TestCase):
         self.assertIn("DNS changes for IT", html)
         self.assertNotIn("not re-checked", html)
 
+    def test_the_spreadsheet_ticket_is_shown_as_such(self):
+        t = {"Spreadsheet fixes": {"key": "CR-77", "url": "https://x/browse/CR-77", "status": "Open",
+                                   "kind": "vmscan-sheet-fixes",
+                                   "outcome": "the network team's spreadsheet ticket - updated by the weekly VM scan run"}}
+        html = brief.fleet_tickets_section(self.data(t))
+        self.assertIn("CR-77", html)
+        self.assertIn("Spreadsheet fixes", html)
+        self.assertIn("spreadsheet fixes for the network team", html)
+        self.assertNotIn("not re-checked", html)
+        txt = "\n".join(brief.fleet_tickets_text(self.data(t)))
+        self.assertIn("spreadsheet fixes for the network team", txt)
+        self.assertNotIn("Product:", txt)
+
     def test_no_tickets_no_section(self):
         self.assertEqual(brief.fleet_tickets_section(self.data({})), "")
         self.assertNotIn("FLEET TICKETS", brief.render_text(self.data({}), "daily"))

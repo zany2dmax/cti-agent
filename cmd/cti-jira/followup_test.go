@@ -695,3 +695,30 @@ func TestTheDomainsLockDownTicketIsListedNotRechecked(t *testing.T) {
 		t.Errorf("the scanner was asked about the lock-down ticket: %v", sc.calls)
 	}
 }
+
+// The VM scan lane's spreadsheet ticket carries the cti-agent label too: it
+// is listed for the Daily Brief, never re-checked against the scanner, and
+// not reported as "no CVE label".
+func TestTheSpreadsheetTicketIsListedNotRechecked(t *testing.T) {
+	sheet := map[string]any{
+		"key": "SEC-77",
+		"fields": map[string]any{
+			"summary": "Network spreadsheet: 4 location(s) to correct",
+			"status": map[string]any{"name": "Open",
+				"statusCategory": map[string]any{"key": "new"}},
+			"labels": []string{"cti-agent", vmscanFixesLabel},
+		},
+	}
+	_, c := newFakeJira(t, sheet)
+	sc := &scanner{}
+	refs := followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+
+	got, ok := refs[sheetFixesRefKey]
+	if !ok || got.Key != "SEC-77" || got.Kind != "vmscan-sheet-fixes" ||
+		!strings.Contains(got.Outcome, "updated by the weekly VM scan run") {
+		t.Fatalf("spreadsheet ref = %+v (present %v)", got, ok)
+	}
+	if len(sc.calls) != 0 {
+		t.Errorf("the scanner was asked about the spreadsheet ticket: %v", sc.calls)
+	}
+}

@@ -94,6 +94,12 @@ only adds to the schedules, and stale titles are reported as missing. Then
   `/etc/cti-agent/sheet-notes.txt` (`NETNOTES_FILE`, `location | what to
   check`) and stay in the ticket until the line is deleted. The email's
   coverage section and the CSV list them too.
+- **The Daily Brief lists the spreadsheet ticket.** FLEET TICKETS now shows the
+  network team's spreadsheet ticket beside the domains lock-down ticket, with
+  its key, link and status ("spreadsheet fixes for the network team"). The daily
+  follow-up lists it and leaves it alone - the weekly VM scan run keeps it
+  current - and searches `JIRA_VMSCAN_PROJECT_KEY` when it names another
+  project. It used to be skipped with a "no CVE label" note.
 - **New "check in Qualys" lines:** a scanned Asset Group whose addresses are
   only under decommissioned locations, and every Asset Group with addresses
   that no scan targeted in the week.

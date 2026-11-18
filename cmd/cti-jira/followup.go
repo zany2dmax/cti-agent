@@ -134,17 +134,26 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			"no ticket was re-checked this run", safelog.Line(err.Error()))
 		return refs
 	}
-	// The domains lock-down ticket may live in another project (INF). It is
-	// listed for the digest like any fleet ticket, and only that: the loop
-	// below leaves it alone.
-	if dp := cfg.DomainsProject(); !strings.EqualFold(dp, cfg.JiraProjectKey) {
-		more, err := c.Search(ctx, followUpJQL(dp), followUpMax)
+	// The domains lock-down ticket and the VM scan lane's spreadsheet ticket
+	// may live in other projects (INF, say). Each is listed for the digest like
+	// any fleet ticket, and only that: the loop below leaves them alone, and
+	// their own weekly runs keep them current.
+	searched := map[string]bool{strings.ToUpper(cfg.JiraProjectKey): true}
+	for _, extra := range []struct{ project, label, what string }{
+		{cfg.DomainsProject(), domainsLabel, "the domains lock-down ticket"},
+		{cfg.VMScanProject(), vmscanFixesLabel, "the spreadsheet ticket"},
+	} {
+		if strings.TrimSpace(extra.project) == "" || searched[strings.ToUpper(extra.project)] {
+			continue
+		}
+		searched[strings.ToUpper(extra.project)] = true
+		more, err := c.Search(ctx, followUpJQL(extra.project), followUpMax)
 		if err != nil {
-			logf("WARNING: follow-up: searching %s for the domains lock-down ticket "+
-				"failed: %s - it is not listed in the digest this run", dp, safelog.Line(err.Error()))
+			logf("WARNING: follow-up: searching %s for %s failed: %s - it is not listed in the digest this run",
+				extra.project, extra.what, safelog.Line(err.Error()))
 		}
 		for _, is := range more {
-			if hasLabel(is.Fields.Labels, domainsLabel) {
+			if hasLabel(is.Fields.Labels, domainsLabel) || hasLabel(is.Fields.Labels, vmscanFixesLabel) {
 				issues = append(issues, is)
 			}
 		}
@@ -165,7 +174,7 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 	}
 
-	var checked, already, nolabel, unanswered, lockdown int
+	var checked, already, nolabel, unanswered, lockdown, sheet int
 	for _, issue := range issues {
 		// The domains lane's lock-down ticket carries the cti-agent label
 		// too. It is not about a CVE and is kept current by run-domains
@@ -178,6 +187,16 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			r.Outcome = "the weekly domains lock-down ticket - updated by the weekly domains run"
 			r.Kind = "domains-lockdown"
 			refs[lockdownRefKey] = r
+			continue
+		}
+		// The VM scan lane's spreadsheet ticket, the same way: not about a CVE,
+		// kept current by run-vmscan (--vmscan-fixes), listed here only.
+		if hasLabel(issue.Fields.Labels, vmscanFixesLabel) {
+			sheet++
+			r := refFor(c, issue, "")
+			r.Outcome = "the network team's spreadsheet ticket - updated by the weekly VM scan run"
+			r.Kind = "vmscan-sheet-fixes"
+			refs[sheetFixesRefKey] = r
 			continue
 		}
 		cve := cveFromLabels(issue.Fields.Labels)
@@ -253,14 +272,17 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		checked++
 	}
 	logf("follow-up: %d fleet ticket(s) found, %d re-checked, %d already handled "+
-		"this run, %d domains lock-down, %d with no CVE label, %d left alone because "+
-		"the scanner could not answer", len(issues), checked, already, lockdown, nolabel, unanswered)
+		"this run, %d domains lock-down, %d spreadsheet, %d with no CVE label, %d left alone because "+
+		"the scanner could not answer", len(issues), checked, already, lockdown, sheet, nolabel, unanswered)
 	return refs
 }
 
 // lockdownRefKey is the domains lock-down ticket's key in the ticket map,
 // which is otherwise keyed by CVE. The digest shows it under FLEET TICKETS.
 const lockdownRefKey = "DNS lock-down"
+
+// sheetFixesRefKey is the spreadsheet ticket's key in the same map.
+const sheetFixesRefKey = "Spreadsheet fixes"
 
 func hasLabel(labels []string, want string) bool {
 	for _, l := range labels {

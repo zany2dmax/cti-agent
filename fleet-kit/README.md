@@ -1866,7 +1866,9 @@ Outlook. The raw markdown report is attached for anyone who wants every row.
 With Jira configured, a **FLEET TICKETS** section lists every fleet ticket the
 morning's follow-up re-checked - key and link, CVE, Jira status, hosts the
 scanner sees today, and what the re-check did - with tickets closed in the last
-30 days below it, and the domains lane's lock-down ticket.
+30 days below it, the domains lane's lock-down ticket, and the VM scan lane's
+spreadsheet ticket for the network team. The last two are listed, not
+re-checked: their own weekly runs keep them current.
 
 Sev1 is suppressed from the daily and appears in the weekly. Sev4 and Sev2 are capped
 at 12 and 10 items on the daily, sorted by host count, with a "+N more in the
