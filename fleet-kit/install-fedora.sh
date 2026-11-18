@@ -689,6 +689,13 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-podprobe"
   ok "built $CODE_DIR/bin/cti-podprobe"
 
+  # Read-only check of the CrowdStrike Falcon API client (advisory triage,
+  # phase 1). Needs outbound 443 to the FALCON_BASE_URL host and FALCON_* in
+  # fleet.env; nothing runs it on a timer.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-falcon" ./cmd/cti-falcon )
+  chmod 0755 "$CODE_DIR/bin/cti-falcon"
+  ok "built $CODE_DIR/bin/cti-falcon"
+
   # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
   # against Qualys, so it needs outbound 443 to two more hosts - checked in
   # the preflight above.
@@ -1107,7 +1114,7 @@ FAIL=0
 [ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
-         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" \
+         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" \
          "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \

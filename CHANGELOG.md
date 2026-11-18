@@ -35,6 +35,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Added
+
+- `cti-falcon --check`: the first step of advisory triage from our own data.
+  It checks the fleet's CrowdStrike Falcon API client. It gets a token, then
+  makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts)
+  on the routes triage will call. It prints counts only and revokes the token
+  before it exits. `FALCON_BASE_URL` must be one of the published CrowdStrike
+  API hosts, and the client follows no redirects, so neither a typo nor a
+  redirect can carry the secret or the token elsewhere. RUNBOOK §11j.
+  **Upgrade:** nothing until you want it. Then create the read-only API
+  client, add the three `FALCON_*` settings to `fleet.env`, and run
+  `sudo cti-agent cti-falcon --check`.
+
+---
+
 ## 1.6.7 — 2026-11-18
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: which

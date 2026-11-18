@@ -123,6 +123,13 @@ flag: --ticket-slot | leave a slot beside the DNS changes for --stamp-ticket to 
 flag: --timeout DURATION | per-request web timeout (default 10s)
 flag: --websites-out STRING | write the domains with a live website of their own (not landers, parked pages, redirects or domains marked landing) as JSON, for the AppSec lane's coverage check
 
+command: cti-falcon
+about: Check the CrowdStrike Falcon API client: token, then one read per scope
+runs: read
+flag: --check | get a token and run one read per scope; prints counts only
+flag: --json | with --check: print the result as JSON
+flag: --timeout DURATION | give up after this long (default 2m0s)
+
 command: cti-jira
 about: File and update the fleet's Jira tickets
 runs: effect

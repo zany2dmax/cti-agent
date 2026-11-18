@@ -28,6 +28,7 @@ document assumes you have decided to run it.
 - [11g. The weekly domains lane](#11g-the-weekly-domains-lane)
 - [11h. Man pages](#11h-man-pages)
 - [11i. Cutting a release](#11i-cutting-a-release)
+- [11j. The CrowdStrike API client](#11j-the-crowdstrike-api-client)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -2573,6 +2574,60 @@ tags arrive in one push, so none of them would get a release.
 - **Use third-party actions.** It reads two files through the GitHub API at the
   run's commit and uses the `gh` CLI the runner already has, with the
   workflow's own token, limited to `contents: write`.
+
+---
+
+## 11j. The CrowdStrike API client
+
+Advisory triage will read from CrowdStrike Falcon: which applications we run,
+which hosts saw an indicator, and which ATT&CK techniques our detections fired
+on. That part isn't built yet. What exists is `cti-falcon --check`, which
+proves the API client works before anything depends on it.
+
+**Create the client** in the Falcon console: Support and resources > Resources
+and tools > **Client Management** > Create API client. Name it
+`cti-agent-fleet`, and tick **Read** only for:
+
+| Scope | What triage uses it for |
+|---|---|
+| Hosts | host name, OS and last-seen for a host ID |
+| Assets | installed applications per host (Falcon Discover) |
+| IOC Management | which hosts saw a domain, IP or hash |
+| Alerts | detections and their ATT&CK techniques |
+
+Tick no Write box, and not the older **IOCs** scope: its routes are retired.
+The secret is shown once. Put it in 1Password, then into
+`/etc/cti-agent/fleet.env`, together with the base URL shown next to it:
+
+```
+FALCON_BASE_URL=https://api.us-2.crowdstrike.com
+FALCON_CLIENT_ID=...
+FALCON_CLIENT_SECRET=...
+```
+
+Only the four published API hosts are accepted (US-1, US-2, EU-1, GovCloud).
+Anything else is refused before a request is made, so a typo can't send the
+secret somewhere else.
+
+**Check it:**
+
+```bash
+sudo cti-agent cti-falcon --check
+```
+
+It gets a token, then makes one `limit=1` read per scope on the exact route
+triage will call. It prints OK, DENIED or ERROR for each, with a count at
+most, and revokes its token before it exits. It exits 0 only when all four
+work. It never prints the token, the secret, an ID or a record.
+
+| What you see | What it means |
+|---|---|
+| `token : FAILED ... HTTP 401` | The client ID or secret is wrong, or the client was deleted. |
+| `token : FAILED ... this API client is in eu-1 - set FALCON_BASE_URL=...` | The client lives on another cloud. Use the host it names. |
+| `token : FAILED ... HTTP 403` | The client may restrict which IP addresses can use it. Allow the box's address. |
+| `Assets: READ DENIED` | The scope isn't ticked, or, if it is, Falcon Discover / Exposure Management isn't licensed. The inventory then comes from Qualys and Entra only. |
+| `IOC Management: READ OK ... no hosts for the test value` | Expected. The probe asks about `example.com`, a reserved name no host should have seen. |
+| `IOC Management: READ ERROR ... HTTP 404` | The route answered 404 without the service's own JSON, or the message is about the route. The lookup triage needs doesn't work. Check the scope, then whether CrowdStrike has moved the route. |
 
 ---
 

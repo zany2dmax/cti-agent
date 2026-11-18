@@ -852,6 +852,18 @@ aggregates only, with every key capped in length and in count, and a byte cap
 on the read. The service allows one session per token, so the fleet's token
 is its own.
 
+`cti-falcon` holds a CrowdStrike Falcon API client that is created with Read
+scopes only (Hosts, Assets, IOC Management, Alerts), and its code has GET for
+queries and no other request method. The secret comes only from the
+environment or `fleet.env`, never a flag. Before any request, `FALCON_BASE_URL`
+must be exactly one of the published CrowdStrike API hosts over https, with no
+port, path or credentials, and the client follows no redirect. So neither a
+typo nor a 3xx can send the client secret or the bearer token anywhere else.
+Errors carry the API's own error text, sanitised and shortened, never a
+response body, which on a token call could echo the request. `--check` prints
+counts at most and revokes its token on exit. Advisory triage, when built,
+will call this from deterministic Go only. No model is ever given the token.
+
 Model usage is rationed by `cti-budget` — window and daily ceilings with
 exponential backoff — so an agent loop cannot consume a shared subscription.
 

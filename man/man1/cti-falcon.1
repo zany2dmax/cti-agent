@@ -1,0 +1,106 @@
+.TH CTI-FALCON 1 "2026-11-18" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-falcon \- check the fleet's CrowdStrike Falcon API client
+.SH SYNOPSIS
+.B cti\-falcon \-\-check
+.RB [ \-\-json ]
+.RB [ \-\-timeout
+.IR DURATION ]
+.PP
+.B sudo cti\-agent cti\-falcon \-\-check
+.SH DESCRIPTION
+.B cti-falcon
+is a read-only check, run by hand. It is the first step of advisory triage
+from the organisation's own data. Triage will read three things from Falcon:
+the applications we run, which hosts saw an indicator, and which ATT&CK
+techniques our detections fired on. Before any of that is built,
+.B \-\-check
+proves the API client works.
+.PP
+It gets an OAuth2 token, then makes one
+.B limit=1
+read per scope on the exact route triage will call:
+.TP
+.B Hosts: READ
+.I /devices/queries/devices/v1
+.TP
+.B Assets: READ
+.I /discover/queries/applications/v1
+(Falcon Discover). A 403 here when the scope is ticked means Discover is not
+licensed.
+.TP
+.B IOC Management: READ
+.I /iocs/queries/indicators/devices/v1
+for the reserved domain
+.BR example.com .
+The service's own 404 (its JSON answer, with a trace ID) is the expected
+"no hosts" answer and counts as OK. A 404 for the route itself, or one from
+anything in front of the service, is an ERROR.
+.TP
+.B Alerts: READ
+.I /alerts/queries/alerts/v2
+.PP
+For each it prints OK, DENIED or ERROR, with a count at most. It then revokes
+its token. It never prints the token, the secret, an ID or a record.
+.SH OPTIONS
+Go's flag syntax: each option may also be written with a single dash.
+.TP
+.B \-\-check
+Required. Run the check.
+.TP
+.B \-\-json
+Print the result as JSON instead of text.
+.TP
+.BI \-\-timeout " DURATION"
+Give up after this long. Default: 2m.
+.SH ENVIRONMENT
+Read from the environment, or from
+.I fleet.env
+.RB ( FLEET_ENV ,
+or
+.I fleet.env
+under
+.BR FLEET_HOME ).
+There is no flag for the secret.
+.TP
+.B FALCON_BASE_URL
+The cloud's API host:
+.BR api.crowdstrike.com ,
+.BR api.us\-2.crowdstrike.com ,
+.B api.eu\-1.crowdstrike.com
+or
+.BR api.laggar.gcw.crowdstrike.com .
+Any other host, a port, a path or credentials in the URL is refused before
+a request is made. Redirects are never followed.
+.TP
+.B FALCON_CLIENT_ID
+.TQ
+.B FALCON_CLIENT_SECRET
+The API client, created with Read scopes only.
+.SH EXIT STATUS
+.TP
+.B 0
+The token and all four scopes work.
+.TP
+.B 1
+A setting is missing or refused, the token failed, or a scope is denied or
+failed.
+.TP
+.B 2
+Bad usage, including running without
+.BR \-\-check .
+.SH EXAMPLES
+Check the client on the box:
+.PP
+.RS
+.B sudo cti\-agent cti\-falcon \-\-check
+.RE
+.PP
+The same, as JSON, for a script:
+.PP
+.RS
+.B sudo cti\-agent cti\-falcon \-\-check \-\-json
+.RE
+.SH SEE ALSO
+.BR cti\-agent (1),
+RUNBOOK.md section 11j, SECURITY.md.

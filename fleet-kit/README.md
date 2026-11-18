@@ -176,6 +176,7 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task dev:report` | — | Show the latest report and priority counts | no |
 | `task dev:clean` | — | Wipe `.fleet-local/` | no |
 | `task kev` | `cti-kev` | CISA KEV deadlines for findings present in the estate | no |
+| — | `cti-falcon --check` | Read-only check of the CrowdStrike API client: a token, then one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts); counts only (needs `FALCON_BASE_URL`, `FALCON_CLIENT_ID`, `FALCON_CLIENT_SECRET`) | no |
 | — | `cti-podprobe` | Read-only probe of the PoD Log API for one archived window: counts only (needs `POD_CLUSTER_ID`, `POD_API_TOKEN`) | no |
 | `task test:kev` | — | Deadline bands, sign convention, present-only filtering | no |
 | `task patchtuesday` | `run-patchtuesday --dry-run` | Build the monthly Patch Tuesday synopsis. Never writes the release manifest | **dry run** |
