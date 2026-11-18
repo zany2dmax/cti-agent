@@ -1430,8 +1430,9 @@ Cc) is read and judged against one question: will this supplier touch company
 data, systems or networks, or provide technology? A **Yes** means the supplier
 is critical and has to go through third-party risk management; a **No** is a
 supplier of materials or other non-technology goods. A Yes, and an **Unsure**,
-each get a Kanban item in `SUPPLIER_JIRA_PROJECT`; a No appears in the digest
-only. One digest to the security team points at the board; a day with nothing
+each get a Kanban item in `SUPPLIER_JIRA_PROJECT`, counted in one line under the
+Daily Brief's FLEET TICKETS ("N Supplier request tickets opened for TPRM
+evaluation"); a No appears in the digest only. One digest to the security team points at the board; a day with nothing
 new sends nothing.
 
 What it reads: the message text and the supplier request form, an `.xlsx`

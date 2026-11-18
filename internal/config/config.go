@@ -99,6 +99,9 @@ type Config struct {
 	// puts tickets (the help desk), unassigned, for the help desk to assign.
 	JiraVMScanProject   string
 	JiraVMScanIssueType string
+	// JiraSupplierProject is where the supplier lane files its Kanban items
+	// (SUPPLIER_JIRA_PROJECT), so the daily follow-up can list them too.
+	JiraSupplierProject string
 	// JiraAllowCreate is the project-key allowlist, and it is deliberately the
 	// same shape as VM_ALLOW_TO: a comma-separated list the fleet may write
 	// to, with no default. A ticket filed into the wrong project is the same
@@ -409,6 +412,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraDomainsIssueType: os.Getenv("JIRA_DOMAINS_ISSUE_TYPE"),
 		JiraVMScanProject:    os.Getenv("JIRA_VMSCAN_PROJECT_KEY"),
 		JiraVMScanIssueType:  os.Getenv("JIRA_VMSCAN_ISSUE_TYPE"),
+		JiraSupplierProject:  os.Getenv("SUPPLIER_JIRA_PROJECT"),
 
 		JiraAllowClose:      os.Getenv("JIRA_ALLOW_CLOSE"),
 		JiraCloseTransition: os.Getenv("JIRA_CLOSE_TRANSITION"),

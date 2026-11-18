@@ -1513,6 +1513,28 @@ class DigestFleetTickets(unittest.TestCase):
         self.assertIn("spreadsheet fixes for the network team", txt)
         self.assertNotIn("Product:", txt)
 
+    def test_supplier_items_are_one_summary_line(self):
+        def item(key, done=False):
+            return {"key": key, "url": f"https://x/browse/{key}", "status": "Done" if done else "To Do",
+                    "cve": "Supplier request", "kind": "supplier-request", "done": done}
+        t = {"supplier:CR-81": item("CR-81"), "supplier:CR-83": item("CR-83"),
+             "supplier:CR-84": item("CR-84", done=True)}
+        html = brief.fleet_tickets_section(self.data(t))
+        self.assertIn("2 Supplier request tickets opened for TPRM evaluation", html)
+        self.assertNotIn("CR-81", html, "supplier items are a count, not a row each")
+        txt = "\n".join(brief.fleet_tickets_text(self.data(t)))
+        self.assertIn("2 Supplier request tickets opened for TPRM evaluation", txt)
+        one = {"supplier:CR-81": item("CR-81")}
+        self.assertIn("1 Supplier request ticket opened", brief.fleet_tickets_section(self.data(one)))
+
+    def test_other_fleet_tickets_are_shown(self):
+        t = {"fleet:CR-82": {"key": "CR-82", "url": "https://x/browse/CR-82", "status": "Open",
+                             "cve": "Fleet ticket", "kind": "fleet-other",
+                             "outcome": "a fleet ticket this daily re-check does not cover"}}
+        html = brief.fleet_tickets_section(self.data(t))
+        for want in ("CR-82", "Fleet ticket", "listed, not re-checked"):
+            self.assertIn(want, html)
+
     def test_no_tickets_no_section(self):
         self.assertEqual(brief.fleet_tickets_section(self.data({})), "")
         self.assertNotIn("FLEET TICKETS", brief.render_text(self.data({}), "daily"))

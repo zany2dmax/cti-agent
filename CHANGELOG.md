@@ -100,6 +100,12 @@ only adds to the schedules, and stale titles are reported as missing. Then
   follow-up lists it and leaves it alone - the weekly VM scan run keeps it
   current - and searches `JIRA_VMSCAN_PROJECT_KEY` when it names another
   project. It used to be skipped with a "no CVE label" note.
+- **The Daily Brief lists every ticket the fleet files.** The supplier lane's
+  open Kanban items (in `SUPPLIER_JIRA_PROJECT`) are one line under FLEET
+  TICKETS ("N Supplier request tickets opened for TPRM evaluation"), and a fleet ticket of a kind the daily follow-up
+  does not know is listed as a fleet ticket instead of being skipped with a
+  "no CVE label" note - so a new lane's tickets show up without anyone
+  remembering to add them.
 - **New "check in Qualys" lines:** a scanned Asset Group whose addresses are
   only under decommissioned locations, and every Asset Group with addresses
   that no scan targeted in the week.

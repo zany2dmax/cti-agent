@@ -722,3 +722,30 @@ func TestTheSpreadsheetTicketIsListedNotRechecked(t *testing.T) {
 		t.Errorf("the scanner was asked about the spreadsheet ticket: %v", sc.calls)
 	}
 }
+
+// Every ticket the fleet files is listed for the Daily Brief: the supplier
+// lane's Kanban items, and a fleet ticket of a kind the pass does not know
+// (it used to be skipped as "no CVE label").
+func TestSupplierItemsAndUnknownFleetTicketsAreListed(t *testing.T) {
+	issue := func(key, summary string, labels ...string) map[string]any {
+		return map[string]any{"key": key, "fields": map[string]any{
+			"summary": summary,
+			"status":  map[string]any{"name": "To Do", "statusCategory": map[string]any{"key": "new"}},
+			"labels":  append([]string{"cti-agent"}, labels...)}}
+	}
+	_, c := newFakeJira(t,
+		issue("SEC-81", "Supplier: Example Co", supplierLabel, "supplier-unsure"),
+		issue("SEC-82", "Something a future lane filed", "cti-futurelane"))
+	sc := &scanner{}
+	refs := followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+
+	if r, ok := refs["supplier:SEC-81"]; !ok || r.Kind != "supplier-request" || r.CVE != "Supplier request" {
+		t.Errorf("supplier item: %+v (present %v)", r, ok)
+	}
+	if r, ok := refs["fleet:SEC-82"]; !ok || r.Kind != "fleet-other" || r.Summary != "Something a future lane filed" {
+		t.Errorf("unknown fleet ticket: %+v (present %v)", r, ok)
+	}
+	if len(sc.calls) != 0 {
+		t.Errorf("neither is about a CVE, yet the scanner was asked: %v", sc.calls)
+	}
+}

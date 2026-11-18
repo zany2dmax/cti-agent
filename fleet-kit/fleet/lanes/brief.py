@@ -506,6 +506,11 @@ def _fleet_tickets(data):
     for cve, t in tickets.items():
         if not isinstance(t, dict) or not t.get("key"):
             continue
+        # Supplier-request items are one summary line, not a row each
+        # (supplier_line): there can be many, and the TPRM board is where
+        # they are worked.
+        if t.get("kind") == "supplier-request":
+            continue
         rows.append(dict(t, cve=t.get("cve") or cve))
 
     def sort_key(t):
@@ -517,11 +522,23 @@ def _fleet_tickets(data):
     return open_, closed
 
 
+def supplier_line(data):
+    """The one line for the supplier lane's open Kanban items, or ""."""
+    tickets = data.get("_tickets") or {}
+    n = sum(1 for t in tickets.values()
+            if isinstance(t, dict) and t.get("kind") == "supplier-request" and not t.get("done"))
+    if n == 0:
+        return ""
+    return f"{n} Supplier request ticket{'s' if n != 1 else ''} opened for TPRM evaluation"
+
+
 def _ticket_hosts(t):
     if t.get("kind") == "domains-lockdown":
         return "DNS changes for IT"
     if t.get("kind") == "vmscan-sheet-fixes":
         return "spreadsheet fixes for the network team"
+    if t.get("kind") == "fleet-other":
+        return "listed, not re-checked"
     if not t.get("checked"):
         return "not re-checked"
     n = t.get("hosts") or 0
@@ -531,7 +548,8 @@ def _ticket_hosts(t):
 def fleet_tickets_section(data):
     """FLEET TICKETS: every open fleet ticket and what today's re-check found."""
     open_, closed = _fleet_tickets(data)
-    if not open_ and not closed:
+    sup = supplier_line(data)
+    if not open_ and not closed and not sup:
         return ""
     products = products_by_cve(data)
 
@@ -564,6 +582,9 @@ def fleet_tickets_section(data):
     parts = []
     if open_:
         parts.append(''.join(row(t) for t in open_))
+    if sup:
+        parts.append("<tr><td colspan=\"3\" style=\"padding:6px 0;color:#2d3748\">"
+                     f"<b>{esc(sup)}</b></td></tr>")
     if closed:
         parts.append(
             "<tr><td colspan=\"3\" style=\"padding:10px 0 2px 0;color:#718096;"
@@ -645,7 +666,8 @@ def held_text(data):
 
 def fleet_tickets_text(data):
     open_, closed = _fleet_tickets(data)
-    if not open_ and not closed:
+    sup = supplier_line(data)
+    if not open_ and not closed and not sup:
         return []
     lines = [f"FLEET TICKETS - {len(open_)} open, re-checked against the scanner today",
              "-" * 68]
@@ -663,6 +685,8 @@ def fleet_tickets_text(data):
             lines.append(f"    {t['url']}")
     for t in open_:
         add(t)
+    if sup:
+        lines.append(f"  {sup}")
     if closed:
         lines.append("  Closed in the last 30 days:")
         for t in closed:

@@ -142,6 +142,7 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 	for _, extra := range []struct{ project, label, what string }{
 		{cfg.DomainsProject(), domainsLabel, "the domains lock-down ticket"},
 		{cfg.VMScanProject(), vmscanFixesLabel, "the spreadsheet ticket"},
+		{cfg.JiraSupplierProject, supplierLabel, "the supplier-request items"},
 	} {
 		if strings.TrimSpace(extra.project) == "" || searched[strings.ToUpper(extra.project)] {
 			continue
@@ -153,7 +154,8 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 				extra.project, extra.what, safelog.Line(err.Error()))
 		}
 		for _, is := range more {
-			if hasLabel(is.Fields.Labels, domainsLabel) || hasLabel(is.Fields.Labels, vmscanFixesLabel) {
+			if hasLabel(is.Fields.Labels, domainsLabel) || hasLabel(is.Fields.Labels, vmscanFixesLabel) ||
+				hasLabel(is.Fields.Labels, supplierLabel) {
 				issues = append(issues, is)
 			}
 		}
@@ -174,7 +176,7 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 	}
 
-	var checked, already, nolabel, unanswered, lockdown, sheet int
+	var checked, already, other, unanswered, lockdown, sheet, supplier int
 	for _, issue := range issues {
 		// The domains lane's lock-down ticket carries the cti-agent label
 		// too. It is not about a CVE and is kept current by run-domains
@@ -199,6 +201,16 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 			refs[sheetFixesRefKey] = r
 			continue
 		}
+		// A supplier-request Kanban item: the supplier lane files and updates
+		// it; one row each, listed here only.
+		if hasLabel(issue.Fields.Labels, supplierLabel) {
+			supplier++
+			r := refFor(c, issue, "Supplier request")
+			r.Outcome = "a supplier-request item - kept current by the supplier lane"
+			r.Kind = "supplier-request"
+			refs["supplier:"+issue.Key] = r
+			continue
+		}
 		cve := cveFromLabels(issue.Fields.Labels)
 		if cve != "" && cve != testCVE {
 			// Oldest first, so if two tickets carry one CVE the newer wins.
@@ -206,9 +218,14 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		}
 		switch {
 		case cve == "":
-			nolabel++
-			logf("note   : follow-up: %s has the cti-agent label but no cti-cve-... "+
-				"label, so it cannot be matched to a CVE - left alone", issue.Key)
+			// A fleet ticket of a kind this pass does not know: still the
+			// fleet's, so it is listed for the digest (every ticket the fleet
+			// files is shown there), not re-checked.
+			other++
+			r := refFor(c, issue, "Fleet ticket")
+			r.Outcome = "a fleet ticket this daily re-check does not cover - listed so it is not lost"
+			r.Kind = "fleet-other"
+			refs["fleet:"+issue.Key] = r
 			continue
 		case done[cve]:
 			already++
@@ -272,8 +289,9 @@ func followUp(ctx context.Context, c *jira.Client, cfg config.Config,
 		checked++
 	}
 	logf("follow-up: %d fleet ticket(s) found, %d re-checked, %d already handled "+
-		"this run, %d domains lock-down, %d spreadsheet, %d with no CVE label, %d left alone because "+
-		"the scanner could not answer", len(issues), checked, already, lockdown, sheet, nolabel, unanswered)
+		"this run, %d domains lock-down, %d spreadsheet, %d supplier, %d other fleet ticket(s) listed, "+
+		"%d left alone because the scanner could not answer",
+		len(issues), checked, already, lockdown, sheet, supplier, other, unanswered)
 	return refs
 }
 
@@ -283,6 +301,9 @@ const lockdownRefKey = "DNS lock-down"
 
 // sheetFixesRefKey is the spreadsheet ticket's key in the same map.
 const sheetFixesRefKey = "Spreadsheet fixes"
+
+// supplierLabel marks the supplier lane's Kanban items (internal/supplier).
+const supplierLabel = "fleet-supplier"
 
 func hasLabel(labels []string, want string) bool {
 	for _, l := range labels {
