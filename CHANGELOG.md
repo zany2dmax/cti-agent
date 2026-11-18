@@ -59,7 +59,9 @@ only adds to the schedules, and stale titles are reported as missing. Then
   has this schedule active, but it launched no scan"). A schedule switched off
   is named as such, not as missing; a monthly one (no fixed interval) is not
   judged and is counted as such. `VMSCAN_SCANS` is no longer needed: it only
-  adds titles to what the schedules say. `--check` lists the schedules.
+  adds titles to what the schedules say. `--check` lists the schedules, and
+  its first line says whether `VMSCAN_SCANS` adds anything instead of counting
+  it as the scans expected.
 
 - **Which VM scans ran comes from Qualys, not the mailbox.** The weekly lists
   the scans launched in the week through the Qualys API, with the Asset Groups

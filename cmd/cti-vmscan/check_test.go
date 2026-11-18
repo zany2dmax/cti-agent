@@ -72,6 +72,9 @@ func TestCheck(t *testing.T) {
 		!strings.Contains(out, "scan schedules, 2 in all, 1 due in the last 7 days, 1 switched off, 0 not judged") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
+	if !strings.Contains(out, "scans expected from the Qualys scan schedules alone") {
+		t.Errorf("with VMSCAN_SCANS unset, --check must say the schedules decide:\n%s", out)
+	}
 	if strings.Contains(out, "Secret Scan") || strings.Contains(out, "Secret Weekly") {
 		t.Errorf("--check prints counts only, never a scan title:\n%s", out)
 	}

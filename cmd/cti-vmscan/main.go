@@ -246,7 +246,13 @@ func doCheck(cfg config.Config, scansFlag string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	failed := 0
-	logf("check  : expecting %d scheduled scan(s)", len(expectedScans(scansFlag)))
+	// The scans expected come from Qualys's schedules (counted below); this
+	// line only says what --scans or VMSCAN_SCANS adds on top.
+	if n := len(expectedScans(scansFlag)); n > 0 {
+		logf("check  : VMSCAN_SCANS adds %d title(s) to the scan schedules (rarely needed)", n)
+	} else {
+		logf("check  : scans expected from the Qualys scan schedules alone")
+	}
 
 	g := graph.New(cfg.TenantID, cfg.ClientID, cfg.ClientSecret)
 	if err := graphToken(ctx, g); err != nil {
