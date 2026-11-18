@@ -36,8 +36,14 @@ func checkOut(t *testing.T, cfg config.Config) (int, string) {
 // check needs, print counts and never a network or group name, and fail when
 // the weekly would say its coverage check did not run.
 func TestCheck(t *testing.T) {
-	oldTok, oldDrive, oldGroups, oldScans := graphToken, driveContent, fetchGroups, fetchScans
-	t.Cleanup(func() { graphToken, driveContent, fetchGroups, fetchScans = oldTok, oldDrive, oldGroups, oldScans })
+	oldTok, oldDrive, oldGroups, oldScans, oldSched := graphToken, driveContent, fetchGroups, fetchScans, fetchSchedules
+	t.Cleanup(func() {
+		graphToken, driveContent, fetchGroups, fetchScans, fetchSchedules = oldTok, oldDrive, oldGroups, oldScans, oldSched
+	})
+	fetchSchedules = func(context.Context, string, string, string) ([]vmscan.Schedule, error) {
+		return []vmscan.Schedule{{Title: "Secret Weekly", Active: true, Interval: 7 * 24 * time.Hour},
+			{Title: "Off", Active: false}}, nil
+	}
 	fetchScans = func(context.Context, string, string, string, time.Time) ([]vmscan.Scan, error) {
 		return []vmscan.Scan{{Title: "Secret Scan", LaunchType: "Scheduled"}, {Title: "By hand", LaunchType: "On-Demand"}}, nil
 	}
@@ -62,10 +68,11 @@ func TestCheck(t *testing.T) {
 	code, out := checkOut(t, cfg)
 	if code != exitOK || !strings.Contains(out, "1 Asset Group(s)") || !strings.Contains(out, "2 row(s)") ||
 		!strings.Contains(out, "2 scan(s) launched in 7 days, 1 scheduled") ||
-		!strings.Contains(out, "network row(s) under") || strings.Contains(out, "site(s)") {
+		!strings.Contains(out, "network row(s) under") || strings.Contains(out, "site(s)") ||
+		!strings.Contains(out, "scan schedules, 2 in all, 1 due in the last 7 days, 1 switched off, 0 not judged") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if strings.Contains(out, "Secret Scan") {
+	if strings.Contains(out, "Secret Scan") || strings.Contains(out, "Secret Weekly") {
 		t.Errorf("--check prints counts only, never a scan title:\n%s", out)
 	}
 	for _, name := range []string{"Secret Plant", "Secret Group", "10.1.30"} {

@@ -5,8 +5,9 @@
 //	cti-vmscan --commit-seen w.seen.json     # after the send: let cleanup archive them
 //
 // It reads the notices that arrived in the CTI mailbox over the last week
-// (Graph, read-only), takes the newest result of every scheduled scan (and of
-// any scan named in --scans or VMSCAN_SCANS), and renders ONE report with the
+// (Graph, read-only), takes the newest result of every scheduled scan Qualys
+// lists, expects every active Qualys scan schedule due in the window (plus
+// any title in --scans or VMSCAN_SCANS), and renders ONE report with the
 // scans kept separate. A scan named there with no result, or a week with no
 // scan at all, is the first thing the report says. A scan launched by hand is
 // listed, not counted. It sends nothing: run-vmscan hands the files to
@@ -60,9 +61,9 @@ func die(format string, a ...any) int {
 func run() int {
 	since := flag.Duration("since", 7*24*time.Hour, "how far back to look for scan-result notices")
 	scansFlag := flag.String("scans", "",
-		"comma-separated titles of the scheduled scans you expect each week (default VMSCAN_SCANS); "+
-			"one that sends no result is reported as missing. Every scheduled scan that reported is "+
-			"included either way")
+		"comma-separated extra scan titles to expect each week, on top of Qualys's active scan "+
+			"schedules (default VMSCAN_SCANS); one that launched no scan is reported as missing. "+
+			"Every scheduled scan that ran is included either way")
 	out := flag.String("out", "", "write the HTML here")
 	textOut := flag.String("text-out", "", "write the plain-text version here")
 	subjectOut := flag.String("subject-out", "", "write the subject line here")
@@ -81,8 +82,8 @@ func run() int {
 	commitSeen := flag.String("commit-seen", "",
 		"record a --seen-out file in the processed log the mailbox cleanup reads; then exit")
 	check := flag.Bool("check", false,
-		"read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list "+
-			"and the Qualys scan list the report needs, print counts, and exit")
+		"read-only: check the Graph credentials, the network spreadsheet, the Qualys Asset Group list, "+
+			"scan list and scan schedules the report needs, print counts, and exit")
 	flag.Parse()
 
 	if *commitSeen != "" {
@@ -114,24 +115,46 @@ func run() int {
 	}
 	// Which scans ran comes from Qualys; the notices add their detail. Without
 	// the list, the notices alone, and the report says so.
-	listErr := ""
+	// Which scans SHOULD have run comes from Qualys's schedules; --scans and
+	// VMSCAN_SCANS only add to it.
+	listErr, schedErr := "", ""
+	var schedules []vmscan.Schedule
+	now := time.Now()
 	switch {
 	case cfg.QualysBaseURL == "" || cfg.QualysUsername == "":
 		listErr = "QUALYS_BASE_URL and QUALYS_USERNAME are not set"
+		schedErr = listErr
 	default:
-		list, err := fetchScans(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, time.Now().Add(-*since))
+		list, err := fetchScans(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword, now.Add(-*since))
 		if err != nil {
 			listErr = safelog.Line(err.Error())
 		} else {
 			logf("list   : Qualys lists %d scan(s) launched in the last %s", len(list), *since)
 			scans = vmscan.WithNotices(list, scans)
 		}
+		if schedules, err = fetchSchedules(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword); err != nil {
+			schedErr = safelog.Line(err.Error())
+		}
 	}
 	if listErr != "" {
 		logf("warn   : Qualys scan list not read, using the notices alone: %s", listErr)
 	}
+	notJudged := 0
+	if schedErr == "" {
+		var due []string
+		due, notJudged = vmscan.DueTitles(schedules, now.Add(-*since), now)
+		logf("sched  : %d scan schedule(s) in Qualys, %d due this week, %d switched off, %d not judged",
+			len(schedules), len(due), len(vmscan.Inactive(schedules)), notJudged)
+		expected = mergeTitles(due, expected)
+	} else {
+		logf("warn   : Qualys scan schedules not read, so a schedule that launched nothing is not detected: %s", schedErr)
+	}
 	week := vmscan.Combine(scans, expected)
 	week.ListUnavailable = listErr
+	week.FromSchedules = schedErr == ""
+	week.SchedulesUnavailable = schedErr
+	week.Inactive = vmscan.Inactive(schedules)
+	week.NotJudged = notJudged
 	for _, s := range week.Scans {
 		if s.NoNotice {
 			logf("warn   : %q ran (Qualys lists it) but its results notice did not arrive", safelog.Line(s.Title))
@@ -207,8 +230,9 @@ var (
 	driveContent = func(ctx context.Context, g *graph.Client, drive, item string) ([]byte, error) {
 		return g.DriveItemContent(ctx, drive, item, 32<<20)
 	}
-	fetchGroups = netmap.FetchGroups
-	fetchScans  = vmscan.FetchScans
+	fetchGroups    = netmap.FetchGroups
+	fetchScans     = vmscan.FetchScans
+	fetchSchedules = vmscan.FetchSchedules
 )
 
 // doCheck answers "would the weekly get its inputs?" without reading the
@@ -285,6 +309,15 @@ func doCheck(cfg config.Config, scansFlag string) int {
 				}
 			}
 			logf("OK     : Qualys scan list, %d scan(s) launched in 7 days, %d scheduled", len(list), sched)
+		}
+		now := time.Now()
+		if sch, err := fetchSchedules(ctx, cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword); err != nil {
+			logf("FAIL   : Qualys scan schedules: %s", safelog.Line(err.Error()))
+			failed++
+		} else {
+			due, notJudged := vmscan.DueTitles(sch, now.Add(-7*24*time.Hour), now)
+			logf("OK     : Qualys scan schedules, %d in all, %d due in the last 7 days, %d switched off, %d not judged",
+				len(sch), len(due), len(vmscan.Inactive(sch)), notJudged)
 		}
 	}
 
@@ -385,6 +418,20 @@ func expectedScans(flagValue string) []string {
 	var out []string
 	for _, t := range strings.Split(raw, ",") {
 		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// mergeTitles is a then b, each title once (ignoring case and spacing).
+func mergeTitles(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range append(append([]string(nil), a...), b...) {
+		k := strings.ToLower(strings.Join(strings.Fields(t), " "))
+		if !seen[k] {
+			seen[k] = true
 			out = append(out, t)
 		}
 	}

@@ -37,11 +37,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
-**Upgrade:** `sudo cti-agent-update --for-real`, then set `VMSCAN_SCANS` in
-`/etc/cti-agent/fleet.env` to the scan titles Qualys uses now,
-`Weekly Scheduled Scan for non-UMI/TRJ,UMI/TRJ Weekly` (the old "Weekly
-Scheduled Scan for Main Sites" and "North/East Weekly" no longer exist). The report works without it; with stale titles it leads with
-`[NO RESULT]` for scans that were only renamed.
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure: which
+VM scans should have run now comes from Qualys's own scan schedules. If
+`VMSCAN_SCANS` is set in `/etc/cti-agent/fleet.env` with the old titles
+("Weekly Scheduled Scan for Main Sites", "North/East Weekly"), remove it - it
+only adds to the schedules, and stale titles are reported as missing. Then
+`sudo cti-agent cti-vmscan --check` should list the scan schedules.
 
 ### Changed
 
@@ -51,11 +52,14 @@ Scheduled Scan for Main Sites" and "North/East Weekly" no longer exist). The rep
   scan was filed as "other" and the coverage check compared all 65 locations
   against nothing: "0 covered, 65 gaps". Now every scheduled scan whose notice
   arrived in the week is reported and its Target Groups count for coverage; a
-  scan launched by hand is listed, not counted. `VMSCAN_SCANS` is now the
-  optional list of scans you expect: one named there with no result still
-  leads the report as `[NO RESULT]`. **Update it on the box** to the current
-  titles in `/etc/cti-agent/fleet.env`:
-  `VMSCAN_SCANS=Weekly Scheduled Scan for non-UMI/TRJ,UMI/TRJ Weekly`.
+  scan launched by hand is listed, not counted.
+- **Which scans should have run comes from Qualys's scan schedules.** Every
+  active schedule whose last launch fell in the week is expected, by its real
+  title; one that launched nothing leads the report as `[NO RESULT]` ("Qualys
+  has this schedule active, but it launched no scan"). A schedule switched off
+  is named as such, not as missing; a monthly one (no fixed interval) is not
+  judged and is counted as such. `VMSCAN_SCANS` is no longer needed: it only
+  adds titles to what the schedules say. `--check` lists the schedules.
 
 - **Which VM scans ran comes from Qualys, not the mailbox.** The weekly lists
   the scans launched in the week through the Qualys API, with the Asset Groups

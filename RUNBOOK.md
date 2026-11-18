@@ -504,7 +504,7 @@ The rest of the lanes, with the gate before each, are in the table below.
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |
 | 8 | `cti-agent-domains.timer` | weekly domains check | `/etc/cti-agent/domains.txt` exists, `DOM_TO` and `DOM_ALLOW_TO` set, one `--dry-run` read ([11g](#11g-the-weekly-domains-lane)) |
 | 9 | `cti-agent-appowners.timer` | each application's scanner report to its owners, daily | owners moved into `owners.db` and `fleet-owners check` clean ([11f](#application-owners-in-ownersdb)), one `--to-dev` run whose emails and reports you have opened ([11f](#reports-to-application-owners-by-email)) |
-| 10 | `cti-agent-vmscan.timer` | weekly VM scan report, both scheduled scans in one email, Mondays unless `FLEET_VMSCAN_DAY` says otherwise | `VMSCAN_TO` and `VMSCAN_ALLOW_TO` set (`VMSCAN_SCANS` naming the scans you expect), one `--dry-run` and one `--to-dev` read; for its coverage check, `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` set and `sudo cti-agent cti-vmscan --check` OK ([11f](#the-weekly-vm-scan-report-run-vmscan)) |
+| 10 | `cti-agent-vmscan.timer` | weekly VM scan report, both scheduled scans in one email, Mondays unless `FLEET_VMSCAN_DAY` says otherwise | `VMSCAN_TO` and `VMSCAN_ALLOW_TO` set, `cti-vmscan --check` listing the scan schedules, one `--dry-run` and one `--to-dev` read; for its coverage check, `SUBNETS_DRIVE_ID` and `SUBNETS_ITEM_ID` set and `sudo cti-agent cti-vmscan --check` OK ([11f](#the-weekly-vm-scan-report-run-vmscan)) |
 | 11 | `cti-agent-supplier.timer` | supplier-request triage, daily | `SUPPLIER_ADDRESS`, `SUPPLIER_TO`, `SUPPLIER_ALLOW_TO` and the Jira settings set, a `--dry-run` whose digest and items you have read, then one `--to-dev` ([11f](#the-supplier-request-lane-run-supplier)) |
 
 ```bash
@@ -1301,7 +1301,7 @@ sudo cti-agent run-vmscan --for-real  # send, and record the notices as used
 
 Recipients are `VMSCAN_TO`, checked against `VMSCAN_ALLOW_TO`; neither has a
 fallback (unset = refuses). To send to the VM audience, reference it in both:
-`VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO`. Every scheduled scan that reported in the last week is included, and its Target Groups count for the coverage check, whatever it is called; a scan launched by hand is listed, not counted. `VMSCAN_SCANS` is the optional list of scans you **expect**, by their Qualys titles: one named there that sent no result is the first thing the report says. Name them, and update the list when a scan is renamed in Qualys. With no scan at all the subject says `[NO RESULT]` and the coverage check says it was not run, rather than calling every location unscanned.
+`VMSCAN_TO=$VM_ALLOW_TO` and `VMSCAN_ALLOW_TO=$VM_ALLOW_TO`. Every scheduled scan that ran in the last week is included, and its Target Groups count for the coverage check, whatever it is called; a scan launched by hand is listed, not counted. With no scan at all the subject says `[NO RESULT]` and the coverage check says it was not run, rather than calling every location unscanned.
 
 **Which scans ran comes from Qualys, not the mailbox.** The lane lists the VM
 scans launched in the last week through the Qualys API (read-only, the same
@@ -1312,9 +1312,16 @@ reported and still counts for coverage; its card says the notice did not arrive
 and shows no host counts. If the scan list cannot be read, the report is built
 from the notices alone and says so. `cti-vmscan --check` lists the scans too.
 
-What the subject can say first: `[NO RESULT]` when a scan named in
-`VMSCAN_SCANS` did not run (or, without the scan list, sent no notice) or no
-scheduled scan ran at all, `[INCOMPLETE]` when one did not finish, otherwise
+**Which scans should have run also comes from Qualys:** its scan schedules.
+Every active schedule whose last launch fell in the week is expected by its
+real title, so a schedule that silently stopped launching is reported, and
+nothing has to be kept in step when a scan is renamed. A schedule switched off
+is named as such; a monthly one is not judged. `VMSCAN_SCANS` only adds titles
+and is rarely needed.
+
+What the subject can say first: `[NO RESULT]` when an active schedule (or a
+title in `VMSCAN_SCANS`) launched no scan in the week, or no scheduled scan ran
+at all, `[INCOMPLETE]` when one did not finish, otherwise
 how many scans ran and how many locations they covered.
 
 **Getting the notices into the mailbox.** Qualys sends them to the people on

@@ -6,8 +6,8 @@
 # Reads the "Qualys: Scan Results" notices that arrived in the CTI mailbox over
 # the last week, takes the newest result of every scheduled scan, renders one
 # report with the scans kept separate, and mails it through cti-mailer --lane
-# vmscan. A scan named in VMSCAN_SCANS (the ones you expect) that left no
-# result, or a week with no scan at all, is the first thing the report says.
+# vmscan. An active Qualys scan schedule that launched nothing this week, or a
+# week with no scan at all, is the first thing the report says.
 #
 # Recipients are VMSCAN_TO, checked against VMSCAN_ALLOW_TO, which has no
 # fallback: unset means the mailer refuses. Set VMSCAN_ALLOW_TO=$VM_ALLOW_TO to

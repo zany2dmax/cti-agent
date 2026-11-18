@@ -18,7 +18,8 @@ import (
 // in Qualys the names stopped matching, the real scan was filed as "other",
 // and the coverage check compared every location against nothing. A list of
 // names to expect is still useful - a named scan that sends nothing is the
-// clearest sign one stopped - so VMSCAN_SCANS remains, as that list only.
+// clearest sign one stopped - and that list now comes from Qualys's own scan
+// schedules (schedules.go); VMSCAN_SCANS only adds to it.
 //
 // A scan launched by hand (Launch Type other than Scheduled) is listed but not
 // counted: one person's one-off scan does not make a location covered.
@@ -61,6 +62,15 @@ type Week struct {
 	// ListUnavailable is why Qualys's scan list could not be read, so the
 	// week is built from the notices alone; empty when it was read.
 	ListUnavailable string
+	// FromSchedules: the expected scans came from Qualys's active schedules
+	// (schedules.go), so a missing one is a schedule that launched nothing.
+	// SchedulesUnavailable is why they could not be read; Inactive names the
+	// schedules switched off; NotJudged counts active schedules whose
+	// recurrence gives no fixed interval (monthly), so they are not checked.
+	FromSchedules        bool
+	SchedulesUnavailable string
+	Inactive             []string
+	NotJudged            int
 }
 
 // noNotice is the reported scans whose results notice did not arrive.
@@ -190,6 +200,33 @@ func scansRan(n int) string {
 	return fmt.Sprintf("%d scheduled scans ran", n)
 }
 
+// missingWhy is what a missing scan means, given where the expectation came from.
+func (w Week) missingWhy() string {
+	if w.FromSchedules && w.ListUnavailable == "" {
+		return "Qualys has this schedule active, but it launched no scan in the window. Check the " +
+			"schedule in Qualys (its next launch, its scanner appliance, its owner's account)."
+	}
+	return "No results notice arrived in the window. Check the schedule in Qualys, and that " +
+		"its notifications still reach this mailbox."
+}
+
+// scheduleNotes is what the report says about the schedules themselves.
+func (w Week) scheduleNotes() []string {
+	var out []string
+	if len(w.Inactive) > 0 {
+		out = append(out, "Scan schedules switched off in Qualys, so not expected: "+strings.Join(w.Inactive, "; ")+".")
+	}
+	if w.NotJudged > 0 {
+		out = append(out, fmt.Sprintf("%d active schedule(s) have no fixed interval (monthly, say) and are "+
+			"not checked for a missing run.", w.NotJudged))
+	}
+	if w.SchedulesUnavailable != "" {
+		out = append(out, "Qualys's scan schedules could not be read ("+w.SchedulesUnavailable+"), so a "+
+			"schedule that launched nothing this week is not detected.")
+	}
+	return out
+}
+
 func (w Week) leadLine() string {
 	if len(w.Missing) == 0 && len(w.Scans) == 0 {
 		if w.ListUnavailable == "" {
@@ -200,6 +237,10 @@ func (w Week) leadLine() string {
 			"scanned. Check the schedules in Qualys, and that their notifications still reach this mailbox."
 	}
 	if len(w.Missing) > 0 {
+		if w.FromSchedules && w.ListUnavailable == "" {
+			return "These scheduled scans should have run this week and Qualys shows no scan for them: " +
+				strings.Join(w.Missing, "; ") + ". The coverage below is not the whole estate."
+		}
 		return "No result came back for: " + strings.Join(w.Missing, "; ") +
 			". Either the scan did not finish or its notice never arrived, so the coverage " +
 			"below is not the whole estate."
@@ -261,6 +302,9 @@ func (w Week) Text(org string, weekEnding time.Time) string {
 		}
 		b.WriteString("\n")
 	}
+	for _, n := range w.scheduleNotes() {
+		fmt.Fprintf(&b, "%s\n\n", n)
+	}
 	if w.ListUnavailable != "" {
 		fmt.Fprintf(&b, "Qualys's scan list could not be read (%s), so this week is built from the results "+
 			"notices alone: a scan whose notice was lost is missing from it.\n\n", w.ListUnavailable)
@@ -294,9 +338,7 @@ func (w Week) HTML(org string, weekEnding time.Time) string {
 
 	emailkit.BodyOpen(&b)
 	for _, t := range w.Missing {
-		emailkit.Card(&b, emailkit.Red, "NO RESULT: "+t,
-			"No results notice arrived in the window. Check the schedule in Qualys, and that "+
-				"its notifications still reach this mailbox.")
+		emailkit.Card(&b, emailkit.Red, "NO RESULT: "+t, e(w.missingWhy()))
 	}
 	for _, s := range w.Scans {
 		tone := emailkit.Blue
@@ -320,6 +362,9 @@ func (w Week) HTML(org string, weekEnding time.Time) string {
 			l.WriteString(e(g))
 		}
 		emailkit.Card(&b, tone, s.Title, l.String())
+	}
+	for _, n := range w.scheduleNotes() {
+		emailkit.Item(&b, e(n))
 	}
 	if w.ListUnavailable != "" {
 		emailkit.Item(&b, "Qualys's scan list could not be read ("+e(w.ListUnavailable)+"), so this week is "+

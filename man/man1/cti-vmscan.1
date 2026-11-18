@@ -135,9 +135,9 @@ Read-only: request a Graph token, read the network spreadsheet
 .RB ( SUBNETS_DRIVE_ID ,
 .BR SUBNETS_ITEM_ID ,
 .BR SUBNETS_SHEET )
-and find its sheet, list the Qualys Asset Groups once, and list the VM scans
-launched in the last seven days: everything the report and its coverage check
-need. It does not read the mailbox (the mailbox roles are
+and find its sheet, list the Qualys Asset Groups once, list the VM scans
+launched in the last seven days, and list the scan schedules: everything the
+report and its coverage check need. It does not read the mailbox (the mailbox roles are
 .BR "cti\-mailer \-\-check" 's),
 writes nothing, and prints counts only, never a network, group or scan name,
 because the heartbeat runs it. A coverage input that is not configured is a
@@ -148,10 +148,13 @@ all of it works, 1 otherwise.
 How far back to look for scan-result notices. Default 168h.
 .TP
 .BI \-\-scans " TITLES"
-Comma-separated titles of the scheduled scans you expect each week. Default
+Comma-separated titles of scans to expect each week, ON TOP OF Qualys's active
+scan schedules, which already say what should have run. Default
 .BR VMSCAN_SCANS ,
-else none. One named here that left no result is reported first as
+else none; rarely needed. Each active schedule whose last launch fell in the
+window, and each title here, that launched no scan is reported first as
 .BR "[NO RESULT]" .
+A schedule switched off is named, not reported missing.
 Every scheduled scan that reported is included either way, and its Target
 Groups count for the coverage check; a scan launched by hand is listed, not
 counted. With no scan at all the subject says
@@ -201,7 +204,8 @@ does this only after a real send.
 .SH ENVIRONMENT
 .TP
 .B VMSCAN_SCANS
-The scans expected each week, by title, comma separated. Optional.
+Extra scan titles to expect, comma separated, on top of the scan schedules.
+Optional and rarely needed.
 .TP
 .B FLEET_SENDER_AUTH
 Set to

@@ -97,19 +97,29 @@ func cleanName(s string) string {
 // FetchScans lists the VM scans launched since a time, with the Asset Groups
 // each targeted. Read-only; the same credential the other Qualys lanes use.
 func FetchScans(ctx context.Context, baseURL, username, password string, since time.Time) ([]Scan, error) {
-	base := strings.TrimRight(baseURL, "/")
-	l := qualysrl.Shared(base)
-	if l.Logf == nil {
-		l.Logf = func(f string, a ...any) { _, _ = fmt.Fprintf(os.Stderr, "[qualys] "+f+"\n", a...) }
-	}
-	client := &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l}
 	q := url.Values{}
 	q.Set("action", "list")
 	q.Set("launched_after_datetime", since.UTC().Format("2006-01-02T15:04:05Z"))
 	q.Set("show_ags", "1")
 	q.Set("show_op", "0")
 	q.Set("show_status", "1")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/2.0/fo/scan/?"+q.Encode(), nil)
+	body, err := qualysGet(ctx, baseURL, username, password, "/api/2.0/fo/scan/", q, "scan list")
+	if err != nil {
+		return nil, err
+	}
+	return ParseScanList(body)
+}
+
+// qualysGet makes one read-only VM API call through the shared rate limiter.
+// what names the call in errors ("scan list").
+func qualysGet(ctx context.Context, baseURL, username, password, path string, q url.Values, what string) ([]byte, error) {
+	base := strings.TrimRight(baseURL, "/")
+	l := qualysrl.Shared(base)
+	if l.Logf == nil {
+		l.Logf = func(f string, a ...any) { _, _ = fmt.Fprintf(os.Stderr, "[qualys] "+f+"\n", a...) }
+	}
+	client := &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -117,25 +127,25 @@ func FetchScans(ctx context.Context, baseURL, username, password string, since t
 	req.Header.Set("X-Requested-With", "cti-agent")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("the Qualys scan list request failed: %w", err)
+		return nil, fmt.Errorf("the Qualys %s request failed: %w", what, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	const limit = 32 << 20
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read the Qualys scan list: %w", err)
+		return nil, fmt.Errorf("failed to read the Qualys %s: %w", what, err)
 	}
 	if len(body) > limit {
-		return nil, fmt.Errorf("the Qualys scan list is over %d MB - not reading it", limit>>20)
+		return nil, fmt.Errorf("the Qualys %s is over %d MB - not reading it", what, limit>>20)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		trimmed := strings.TrimSpace(string(body))
 		if len(trimmed) > 400 {
 			trimmed = trimmed[:400] + "..."
 		}
-		return nil, fmt.Errorf("qualys refused the scan list (HTTP %d): %s", resp.StatusCode, trimmed)
+		return nil, fmt.Errorf("qualys refused the %s (HTTP %d): %s", what, resp.StatusCode, trimmed)
 	}
-	return ParseScanList(body)
+	return body, nil
 }
 
 // WithNotices joins the scan list with the results notices, by scan
