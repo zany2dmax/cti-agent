@@ -163,7 +163,10 @@ func (c *Client) readApps(ctx context.Context, filter string, max int) ([]app, i
 	var rows []app
 	total, after := 0, ""
 	for {
-		q := url.Values{"filter": {filter}, "limit": {strconv.Itoa(pageSize)}}
+		// facet=host_info adds the host's details (platform among them) to
+		// each record; without it the host is an ID only. Host names arrive
+		// with it too, and are never kept or printed.
+		q := url.Values{"filter": {filter}, "limit": {strconv.Itoa(pageSize)}, "facet": {"host_info"}}
 		if after != "" {
 			q.Set("after", after)
 		}

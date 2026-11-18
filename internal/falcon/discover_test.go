@@ -54,6 +54,11 @@ type appsFake struct {
 func (a *appsFake) handler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := q.Get("filter")
+	if !strings.Contains(f, "first_seen_timestamp:<=") && q.Get("facet") != "host_info" {
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"errors":[{"code":400,"message":"test fake: paged reads must ask for facet=host_info"}]}`))
+		return
+	}
 	a.mu.Lock()
 	a.filters = append(a.filters, f)
 	a.mu.Unlock()
