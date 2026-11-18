@@ -2,6 +2,7 @@ package vmscan
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,5 +49,25 @@ func TestFixesAreHeldWhenTheCheckDidNotRun(t *testing.T) {
 	var nilCov *Coverage
 	if f := nilCov.Fixes(time.Now()); !f.Held {
 		t.Errorf("%+v", f)
+	}
+}
+
+func TestCleanupIsInTheFixesListTheHashAndTheEmail(t *testing.T) {
+	c := &Coverage{Questions: []netmap.Question{{Location: "Naples", Kind: netmap.QInvalid, Why: "x"}}}
+	before := c.Fixes(time.Now()).Hash
+	c.Cleanup = []netmap.Cleanup{
+		{Location: "Cancos", Kind: netmap.CNote, Why: "no location in the sheet"},
+		{Location: "Old Branch", Row: 1, Kind: netmap.CMisspelledDecom, Why: `the header starts with "DECOMISSIONED"`},
+	}
+	f := c.Fixes(time.Now())
+	if len(f.Cleanup) != 2 || f.Cleanup[0].Kind != string(netmap.CNote) || f.Hash == before {
+		t.Errorf("cleanup %+v, hash %s (was %s)", f.Cleanup, f.Hash, before)
+	}
+	txt := c.text()
+	if !strings.Contains(txt, "CLEAN UP IN THE SPREADSHEET (2)") || !strings.Contains(txt, "Cancos: no location in the sheet") {
+		t.Errorf("text:\n%s", txt)
+	}
+	if !strings.Contains(c.CSV(), "NETWORK TEAM: CLEAN UP IN THE SPREADSHEET,Old Branch,1") {
+		t.Errorf("csv:\n%s", c.CSV())
 	}
 }

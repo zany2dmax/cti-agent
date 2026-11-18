@@ -72,6 +72,13 @@ as the corp network. The location is not checked until this is fixed, or an
 rule in FILES says which rows count. The lane never guesses, and the fix is the
 network team's: the security team only reads the spreadsheet.
 .TP
+.B CLEAN UP IN THE SPREADSHEET
+What is wrong or unclear in the spreadsheet without stopping the check: two
+locations listing overlapping networks, a row outside its location's block, the
+same public IP under two locations, DECOMMISSIONED misspelled or not at the start
+of a header, a header marked "??" or without its /16, a row with a VLAN but no
+network, and the notes in FILES. Also for the network team, in the same ticket.
+.TP
 .B CHECK IN QUALYS
 A Target Group a scan names that Qualys has no Asset Group for, a scanned Asset
 Group whose addresses are only under decommissioned locations, a scanned group
@@ -231,6 +238,10 @@ The worksheet to read. Default
 Optional security-team rules for locations the spreadsheet does not make clear. Default
 .IR /etc/cti\-agent/netrules.txt .
 .TP
+.B NETNOTES_FILE
+Optional notes from cross-checks, for the network team. Default
+.IR /etc/cti\-agent/sheet\-notes.txt .
+.TP
 .B QUALYS_BASE_URL
 .TQ
 .B QUALYS_USERNAME
@@ -255,6 +266,16 @@ Optional, root-owned: the security team's own record about a location, one per l
 .B location | ignore
 (leave it out of the check). The location is the start of its header in the
 spreadsheet. Lines starting with # are comments.
+.TP
+.I /etc/cti\-agent/sheet\-notes.txt
+Optional, root-owned: findings from checking the spreadsheet against other
+records (an acquisition's network design, the incident-response contacts list),
+one
+.B location | what to check
+per line. Each is listed for the network team in the clean-up section of the
+report and of the spreadsheet ticket, until the line is deleted. The location
+is the start of its header, or the name of a site the spreadsheet does not have
+yet. Lines starting with # are comments.
 .TP
 .I $FLEET_HOME/state/processed\-vmscan.json
 The notices this lane has used, written by

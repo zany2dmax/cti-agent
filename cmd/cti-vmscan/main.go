@@ -209,7 +209,8 @@ func run() int {
 		} else if f.Held {
 			logf("fixes  : held (%s) - the spreadsheet ticket is left alone", safelog.Line(f.HeldWhy))
 		} else {
-			logf("fixes  : %d spreadsheet row(s) for the network team (list %s)", len(f.Fixes), f.Hash)
+			logf("fixes  : %d spreadsheet row(s) to correct, %d to clean up, for the network team (list %s)",
+				len(f.Fixes), len(f.Cleanup), f.Hash)
 		}
 	}
 	if *seenOut != "" {
@@ -383,6 +384,21 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	}
 	corp, questions := netmap.SelectCorp(all, rules)
 
+	// What to tidy in the sheet, and the operator's notes from cross-checks.
+	cleanup := netmap.Hygiene(rows, all, questions)
+	notesPath := strings.TrimSpace(os.Getenv("NETNOTES_FILE"))
+	if notesPath == "" {
+		notesPath = "/etc/cti-agent/sheet-notes.txt"
+	}
+	// #nosec G304 G703 -- the operator's own notes file, root-owned, named in fleet.env.
+	if b, err := os.ReadFile(notesPath); err == nil {
+		notes, problems := netmap.ParseNotes(string(b))
+		for _, p := range problems {
+			logf("warn   : %s: %s", safelog.Line(notesPath), safelog.Line(p))
+		}
+		cleanup = append(netmap.PlaceNotes(notes, all), cleanup...)
+	}
+
 	if cfg.QualysBaseURL == "" || cfg.QualysUsername == "" {
 		return unavailable("QUALYS_BASE_URL, QUALYS_USERNAME and QUALYS_PASSWORD are not set, so the Asset Groups cannot be listed")
 	}
@@ -407,7 +423,8 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 		}
 	}
 	res := netmap.Check(corp, all, groups, scanned)
-	return &vmscan.Coverage{Checked: res.Checked, Covered: res.Covered, Findings: res.Findings, Questions: questions}
+	return &vmscan.Coverage{Checked: res.Checked, Covered: res.Covered, Findings: res.Findings, Questions: questions,
+		Cleanup: cleanup}
 }
 
 // expectedScans is the scan titles expected each week: the flag, else

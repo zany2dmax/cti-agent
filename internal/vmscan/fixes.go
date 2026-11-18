@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/netmap"
 )
 
 // # THE SPREADSHEET FIXES GO TO THE HELP DESK AS ONE TICKET
@@ -37,6 +39,9 @@ type FixesFile struct {
 	Generated string     `json:"generated"`
 	Hash      string     `json:"hash"`
 	Fixes     []SheetFix `json:"fixes"`
+	// Cleanup is what is wrong in the sheet without stopping the check, and
+	// the operator's notes; a second section of the same ticket.
+	Cleanup []SheetFix `json:"cleanup"`
 	// Held: the coverage check did not run, so the list says nothing about
 	// the sheet. cti-jira files, comments on and resolves nothing - an empty
 	// list would otherwise tell the open ticket it is finished.
@@ -46,7 +51,7 @@ type FixesFile struct {
 
 // Fixes is the coverage check's spreadsheet questions as a fixes list.
 func (c *Coverage) Fixes(now time.Time) FixesFile {
-	f := FixesFile{Generated: now.UTC().Format(time.RFC3339), Fixes: []SheetFix{}}
+	f := FixesFile{Generated: now.UTC().Format(time.RFC3339), Fixes: []SheetFix{}, Cleanup: []SheetFix{}}
 	if c == nil {
 		f.Held, f.HeldWhy = true, "the coverage check was not asked for"
 		return f
@@ -61,7 +66,13 @@ func (c *Coverage) Fixes(now time.Time) FixesFile {
 				Title: questionTitle(k), Problem: q.Why, Action: questionAction(k)})
 		}
 	}
-	f.Hash = FixesHash(f.Fixes)
+	for _, k := range netmap.CleanupOrder {
+		for _, x := range c.cleanupOf(k) {
+			f.Cleanup = append(f.Cleanup, SheetFix{Location: x.Location, Row: x.Row, Kind: string(k),
+				Title: netmap.CleanupTitle(k), Problem: x.Why, Action: netmap.CleanupAction(k)})
+		}
+	}
+	f.Hash = FixesHash(append(append([]SheetFix(nil), f.Fixes...), f.Cleanup...))
 	return f
 }
 

@@ -84,6 +84,16 @@ only adds to the schedules, and stale titles are reported as missing. Then
   `cti-jira --vmscan-fixes`, and optional `JIRA_VMSCAN_PROJECT_KEY` /
   `JIRA_VMSCAN_ISSUE_TYPE` (default: the `JIRA_PROJECT_KEY` project, which must
   be in `JIRA_ALLOW_CREATE`). Dry runs and test sends preview it.
+- **The spreadsheet ticket has a clean-up section.** What is wrong or unclear
+  in the sheet without stopping the check goes to the network team in the same
+  ticket, in a section of its own: overlapping networks between locations, 10.x
+  rows outside their location's block, the same public IP under two sites,
+  DECOMMISSIONED misspelled or not at the start of a header, headers marked
+  "??" or without a /16, and rows with a VLAN but no network. Findings from
+  cross-checks against other records go in the optional
+  `/etc/cti-agent/sheet-notes.txt` (`NETNOTES_FILE`, `location | what to
+  check`) and stay in the ticket until the line is deleted. The email's
+  coverage section and the CSV list them too.
 - **New "check in Qualys" lines:** a scanned Asset Group whose addresses are
   only under decommissioned locations, and every Asset Group with addresses
   that no scan targeted in the week.

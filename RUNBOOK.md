@@ -1367,6 +1367,24 @@ run and a test send print the ticket; check it before the first real run with
 `sudo cti-agent run-vmscan --dry-run`. The "not scanned" networks are not in
 it: they are for the network and M&A teams to explain, in the email.
 
+The same ticket has a second section, **clean-up (does not stop the check)**:
+what is wrong or unclear in the sheet although it can still be read. The lane
+finds some itself every week: two locations listing overlapping networks, a 10.x
+row outside its location's block, the same public IP under two sites,
+DECOMMISSIONED misspelled or not at the start of a header, a header marked "??"
+or without its /16, and rows with a VLAN but no network. The rest are findings
+from cross-checking the sheet against other records (an acquisition's network
+design, the incident-response contacts list), which the lane cannot read every
+week because each has its own layout. Record those in
+`/etc/cti-agent/sheet-notes.txt` (root-owned, optional, `NETNOTES_FILE`), one
+per line; each stays in the ticket until you delete the line:
+
+```text
+# location (the start of its header, or a site the sheet does not have) | what to check
+Example Site | the acquisition's network design gives it 10.55.0.0/16; the sheet gives that block to another site
+Missing Co | no location in the sheet; it is in the incident-response contacts list
+```
+
 It only reads, and beyond the 10.X.30 convention it never guesses which row is
 a location's network. The
 spreadsheet belongs to the network team and the security team is only a consumer

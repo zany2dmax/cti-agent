@@ -57,7 +57,8 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 	if strings.TrimSpace(project) == "" {
 		return die("no Jira project: set JIRA_PROJECT_KEY (or JIRA_VMSCAN_PROJECT_KEY)")
 	}
-	logf("vmscan: %d spreadsheet row(s) for the network team (list %s)", len(ff.Fixes), ff.Hash)
+	logf("vmscan: %d spreadsheet row(s) to correct and %d to clean up, for the network team (list %s)",
+		len(ff.Fixes), len(ff.Cleanup), ff.Hash)
 
 	issues, err := c.Search(ctx, vmscanFixesJQL(project), 5)
 	if err != nil {
@@ -99,7 +100,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 		return exitOK
 	}
 
-	st := vmscanFixesState{Hash: ff.Hash, PostedAt: now, Count: len(ff.Fixes)}
+	st := vmscanFixesState{Hash: ff.Hash, PostedAt: now, Count: len(ff.Fixes) + len(ff.Cleanup)}
 	switch plan {
 	case domainsCreate:
 		res, err := c.CreateIssue(ctx, jira.IssueRequest{
@@ -138,7 +139,7 @@ func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config, path 
 
 	case domainsDone:
 		text := fmt.Sprintf("The weekly VM scan coverage check on %s could read every location in the "+
-			"network spreadsheet: nothing in this ticket is left to correct. It can be closed.",
+			"network spreadsheet and found nothing to clean up: nothing in this ticket is left. It can be closed.",
 			now.Format("2 January 2006"))
 		if err := c.AddComment(ctx, open.Key, text); err != nil {
 			return die("commenting on %s: %s", open.Key, safelog.Line(err.Error()))
@@ -167,7 +168,7 @@ func vmscanPlanWords(p domainsPlan) string {
 
 // planVMScanFixes decides, without touching Jira. Pure, so it is tested.
 func planVMScanFixes(open *jira.Issue, prev vmscanFixesState, ff vmscan.FixesFile) (domainsPlan, string) {
-	empty := len(ff.Fixes) == 0
+	empty := len(ff.Fixes) == 0 && len(ff.Cleanup) == 0
 	switch {
 	case ff.Held:
 		return domainsNothing, "held: " + ff.HeldWhy + " - nothing is filed, changed or resolved"
@@ -187,8 +188,28 @@ func planVMScanFixes(open *jira.Issue, prev vmscanFixesState, ff vmscan.FixesFil
 }
 
 func vmscanFixesSummary(ff vmscan.FixesFile, now time.Time) string {
-	return fmt.Sprintf("Network spreadsheet: %d location(s) to correct for the VM scan coverage check - week of %s",
-		len(ff.Fixes), now.Format("2006-01-02"))
+	return fmt.Sprintf("Network spreadsheet: %d location(s) to correct, %d item(s) to clean up - week of %s",
+		len(ff.Fixes), len(ff.Cleanup), now.Format("2006-01-02"))
+}
+
+// writeFixGroups writes items grouped under their titles, a blank line before
+// each heading so Jira cannot run the list above into it.
+func writeFixGroups(b *strings.Builder, fixes []vmscan.SheetFix) {
+	last := ""
+	for _, x := range fixes {
+		if x.Title != last {
+			if last != "" {
+				b.WriteString("\n")
+			}
+			fmt.Fprintf(b, "h3. %s\n%s\n\n", wikiEscape(x.Title), wikiEscape(x.Action))
+			last = x.Title
+		}
+		row := ""
+		if x.Row > 0 {
+			row = fmt.Sprintf(" (sheet row %d)", x.Row)
+		}
+		fmt.Fprintf(b, "* *%s*%s: %s\n", wikiEscape(x.Location), row, wikiEscape(x.Problem))
+	}
 }
 
 // vmscanFixesBody is the ticket text, Jira wiki markup (the v2 API's format).
@@ -198,24 +219,19 @@ func vmscanFixesBody(ff vmscan.FixesFile, now time.Time) string {
 	b.WriteString("Filed automatically by the CTI agent's weekly VM scan coverage check, for the " +
 		"help desk to assign to the network team. The check compares the network spreadsheet " +
 		"with what the scanner scans; the locations below cannot be " +
-		"read as written, so they are not checked until they are corrected. Each line names the " +
+		"read as written, so they are not checked until they are corrected; the clean-up items " +
+		"do not stop the check, but the sheet is wrong or unclear there. Each line names the " +
 		"sheet row. The check runs weekly and comments here only when the list changes.\n\n")
-	last := ""
-	for _, x := range ff.Fixes {
-		if x.Title != last {
-			// A blank line ends the list above: without it Jira can run the
-			// bullets into the heading.
-			if last != "" {
-				b.WriteString("\n")
-			}
-			fmt.Fprintf(&b, "h3. %s\n%s\n\n", wikiEscape(x.Title), wikiEscape(x.Action))
-			last = x.Title
+	if len(ff.Fixes) > 0 {
+		b.WriteString("h2. To correct (the check cannot read these)\n\n")
+		writeFixGroups(&b, ff.Fixes)
+	}
+	if len(ff.Cleanup) > 0 {
+		if len(ff.Fixes) > 0 {
+			b.WriteString("\n")
 		}
-		row := ""
-		if x.Row > 0 {
-			row = fmt.Sprintf(" (sheet row %d)", x.Row)
-		}
-		fmt.Fprintf(&b, "* *%s*%s: %s\n", wikiEscape(x.Location), row, wikiEscape(x.Problem))
+		b.WriteString("h2. Clean-up (does not stop the check)\n\n")
+		writeFixGroups(&b, ff.Cleanup)
 	}
 	fmt.Fprintf(&b, "\n_Generated %s; list %s._", now.UTC().Format("2006-01-02 15:04 UTC"), ff.Hash)
 	return b.String()

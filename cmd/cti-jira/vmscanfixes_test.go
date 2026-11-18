@@ -80,3 +80,29 @@ func TestEachHeadingAfterTheFirstFollowsABlankLine(t *testing.T) {
 		t.Errorf("no blank line before the second heading:\n%s", body)
 	}
 }
+
+func TestCleanupAloneKeepsTheTicketOpenAndHasItsOwnSection(t *testing.T) {
+	ff := vmscan.FixesFile{Cleanup: []vmscan.SheetFix{{Location: "Old Branch", Kind: "misspelled-decommissioned",
+		Title: "DECOMMISSIONED misspelled", Problem: `the header starts with "DECOMISSIONED"`,
+		Action: "Network team: spell it DECOMMISSIONED."}}}
+	ff.Hash = vmscan.FixesHash(ff.Cleanup)
+	if p, _ := planVMScanFixes(nil, vmscanFixesState{}, ff); p != domainsCreate {
+		t.Errorf("a clean-up-only list must file a ticket: %q", p)
+	}
+	open := &jira.Issue{Key: "CR-9"}
+	if p, _ := planVMScanFixes(open, vmscanFixesState{Hash: "old"}, ff); p == domainsDone {
+		t.Error("an open ticket with clean-up left is not done")
+	}
+	both := fixesOf(1)
+	both.Cleanup = ff.Cleanup
+	body := vmscanFixesBody(both, time.Now())
+	for _, want := range []string{"h2. To correct (the check cannot read these)",
+		"\n\nh2. Clean-up (does not stop the check)", "h3. DECOMMISSIONED misspelled"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %q:\n%s", want, body)
+		}
+	}
+	if s := vmscanFixesSummary(both, time.Now()); !strings.Contains(s, "1 location(s) to correct, 1 item(s) to clean up") {
+		t.Errorf("summary %q", s)
+	}
+}

@@ -22,6 +22,9 @@ type Coverage struct {
 	Covered   int
 	Findings  []netmap.Finding
 	Questions []netmap.Question
+	// Cleanup is what is wrong in the sheet without stopping the check, and
+	// the operator's notes from cross-checks (netmap/hygiene.go).
+	Cleanup []netmap.Cleanup
 	// Unavailable is why the check did not run; empty when it did. A check that
 	// could not run is said so in the report, never presented as a clean result.
 	Unavailable string
@@ -136,6 +139,16 @@ func (c *Coverage) questionsOf(k netmap.QuestionKind) []netmap.Question {
 	return out
 }
 
+func (c *Coverage) cleanupOf(k netmap.CleanupKind) []netmap.Cleanup {
+	var out []netmap.Cleanup
+	for _, x := range c.Cleanup {
+		if x.Kind == k {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 func (c *Coverage) gapsOf(k netmap.Kind) []netmap.Finding {
 	var out []netmap.Finding
 	for _, f := range c.Gaps() {
@@ -192,13 +205,22 @@ func (c *Coverage) text() string {
 			}
 		}
 	}
+	if len(c.Cleanup) > 0 {
+		fmt.Fprintf(&b, "\nFOR THE NETWORK TEAM: CLEAN UP IN THE SPREADSHEET (%d)\n%s\n", len(c.Cleanup), strings.Repeat("-", 72))
+		b.WriteString("  These do not stop the check, but the sheet is wrong or unclear here.\n")
+		for _, k := range netmap.CleanupOrder {
+			for _, x := range c.cleanupOf(k) {
+				fmt.Fprintf(&b, "  - %s%s: %s\n      -> %s\n", x.Location, rowRef(x.Row), x.Why, netmap.CleanupAction(k))
+			}
+		}
+	}
 	if o := c.Oddities(); len(o) > 0 {
 		fmt.Fprintf(&b, "\nCHECK IN QUALYS (%d)\n%s\n", len(o), strings.Repeat("-", 72))
 		for _, f := range o {
 			fmt.Fprintf(&b, "  - %s\n", oddLine(f))
 		}
 	}
-	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 {
+	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 && len(c.Cleanup) == 0 {
 		b.WriteString("  Nothing missing.\n")
 	}
 	b.WriteString("\nHOW THE SPREADSHEET IS READ\n" + strings.Repeat("-", 72) + "\n")
@@ -248,6 +270,22 @@ func (c *Coverage) html(b *strings.Builder) {
 			"The security team only reads this spreadsheet. These rows cannot be read as written, "+
 				"so these locations are not checked until the network team corrects them.<br><br>"+l.String())
 	}
+	if len(c.Cleanup) > 0 {
+		var l strings.Builder
+		for _, k := range netmap.CleanupOrder {
+			xs := c.cleanupOf(k)
+			if len(xs) == 0 {
+				continue
+			}
+			fmt.Fprintf(&l, "<b>%s</b><br>", e(netmap.CleanupTitle(k)))
+			for _, x := range xs {
+				fmt.Fprintf(&l, "&bull; %s<br>", e(x.Location+rowRef(x.Row)+": "+x.Why))
+			}
+			fmt.Fprintf(&l, "<span style=\"color:%s\">&rarr; %s</span><br><br>", emailkit.Muted, e(netmap.CleanupAction(k)))
+		}
+		emailkit.Card(b, emailkit.Grey, fmt.Sprintf("FOR THE NETWORK TEAM: CLEAN UP IN THE SPREADSHEET (%d)", len(c.Cleanup)),
+			"These do not stop the check, but the sheet is wrong or unclear here.<br><br>"+l.String())
+	}
 	if o := c.Oddities(); len(o) > 0 {
 		var l strings.Builder
 		for _, f := range o {
@@ -255,7 +293,7 @@ func (c *Coverage) html(b *strings.Builder) {
 		}
 		emailkit.Card(b, emailkit.Amber, fmt.Sprintf("CHECK IN QUALYS (%d)", len(o)), l.String())
 	}
-	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 {
+	if len(c.Gaps()) == 0 && len(c.Oddities()) == 0 && len(c.Questions) == 0 && len(c.Cleanup) == 0 {
 		emailkit.Item(b, "Nothing missing.")
 	}
 	var g strings.Builder
@@ -291,6 +329,12 @@ func (c *Coverage) CSV() string {
 	for _, k := range questionOrder {
 		for _, q := range c.questionsOf(k) {
 			_ = w.Write([]string{"NETWORK TEAM: FIX IN THE SPREADSHEET", q.Location, row(q.Row), "", "", questionTitle(k) + ": " + q.Why + ". " + questionAction(k), ""})
+		}
+	}
+	for _, k := range netmap.CleanupOrder {
+		for _, x := range c.cleanupOf(k) {
+			_ = w.Write([]string{"NETWORK TEAM: CLEAN UP IN THE SPREADSHEET", x.Location, row(x.Row), "", "",
+				netmap.CleanupTitle(k) + ": " + x.Why + ". " + netmap.CleanupAction(k), ""})
 		}
 	}
 	for _, f := range c.Oddities() {
