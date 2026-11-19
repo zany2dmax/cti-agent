@@ -7,6 +7,7 @@
 //	cti-triage --judge      --message advisory.txt          # reader, lookups, then the judge: checked verdicts
 //	cti-triage --judge      --message advisory.txt --facts-file sheet.json      # judge a saved sheet, no lookups
 //	cti-triage --show-judge-input --message advisory.txt --facts-file sheet.json # what the judge would be shown
+//	cti-triage --batch input.json --out advisories.json    # the digest's run: every advisory ingest saved
 //
 // # WHAT IT IS FOR
 //
@@ -104,14 +105,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	subjectsFile := fs.String("subjects-file", "", "with --facts or --judge: a saved reader answer to use instead of a model call")
 	factsFile := fs.String("facts-file", "", "with --judge or --show-judge-input: a saved fact sheet (--facts --json) instead of the reader and the lookups")
 	judgementFile := fs.String("judgement-file", "", "with --judge: a saved judge answer to check instead of a model call")
+	batch := fs.String("batch", "", "triage every advisory in this file (cti-agent --advisories-out) and write the report to --out")
+	outFile := fs.String("out", "", "with --batch: where to write the report (cti-advisories/1)")
+	batchTimeout := fs.Duration("batch-timeout", 20*time.Minute, "with --batch: stop starting advisories after this long; the rest are listed as not triaged")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
-	timeout := fs.Duration("timeout", 5*time.Minute, "give up after this long")
+	timeout := fs.Duration("timeout", 5*time.Minute, "give up after this long (with --batch: per advisory)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: cti-triage --show-input | --read | --facts | --judge | --show-judge-input  --message FILE [--subject S] [--sender S] [--subjects-file F] [--facts-file F] [--judgement-file F] [--json] [--timeout D]")
+		_, _ = fmt.Fprintln(stderr, "usage: cti-triage --show-input | --read | --facts | --judge | --show-judge-input  --message FILE [--subject S] [--sender S] [--subjects-file F] [--facts-file F] [--judgement-file F] [--json] [--timeout D]\n       cti-triage --batch FILE --out FILE [--timeout D] [--batch-timeout D]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+	logf := func(format string, a ...any) { _, _ = fmt.Fprintf(stderr, "[triage] "+format+"\n", a...) }
+	if *batch != "" || *outFile != "" {
+		alone := !*showInput && !*read && !*facts && !*judge && !*showJudgeInput && *message == "" &&
+			*subjectsFile == "" && *factsFile == "" && *judgementFile == "" && !*asJSON
+		if *batch == "" || *outFile == "" || !alone || fs.NArg() > 0 {
+			fs.Usage()
+			return exitUsage
+		}
+		return runBatch(*batch, *outFile, *timeout, *batchTimeout, logf)
 	}
 	modes := 0
 	for _, on := range []bool{*showInput, *read, *facts, *judge, *showJudgeInput} {
@@ -129,7 +143,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitUsage
 	}
-	logf := func(format string, a ...any) { _, _ = fmt.Fprintf(stderr, "[triage] "+format+"\n", a...) }
 
 	body, err := readCapped(*message, maxMessage)
 	if err != nil {
@@ -256,42 +269,7 @@ func agentFile(env, agent string) string {
 // the verdicts are printed: sightings and code's own floors do not depend
 // on it. A judge that failed is exit 1, after the output.
 func runJudge(ctx context.Context, msg triage.Message, sheet triage.FactSheet, in triage.JudgeInput, saved string, asJSON bool, stdout io.Writer, logf func(string, ...any)) int {
-	var j *triage.Judgement
-	down := ""
-	var raw []byte
-	switch {
-	case saved == "-":
-		down = "the run timed out before the judge was asked"
-	case saved != "":
-		b, err := readBytesCapped(saved, maxMessage)
-		if err != nil {
-			down = "--judgement-file: " + err.Error()
-		}
-		raw = b
-	default:
-		instr, err := readCapped(agentFile("TRIAGE_JUDGE_INSTRUCTIONS", "triage-judge"), 64<<10)
-		if err != nil {
-			down = "the judge's instructions: " + err.Error()
-			break
-		}
-		model := strings.TrimSpace(os.Getenv("TRIAGE_JUDGE_MODEL"))
-		if model == "" {
-			model = os.Getenv("TRIAGE_MODEL")
-		}
-		m := triage.ModelCall{Bin: os.Getenv("CLAUDE_BIN"), Model: model, Instructions: instr}
-		out, usage, err := callModel(ctx, m, in.Text)
-		logf("judge  : %s", usage)
-		if err != nil {
-			down = "judge: " + err.Error()
-		}
-		raw = []byte(out)
-	}
-	if down == "" {
-		var err error
-		if j, err = triage.ParseJudgement(raw); err != nil {
-			down = err.Error()
-		}
-	}
+	j, down, _ := askJudge(ctx, in, saved, logf)
 	v := triage.VerifyJudgement(j, in, sheet, msg.ID, down)
 	if down != "" {
 		logf("error  : %s", s(down))
@@ -309,6 +287,45 @@ func runJudge(ctx context.Context, msg triage.Message, sheet triage.FactSheet, i
 		return exitErr
 	}
 	return code
+}
+
+// askJudge gets the judge's parsed answer: from a saved file, from a model
+// call, or (saved "-") not at all. down is why there is no answer.
+func askJudge(ctx context.Context, in triage.JudgeInput, saved string, logf func(string, ...any)) (*triage.Judgement, string, triage.Usage) {
+	var usage triage.Usage
+	var raw []byte
+	switch {
+	case saved == "-":
+		return nil, "the run timed out before the judge was asked", usage
+	case saved != "":
+		b, err := readBytesCapped(saved, maxMessage)
+		if err != nil {
+			return nil, "--judgement-file: " + err.Error(), usage
+		}
+		raw = b
+	default:
+		instr, err := readCapped(agentFile("TRIAGE_JUDGE_INSTRUCTIONS", "triage-judge"), 64<<10)
+		if err != nil {
+			return nil, "the judge's instructions: " + err.Error(), usage
+		}
+		model := strings.TrimSpace(os.Getenv("TRIAGE_JUDGE_MODEL"))
+		if model == "" {
+			model = os.Getenv("TRIAGE_MODEL")
+		}
+		m := triage.ModelCall{Bin: os.Getenv("CLAUDE_BIN"), Model: model, Instructions: instr}
+		out, u, err := callModel(ctx, m, in.Text)
+		usage = u
+		logf("judge  : %s", u)
+		if err != nil {
+			return nil, "judge: " + err.Error(), usage
+		}
+		raw = []byte(out)
+	}
+	j, err := triage.ParseJudgement(raw)
+	if err != nil {
+		return nil, err.Error(), usage
+	}
+	return j, "", usage
 }
 
 func printVerdicts(w io.Writer, v triage.Verdicts) {

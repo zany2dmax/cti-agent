@@ -1511,6 +1511,77 @@ class DigestTicketLinks(unittest.TestCase):
         self.assertIn("https://x/browse/CR-9", line)
 
 
+class DigestAdvisories(unittest.TestCase):
+    """FLEET ADVISORIES: advisory triage's report, rendered by brief.py.
+
+    Mail anyone can send, so nothing in it is a link and everything is
+    escaped; a sighting comes first whatever the judge said; every advisory
+    read is listed.
+    """
+
+    REPORT = {
+        "schema": "cti-advisories/1", "read": 3, "triaged": 2, "cost_usd": 0.0612,
+        "gaps": ["not visible to Falcon: sites without the sensor"],
+        "results": [
+            {"subject": "Quiet one", "sender": "feed@example.com", "trusted_sender": True,
+             "verdicts": {"sightings": [], "verdicts": [
+                 {"subject": "S1", "title": "7-Zip", "relevance": "unlikely", "reason": "not installed",
+                  "reason_by": "judge", "facts": []}]}},
+            {"subject": "<script>x</script> hxxp://evil[.]example/a", "sender": "a@b.example",
+             "trusted_sender": False, "problems": ["reader: no JSON object"],
+             "verdicts": {"sightings": [{"value": "evil.example", "type": "domain", "hosts_seen_on": 2}],
+                          "verdicts": [{"subject": "S1", "title": "Campaign", "relevance": "possible",
+                                        "reason": "the domain was seen on 2 hosts", "reason_by": "judge",
+                                        "raised_by_code": "one of our hosts saw one of the advisory's indicators",
+                                        "facts": [{"id": "F1", "text": "indicator \"evil.example\" seen on 2"}],
+                                        "suggested_checks": ["isolate the 2 hosts"]}]}},
+            {"subject": "Third", "sender": "c@d.example", "not_triaged": "over the cap of 2"},
+        ],
+    }
+
+    def data(self, rep=REPORT, enabled=True, kind="daily"):
+        return {"findings": [], "counts": {}, "total": 0, "generated": "now",
+                "_advisories": rep, "_triage_enabled": enabled, "_kind": kind}
+
+    def test_sightings_first_and_every_advisory_listed(self):
+        txt = "\n".join(brief.advisories_text(self.data()))
+        self.assertIn("FLEET ADVISORIES - 3 messages with no CVE, 1 worth a look", txt)
+        self.assertLess(txt.index("SEEN ON OUR HOSTS: evil.example"), txt.index("Quiet one"))
+        self.assertIn("Not triaged: over the cap of 2", txt)
+        self.assertIn("Raised by code:", txt)
+        self.assertIn("Check: isolate the 2 hosts", txt)
+        self.assertIn("(not an authenticated feed)", txt)
+        self.assertIn("Model cost: $0.06", txt)
+
+    def test_nothing_in_it_is_markup_or_a_link(self):
+        html = brief.advisories_section(self.data())
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;script&gt;", html)
+        self.assertNotIn("<a ", html)
+        self.assertNotIn("href", html)
+
+    def test_it_reaches_the_daily_and_not_the_weekly(self):
+        self.assertIn("FLEET ADVISORIES", brief.render(self.data(), "daily"))
+        self.assertIn("FLEET ADVISORIES", brief.render_text(self.data(), "daily"))
+        self.assertNotIn("FLEET ADVISORIES", brief.render(self.data(kind="weekly"), "weekly"))
+
+    def test_missing_report(self):
+        self.assertIn("reported nothing today", brief.advisories_section(self.data(rep=None)))
+        self.assertEqual(brief.advisories_section(self.data(rep=None, enabled=False)), "")
+        self.assertEqual(brief.advisories_text(self.data(rep=None, enabled=False)), [])
+
+    def test_load_advisories_rejects_other_shapes(self):
+        with tempfile.TemporaryDirectory() as d:
+            enriched = os.path.join(d, "enriched-x.json")
+            self.assertIsNone(brief.load_advisories(enriched))
+            path = os.path.join(d, "enriched-x-advisories.json")
+            for bad in ("not json", '{"schema": "cti-advisories/2", "results": []}', '{"schema": "cti-advisories/1"}'):
+                pathlib.Path(path).write_text(bad)
+                self.assertIsNone(brief.load_advisories(enriched), bad)
+            pathlib.Path(path).write_text(json.dumps(self.REPORT))
+            self.assertEqual(brief.load_advisories(enriched)["read"], 3)
+
+
 class DigestFleetTickets(unittest.TestCase):
     """Every fleet ticket appears in the digest, not only today's CVEs'.
 
@@ -4851,6 +4922,61 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertNotIn("--no-db", enrich_[0])
         self.assertIn(f"--out {self.home}/state/enriched-{day}.json", enrich_[0])
         self.assertFalse((self.home / "dryrun").exists())
+
+    def triage_stubs(self, triage_exit=0):
+        agent = pathlib.Path(self.base["CTI_AGENT_DIR"]) / "cti-agent"
+        agent.write_text('#!/usr/bin/env bash\n'
+                         'echo "cti-agent $*" >> "$STUB_LOG"\n'
+                         'echo "| CVE-2026-1 |" > "$REPORT_PATH"\n'
+                         'while [ $# -gt 0 ]; do [ "$1" = --advisories-out ] && echo "{}" > "$2"; shift; done\n')
+        t = self.code / "bin" / "cti-triage"
+        t.write_text('#!/usr/bin/env bash\necho "cti-triage $*" >> "$STUB_LOG"\n'
+                     f'exit {triage_exit}\n')
+        t.chmod(0o755)
+
+    def test_digest_triage_is_off_unless_enabled(self):
+        self.triage_stubs()
+        r, calls = self.run_lane("run-digest", "daily", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse([c for c in calls if c.startswith("cti-triage")], calls)
+        self.assertFalse([c for c in calls if "--advisories-out" in c], calls)
+
+    def test_digest_triage_runs_beside_the_enriched_file(self):
+        day = datetime.date.today().isoformat()
+        for args, where in ((["daily", "--for-real"], self.home / "state"),
+                            (["daily", "--dry-run"], self.home / "dryrun" / "digest-daily")):
+            with self.subTest(args=args):
+                self.triage_stubs()
+                self.log.write_text("")
+                stale = where / f"enriched-{day}-advisories.json"
+                where.mkdir(parents=True, exist_ok=True)
+                stale.write_text("yesterday's read")
+                r, calls = self.run_lane("run-digest", *args, env="TRIAGE_ENABLED=1\n")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                adv_in = where / f"enriched-{day}-advisory-input.json"
+                self.assertTrue(any(f"--advisories-out {adv_in}" in c for c in calls if c.startswith("cti-agent")), calls)
+                tri = [c for c in calls if c.startswith("cti-triage")]
+                self.assertEqual(tri, [f"cti-triage --batch {adv_in} --out {stale} --batch-timeout 20m"])
+                self.assertFalse(stale.exists(), "a report from an earlier read survived the rerun")
+                self.assertFalse(adv_in.exists(), "the input is removed once triaged")
+                order = [c.split()[0] for c in calls]
+                self.assertLess(order.index("cti-triage"), order.index("brief.py"))
+
+    def test_digest_survives_a_failed_triage(self):
+        self.triage_stubs(triage_exit=1)
+        day = datetime.date.today().isoformat()
+        r, calls = self.run_lane("run-digest", "daily", "--for-real", env="TRIAGE_ENABLED=yes\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("cti-triage failed", r.stdout)
+        self.assertTrue([c for c in calls if c.startswith("cti-mailer")], "the digest was not sent")
+        self.assertTrue((self.home / "state" / f"enriched-{day}-advisory-input.json").exists(),
+                        "the input should be kept for a rerun")
+
+    def test_the_weekly_never_triages(self):
+        self.triage_stubs()
+        r, calls = self.run_lane("run-digest", "weekly", "--dry-run", env="TRIAGE_ENABLED=1\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse([c for c in calls if c.startswith("cti-triage")], calls)
 
     def test_digest_weekly_rehearsal_leaves_the_weekly_file_alone(self):
         day = datetime.date.today().isoformat()

@@ -145,9 +145,11 @@ eval:supplier`) runs the same arguments.
 >   sightings are reported by code whatever the judge says.
 >   The reader may later be given web search, because it never holds our data.
 >
-> The extractor and verifiers exist. Nothing runs on a timer, and nothing
-> reaches the brief yet. Read every "must" about the brief as a requirement
-> on work not yet done.
+> **In the daily digest behind `TRIAGE_ENABLED` (off by default).** Ingest
+> saves messages with no CVE, `cti-triage --batch` triages them, and
+> `brief.py` renders FLEET ADVISORIES with every value escaped and nothing
+> made a link. Any failure costs the section, never the digest. Until it is
+> turned on, nothing here runs on a timer.
 
 This is the newest and sharpest boundary in the system, and the one most
 likely to be got wrong by a well-meaning change. The agent's standing

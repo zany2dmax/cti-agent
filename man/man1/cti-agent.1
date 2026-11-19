@@ -13,6 +13,8 @@ cti-agent \- run a fleet command by hand as the service account; and the daily m
 .I /opt/cti\-agent/agent/cti\-agent
 .RB [ \-\-lookback
 .IR DURATION ]
+.RB [ \-\-advisories\-out
+.IR FILE ]
 .SH DESCRIPTION
 Two programs share this name.
 .SS The operator wrapper
@@ -162,6 +164,17 @@ received in the last
 (or
 .BR \-\-lookback ),
 through Microsoft Graph.
+.TP
+.BI \-\-advisories\-out " FILE"
+Also writes every message read that names no CVE (not auto-replies, not
+its own mail, not skipped subjects) to
+.IR FILE ,
+0600, for
+.BR "cti\-triage \-\-batch" .
+Bodies are capped at 256 KiB and the file at 100 messages. run-digest
+passes it when
+.B TRIAGE_ENABLED
+is on. A failure to write it is a warning, never a failed ingest.
 .TP
 .B Skips its own mail
 A message carrying a correctly signed

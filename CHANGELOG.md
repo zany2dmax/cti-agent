@@ -44,9 +44,21 @@ root-owned in `/usr/bin` or `/usr/local/bin` (or named by `CLAUDE_BIN`),
 be set in `fleet.env` (the model gets an empty HOME, so a login stored in
 `~/.claude` never reached it). A box where the heartbeat runs needs nothing;
 if one fails, the supplier judges nothing (every request Unsure) and the
-journal says why.
+journal says why. Advisory triage in the digest stays off until you set
+`TRIAGE_ENABLED=1` (RUNBOOK 11k, "In the daily digest").
 
 ### Added
+
+- **Advisory triage in the daily digest: FLEET ADVISORIES (`TRIAGE_ENABLED`,
+  off by default).** With it on, ingest saves every message with no CVE, and
+  run-digest runs the new `cti-triage --batch` on them before the brief:
+  reader, Falcon lookups and judge for each, authenticated feed senders
+  first, at most `TRIAGE_MAX_PER_RUN` (default 10) and none started after 20
+  minutes. The brief lists every one: sightings first, then likely and
+  possible with reason, facts and checks, one line for the rest, and any not
+  triaged with why, then the day's model cost. Nothing in it is a link. Any
+  failure costs the section, never the digest; the weekly never triages. A
+  dry run triages too, in its own directory, and pays for the same calls.
 
 - **Advisory triage phase 4: the judge (`cti-triage --judge`).** After the
   reader and the Falcon lookups, a second no-tools model sees the fact sheet

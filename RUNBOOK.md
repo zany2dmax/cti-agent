@@ -2735,10 +2735,11 @@ before they're printed. Neither mode ever prints a host name or ID.
 
 ## 11k. Advisory triage by hand
 
-`cti-triage` is advisory triage by hand: it turns one advisory into facts
-from our own tools (phase 3), and `--judge` weighs them (phase 4). Putting
-the result in the Daily Brief is the next step. Until then you run it by
-hand, and it writes nothing.
+`cti-triage` is advisory triage: it turns one advisory into facts from our
+own tools (phase 3), and `--judge` weighs them (phase 4). By hand it writes
+nothing. With `TRIAGE_ENABLED=1` the daily digest runs it on every message
+with no CVE and lists the result under FLEET ADVISORIES (see "In the daily
+digest" below).
 
 **Set up** in `/etc/cti-agent/fleet.env`, next to the `FALCON_*` settings:
 
@@ -2857,6 +2858,51 @@ sudo cti-agent cti-triage --judge --message adv.txt --facts-file sheet.json
 | `the judge's reason was removed` | It said we're affected or safe, or claimed something it didn't cite. The facts listed are what's known. |
 | `JUDGE CLAIMS REMOVED` | Everything code changed, one line each. Now and then is normal. On every run, the judge's instructions or model need a look. |
 | `JUDGE UNAVAILABLE` | The call failed, timed out, refused, or wasn't `cti-judgement/1`. Sightings and code's floors are still right. |
+
+### In the daily digest: `TRIAGE_ENABLED`
+
+Off by default. To turn it on, check the hand runs above work on the box
+first, then add to `/etc/cti-agent/fleet.env`:
+
+```
+TRIAGE_ENABLED=1
+TRIAGE_MAX_PER_RUN=10
+```
+
+Then preview before the timer sends it:
+
+```bash
+sudo cti-agent run-digest daily --dry-run
+sudo journalctl -u cti-agent-digest --since today | grep -E "triage|advisories"
+```
+
+What the daily does with it:
+
+1. **Ingest** saves every message with no CVE (not auto-replies, not the
+   fleet's own mail) to `state/enriched-DATE-advisory-input.json`.
+2. **Step 2c** runs `cti-triage --batch` on it: reader, Falcon, judge for
+   each, authenticated feed senders first. It judges at most
+   `TRIAGE_MAX_PER_RUN` and starts none after 20 minutes. The report goes
+   to `state/enriched-DATE-advisories.json`.
+3. **The brief** lists every one under **FLEET ADVISORIES**: sightings
+   first (`SEEN ON OUR HOSTS`), then likely and possible with reason, facts
+   and checks, then one line each for the rest, then any not triaged and
+   why. Nothing in it is a link.
+
+A dry run triages too, in its own directory, so the preview is the real
+thing. It pays for the same model calls. The brief prints the day's model
+cost at the end of the section.
+
+**If it fails**, the digest still goes out. The section says triage
+"reported nothing today", the journal has `triage: WARNING`, and the input
+is kept. To rerun triage alone on it:
+
+```bash
+sudo cti-agent cti-triage --batch /var/lib/cti-agent/state/enriched-$(date +%F)-advisory-input.json --out /tmp/adv.json
+```
+
+To turn it off, remove `TRIAGE_ENABLED` (or set it to 0). Nothing else
+changes.
 
 ---
 

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,5 +236,106 @@ func TestShowJudgeInputMakesNoCall(t *testing.T) {
 	}
 	if !strings.Contains(o.String(), "FACTS") || !strings.Contains(o.String(), triage.BeginContent) {
 		t.Fatalf("out = %s", o.String())
+	}
+}
+
+func batchInput(t *testing.T, n int) string {
+	t.Helper()
+	var msgs []triage.Advisory
+	for i := 0; i < n; i++ {
+		msgs = append(msgs, triage.NewAdvisory(fmt.Sprintf("id%d", i), time.Unix(int64(1000+i), 0), "feed@example.com",
+			fmt.Sprintf("Advisory %d", i), i == n-1, "Chrome before 131.0 is exploited via evil[.]example (T1566)."))
+	}
+	p := filepath.Join(t.TempDir(), "in.json")
+	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func readReport(t *testing.T, p string) triage.AdvisoryReport {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r triage.AdvisoryReport
+	if err := json.Unmarshal(b, &r); err != nil || r.Schema != triage.AdvisoryReportSchema {
+		t.Fatalf("report: %v %s", err, b)
+	}
+	return r
+}
+
+func TestBatch(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "r.md", "reader"))
+	t.Setenv("TRIAGE_JUDGE_INSTRUCTIONS", write(t, "j.md", "judge"))
+	t.Setenv("TRIAGE_MAX_PER_RUN", "2")
+	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
+	calls := 0
+	callModel = func(_ context.Context, m triage.ModelCall, input string) (string, triage.Usage, error) {
+		calls++
+		if m.Instructions == "reader" {
+			if strings.Contains(input, "Advisory 0") {
+				return "garbage", triage.Usage{CostUSD: 0.01}, nil
+			}
+			return `{"schema":"cti-subjects/1","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":[],"quotes":[]}],"refusal":null}`, triage.Usage{CostUSD: 0.01}, nil
+		}
+		return `{"schema":"cti-judgement/1","items":[{"subject":"S1","relevance":"likely","reason":"3 hosts below the fix","facts":["F1"],"checks":["patch them"]}],"refusal":null}`, triage.Usage{CostUSD: 0.02}, nil
+	}
+	out := filepath.Join(t.TempDir(), "adv.json")
+	var o, e bytes.Buffer
+	if code := run([]string{"--batch", batchInput(t, 3), "--out", out}, &o, &e); code != exitOK {
+		t.Fatalf("exit %d: %s", code, e.String())
+	}
+	r := readReport(t, out)
+	if r.Read != 3 || r.Triaged != 2 || len(r.Results) != 3 || calls != 4 {
+		t.Fatalf("read %d triaged %d results %d calls %d", r.Read, r.Triaged, len(r.Results), calls)
+	}
+	// The trusted sender (Advisory 2) goes first; Advisory 1 is over the cap.
+	if r.Results[0].Subject != "Advisory 2" || r.Results[0].Verdicts.Verdicts[0].Relevance != "likely" {
+		t.Fatalf("first = %+v", r.Results[0])
+	}
+	if r.Results[1].Subject != "Advisory 0" || len(r.Results[1].Problems) == 0 || len(r.Results[1].Verdicts.Sightings) != 1 {
+		t.Fatalf("reader failure = %+v", r.Results[1])
+	}
+	if r.Results[2].Subject != "Advisory 1" || !strings.Contains(r.Results[2].Skipped, "cap of 2") {
+		t.Fatalf("over cap = %+v", r.Results[2])
+	}
+	if r.CostUSD < 0.059 || r.CostUSD > 0.061 {
+		t.Fatalf("cost = %v", r.CostUSD)
+	}
+	if fi, _ := os.Stat(out); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v", fi.Mode())
+	}
+}
+
+func TestBatchWithoutFalconListsEveryAdvisory(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "r.md", "reader"))
+	factSource = func() (triage.FactSource, func(), error) { return nil, nil, fmt.Errorf("no creds") }
+	callModel = func(context.Context, triage.ModelCall, string) (string, triage.Usage, error) {
+		t.Fatal("a model call was made without Falcon")
+		return "", triage.Usage{}, nil
+	}
+	out := filepath.Join(t.TempDir(), "adv.json")
+	var o, e bytes.Buffer
+	if code := run([]string{"--batch", batchInput(t, 2), "--out", out}, &o, &e); code != exitErr {
+		t.Fatalf("exit %d", code)
+	}
+	r := readReport(t, out)
+	if len(r.Results) != 2 || r.Results[0].Skipped == "" || r.Triaged != 0 {
+		t.Fatalf("report = %+v", r)
+	}
+}
+
+func TestBatchUsage(t *testing.T) {
+	isolate(t)
+	in := batchInput(t, 1)
+	for _, args := range [][]string{{"--batch", in}, {"--out", "x"}, {"--batch", in, "--out", "x", "--judge"}, {"--batch", in, "--out", "x", "--message", in}} {
+		var o, e bytes.Buffer
+		if code := run(args, &o, &e); code != exitUsage {
+			t.Errorf("%v: exit %d", args, code)
+		}
 	}
 }

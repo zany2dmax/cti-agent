@@ -19,6 +19,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
 	"github.com/zany2dmax/cti-agent/internal/report"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
+	"github.com/zany2dmax/cti-agent/internal/triage"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/providers"
 )
@@ -40,6 +41,11 @@ func main() {
 		"override GRAPH_LOOKBACK_HOURS for this run only, e.g. 168h to catch up "+
 			"after the timer was off. The window used is always printed and "+
 			"appears in the report header")
+	// Advisory triage's input. run-digest passes it when TRIAGE_ENABLED is
+	// on; without it nothing about this run changes.
+	advisoriesOut := flag.String("advisories-out", "",
+		"also write every message read that names no CVE (not auto-replies) to this "+
+			"file, for cti-triage --batch")
 	flag.Parse()
 
 	// fleet.env. run-digest sources it in shell before calling this, so under
@@ -99,6 +105,7 @@ func main() {
 	subjects := make([]report.ScannedEmail, 0, len(messages))
 	seen := make([]mailbox.Processed, 0, len(messages))
 	var skippedSubjects []string
+	var advisories []triage.Advisory
 	for _, msg := range messages {
 		// Never read our own report back in.
 		//
@@ -152,6 +159,13 @@ func main() {
 			if fromTeam {
 				asked[cve] = true
 			}
+		}
+		// No CVE: the message is advisory triage's to read, when it is on.
+		// Auto-replies are not advisories. Saved before the cleanup lane can
+		// archive it, because only this run has its body.
+		if *advisoriesOut != "" && len(found) == 0 && !msg.IsAutoReply() {
+			advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
+				msg.From, msg.Subject, fromFeed, msg.BodyText))
 		}
 		subjects = append(subjects, report.ScannedEmail{
 			Subject:  msg.Subject,
@@ -315,6 +329,17 @@ func main() {
 		// by removing the sanitiser - quieter output, worse code - so the
 		// annotation stays and the scrub stays.
 		log.Fatalf("write report failed: %s", safelog.Line(err.Error()))
+	}
+
+	// Not fatal: a failure costs today's advisory triage, never the CVE
+	// digest. run-digest sees no file and says triage had nothing to read.
+	if *advisoriesOut != "" {
+		if err := triage.WriteAdvisoryInput(*advisoriesOut, advisories, time.Now()); err != nil {
+			log.Printf("WARNING: could not write the advisories for triage (%s); "+
+				"today's advisories without a CVE will not be triaged", safelog.Line(err.Error()))
+		} else {
+			log.Printf("advisories: %d message(s) with no CVE saved for triage", len(advisories))
+		}
 	}
 
 	// Record what was read, AFTER the report is on disk. The ordering is the

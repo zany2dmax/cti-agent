@@ -710,6 +710,202 @@ def fleet_tickets_text(data):
     lines.append("")
     return lines
 
+# ── FLEET ADVISORIES ─────────────────────────────────────────────────────────
+#
+# Advisory triage (cti-triage --batch, TRIAGE_ENABLED): every message with no
+# CVE, read by a no-tools model that never sees our data, looked up in
+# Falcon, and judged by a no-tools model that never sees the advisory. The
+# report is code's: cti-triage checked every claim against the facts.
+#
+# Everything here came from mail anyone can send, so nothing is a link -
+# subjects, senders, indicators and product names are escaped text - and a
+# sighting is printed first whatever the judge said. Every advisory read is
+# listed: triaged, failed with its reason, or over the day's cap.
+
+ADV_HEADING = "FLEET ADVISORIES"
+ADV_RANK = {"likely": 0, "possible": 1, "unknown": 2, "unlikely": 3}
+ADV_NOTE = ("Judged from what our own tools hold. Never a statement that we are "
+            "or are not affected - check before acting.")
+
+
+def triage_enabled():
+    return (os.environ.get("TRIAGE_ENABLED") or "").strip().lower() in ("1", "yes", "true", "on")
+
+
+def load_advisories(enriched_path):
+    """The cti-advisories/1 report cti-triage wrote beside the enriched file.
+
+    None when there is none: triage is off, had nothing to read, or failed.
+    Malformed is treated as missing, and the section says triage did not
+    report, rather than failing the digest.
+    """
+    base = enriched_path[:-5] if enriched_path.endswith(".json") else enriched_path
+    try:
+        with open(base + "-advisories.json") as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict) or got.get("schema") != "cti-advisories/1":
+        return None
+    if not isinstance(got.get("results"), list):
+        return None
+    return got
+
+
+def _adv_results(rep):
+    """Results in reading order: sightings first, then the best relevance."""
+    out = []
+    for r in rep.get("results") or []:
+        if not isinstance(r, dict):
+            continue
+        v = r.get("verdicts") if isinstance(r.get("verdicts"), dict) else {}
+        verdicts = [x for x in (v.get("verdicts") or []) if isinstance(x, dict)]
+        sightings = [x for x in (v.get("sightings") or []) if isinstance(x, dict)]
+        best = min((ADV_RANK.get(x.get("relevance"), 2) for x in verdicts), default=4)
+        if r.get("not_triaged"):
+            best = 5
+        out.append((0 if sightings else 1, best, r, verdicts, sightings))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+
+def _adv_worth(rep):
+    return sum(1 for s_, b, *_ in _adv_results(rep) if s_ == 0 or b <= 1)
+
+
+def _adv_summary(rep):
+    read = int(rep.get("read") or 0)
+    worth = _adv_worth(rep)
+    return (f"{read} message{'s' if read != 1 else ''} with no CVE, "
+            f"{worth} worth a look")
+
+
+def _adv_name(x):
+    name = str(x.get("title") or x.get("subject") or "")
+    if x.get("name"):
+        name += f" ({x['name']})"
+    return name
+
+
+def _adv_sender(r):
+    who = str(r.get("sender") or "unknown sender")
+    return who + ("" if r.get("trusted_sender") else " (not an authenticated feed)")
+
+
+def advisories_section(data):
+    if data.get("_kind") != "daily":
+        return ""
+    rep = data.get("_advisories")
+    if rep is None:
+        if not data.get("_triage_enabled"):
+            return ""
+        body = ('<tr><td style="padding:4px 0;color:#4a5568">Advisory triage is on but '
+                'reported nothing today: it had no mail without a CVE, or it failed. '
+                'The digest run log says which.</td></tr>')
+        summary = "no report"
+    else:
+        red_fg, red_bg = tone("red")
+        rows = []
+        for _, _, r, verdicts, sightings in _adv_results(rep):
+            head = (f'<b>{esc(r.get("subject") or "(no subject)")}</b>'
+                    f'<br><span style="color:#718096">from {esc(_adv_sender(r))}</span>')
+            parts = [head]
+            for x in sightings:
+                parts.append(
+                    f'<div style="background:{red_bg};color:{red_fg};border-left:3px solid {red_fg};'
+                    f'padding:4px 8px;margin:4px 0;font-weight:700">SEEN ON OUR HOSTS: '
+                    f'{esc(x.get("value"))} ({esc(x.get("type"))}) on {esc(x.get("hosts_seen_on"))} '
+                    f'host(s). Treat it as an incident lead.</div>')
+            if r.get("not_triaged"):
+                parts.append(f'<div style="color:#718096">Not triaged: {esc(r["not_triaged"])}</div>')
+            for x in verdicts:
+                rel = str(x.get("relevance") or "unknown")
+                label = f'<b>{esc(rel.upper())}</b> &middot; {esc(_adv_name(x))}'
+                if rel in ("likely", "possible"):
+                    by = " (code)" if x.get("reason_by") == "code" else ""
+                    detail = [f'{esc(x.get("reason"))}{by}']
+                    if x.get("raised_by_code"):
+                        detail.append(f'Raised by code: {esc(x["raised_by_code"])}')
+                    for f in (x.get("facts") or [])[:6]:
+                        if isinstance(f, dict):
+                            detail.append(f'Fact: {esc(f.get("text"))}')
+                    for c in (x.get("suggested_checks") or [])[:3]:
+                        detail.append(f'Check: {esc(c)}')
+                    parts.append(f'<div style="margin-top:4px">{label}<br>'
+                                 f'<span style="color:#2d3748">{"<br>".join(detail)}</span></div>')
+                else:
+                    parts.append(f'<div style="margin-top:2px;color:#4a5568">{label}</div>')
+            for pr in (r.get("problems") or [])[:3]:
+                parts.append(f'<div style="color:#718096">Note: {esc(pr)}</div>')
+            rows.append('<tr><td style="padding:6px 0;vertical-align:top;'
+                        'border-bottom:1px solid #edf2f7">' + "".join(parts) + '</td></tr>')
+        if rep.get("over_ingest_cap"):
+            rows.append(f'<tr><td style="padding:4px 0;color:#718096">+{esc(rep["over_ingest_cap"])} '
+                        'more not saved for triage (over the ingest cap).</td></tr>')
+        gaps = "; ".join(str(g) for g in (rep.get("gaps") or []))
+        foot = esc(ADV_NOTE)
+        if gaps:
+            foot += f"<br>Not covered: {esc(gaps)}."
+        foot += f'<br>Model cost: ${float(rep.get("cost_usd") or 0):.2f}.'
+        rows.append(f'<tr><td style="padding:6px 0;color:#718096;font-size:11px">{foot}</td></tr>')
+        body = "".join(rows)
+        summary = _adv_summary(rep)
+    return f"""
+  <tr><td style="padding:4px 20px 14px 20px;border-top:1px solid #e2e8f0">
+    <div style="font:700 12px -apple-system,Segoe UI,Arial,sans-serif;
+                color:#4a5568;margin:12px 0 8px 0;letter-spacing:.5px">
+      {ADV_HEADING} &mdash; {esc(summary)}</div>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+           style="font:400 12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+      {body}
+    </table>
+  </td></tr>"""
+
+
+def advisories_text(data):
+    if data.get("_kind") != "daily":
+        return []
+    rep = data.get("_advisories")
+    if rep is None:
+        if not data.get("_triage_enabled"):
+            return []
+        return [f"{ADV_HEADING} - no report", "-" * 68,
+                "  Advisory triage is on but reported nothing today: it had no mail",
+                "  without a CVE, or it failed. The digest run log says which.", ""]
+    lines = [f"{ADV_HEADING} - {_adv_summary(rep)}", "-" * 68]
+    for _, _, r, verdicts, sightings in _adv_results(rep):
+        lines.append(f"  {r.get('subject') or '(no subject)'}")
+        lines.append(f"    from {_adv_sender(r)}")
+        for x in sightings:
+            lines.append(f"    >>> SEEN ON OUR HOSTS: {x.get('value')} ({x.get('type')}) on "
+                         f"{x.get('hosts_seen_on')} host(s). Treat it as an incident lead.")
+        if r.get("not_triaged"):
+            lines.append(f"    Not triaged: {r['not_triaged']}")
+        for x in verdicts:
+            rel = str(x.get("relevance") or "unknown")
+            lines.append(f"    {rel.upper()}  {_adv_name(x)}")
+            if rel in ("likely", "possible"):
+                by = " (code)" if x.get("reason_by") == "code" else ""
+                lines.append(f"      {x.get('reason')}{by}")
+                if x.get("raised_by_code"):
+                    lines.append(f"      Raised by code: {x['raised_by_code']}")
+                for f in (x.get("facts") or [])[:6]:
+                    if isinstance(f, dict):
+                        lines.append(f"      Fact: {f.get('text')}")
+                for c in (x.get("suggested_checks") or [])[:3]:
+                    lines.append(f"      Check: {c}")
+        for pr in (r.get("problems") or [])[:3]:
+            lines.append(f"    Note: {pr}")
+    if rep.get("over_ingest_cap"):
+        lines.append(f"  +{rep['over_ingest_cap']} more not saved for triage (over the ingest cap).")
+    lines.append(f"  {ADV_NOTE}")
+    gaps = "; ".join(str(g) for g in (rep.get("gaps") or []))
+    if gaps:
+        lines.append(f"  Not covered: {gaps}.")
+    lines.append(f"  Model cost: ${float(rep.get('cost_usd') or 0):.2f}.")
+    lines.append("")
+    return lines
+
 
 def render(data, kind):
     c, meta = data["counts"], data.get("source_meta", {})
@@ -945,7 +1141,7 @@ def render(data, kind):
       {degraded}{''.join(sections)}
     </table></td></tr>
 
-{held_section(data)}{fleet_tickets_section(data)}{subjects_section(data)}
+{held_section(data)}{fleet_tickets_section(data)}{advisories_section(data)}{subjects_section(data)}
   <tr><td style="padding:8px 20px 18px 20px;border-top:1px solid {T['rule']}">
     <div style="font:400 11px/1.6 {T['font']};
                 color:{T['muted']}">
@@ -1113,6 +1309,7 @@ def render_text(data, kind):
         lines.append("")
     lines += held_text(data)
     lines += fleet_tickets_text(data)
+    lines += advisories_text(data)
     lines.append("Presence determined solely by the vulnerability lookup provider.")
     lines.append("UNKNOWN means the scanner had no mapping - not that we are clean.")
     attr_text, attr_url = attribution()
@@ -1155,6 +1352,8 @@ def main():
     data["_products"] = load_products(args.enriched)
     data["_enriched"] = args.enriched
     data["_kind"] = kind
+    data["_advisories"] = load_advisories(args.enriched) if kind == "daily" else None
+    data["_triage_enabled"] = triage_enabled()
 
     if args.subject_only:
         print(subject(data, kind))

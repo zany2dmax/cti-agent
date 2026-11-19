@@ -111,6 +111,26 @@ on a real run, the same without
 on a dry run. Any failure, including the binary being absent, costs tickets
 and nothing else. The weekly never runs it.
 .TP
+.B 2c. Advisory triage (daily, TRIAGE_ENABLED, non-fatal)
+With
+.B TRIAGE_ENABLED=1
+ingest is run with
+.B \-\-advisories\-out
+and saves every message with no CVE (auto-replies aside) as
+.IR state/enriched\-DATE\-advisory\-input.json .
+.B cti\-triage \-\-batch
+then runs each through the reader, the Falcon lookups and the judge
+(at most
+.BR TRIAGE_MAX_PER_RUN ,
+20 minutes in all) and writes
+.IR state/enriched\-DATE\-advisories.json ,
+which
+.B brief.py
+renders as FLEET ADVISORIES. The input is removed once triaged and kept if
+triage fails. Runs on a dry run too, in its directory, so the preview is
+what the real digest would show; that costs the same model calls. Any
+failure costs the section and nothing else.
+.TP
 .B 3. Brief
 .B python3 lanes/brief.py \-\-daily
 (or
@@ -317,6 +337,11 @@ The CVE-to-ticket map
 .B cti\-jira
 writes for
 .BR brief.py .
+.TP
+.IR state/enriched\-DATE\-advisory\-input.json ", " state/enriched\-DATE\-advisories.json
+Advisory triage's input (message bodies with no CVE) and report, 0600.
+Only with
+.BR TRIAGE_ENABLED .
 .TP
 .IR state/weekly\-enriched\-DATE.json ", " state/weekly\-enriched\-DATE\-tickets.json
 The weekly rollup and its borrowed ticket map, 0600. Not named

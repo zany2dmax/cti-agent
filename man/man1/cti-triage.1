@@ -20,6 +20,15 @@ cti-triage \- turn one threat-intel advisory into facts from our own tools
 .RB [ \-\-timeout
 .IR D ]
 .PP
+.B cti\-triage \-\-batch
+.I FILE
+.B \-\-out
+.I FILE
+.RB [ \-\-timeout
+.IR D ]
+.RB [ \-\-batch\-timeout
+.IR D ]
+.PP
 .B sudo cti\-agent cti\-triage \-\-facts \-\-message
 .I advisory.txt
 .SH DESCRIPTION
@@ -75,6 +84,26 @@ becomes
 when that subject's inventory lookup failed. Sightings are printed first,
 by code, even when the judge fails or refuses.
 .PP
+.B \-\-batch
+is how the daily digest runs it (TRIAGE_ENABLED, see
+.BR run\-digest (1)):
+every message ingest saved with no CVE, each through the reader, the
+lookups and the judge with its own
+.BR \-\-timeout ,
+into one
+.B cti\-advisories/1
+report for
+.BR brief.py .
+Authenticated feed senders go first, then oldest first; at most
+.B TRIAGE_MAX_PER_RUN
+(default 10, at most 50) are triaged, and none is started after
+.BR \-\-batch\-timeout .
+Every advisory read is in the report: triaged, with any stage that failed,
+or not triaged and why. A failed reader still leaves the indicators and the
+advisory's techniques to look up; a failed judge still leaves code's verdicts
+and the sightings. Without Falcon or the reader's instructions nothing is
+triaged, every advisory is listed as such, and the exit status is 1.
+.PP
 Every model call's tokens and cost are printed on stderr.
 .SH OPTIONS
 Exactly one of
@@ -97,6 +126,25 @@ Run the reader, then the Falcon lookups, and print the fact sheet.
 .TP
 .B \-\-judge
 Run the reader, the lookups and the judge, and print the checked verdicts.
+.TP
+.BI \-\-batch " FILE"
+With
+.BR \-\-out :
+triage every advisory in
+.I FILE
+.RB ( "cti\-agent \-\-advisories\-out" ).
+Takes no other mode or
+.BR \-\-message .
+.TP
+.BI \-\-out " FILE"
+Where
+.B \-\-batch
+writes its report, 0600.
+.TP
+.BI \-\-batch\-timeout " D"
+With
+.BR \-\-batch :
+start no advisory after this long. Default: 20m.
 .TP
 .B \-\-show\-judge\-input
 With
@@ -159,6 +207,11 @@ What Falcon cannot see, repeated on every fact sheet.
 .B TRIAGE_JUDGE_MODEL
 The judge's model. Default:
 .BR TRIAGE_MODEL .
+.TP
+.B TRIAGE_MAX_PER_RUN
+With
+.BR \-\-batch :
+how many advisories are triaged. Default 10, at most 50.
 .TP
 .B TRIAGE_JUDGE_INSTRUCTIONS
 The judge's instructions. Default:

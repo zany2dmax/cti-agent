@@ -89,6 +89,7 @@ HTML="$FLEET_HOME/reports/digest-$KIND-$DAY.html"
 TXT="$FLEET_HOME/reports/digest-$KIND-$DAY.txt"
 BOARD="$FLEET_CODE/bin/fleet-board"
 DB="$FLEET_CODE/bin/fleet-db"
+TRIAGE="$FLEET_CODE/bin/cti-triage"
 
 mkdir -p "$FLEET_HOME"/{reports,state,logs}
 say() { echo "[run-digest $(date '+%H:%M:%S')] $*"; }
@@ -150,6 +151,19 @@ if [ -n "$DRY" ]; then
   chmod 0600 "$OUT"/* 2>/dev/null || true
   say "dry run: working in $OUT - the processed log, memory.db and today's real files are left alone"
 fi
+
+# ── ADVISORY TRIAGE (TRIAGE_ENABLED) ────────────────────────────────────────
+# Daily only, and off unless TRIAGE_ENABLED is 1/yes/true/on. Ingest saves
+# every message with no CVE beside the enriched file; step 2c triages them
+# and leaves the report there too, which is where brief.py looks. Both names
+# follow ENRICHED, so a dry run's land in its own directory. Today's old
+# copies are removed just before ingest (after the already-sent check, so a
+# digest that went out keeps its record): a rerun must never render a
+# report from an earlier read.
+TRIAGE_ON=""
+case "${TRIAGE_ENABLED:-}" in 1|yes|true|on) [ "$KIND" = daily ] && TRIAGE_ON=1 ;; esac
+ADV_IN="${ENRICHED%.json}-advisory-input.json"
+ADV_OUT="${ENRICHED%.json}-advisories.json"
 
 # Do not double-send. A duplicate 6am digest trains people to ignore it.
 if [ -z "$DRY" ] && [ "$("$DB" was-sent "$DAY" "$KIND" 2>/dev/null || echo no)" = "yes" ]; then
@@ -253,12 +267,15 @@ fi
 # send is recorded, so the next run's catch-up starts from the read, not from
 # the send (enrich, Jira and the brief can take a while in between).
 READ_START=$(date +%s)
+rm -f "$ADV_IN" "$ADV_OUT"
 say "ingest: reading $GRAPH_MAILBOX"
+ADV_ARGS=()
+[ -n "$TRIAGE_ON" ] && ADV_ARGS=(--advisories-out "$ADV_IN")
 if [ -x "${CTI_AGENT_DIR:-}/cti-agent" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" ./cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ${ADV_ARGS[@]+"${ADV_ARGS[@]}"} ) \
     || fail "cti-agent exited non-zero (check Graph auth and Qualys creds)"
 elif [ -d "${CTI_AGENT_DIR:-}" ]; then
-  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ) \
+  ( cd "$CTI_AGENT_DIR" && REPORT_PATH="$RAW" go run ./cmd/cti-agent ${LOOKBACK:+--lookback "$LOOKBACK"} ${ADV_ARGS[@]+"${ADV_ARGS[@]}"} ) \
     || fail "go run failed"
 else
   fail "CTI_AGENT_DIR not set or not found"
@@ -310,6 +327,32 @@ elif [ -z "$DRY" ] && [ -x "$JIRA" ]; then
 elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
   say "ticket: dry run, nothing will be filed or commented"
   "$JIRA" --from-enriched "$ENRICHED" --dry-run --follow-up || true
+fi
+
+# ── 2c. advisory triage ──────────────────────────────────────────────────────
+# Each message with no CVE goes through the reader (no tools, never sees our
+# data), the Falcon lookups and the judge (no tools, never sees the
+# advisory). Model calls cost money, so it runs on a dry run too only
+# because the preview must show what the real digest would; at most
+# TRIAGE_MAX_PER_RUN advisories (default 10) are judged.
+#
+# NON-FATAL, like ticketing: a model outage, a Falcon outage or a bug here
+# costs the FLEET ADVISORIES section, never the CVE digest. cti-triage
+# stops starting advisories after --batch-timeout and still writes its
+# report; `timeout` is the backstop, inside the unit's hour.
+if [ -n "$TRIAGE_ON" ]; then
+  if [ ! -x "$TRIAGE" ]; then
+    say "triage: $TRIAGE not installed - skipped"
+  elif [ ! -s "$ADV_IN" ]; then
+    say "triage: ingest saved no advisories - nothing to triage"
+  else
+    say "triage: reader, Falcon and judge for each message with no CVE"
+    if timeout 25m "$TRIAGE" --batch "$ADV_IN" --out "$ADV_OUT" --batch-timeout 20m; then
+      rm -f "$ADV_IN"
+    else
+      say "triage: WARNING: cti-triage failed - FLEET ADVISORIES says so; the input is kept at $ADV_IN"
+    fi
+  fi
 fi
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
