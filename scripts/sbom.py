@@ -36,6 +36,7 @@ Python standard library and `go`/`git`, and it is never installed on the box.
 """
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -53,43 +54,63 @@ class Rule(Exception):
 
 
 def run(*cmd):
+    # FileNotFoundError (the tool is not installed) is left to the caller: git
+    # and go each say what they are needed for.
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=False)  # nosec B603
 
 
+def _try(*cmd):
+    try:
+        return run(*cmd)
+    except FileNotFoundError:
+        return None
+
+
 def git_version():
-    r = run("git", "describe", "--tags", "--always", "--dirty")
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+    r = _try("git", "describe", "--tags", "--always", "--dirty")
+    return r.stdout.strip() if r and r.returncode == 0 and r.stdout.strip() else "unknown"
 
 
 def git_commit():
-    r = run("git", "rev-parse", "HEAD")
-    return r.stdout.strip() if r.returncode == 0 else ""
+    r = _try("git", "rev-parse", "HEAD")
+    return r.stdout.strip() if r and r.returncode == 0 else ""
+
+
+def tree_fingerprint():
+    """A hash of the uncommitted changes, so two different dirty trees at one
+    commit do not share a serial number. Empty for a clean tree."""
+    r = _try("git", "diff", "HEAD")
+    if not r or r.returncode != 0 or not r.stdout:
+        return ""
+    return hashlib.sha256(r.stdout.encode("utf-8", "replace")).hexdigest()[:16]
 
 
 def go_toolchain():
-    r = run("go", "env", "GOVERSION")
-    v = r.stdout.strip()
+    r = _try("go", "env", "GOVERSION")
+    v = r.stdout.strip() if r else ""
     return v[2:] if v.startswith("go") else (v or "unknown")
 
 
 def go_modules():
-    """(path, version) of every module the main module requires. Parsed from
-    go.mod directly: the standard library has no parser for it, and the file's
-    grammar here is two forms."""
-    with open(os.path.join(ROOT, "go.mod"), encoding="utf-8") as f:
-        text = f.read()
-    mods = []
-    for block in re.findall(r"(?ms)^require\s*\((.*?)^\)", text):
-        for line in block.splitlines():
-            line = line.split("//")[0].strip()
-            if line:
-                parts = line.split()
-                if len(parts) >= 2:
-                    mods.append((parts[0], parts[1]))
-    for line in re.findall(r"(?m)^require\s+(\S+\s+\S+)", text):
-        parts = line.split()
-        mods.append((parts[0], parts[1]))
-    return sorted(set(mods))
+    """(path, version) of every module the main module requires, as the go tool
+    itself reads go.mod (`go mod edit -json`): Go accepts an indented `require`,
+    a block, an inline form and quoted paths, and a regular expression over the
+    text misses some of them."""
+    for name in ("go.work", "vendor"):
+        if os.path.exists(os.path.join(ROOT, name)):
+            raise Rule(f"{name} exists: the module is standard library only, and a "
+                       f"{name} is how third-party code would arrive")
+    try:
+        r = run("go", "mod", "edit", "-json")
+    except FileNotFoundError:
+        raise Rule("the go tool is not installed, so go.mod cannot be read; install Go to run the SBOM") from None
+    if r.returncode != 0:
+        raise Rule(f"go mod edit could not read go.mod: {r.stderr.strip()[:200]}")
+    try:
+        req = json.loads(r.stdout).get("Require") or []
+    except ValueError:
+        raise Rule("go mod edit -json gave output that is not JSON") from None
+    return sorted({(m["Path"], m["Version"]) for m in req})
 
 
 def go_commands():
@@ -98,44 +119,120 @@ def go_commands():
                   if os.path.isfile(os.path.join(base, d, "main.go")))
 
 
+SCAN_DIRS = ("fleet-kit", "scripts")
+
+
+def _walk(base):
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = sorted(d for d in dirnames if d not in (".git", "__pycache__", "node_modules"))
+        for name in sorted(filenames):
+            yield os.path.join(dirpath, name)
+
+
+def _head(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.readline()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
 def python_files():
+    """Every Python file under fleet-kit and scripts, recursively: a .py file, or
+    a file whose first line is a python shebang."""
     out = []
-    for d in ("fleet-kit/fleet/lanes", "fleet-kit/fleet/bin", "scripts"):
+    for d in SCAN_DIRS:
         base = os.path.join(ROOT, d)
-        if not os.path.isdir(base):
-            continue
-        for name in sorted(os.listdir(base)):
-            p = os.path.join(base, name)
-            if not os.path.isfile(p):
-                continue
-            try:
-                with open(p, encoding="utf-8") as f:
-                    head = f.readline()
-            except (OSError, UnicodeDecodeError):
-                continue
-            if name.endswith(".py") or ("python" in head and head.startswith("#!")):
-                out.append(p)
+        if os.path.isdir(base):
+            for p in _walk(base):
+                head = _head(p)
+                if p.endswith(".py") or (head.startswith("#!") and "python" in head):
+                    out.append(p)
     return out
 
 
+def shell_files():
+    out = []
+    for d in SCAN_DIRS:
+        base = os.path.join(ROOT, d)
+        if os.path.isdir(base):
+            for p in _walk(base):
+                head = _head(p)
+                if p.endswith(".sh") or (head.startswith("#!") and re.search(r"\b(ba)?sh\b", head)):
+                    out.append(p)
+    return out
+
+
+_HEREDOC = re.compile(r"python3?\b[^\n]*?<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\s*\2\b", re.S)
+_DASH_C = re.compile(r"python3?\s+(?:-\w+\s+)*-c\s+(['\"])(.*?)\1", re.S)
+_IMPORT_LINE = re.compile(r"^[ \t]*(?:from[ \t]+([A-Za-z_][\w.]*)[ \t]+import\b|import[ \t]+([A-Za-z_][\w., \t]*))", re.M)
+
+
+def _snippet_imports(text):
+    names = []
+    for m in _IMPORT_LINE.finditer(text):
+        if m.group(1):
+            names.append(m.group(1).split(".")[0])
+        else:
+            names += [x.strip().split(" ")[0].split(".")[0] for x in m.group(2).split(",") if x.strip()]
+    return names
+
+
+def embedded_python(path):
+    """The imports of Python written inside a shell script: a `python3 - <<EOF`
+    heredoc, or `python3 -c '...'`. They cannot be parsed (shell variables are in
+    them), so they are read by line, which is enough to see an import."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    names = []
+    for m in _HEREDOC.finditer(text):
+        names += _snippet_imports(m.group(3))
+    for m in _DASH_C.finditer(text):
+        names += _snippet_imports(m.group(2).replace(";", "\n"))
+    return names
+
+
+def _dynamic_imports(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
+            if name in ("__import__", "import_module"):
+                yield node.lineno
+
+
 def third_party_imports():
-    """{module: [files]} for every import that is not the standard library or
-    this repository's own code."""
+    """{module: [files]} for every import that is not the standard library or a
+    module sitting in the SAME directory as the file that imports it. A module of
+    that name elsewhere in the tree is not on that file's path, so it does not
+    excuse the import. Dynamic imports (__import__, import_module) cannot be
+    checked, so they are reported as a module called "<dynamic import>"."""
     std = set(sys.stdlib_module_names)
-    local = {os.path.splitext(os.path.basename(p))[0] for p in python_files()}
     found = {}
+
+    def note(mod, path):
+        found.setdefault(mod, []).append(os.path.relpath(path, ROOT))
+
     for p in python_files():
+        local = {os.path.splitext(n)[0] for n in os.listdir(os.path.dirname(p))}
         with open(p, encoding="utf-8") as f:
             tree = ast.parse(f.read(), filename=p)
-        names = []
         for node in ast.walk(tree):
+            names = []
             if isinstance(node, ast.Import):
-                names += [a.name.split(".")[0] for a in node.names]
+                names = [a.name.split(".")[0] for a in node.names]
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names.append(node.module.split(".")[0])
-        for n in names:
+                names = [node.module.split(".")[0]]
+            for n in names:
+                if n not in std and n not in local:
+                    note(n, p)
+        if any(True for _ in _dynamic_imports(tree)):
+            note("<dynamic import>", p)
+    for p in shell_files():
+        local = {os.path.splitext(n)[0] for n in os.listdir(os.path.dirname(p))}
+        for n in embedded_python(p):
             if n not in std and n not in local:
-                found.setdefault(n, []).append(os.path.relpath(p, ROOT))
+                note(n, p)
     return {k: sorted(set(v)) for k, v in sorted(found.items())}
 
 
@@ -154,7 +251,10 @@ def check():
 
 def build(version):
     commit = git_commit()
-    serial = uuid.uuid5(uuid.NAMESPACE_URL, f"{PURL_NS}@{version}#{commit}")
+    fingerprint = tree_fingerprint()
+    # A serial number is unique per BOM: a dirty tree adds a hash of its changes,
+    # so two different working trees at one commit do not share one.
+    serial = uuid.uuid5(uuid.NAMESPACE_URL, f"{PURL_NS}@{version}#{commit}#{fingerprint}")
     go_ver = go_toolchain()
     stdlib_ref = f"pkg:golang/stdlib@{go_ver}"
     lanes_ref = f"{PURL_NS}@{version}#fleet-kit-lanes"
@@ -173,7 +273,7 @@ def build(version):
         "type": "application", "bom-ref": lanes_ref, "name": "fleet-kit-lanes", "version": version,
         "description": "The bash runners and Python lanes under fleet-kit/fleet (standard library only)",
     })
-    deps.append({"ref": lanes_ref, "dependsOn": ["platform:python3", "platform:bash"]})
+    deps.append({"ref": lanes_ref, "dependsOn": ["platform:python3", "platform:bash", "platform:claude-code"]})
     components.append({
         "type": "library", "bom-ref": stdlib_ref, "name": "go-standard-library", "version": go_ver,
         "purl": stdlib_ref, "description": "The Go standard library of the toolchain that builds the commands",
@@ -186,6 +286,15 @@ def build(version):
             "type": "platform", "bom-ref": f"platform:{name}", "name": name,
             "description": f"{name} as provided by the host operating system (the Fedora package); not shipped with the fleet",
         })
+    # The heartbeat, the supplier judge and advisory triage run the Claude Code
+    # CLI: third-party software the fleet executes and does not ship. It is the
+    # host's, installed system-wide (root-owned), so no version is known here.
+    components.append({
+        "type": "application", "bom-ref": "platform:claude-code", "name": "claude-code",
+        "description": "The Claude Code CLI (a Node application) that run-checkin, run-supplier and advisory triage execute; "
+                       "installed on the host by the operator, not built or shipped here",
+        "scope": "required",
+    })
     components.sort(key=lambda c: (c["type"], c["name"]))
     deps.sort(key=lambda d: d["ref"])
     return {
@@ -199,7 +308,8 @@ def build(version):
             "component": {"type": "application", "bom-ref": f"{PURL_NS}@{version}", "name": "cti-agent",
                           "version": version, "description": "CTI Agent Fleet"},
             "properties": [{"name": "git.commit", "value": commit},
-                           {"name": "dependencies.third-party", "value": "none"}],
+                           {"name": "git.dirty", "value": "true" if fingerprint else "false"},
+                           {"name": "dependencies.third-party", "value": "none (the Claude Code CLI is host software the fleet runs, listed as a platform component)"}],
         },
         "components": components,
         "dependencies": deps,
@@ -216,6 +326,13 @@ def main(argv):
         check()
     except Rule as e:
         print(f"sbom: the no-dependency rule is broken: {e}", file=sys.stderr)
+        return 1
+    except SyntaxError as e:
+        print(f"sbom: cannot read {os.path.relpath(e.filename or '?', ROOT)} line {e.lineno}: it does not parse, "
+              f"so its imports cannot be checked", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"sbom: cannot read the tree: {e}", file=sys.stderr)
         return 1
     if a.check:
         print("sbom: ok - no third-party Go modules, no third-party Python imports")

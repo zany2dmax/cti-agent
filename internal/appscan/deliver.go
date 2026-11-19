@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/statefile"
@@ -183,9 +184,14 @@ func (f DeliveriesFile) JSON() []byte {
 // LoadDeliveredLog reads the log; a missing file is an empty log.
 func LoadDeliveredLog(p string) (DeliveredLog, error) {
 	l := DeliveredLog{}
-	err := statefile.Read(p, &l, deliveredOpts(&l, time.Now))
+	// Parsing only. A log that parses is REPAIRED entry by entry, not rejected:
+	// one bad old entry must not make every later commit and report fail.
+	err := statefile.Read(p, &l, statefile.Options{MaxBytes: maxDeliveredBytes})
 	switch {
 	case err == nil:
+		if notes := l.Normalize(time.Now()); len(notes) > 0 {
+			fmt.Fprintf(os.Stderr, "appscan: repaired %s: %s\n", p, strings.Join(notes, "; "))
+		}
 		return l, nil
 	case errors.Is(err, os.ErrNotExist):
 		return DeliveredLog{}, nil
@@ -263,7 +269,39 @@ func safeKey(k string) string {
 }
 
 func deliveredOpts(l *DeliveredLog, now func() time.Time) statefile.Options {
-	return statefile.Options{Validate: func() error { return l.Validate(now()) }}
+	return statefile.Options{MaxBytes: maxDeliveredBytes, Validate: func() error { return l.Validate(now()) }}
+}
+
+// maxDeliveredBytes is far above maxDelivered entries' worth, so the entry count
+// is the limit and the byte cap is only a backstop.
+const maxDeliveredBytes = 32 << 20
+
+// Normalize drops the entries ValidateEntry refuses and pulls a delivery dated
+// ahead of the clock back to now, and says what it did. After it, Validate
+// passes. A dropped entry means the application is reported again next run,
+// which is the safe direction.
+func (l DeliveredLog) Normalize(now time.Time) []string {
+	dropped, clamped := 0, 0
+	for k, e := range l {
+		if err := ValidateEntry(k, e); err != nil {
+			delete(l, k)
+			dropped++
+			continue
+		}
+		if e.At.After(now.Add(deliveredSkew)) {
+			e.At = now
+			l[k] = e
+			clamped++
+		}
+	}
+	var notes []string
+	if dropped > 0 {
+		notes = append(notes, fmt.Sprintf("dropped %d entries that were not valid deliveries", dropped))
+	}
+	if clamped > 0 {
+		notes = append(notes, fmt.Sprintf("pulled %d future delivery times back to now", clamped))
+	}
+	return notes
 }
 
 // CommitDelivered records "key<TAB>ref<TAB>status" lines in the log,
@@ -289,7 +327,14 @@ func CommitDelivered(logPath string, lines io.Reader, now time.Time) (int, []str
 			bad = append(bad, fmt.Sprintf("line %d: want key, ref and status separated by tabs", i+1))
 			continue
 		}
-		e := DeliveredEntry{Ref: f[1], At: now.UTC(), Status: f[2]}
+		// Ref and status come from our own runner; text that merely carries a
+		// control character or runs long is repaired, not refused, since a refused
+		// held scan would be re-reported on every run. The key is an identity and
+		// is validated as it is.
+		e := DeliveredEntry{Ref: spaceControl(f[1]), At: now.UTC(), Status: spaceControl(f[2])}
+		if strings.HasPrefix(e.Status, "held: ") && len(e.Status) > maxStatus {
+			e.Status = clipUTF8(e.Status, maxStatus)
+		}
 		if err := ValidateEntry(f[0], e); err != nil {
 			bad = append(bad, fmt.Sprintf("line %d: %v", i+1, err))
 			continue
@@ -527,4 +572,25 @@ func WriteOwnerFile(dir, name string, b []byte) error {
 		return fmt.Errorf("%q is not a plain file name", name)
 	}
 	return writeNew(filepath.Join(dir, name), b)
+}
+
+// spaceControl replaces control characters with a space.
+func spaceControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// clipUTF8 cuts s to at most n bytes without splitting a character.
+func clipUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

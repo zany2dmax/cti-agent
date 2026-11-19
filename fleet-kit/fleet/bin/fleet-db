@@ -16,8 +16,9 @@
   fleet-db vacuum
 
 Every command that writes checks its arguments first (see "WHAT IS CHECKED"
-below) and refuses with "fleet-db: <reason>" and exit 2, before it touches the
-database. Reads are unchanged.
+below) and refuses with "fleet-db: <reason>" and exit 2, before it writes any
+row. Reads are unchanged. `finding upsert` exits 3 when it skipped a row (the
+valid rows are written).
 """
 import json
 import math
@@ -37,8 +38,10 @@ DB = os.path.join(FLEET_HOME, "state", "memory.db")
 # cti-jira, and an operator. The guard protects only the first path, so the
 # command itself refuses what no caller should send: a number that is not a
 # number, a date that is not a date, text with control characters or far past
-# the size anything here stores. The limits below mirror the guard's (a test
-# fails if they drift), so the heartbeat sees one set of rules, not two.
+# the size anything here stores. The names, counts and lengths below mirror the
+# guard's (a test fails if they drift). The guard is stricter on one thing: it
+# allows printable ASCII only, where this accepts any text without control
+# characters, so a lane or an operator can store a non-English supplier name.
 #
 # A batch (`finding upsert`) is not all-or-nothing: a row that fails is skipped
 # and named on stderr, the rest are written, so one bad value cannot stop the
@@ -126,6 +129,7 @@ def validate_finding(f):
     upsert always has); a known column must hold what it says it holds."""
     if not isinstance(f, dict):
         raise Invalid("a finding is a JSON object")
+    f = dict(f)
     v_match("cve", f.get("cve"), CVE_RX, "a CVE id")
     for k, limit in FINDING_TEXT.items():
         v = f.get(k)
@@ -135,8 +139,11 @@ def validate_finding(f):
             raise Invalid(f"{k} must be text")
         if len(str(v)) > limit:
             raise Invalid(f"{k} is too long ({len(str(v))} characters, at most {limit})")
-        if CTRL_RX.search(str(v)):
-            raise Invalid(f"{k} has control characters")
+        # Text from an advisory or a feed may carry a stray control character
+        # (a carriage return from an external CNA is common). Losing the whole
+        # finding over it would lose its history, so it is replaced, not refused.
+        if isinstance(v, str) and CTRL_RX.search(v):
+            f[k] = CTRL_RX.sub(" ", v)
     for k, (lo, hi) in FINDING_RANGE.items():
         v = f.get(k)
         if v is None or v == "":
@@ -395,6 +402,10 @@ def _main(argv):
             c.execute(sql, vals + [now(), now()])
         c.commit()
         print(f"upserted {len(rows)} findings" + (f" ({skipped} skipped, see above)" if skipped else ""))
+        # Exit 3 when any row was skipped, so a caller can tell a clean upsert
+        # from one that lost rows. The rows that were valid ARE written.
+        if skipped:
+            return 3
 
     elif cmd == "note":
         # Record that a finding has been handed to somebody. Until now nothing
@@ -568,7 +579,7 @@ def _main(argv):
             raise Invalid("sent takes a date, five counts and a message id")
         day = v_day("date", args[0])
         s5, s4, s3, s2, s1 = (v_count(n, a) for n, a in zip(("sev5", "sev4", "sev3", "sev2", "sev1"), args[1:6]))
-        mid = v_text("message id", args[6], 512)
+        mid = v_text("message id", args[6] if args[6].strip() else "unknown", 512)
         kind = v_match("kind", args[7] if len(args) > 7 else "daily", KIND_RX, "a digest kind (lowercase letters)")
         c.execute("INSERT OR REPLACE INTO digests(kind,day,sev5,sev4,sev3,sev2,sev1,"
                   "message_id,ts) VALUES(?,?,?,?,?,?,?,?,?)",

@@ -8,13 +8,17 @@ import (
 	"time"
 )
 
+// stdinText is what the next run reads on standard input.
+var stdinText string
+
 func runIn(t *testing.T, dir string, args ...string) (int, string, string) {
 	t.Helper()
+	t.Cleanup(func() { stdinText = "" })
 	t.Setenv("AUDIT_DIR", dir)
 	t.Setenv("AUDIT_SYSLOG_ADDR", "")
 	t.Setenv("FLEET_ENV", filepath.Join(t.TempDir(), "none"))
 	var out, errb strings.Builder
-	code := run(args, &out, &errb)
+	code := run(args, strings.NewReader(stdinText), &out, &errb)
 	return code, out.String(), errb.String()
 }
 
@@ -105,5 +109,68 @@ func TestCheckReportsAWritableAndAnUnwritableTrail(t *testing.T) {
 	}
 	if code, out, _ := runIn(t, "off", "--check"); code != 1 || !strings.Contains(out, "discarded") {
 		t.Fatalf("off: %d %q", code, out)
+	}
+}
+
+// A leading zero in AUDIT_RETAIN_DAYS must not be read as octal ("0120" is 80).
+func TestDaysAreDecimalEvenWithALeadingZero(t *testing.T) {
+	dir := t.TempDir()
+	// 100 days old: kept by 120, deleted by octal-misread 80.
+	old := time.Now().UTC().AddDate(0, 0, -100).Format("2006-01-02")
+	if err := os.WriteFile(filepath.Join(dir, "audit-"+old+".log"), []byte("x\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"0120", "120", " 120 ", "08", "009"} {
+		code, out, errs := runIn(t, dir, "--prune", "--dry-run", "--days", d)
+		if code != 0 {
+			t.Errorf("--days %q: code %d: %s", d, code, errs)
+			continue
+		}
+		wantDelete := d == "08" || d == "009" // 8 and 9 days: the file is older than that
+		if got := strings.Contains(out, "would delete 1"); got != wantDelete {
+			t.Errorf("--days %q: would-delete = %v, want %v:\n%s", d, got, wantDelete, out)
+		}
+	}
+	for _, bad := range []string{"0", "-5", "1e3", "abc", "99999999999999999999"} {
+		if code, _, _ := runIn(t, dir, "--prune", "--days", bad); code != 2 {
+			t.Errorf("--days %q accepted (code %d)", bad, code)
+		}
+	}
+}
+
+func TestStdinWritesManyEventsAndSkipsBadLines(t *testing.T) {
+	dir := t.TempDir()
+	stdinText = strings.Join([]string{
+		`{"action":"owners.set","target":"id:1","outcome":"success","detail":"a"}`,
+		`not json`,
+		`{"action":"","target":"x","outcome":"success"}`,
+		`{"action":"owners.rm","target":"id:2","outcome":"weird"}`,
+		`{"action":"owners.add","target":"id:3","outcome":"success","extra":1}`,
+		``,
+		`{"action":"owners.site","target":"site:x","outcome":"refused"}`,
+	}, "\n")
+	code, _, errs := runIn(t, dir, "--stdin", "--lane", "fleet-owners")
+	if code != 0 {
+		t.Fatalf("code %d: %s", code, errs)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "audit-*.log"))
+	b, _ := os.ReadFile(files[0])
+	text := string(b)
+	for _, want := range []string{" owners.set ", " owners.rm ", " owners.site "} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %s:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, " owners.add ") {
+		t.Error("a line with an unknown field was written")
+	}
+	if !strings.Contains(text, `outcome="failure"`) { // the "weird" outcome
+		t.Errorf("an unknown outcome should be recorded as failure:\n%s", text)
+	}
+	if strings.Count(errs, "is not an event") != 3 {
+		t.Errorf("want three skipped lines named, got:\n%s", errs)
+	}
+	if strings.Count(text, "\n") != 3 || !strings.Contains(text, `lane="fleet-owners"`) {
+		t.Errorf("three events with the lane expected:\n%s", text)
 	}
 }

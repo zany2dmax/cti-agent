@@ -48,9 +48,12 @@ Before traces, the only account of a beat was whatever the model chose to
 print. A trace answers "why did the heartbeat escalate on Tuesday?" from what
 it actually did.
 .PP
-By default a trace keeps the beat's decisions and their cost, not the content
-the beat read. It records what the model said, every tool call and its
-arguments, what was denied, the turns, tokens, cost and the final verdict. A
+By default a trace keeps what the beat did, not the tool results it read, and
+works by allowlist. It records what the model wrote, every tool call and its
+arguments, what was denied, the turns, tokens, cost and the final result. What
+the model wrote and the arguments it passed can quote mail, so a minimal trace is
+far less than a copy of the mailbox and is not nothing. Anything in an event
+shape the program does not know is kept only as a size and a hash. A
 tool result (a mail body, an advisory, a report) is replaced by its size and the
 first 16 characters of its SHA-256, so "what did it look at" has an answer and
 the trace is not a second copy of the mailbox. A failed tool call keeps its

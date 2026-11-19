@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/config"
@@ -445,8 +446,35 @@ func trustedSource(msg graph.Message, feed []string) bool {
 	if !mailbox.FleetSender(msg.From, feed) {
 		return false
 	}
-	ok, _ := msg.VouchedFor()
+	ok, why := msg.VouchedFor()
+	if !ok {
+		warnUnvouched(msg, why)
+	}
 	return ok
+}
+
+var (
+	unvouchedMu   sync.Mutex
+	unvouchedSeen = map[string]bool{}
+)
+
+// warnUnvouched says, once per sender per run, that mail from a sender the fleet
+// reads was not trusted because the receiving server did not authenticate it. On
+// a tenant whose gateway hides the sender, every feed email fails this check; the
+// scanner lanes say so in their reports, and without this the digest would just
+// quietly stop trusting its feeds.
+func warnUnvouched(msg graph.Message, why string) {
+	key := strings.ToLower(strings.TrimSpace(msg.From))
+	unvouchedMu.Lock()
+	seen := unvouchedSeen[key]
+	unvouchedSeen[key] = true
+	unvouchedMu.Unlock()
+	if seen {
+		return
+	}
+	log.Printf("mail from %s is not trusted: %s. If every genuine message from this sender says this, "+
+		"mail reaches Exchange Online through a gateway that hides the sender: fix the connector, or list the "+
+		"sender's domain in %s", safelog.Line(msg.From), why, graph.UnauthenticatedSendersEnv)
 }
 
 // triageSenders is the threat-intel sender list: TRIAGE_SENDERS, or
@@ -470,7 +498,10 @@ func intelSource(msg graph.Message, list []string) bool {
 	if len(list) == 0 || !mailbox.SenderIn(msg.From, list) {
 		return false
 	}
-	ok, _ := msg.VouchedFor()
+	ok, why := msg.VouchedFor()
+	if !ok {
+		warnUnvouched(msg, why)
+	}
 	return ok
 }
 

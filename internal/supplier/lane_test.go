@@ -66,7 +66,10 @@ func TestOneConversationIsOneRequestAndTheFormMessageCarriesIt(t *testing.T) {
 	if len(src.opened) != 1 || src.opened[0] != "f" {
 		t.Errorf("opened %v, want only the form", src.opened)
 	}
-	if !strings.Contains(items[0].Input, "REPLY from approver@example.test: Approved") {
+	if strings.Contains(items[0].Input, "approver@") {
+		t.Errorf("a reply's sender address reached the model's input:\n%s", items[0].Input)
+	}
+	if !strings.Contains(items[0].Input, "REPLY from example.test: Approved") {
 		t.Errorf("the reply was not shown to the model:\n%s", items[0].Input)
 	}
 	if len(r.Skipped) != 1 || r.Skipped[0].Name != "W-9.pdf" {

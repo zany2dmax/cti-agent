@@ -252,7 +252,8 @@ Optional and rarely needed.
 Exact From domains, comma separated, whose notices are read without the sender
 authentication check. Only for a tenant whose inbound gateway hides the real
 sender from Exchange Online, which makes every genuine notice fail. The domains
-listed only; each acceptance is written to the audit trail. It replaces
+listed only; the first acceptance of each domain in a run is written to the
+audit trail (even in a dry run: it is a trust decision, not a write). It replaces
 .BR FLEET_SENDER_AUTH=off ,
 which switched the check off for every sender and is no longer honoured.
 .TP

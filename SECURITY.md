@@ -116,10 +116,17 @@ credit terms, spend, the branch, the ERP, or the requester's and approver's
 names. The rules that use the sender and the form's structure run in code, so the
 model does not need them. Every value, and the subject and body, then passes
 `RedactSensitive`, which replaces tax ids, bank account and routing numbers,
-IBANs and Luhn-valid card numbers with a marker, because a requester will paste
-them into the notes even though the form has attachments for them. It is blunt
-on purpose and misses numbers written as words, which is why the field list is
-short and the redaction is only a net under it. The people who file and review a
+IBANs and Luhn-valid card numbers with a marker (and bare nine-digit numbers
+that pass the routing checksum, and numbers beside a bank or tax word, including
+a value on the line below its label), because a requester will paste them into
+the notes even though the form has attachments for them. Invisible characters
+and fullwidth digits are normalised first so they cannot hide a number. It is
+blunt on purpose and a net, not a guarantee: it misses numbers written as words,
+broken up by anything but a space, dot or hyphen, encoded (base64), on a line
+with no bank or tax word, or more than one line from their label, and it removes
+digits from dates and phone numbers on a line that mentions an account. That is
+why the field list is short. A reply in the thread is shown as its sender's
+domain, like the first message. The people who file and review a
 request still get the full form; only the model's copy is cut. What still leaves
 the host is a supplier's name, what it supplies and the requester's own
 description, under the company's terms for the Claude service.
@@ -435,13 +442,20 @@ control covers the disk and snapshot theft that application encryption is
 supposed to cover. What the application owes is to **store less and keep it
 shorter**, which is where the effort goes:
 
-- **Traces store decisions, not what the beat read.** The default
-  (`CHECKIN_TRACE_KEEP=minimal`) keeps what the model said and did, its cost
-  and its verdict, and replaces every tool result (a mail body, an advisory, a
-  report) with its size and a short hash. A failed call keeps 300 characters;
-  stray stderr is capped. `full` exists for an investigation and puts mail text
-  in the file, so it is a deliberate, temporary setting. Traces are deleted
-  after `CHECKIN_TRACE_DAYS` (14).
+- **Traces keep what the beat did, not the tool results it read.** The default
+  (`CHECKIN_TRACE_KEEP=minimal`) is an allowlist. It keeps what the model wrote,
+  every tool call with its arguments, what was denied, the turns, tokens, cost
+  and the final result text. A tool result (a mail body, an advisory, a report)
+  becomes its size and a short hash, and so does anything in a shape the code
+  does not know (a compaction summary, hook or MCP output, a server-side tool
+  result, private reasoning). What is still in a minimal trace, and can quote
+  mail: the model's own words, the arguments of each call (an escalation reason,
+  a memory it saved), the first 300 characters of a failed call (including a
+  failed command's output), and stray stderr (2,000 characters a line). So it is
+  far less than a copy of the mailbox, and it is not nothing. `full` keeps every
+  event as it came, for an investigation, so it is a deliberate, temporary
+  setting. Traces are deleted after `CHECKIN_TRACE_DAYS` (14). The journal
+  timeline carries the same model text separately.
 - **The audit trail carries no content**: recipients, keys and outcomes, never
   bodies or credentials, and is pruned after 120 days.
 - **Credentials are not in the data stores**: they are in `fleet.env`, never
@@ -532,7 +546,14 @@ answer that does not depend on reading a journal.
 - **Where.** The events are written inside the clients, so `cti-mailer`,
   `cti-alert`, `cti-mailbox` and `cti-jira` are all covered, and a new command
   that uses a client is covered without anyone remembering to add it. Reads
-  and `--dry-run` write nothing.
+  and `--dry-run` write no events for changes. The one exception is a trust
+  decision, not a write: reading mail from a sender domain listed in
+  `FLEET_UNAUTHENTICATED_SENDERS` is recorded, first acceptance of each domain in
+  a run, even in a dry run. The Python mailer kept as a rollback fallback
+  (`mailer.py`) does not write events; the live path, `cti-mailer`, does.
+  The files are mode 0600 in a 0750 directory, so a root-run collector reads
+  them as they are and a collector running as another user needs read access
+  granted (an ACL).
 - **File.** `/var/log/cti-agent/audit-YYYY-MM-DD.log`, one file per UTC day,
   in the directory `AUDIT_DIR`. systemd creates it (`LogsDirectory=cti-agent`)
   for each unit that changes something, and the installer creates it too,
@@ -553,8 +574,9 @@ answer that does not depend on reading a journal.
   line to a collector as it is written, in addition to the file. The protocol
   is `AUDIT_SYSLOG_PROTO`: `tls` (the default; certificate and host name
   verified, TLS 1.2 or later), or `tcp` or `udp`, which are unencrypted and
-  have to be asked for by name. A dead collector costs one warning per run and
-  the file still has the event. No SIEM is built or bundled; forwarding is
+  have to be asked for by name. A dead or hung collector costs one 2-second timeout and
+  one warning per run, after which forwarding is off for the rest of that run
+  (so it cannot slow every event); the file still has every event. No SIEM is built or bundled; forwarding is
   only the option to ship to one. The other way needs no setting: point the
   collector's file reader at `/var/log/cti-agent/audit-*.log`.
 - **Retention.** The daily mailbox cleanup lane runs `cti-audit --prune
@@ -1117,13 +1139,23 @@ popular library has an advisory.
 
 **The SBOM proves it instead of promising it.** `task sbom` (run by `task ship`
 and `task check`) writes a CycloneDX 1.5 SBOM to `dist/sbom/` and, before it
-does, reads `go.mod` and every Python file's imports (`scripts/sbom.py`). It
-lists each Go command as an application, the lanes as one, the Go standard
-library at the toolchain's version, and the host's `python3` and `bash` as
-platform; and it fails, so the ship fails, if `go.mod` requires a module or a
-lane imports anything that is not the standard library. A dependency added by
-accident turns the next ship red. The file is a build artifact (`dist/` is not
-committed) and is deterministic for a commit.
+does, checks the rule (`scripts/sbom.py`): it asks the go tool what `go.mod`
+requires (and refuses a `go.work` or a `vendor/` directory), and it reads every
+Python file under `fleet-kit` and `scripts`, recursively, plus the Python written
+inside shell scripts (`python3 - <<EOF` heredocs and `python3 -c`), for any
+import that is not the standard library or a module in the same directory. A
+dynamic import (`__import__`, `import_module`) cannot be checked and is refused.
+The SBOM lists each Go command as an application, the lanes as one, the Go
+standard library at the toolchain's version, the host's `python3` and `bash` as
+platform, and the Claude Code CLI as the third-party application the heartbeat,
+the supplier judge and advisory triage run (installed by the operator, version
+unknown to the build). If the rule is broken the ship fails: a dependency added
+by accident turns the next ship red. The file is a build artifact (`dist/` is not
+committed) and is the same for a commit apart from its timestamp; a dirty tree
+adds a hash of its changes to the serial number. It is made on the maintainer's
+machine, so its Go version is that machine's, and the binaries the installer
+builds on the host use the host's Go: it describes what the code is made of, and
+it is not yet attached to a release or written on the host.
 
 The cost is more code written here. The benefit is that `govulncheck` has a
 small and comprehensible surface — which matters, because this system parses
@@ -1324,22 +1356,42 @@ record that never expires.
   owners lane's delivered log are read and written through
   `internal/statefile`: validate, refuse an oversized value, write a temp file
   at 0600 in the same directory, flush it, and rename it over the target, so a
-  reader sees the old file or the new one and a refused write changes nothing.
-  Each file has a `Validate` that says what it could hold (known outcomes, no
-  future-dated entries, bounded counts and lengths, no control characters). A
-  file that parses but fails validation is treated as damaged: the budget
-  ledger starts fresh with a warning (an outage over a counter is worse), the
-  processed log fails closed (the cleanup lane stops loudly). Free text that is
-  ordinary data (a mail subject, a note) is clipped on the way in, not refused,
-  so a long subject cannot stop the lane remembering what it read.
+  reader sees the old file or the new one. Each file has a `Validate` that says
+  what it could hold, and what it checks differs by file:
+  - the **budget ledger**: a known outcome on every beat, no beat more than an
+    hour ahead of the clock, notes under 500 bytes, at most 5,000 beats, a
+    cooldown or alert marker no further ahead than the longest backoff;
+  - the **processed-message log**: a message id on every entry (not repeated, not
+    over 2 KB), no read time more than a day ahead, subjects and refs clipped,
+    at most 50,000 entries;
+  - the **delivered log**: a key, a ref and a status (`sent` or `held: <why>`)
+    on every entry, no control characters, no delivery time more than a day
+    ahead.
+  **Writing** refuses what fails (and a save first brings the ledger within
+  bounds, so the beat just recorded is never lost to a refused write). **Reading**
+  does not reject a file that parses: it REPAIRS it, entry by entry, and says
+  what it did on stderr (the journal). A clock that stepped back, or an older
+  version's longer subject, must not stop every lane until somebody deletes a
+  file by hand. The repair errs toward safe: a future-dated beat counts as now
+  against the ceilings, an unknown outcome counts as an error, a cooldown is
+  pulled in to the longest backoff and never cleared, a delivery that is not valid
+  is dropped (that application is simply reported again), a future read time is
+  pulled back to now so it expires normally. Only a file that does not parse
+  fails closed: the processed log stops the cleanup lane loudly, and the ledger
+  starts fresh with a warning (an outage over a counter is worse).
 - **The database (`fleet-db`).** Every command that writes checks its
-  arguments first and refuses with exit 2 before touching memory.db: row
-  numbers, real dates, bounded counts, names that are plain names, text with no
-  control characters and within the size each field stores. The limits are the
-  ones `checkin-bash-guard` puts on the heartbeat, and a test fails if they
-  drift, so the model sees one set of rules and every other caller (the lanes,
-  `cti-jira`, an operator) gets the same ones. The nightly `finding upsert` is a
-  batch: a bad row is skipped and named on stderr, the rest are written.
+  arguments first and refuses with exit 2 before it writes any row: row numbers,
+  real dates, bounded counts, names that are plain names, and text with no
+  control characters within the size each field stores. The names, counts and
+  lengths are the ones `checkin-bash-guard` puts on the heartbeat, and a test
+  fails if they drift. The guard is stricter on one thing: it allows printable
+  ASCII only, where `fleet-db` accepts any text without control characters, so a
+  lane or an operator can store a non-English supplier name. The nightly
+  `finding upsert` is a batch: a row that fails (a bad CVE id, a priority that is
+  not Sev1 to Sev5, a number out of range) is skipped and named on stderr, the rest
+  are written, and the command exits 3 so the caller knows; a stray control
+  character in a finding's text is replaced with a space, not a reason to lose the
+  finding.
 
 This is validation at the write, not an application service in front of a
 database: the fleet has no server. What it does not do is stop a caller that

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -411,5 +413,99 @@ func TestPruneRefusesNonsenseWindows(t *testing.T) {
 	}
 	if _, err := Prune(filepath.Join(t.TempDir(), "nope"), 120, time.Now(), false); err == nil {
 		t.Error("a missing directory should be an error, so a typo in AUDIT_DIR is noticed")
+	}
+}
+
+// ---- found by review ----
+
+// A collector that accepts the connection and never answers must cost the
+// run one timeout, not one per event.
+func TestAHungCollectorCostsOneTimeoutNotOnePerEvent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }() // never speaks TLS; holds the connection open
+		}
+	}()
+	dir := t.TempDir()
+	l, warn := logger(dir)
+	l.Forward = &Forwarder{Addr: ln.Addr().String(), Proto: "tls", Timeout: 400 * time.Millisecond}
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		_ = l.Emit(Event{Action: "a", Outcome: Success})
+	}
+	if took := time.Since(start); took > 1500*time.Millisecond {
+		t.Fatalf("10 events took %v: the dead collector was dialled for each", took)
+	}
+	if strings.Count(warn.String(), "forwarding is off for the rest of this run") != 1 {
+		t.Errorf("want one warning saying forwarding is off, got %q", warn.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "audit-2026-11-19.log"))
+	if strings.Count(string(b), "\n") != 10 {
+		t.Errorf("the local file lost events: %q", b)
+	}
+}
+
+func TestAFIFOWhereTheDaysFileGoesCannotHangTheLane(t *testing.T) {
+	dir := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(dir, "audit-2026-11-19.log"), 0o600); err != nil {
+		t.Skip("no fifos here")
+	}
+	l, warn := logger(dir)
+	done := make(chan error, 1)
+	go func() { done <- l.Emit(Event{Action: "a", Outcome: Success}) }()
+	select {
+	case err := <-done:
+		// With no reader the open itself fails (ENXIO); with one it would be
+		// refused as not a regular file. Either way: an error, the event on
+		// stderr, and no hang.
+		if err == nil || !strings.Contains(warn.String(), "cannot write") || !strings.Contains(warn.String(), "<86>1 ") {
+			t.Fatalf("a FIFO was accepted: %v %q", err, warn.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Emit hung on a FIFO")
+	}
+}
+
+func TestARelativeAuditDirIsRefused(t *testing.T) {
+	l, warn := logger("relative/dir")
+	if err := l.Emit(Event{Action: "a", Outcome: Success}); err == nil {
+		t.Fatal("a relative AUDIT_DIR was used")
+	}
+	if !strings.Contains(warn.String(), "not an absolute path") {
+		t.Errorf("warning: %q", warn.String())
+	}
+	if _, err := os.Stat("relative"); err == nil {
+		t.Error("a directory was created from the working directory")
+	}
+}
+
+func TestLineAndParagraphSeparatorsAreNeutralised(t *testing.T) {
+	l, _ := logger(t.TempDir())
+	line := l.Format(fixed, Event{Action: "a", Target: "x y z", Outcome: Success, Detail: "d e"})
+	if strings.ContainsAny(line, "  ") {
+		t.Fatalf("a separator survived: %q", line)
+	}
+}
+
+func TestALongRecipientListSurvivesInTheTarget(t *testing.T) {
+	l, _ := logger(t.TempDir())
+	var addrs []string
+	for i := 0; i < 30; i++ {
+		addrs = append(addrs, fmt.Sprintf("person%02d@example.com", i))
+	}
+	line := l.Format(fixed, Event{Action: "mail.send", Target: strings.Join(addrs, ","), Outcome: Success})
+	for _, a := range addrs {
+		if !strings.Contains(line, a) {
+			t.Fatalf("recipient %s was cut off: %s", a, line)
+		}
 	}
 }

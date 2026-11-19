@@ -38,7 +38,9 @@
 //
 // No message bodies, no credentials, no report text. Values are sanitised with
 // safelog (a control character cannot start a forged line) and capped. A
-// rehearsal (--dry-run) writes nothing, because nothing happened.
+// rehearsal (--dry-run) writes no event for a change, because nothing changed;
+// the one event that is a decision and not a write (a sender domain accepted
+// without authentication) is written even then.
 //
 // # WHAT IT DOES NOT PROVE
 //
@@ -119,6 +121,9 @@ type Logger struct {
 
 	mu     sync.Mutex
 	warned map[string]bool
+	// fwdDown is set after the first failed forward and stays set for the
+	// rest of the process: see Emit.
+	fwdDown bool
 }
 
 // FromEnv builds the logger a command uses: AUDIT_DIR, AUDIT_SYSLOG_ADDR,
@@ -212,17 +217,38 @@ func (l *Logger) Emit(e Event) error {
 	case "off":
 		// Discarded on purpose (tests, a dev machine).
 	default:
-		if err := writeFile(dir, t, line); err != nil {
+		err := error(nil)
+		if !filepath.IsAbs(dir) {
+			err = fmt.Errorf("AUDIT_DIR %q is not an absolute path", dir)
+		} else {
+			err = writeFile(dir, t, line)
+		}
+		if err != nil {
 			note("file", fmt.Errorf("audit: cannot write %s (%v); the event follows on stderr, which the journal keeps", dir, err))
 			_, _ = fmt.Fprintln(l.warnOut(), line)
 		}
 	}
-	if l.Forward != nil && l.dir() != "off" {
+	// A collector that is down must not tax every event. Each Send dials afresh
+	// with a timeout, so a hung collector would cost its whole timeout per
+	// event: a mailbox run moving a few hundred messages inside one two-minute
+	// context would spend the context on it, and the unit would fail. After the
+	// first failed forward the rest of this process stops trying; the local file
+	// still has every event, and the next run tries again.
+	if l.Forward != nil && l.dir() != "off" && !l.forwardingDown() {
 		if err := l.Forward.Send(line); err != nil {
-			note("forward", fmt.Errorf("audit: cannot forward to %s (%v); the local file still has it", l.Forward.Addr, err))
+			l.mu.Lock()
+			l.fwdDown = true
+			l.mu.Unlock()
+			note("forward", fmt.Errorf("audit: cannot forward to %s (%v); forwarding is off for the rest of this run, and the local file still has every event", l.Forward.Addr, err))
 		}
 	}
 	return firstErr
+}
+
+func (l *Logger) forwardingDown() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.fwdDown
 }
 
 func (l *Logger) dir() string {
@@ -259,9 +285,16 @@ func writeFile(dir string, t time.Time, line string) error {
 	// O_NOFOLLOW: a symlink planted where the day's file goes must not
 	// redirect the audit trail.
 	// #nosec G304 G302 -- the directory is ours (AUDIT_DIR or /var/log/cti-agent); 0640 is the intent, the unit's UMask only tightens it
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o640)
+	// O_NONBLOCK: a FIFO planted under the day's name would otherwise block the
+	// open until something reads it, and the lane would hang. It is harmless on
+	// a regular file, and anything that is not one is refused below.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o640)
 	if err != nil {
 		return err
+	}
+	if fi, serr := f.Stat(); serr != nil || !fi.Mode().IsRegular() {
+		_ = f.Close()
+		return fmt.Errorf("%s is not a regular file", filepath.Base(path))
 	}
 	// One Write of one line: O_APPEND makes that atomic for a line this size,
 	// so concurrent units do not interleave.
@@ -294,18 +327,23 @@ func (l *Logger) Format(t time.Time, e Event) string {
 
 	var sd strings.Builder
 	sd.WriteString("[audit@" + enterpriseID + ` v="1"`)
-	for _, kv := range [][2]string{
-		{"lane", lane},
-		{"actor", l.Actor},
-		{"run", l.Run},
-		{"target", e.Target},
-		{"outcome", e.Outcome},
+	for _, kv := range []struct {
+		k, v string
+		max  int
+	}{
+		{"lane", lane, 256},
+		{"actor", l.Actor, 256},
+		{"run", l.Run, 256},
+		// A mail goes to a list of recipients, and "who was this sent to" is
+		// the question the trail exists to answer: room for a long list.
+		{"target", e.Target, 1024},
+		{"outcome", e.Outcome, 256},
 	} {
-		sd.WriteString(" " + kv[0] + `="` + sdValue(kv[1], 256) + `"`)
+		sd.WriteString(" " + kv.k + `="` + sdValue(kv.v, kv.max) + `"`)
 	}
 	sd.WriteString("]")
 
-	msg := safelog.LineMax(e.Detail, 300)
+	msg := strings.NewReplacer("\u2028", " ", "\u2029", " ").Replace(safelog.LineMax(e.Detail, 300))
 	if msg == "" {
 		msg = "-"
 	}
@@ -359,6 +397,9 @@ func token(s string, max int, fallback string) string {
 // to escape (the quote, the backslash and the closing bracket) escaped.
 func sdValue(s string, max int) string {
 	s = safelog.LineMax(s, max)
+	// U+2028 and U+2029 are not record breaks to syslog, but some log viewers
+	// draw them as one.
+	s = strings.NewReplacer("\u2028", " ", "\u2029", " ").Replace(s)
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
@@ -416,7 +457,7 @@ func (f *Forwarder) Probe() error {
 func (f *Forwarder) dial() (net.Conn, string, time.Duration, error) {
 	timeout := f.Timeout
 	if timeout <= 0 {
-		timeout = 3 * time.Second
+		timeout = 2 * time.Second
 	}
 	proto := f.Proto
 	if proto == "" {

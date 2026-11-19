@@ -355,7 +355,8 @@ the inbox. For a tenant whose inbound gateway hides the real sender, list the
 scanner's From domain here (exact domains, comma separated, such as
 .BR qualys.net )
 to read its notices without the check. It applies to the listed domains only,
-every acceptance is written to the audit trail, and a forged From of a listed
+the first acceptance of each domain in a run is written to the audit trail
+(even in a dry run: it is a trust decision, not a write), and a forged From of a listed
 domain is believed, so list as few as needed and prefer fixing the connector. It
 replaces
 .BR FLEET_SENDER_AUTH=off ,

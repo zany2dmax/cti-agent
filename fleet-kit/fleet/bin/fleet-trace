@@ -24,18 +24,20 @@ each model call in the fleet cost.
 Traces live in $FLEET_HOME/state/traces, 0600 in a 0700 directory.
 
 What a trace keeps (--keep, CHECKIN_TRACE_KEEP in run-checkin). By default
-MINIMAL: the beat's decisions and their cost - what the model said, every
-tool call and its arguments, what was denied, the turns, tokens, cost and the
-final verdict - and NOT the content the beat read. A tool result (a mail body,
-an advisory, a report) is replaced by its size and the first 16 characters of
-its SHA-256, so "what did it look at" is answerable and "what did it say" is
-the mail's own record, not a second copy here. A failed tool call keeps its
-first 300 characters, because the refusal's reason is what an operator needs.
-The model's private reasoning is kept as a length. FULL keeps every event as it
-came, for an investigation: untrusted advisory and mail text then sits in the
-trace, so it is handled like a report: never mailed, never committed, and not
-readable by the beat itself (run-checkin grants no Read on state/). A trace is
-also deleted after CHECKIN_TRACE_DAYS.
+MINIMAL, and by ALLOWLIST: what the model wrote, every tool call and its
+arguments, what was denied, the turns, tokens, cost and the final result. A tool
+result (a mail body, an advisory, a report) is replaced by its size and the first
+16 characters of its SHA-256, so "what did it look at" is answerable and the
+trace is not a second copy of the mailbox. So is anything in an event shape this
+program does not know (an auto-compact summary, hook or MCP output, a server-side
+tool result, private reasoning): kept only as what it weighed. What IS still in
+a minimal trace, and can quote mail: the model's own words, the arguments of each
+call, the first 300 characters of a failed call (a refusal's reason, and a failed
+command's output), and stray stderr (2,000 characters a line). FULL keeps every
+event as it came, for an investigation: untrusted advisory and mail text then
+sits in the trace, so it is handled like a report: never mailed, never committed,
+and not readable by the beat itself (run-checkin grants no Read on state/). A
+trace is also deleted after CHECKIN_TRACE_DAYS.
 
 Why --plain exists. cti-budget tells "the quota refused us" from "the account
 is out of credit" from "the script broke" by matching words such as "429",
@@ -119,7 +121,7 @@ def _chars(c):
     if c.get("type") == REDACTED:
         n = c.get("chars")
         return n if isinstance(n, int) and n >= 0 else 0
-    return len(c.get("text") or "")
+    return len(str(c.get("text") or ""))
 
 
 def result_size(content):
@@ -141,7 +143,7 @@ def result_text(content):
             if c.get("type") == REDACTED:
                 out.append(f"[content not kept: {_chars(c)} chars, sha256 {clean(c.get('sha256'), 16)}]")
             else:
-                out.append(c.get("text") or "")
+                out.append(str(c.get("text") or ""))
         return "\n".join(out)
     return ""
 
@@ -154,30 +156,79 @@ def _redacted(text):
             "sha256": hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]}
 
 
+# What the default trace keeps, by allowlist. Everything else in an event is
+# replaced by its size and a short hash, so a shape this code has not seen (an
+# auto-compact summary, MCP or hook output, a server-side tool result, a new
+# key on an old block) is not kept by default. Redacting by denylist would keep
+# exactly what nobody thought of.
+_KEEP_TOP = ("type", "subtype", "uuid", "session_id", "parent_tool_use_id", "timestamp", "isSidechain",
+             "is_api_error_message", "error")
+_KEEP_MSG = ("role", "model", "id", "stop_reason", "usage")
+_KEEP_INIT = ("model", "tools", "mcp_servers", "permissionMode", "apiKeySource", "claude_code_version", "cwd")
+
+
+def _stub(value):
+    return _redacted(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
+
+
+def _block(b, etype):
+    """One content block of a user or assistant message, as the default trace
+    keeps it."""
+    if not isinstance(b, dict):
+        return _stub(b)
+    kind = b.get("type")
+    if etype == "user" and kind == "tool_result":
+        text = result_text(b.get("content"))
+        kept = {k: b[k] for k in ("type", "tool_use_id") if k in b}
+        # A refusal's reason is what an operator needs; a success's content is
+        # somebody's mail. Only an is_error of exactly true counts as a failure.
+        if b.get("is_error") is True:
+            kept["is_error"] = True
+            kept["content"] = clean(text, 300)
+        else:
+            kept["is_error"] = False
+            kept["content"] = [_redacted(text)]
+        return kept
+    if etype == "assistant" and kind == "text":
+        return {"type": "text", "text": b.get("text") if isinstance(b.get("text"), str) else ""}
+    if etype == "assistant" and kind == "tool_use":
+        return {k: b[k] for k in ("type", "id", "name", "input") if k in b}
+    # Everything else (thinking, a string, text in a user turn, server tool
+    # results, anything new) is kept as what it weighed.
+    return {**_stub(b), "was": kind if isinstance(kind, str) else "unknown"}
+
+
 def minimize(ev):
     """The event as the default trace keeps it: the decision and the cost, not
-    the content the beat read. See the module docstring."""
-    ev = dict(ev)
-    # Claude Code repeats a tool's output on the event itself as well.
-    for key in ("tool_use_result", "toolUseResult"):
-        if key in ev:
-            ev[key] = _redacted(json.dumps(ev[key], ensure_ascii=False, sort_keys=True))
-    msg = ev.get("message")
-    if not isinstance(msg, dict) or not isinstance(msg.get("content"), list):
-        return ev
-    blocks = []
-    for b in msg["content"]:
-        if isinstance(b, dict) and ev.get("type") == "user" and b.get("type") == "tool_result":
-            b = dict(b)
-            text = result_text(b.get("content"))
-            # A refusal's reason is what an operator needs; a success's content
-            # is somebody's mail.
-            b["content"] = clean(text, 300) if b.get("is_error") else [_redacted(text)]
-        elif isinstance(b, dict) and ev.get("type") == "assistant" and b.get("type") in ("thinking", "redacted_thinking"):
-            b = {"type": b["type"], "chars": len(str(b.get("thinking") or b.get("data") or ""))}
-        blocks.append(b)
-    ev["message"] = dict(msg, content=blocks)
-    return ev
+    the content the beat read. An allowlist: see the module docstring."""
+    etype = ev.get("type")
+    if etype in ("result", "fleet_trace", "fleet_trace_text"):
+        return ev  # the verdict and cost, and this program's own records
+    if etype == "system":
+        keep = {k: ev[k] for k in _KEEP_TOP if k in ev}
+        if ev.get("subtype") == "init":
+            keep.update({k: ev[k] for k in _KEEP_INIT if k in ev})
+        else:
+            keep["detail"] = _stub({k: v for k, v in ev.items() if k not in _KEEP_TOP})
+        return keep
+    if etype in ("user", "assistant"):
+        out = {k: ev[k] for k in _KEEP_TOP if k in ev}
+        msg = ev.get("message")
+        if isinstance(msg, dict):
+            m = {k: msg[k] for k in _KEEP_MSG if k in msg}
+            content = msg.get("content")
+            if isinstance(content, list):
+                m["content"] = [_block(b, etype) for b in content]
+            elif content is not None:
+                m["content"] = [_stub(content)]  # a bare string: a prompt or a compaction summary
+            out["message"] = m
+        # Every other key (tool_use_result, toolUseResult, structured output,
+        # hook output, anything new) is kept only as what it weighed.
+        extra = {k: v for k, v in ev.items() if k not in _KEEP_TOP and k != "message"}
+        if extra:
+            out["extra"] = _stub(extra)
+        return out
+    return {"type": etype if isinstance(etype, str) else "unknown", "detail": _stub(ev)}
 
 
 class Timeline:
@@ -400,7 +451,12 @@ def cmd_tee(args):
             elif keep_mode == "full":
                 keep(raw)
             else:
-                keep(json.dumps(minimize(ev), ensure_ascii=False))
+                try:
+                    kept = minimize(ev)
+                except Exception:  # noqa: BLE001 - a malformed event must still leave a record
+                    kept = {"type": ev.get("type") if isinstance(ev.get("type"), str) else "unknown",
+                            "fleet_trace_error": "malformed event, content not kept", "detail": _stub(raw)}
+                keep(json.dumps(kept, ensure_ascii=False))
             if ev is None:
                 # Not JSON: stderr or a crash message. Shown as it came,
                 # because that is what the journal always showed.

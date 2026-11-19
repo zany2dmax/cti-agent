@@ -103,6 +103,16 @@ func storeFromEnv() *budget.Store {
 	lim.DailyBeats = envInt("FLEET_BUDGET_DAILY_BEATS", lim.DailyBeats, maxDailyBeats)
 	lim.BackoffBase = envDuration("FLEET_BUDGET_BACKOFF_BASE_HOURS", lim.BackoffBase)
 	lim.BackoffMax = envDuration("FLEET_BUDGET_BACKOFF_MAX_HOURS", lim.BackoffMax)
+	// The ledger holds 48 hours of beats and refuses a cooldown beyond a week,
+	// so a longer window or backoff could not be honoured: clamp, and say so.
+	if lim.Window > 48*time.Hour {
+		_, _ = fmt.Fprintf(os.Stderr, "cti-budget: FLEET_BUDGET_WINDOW_HOURS is capped at 48 (the ledger keeps 48 hours of beats)\n")
+		lim.Window = 48 * time.Hour
+	}
+	if lim.BackoffMax > 7*24*time.Hour {
+		_, _ = fmt.Fprintf(os.Stderr, "cti-budget: FLEET_BUDGET_BACKOFF_MAX_HOURS is capped at 168 (a week)\n")
+		lim.BackoffMax = 7 * 24 * time.Hour
+	}
 
 	path := os.Getenv("FLEET_BUDGET_FILE")
 	if path == "" {

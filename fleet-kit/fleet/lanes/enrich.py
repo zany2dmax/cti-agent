@@ -943,14 +943,19 @@ def main():
         # so. The findings database stayed empty while the digest looked fine.
         db = find_fleet_db()
         if db:
-            try:
-                # argv is this interpreter and fleet-db's own path.
-                subprocess.run([sys.executable, db, "finding", "upsert"],  # nosec B603
-                               input=json.dumps(rows), text=True, check=True,
+            # argv is this interpreter and fleet-db's own path. Exit 3 means it
+            # wrote every valid row and skipped some, naming each on its stderr
+            # (which is ours): not a failure of the upsert, but not clean either.
+            r = subprocess.run([sys.executable, db, "finding", "upsert"],  # nosec B603
+                               input=json.dumps(rows), text=True, check=False,
                                stdout=subprocess.DEVNULL)
+            if r.returncode == 0:
                 log(f"upserted {len(rows)} findings to memory.db")
-            except subprocess.CalledProcessError as e:
-                log(f"db upsert failed ({e}) - JSON is still on disk")
+            elif r.returncode == 3:
+                log("upserted findings to memory.db, but fleet-db SKIPPED some rows "
+                    "(each is named above); the rest are written - JSON is still on disk")
+            else:
+                log(f"db upsert failed (exit {r.returncode}) - JSON is still on disk")
         else:
             # Loud, not silent. Without the upsert there is no history, so
             # nothing can tell a new CVE from one reported every day this week.

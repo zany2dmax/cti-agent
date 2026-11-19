@@ -16,6 +16,19 @@ func TestRedactSensitiveRemovesWhatTheModelMustNotReceive(t *testing.T) {
 		{"account on an account line", "Bank account number: 000123456789, routing 021000021", "000123456789", "[redacted: account number]"},
 		{"routing", "ACH routing 021000021", "021000021", "[redacted: account number]"},
 		{"spaced account digits", "acct 1234 5678 90", "1234 5678 90", "[redacted: account number]"},
+		// found by review: realistic layouts the first version missed
+		{"9-digit EIN, no hyphen", "EIN 123456789 attached", "123456789", "[redacted: tax id]"},
+		{"Tax ID label", "Tax ID: 123456789", "123456789", "[redacted: tax id]"},
+		{"SSN with spaces", "SSN 123 45 6789", "123 45 6789", "[redacted: tax id]"},
+		{"SSN with dots", "ssn 123.45.6789", "123.45.6789", "[redacted: tax id]"},
+		{"label above value", "Routing\n021000021\nthanks", "021000021", "[redacted: account number]"},
+		{"account label above value", "acct no:\n12345678", "12345678", "[redacted: account number]"},
+		{"bare routing number, no bank word", "please use 021000021 for the transfer", "021000021", "[redacted: account number]"},
+		{"accountnumber run on", "accountnumber 12345678", "12345678", "[redacted: account number]"},
+		{"card with dots", "4111.1111.1111.1111", "1111.1111", "[redacted: card number]"},
+		{"lowercase iban", "iban de89 3704 0044 0532 0130 00", "0532 0130", "[redacted: iban]"},
+		{"fullwidth digits", "EIN １２-３４５６７８９", "３４５６７８９", "[redacted: tax id]"},
+		{"zero-width inside the number", "EIN 12-345\u200b6789", "6789", "[redacted: tax id]"},
 	} {
 		got := RedactSensitive(c.in)
 		if strings.Contains(got, c.gone) {
@@ -35,6 +48,9 @@ func TestRedactSensitiveLeavesOrdinaryRequestsAlone(t *testing.T) {
 		"Order 4111 1111 1111 1112 is not a card (fails Luhn).", // 16 digits, no Luhn, no bank word
 		"Software and cloud hosting; needs access to our network.",
 		"Invoice 2026-11-19, PO 88123, page 3 of 12.",
+		"We have 123456789 users",                                  // nine digits, fails the routing checksum, no tax word
+		"Our EIN application is pending; we will send it later.",   // a tax word with no number
+		"The account manager is Pat; call about the Dallas depot.", // a bank-ish word with no digits
 	} {
 		if got := RedactSensitive(in); got != in {
 			t.Errorf("changed an ordinary line:\n in: %q\nout: %q", in, got)
@@ -117,5 +133,18 @@ func TestEvidenceIsCheckedAgainstTheRedactedSource(t *testing.T) {
 	}
 	if strings.Contains(src, "000123456789") {
 		t.Fatalf("the account number reached the source:\n%s", src)
+	}
+}
+
+func TestRedactionLeavesWhatTheJudgementNeeds(t *testing.T) {
+	for _, in := range []string{
+		"Acme Cloud Hosting LLC provides SaaS and managed network services",
+		"Needs access to our ERP and the customer database over a VPN",
+		"Annual spend $120,000, 3 year term, SLA 99.95%",
+		"See https://example.com/security/trust-center for their SOC 2 report",
+	} {
+		if got := RedactSensitive(in); got != in {
+			t.Errorf("redaction changed text the judgement needs:\n in: %q\nout: %q", in, got)
+		}
 	}
 }

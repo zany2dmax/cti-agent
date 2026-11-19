@@ -61,8 +61,9 @@ journal says why. Advisory triage in the digest stays off until you set
   `cti-alert`, `cti-mailbox` and `cti-jira` are all covered, and so is any
   command added later. `fleet-owners` writes its own after a change commits,
   and writes one for a refused attempt too. No message body, subject, ticket
-  text or credential is ever written; recipients are. A `--dry-run` writes
-  nothing. An unwritable directory sends the event to the journal with one
+  text or credential is ever written; recipients are. A `--dry-run` writes no
+  event for a change (the one exception: reading mail from a domain listed in
+  `FLEET_UNAUTHENTICATED_SENDERS` is a trust decision and is recorded even then). An unwritable directory sends the event to the journal with one
   warning and never stops a lane. The orchestrator and scout have no log
   directory on purpose: the heartbeat must not be able to write or delete the
   trail it is accountable to, so its events fall back to the journal.
@@ -76,7 +77,8 @@ journal says why. Advisory triage in the digest stays off until you set
     sends the same lines to a collector as they are written, in addition to
     the file: TLS by default (certificate and host name verified, TLS 1.2 or
     better), `AUDIT_SYSLOG_PROTO=tcp|udp` if asked for by name. A collector
-    that is down costs one warning. Or point the collector's file reader at
+    that is down or hung costs one 2-second timeout and one warning per run, then
+    forwarding is off for the rest of that run. Or point the collector's file reader at
     `audit-*.log` and set nothing. No SIEM is built or bundled.
   - **New command `cti-audit`:** `--action` writes an event (for scripts),
     `--prune --days N [--dry-run]`, and `--check` (is the trail writable, is
@@ -260,10 +262,14 @@ journal says why. Advisory triage in the digest stays off until you set
   orchestrator read: mail bodies, advisories, report text, in a plaintext file
   for 14 days. By default (`minimal`) a trace now keeps what the model said and
   did (each tool call and its arguments, what was denied), the turns, tokens,
-  cost and the final verdict, and replaces every successful tool result with
+  cost and the final result, and replaces every successful tool result, and
+  anything in an event shape the code does not know (it is an allowlist), with
   its size and the first 16 characters of its SHA-256. A failed call keeps its
-  first 300 characters (the reason for a refusal), stray stderr is capped at
-  2,000, and the model's private reasoning is kept as a length. `fleet-trace
+  first 300 characters (the reason for a refusal, which can include a failed
+  command's output), stray stderr is capped at 2,000 a line, and the model's
+  private reasoning is kept as a length. What the model wrote and the arguments
+  of each call are kept and can quote mail: a minimal trace is far less than a
+  copy of the mailbox, not nothing. `fleet-trace
   show` and `list` and `cti-checkin-verdict` work as before (`show --full` says
   `[content not kept]`); the journal timeline still says how much each tool
   returned. `CHECKIN_TRACE_KEEP=full` (or `fleet-trace tee --keep full`)
@@ -277,8 +283,10 @@ journal says why. Advisory triage in the digest stays off until you set
   - **Fixed issues found by PrimeSec AI:** guardrail findings "Data
     Minimization in Storage" (11583430) is fixed by the entry above, and the
     two trace findings under "AES-256 At-Rest Encryption" (11583427) and
-    "Encryption at Rest" (11583436) no longer describe what is stored: the
-    trace holds no mail or advisory text by default. The other thirteen
+    "Encryption at Rest" (11583436) describe a trace that kept every tool
+    result; it no longer does (what the model wrote and its call arguments are
+    still kept, so a re-scan may still note plaintext at rest, which the disk
+    encryption answers). The other thirteen
     findings in the two encryption rules (the reports, `fleet-db`,
     `fleet-owners` and its snapshot, the digest and enrichment files) are
     answered by the disk's encryption and need you to confirm it (SECURITY.md,
@@ -290,20 +298,30 @@ journal says why. Advisory triage in the digest stays off until you set
   and none checked what it was about to write. They now go through
   `internal/statefile` (validate, refuse an oversized value, temp file at 0600
   in the same directory, flush, rename), and each has a `Validate`: known
-  outcomes only, no future-dated entries, bounded counts and lengths, no
-  control characters, `sent` or `held: <why>` for a delivery. A cooldown in the
-  year 9999 would have stopped the heartbeat for good; an entry dated next year
-  would never have been pruned. A file that parses but fails validation is
-  treated as damaged: the ledger starts fresh with a warning, the processed log
-  fails closed. A mail subject or a note that is merely long is clipped, not
-  refused. `CommitDelivered` also validates each line it is handed and names
-  the ones it skipped. Every `fleet-db` command that writes (`remember`, `task`,
+  outcomes only, no future-dated entries (within an hour, a day or the longest
+  backoff of the clock), bounded counts and lengths, and for the delivered log
+  `sent` or `held: <why>` with no control characters. A cooldown in the year 9999
+  would have stopped the heartbeat for good; an entry dated next year would never
+  have been pruned. Writing refuses what fails. READING REPAIRS a file that
+  parses, entry by entry, and says what it did (a future-dated beat counts as
+  now, an unknown outcome as an error, a cooldown is pulled in and never cleared,
+  a delivery that is not valid is dropped and reported again, a future read time
+  is pulled back to now): a clock that stepped back must not stop every lane.
+  Only a file that does not parse fails closed (the processed log stops the
+  cleanup loudly; the ledger starts fresh with a warning). `FLEET_BUDGET_WINDOW_HOURS`
+  and `FLEET_BUDGET_BACKOFF_MAX_HOURS` are capped at 48 and 168, which is what the
+  ledger can honour. A mail subject or a note that is merely long is clipped, not
+  refused. `CommitDelivered` also validates each line it is handed and names the
+  ones it skipped. Every `fleet-db` command that writes (`remember`, `task`,
   `mail`, `ack`, `note`, `sent`, `finding upsert`) now checks its arguments
-  first and refuses with `fleet-db: <reason>` and exit 2 before touching the
-  database (it used to answer a bad row number with a Python traceback). The
-  limits are the ones `checkin-bash-guard` already puts on the heartbeat, and a
-  test fails if they drift. `finding upsert` is not all-or-nothing: a bad row is
-  skipped and named, the rest are written. SECURITY.md has a new "Validating
+  first and refuses with `fleet-db: <reason>` and exit 2 before it writes any row
+  (it used to answer a bad row number with a Python traceback). The names, counts
+  and lengths are the ones `checkin-bash-guard` already puts on the heartbeat, and
+  a test fails if they drift; `fleet-db` accepts non-ASCII text where the guard
+  does not. `finding upsert` is not all-or-nothing: a bad row is
+  skipped and named, the rest are written, and it exits 3 so the nightly enrich
+  step can say so; a stray control character in a finding's text is replaced, not
+  a reason to lose the finding. SECURITY.md has a new "Validating
   what is written". **Upgrade:** nothing. If a hand-run `fleet-db` call that
   used to work is refused, the message says which value to fix.
   - **Fixed issues found by PrimeSec AI:** guardrail findings "Server-Side
@@ -318,12 +336,17 @@ journal says why. Advisory triage in the digest stays off until you set
 - **An SBOM, made every time the code ships, that proves the no-dependency
   rule (`task sbom`).** `scripts/sbom.py` writes a CycloneDX 1.5 SBOM to
   `dist/sbom/` (each Go command as an application, the lanes as one, the Go
-  standard library at the toolchain's version, the host's `python3` and `bash`
-  as platform) and first reads `go.mod` and every Python file's imports: if the
-  module requires anything, or a lane imports anything that is not the standard
-  library, it exits 1. `task ship` and `task check` run it, so a dependency added
-  by accident turns the ship red, and the SBOM is rewritten on every ship and
-  cannot go stale. Deterministic for a commit; `dist/` is not committed.
+  standard library at the toolchain's version, the host's `python3` and `bash` as
+  platform, and the Claude Code CLI that the heartbeat, the supplier judge and
+  triage run) and first checks the rule: the go tool says what `go.mod` requires
+  (a `go.work` or `vendor/` is refused), and every Python file under `fleet-kit`
+  and `scripts`, recursively, and the Python inside shell scripts, is read for an
+  import that is not the standard library or a module in its own directory; a
+  dynamic import is refused as unverifiable. If the rule is broken it exits 1.
+  `task ship` and `task check` run it, so a dependency added by accident turns the
+  ship red, and the SBOM is rewritten on every ship. The same for a commit apart
+  from its timestamp (a dirty tree adds a hash of its changes to the serial);
+  `dist/` is not committed; it is not yet attached to a release.
   SECURITY.md "Supply chain" says so, and "Known gaps and accepted risks" now
   records the four findings the owner has decided: the Go source on the
   production host (accepted until the RPM), test sends using real data
@@ -331,7 +354,8 @@ journal says why. Advisory triage in the digest stays off until you set
   listens), no FIPS 140-3 (not required). **Upgrade:** nothing; it is build
   tooling and never installed on the box.
   - **Fixed issues found by PrimeSec AI:** guardrail finding "SBOM for All
-    Applications" (11583425) is fixed by the entry above. "FIPS 140-3
+    Applications" (11583425) is addressed by the entry above (the SBOM exists and
+    is regenerated on every ship; attaching it to a release is not automated). "FIPS 140-3
     Cryptographic Compliance" (10785588, 10785589, 10785590, 10785591,
     10785592, 11583438, 11583439, 11583440, 11583441, 11583442) was dismissed
     in Prime as not applicable on 2026-11-19. "No Source Code in Production"
@@ -354,7 +378,8 @@ journal says why. Advisory triage in the digest stays off until you set
   line what to set instead. **Upgrade:** `grep FLEET_SENDER_AUTH
   /etc/cti-agent/fleet.env`. Nothing printed (or the value is blank): nothing to
   do. `off`: after the update the Qualys weekly and the scan reports will report
-  every notice as unauthenticated until you add
+  every notice as unauthenticated, and the digest will log (once per sender) that
+  feed and threat-intel mail is no longer trusted, until you add
   `FLEET_UNAUTHENTICATED_SENDERS=<the scanner's From domain>` (and the feed
   domains, if the triage lane is on); then remove the old line. The man pages and
   `fleet.env.example` say the same.
@@ -370,7 +395,11 @@ journal says why. Advisory triage in the digest stays off until you set
   and the body also pass `RedactSensitive`, which replaces tax ids (EIN, SSN),
   bank account and routing numbers (on a line that mentions accounts or
   routing), IBANs and Luhn-valid card numbers with a `[redacted: ...]` marker. It
-  is blunt on purpose and a net under the field list, not a replacement for it.
+  is blunt on purpose and a net under the field list, not a replacement for it
+  (it misses numbers in words, encoded, or on a line with no bank or tax word; it
+  also normalises invisible characters and fullwidth digits, and catches a bare
+  nine-digit number that passes the routing checksum and a value on the line below
+  its label). A reply in the thread is shown as its sender's domain too.
   Evidence quotes are checked against the same redacted text, so a redaction
   cannot make a real quote look invented. The people who file and review the
   request still get the full form. SECURITY.md says what still leaves the host.

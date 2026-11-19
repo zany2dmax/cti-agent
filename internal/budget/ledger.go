@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -200,9 +201,15 @@ func (s *Store) opts(l *Ledger) statefile.Options {
 // outage.
 func (s *Store) Load() (*Ledger, error) {
 	var l Ledger
-	err := statefile.Read(s.Path, &l, s.opts(&l))
+	// Parsing only. A ledger that parses is REPAIRED, not thrown away
+	// (Normalize): resetting it would clear both ceilings and the cooldown, so
+	// a clock that stepped back an hour would hand the heartbeat a fresh quota.
+	err := statefile.Read(s.Path, &l, statefile.Options{})
 	switch {
 	case err == nil:
+		if notes := s.Normalize(&l); len(notes) > 0 {
+			fmt.Fprintf(os.Stderr, "budget: repaired %s: %s\n", s.Path, strings.Join(notes, "; "))
+		}
 		return &l, nil
 	case errors.Is(err, os.ErrNotExist):
 		return &Ledger{}, nil
@@ -212,6 +219,60 @@ func (s *Store) Load() (*Ledger, error) {
 	return nil, fmt.Errorf("budget: reading %s: %w", s.Path, err)
 }
 
+// Normalize repairs a ledger that parses but holds what this package would not
+// have written, and says what it did. It errs toward spending LESS: a beat dated
+// ahead of the clock is counted as happening now (it still counts against the
+// ceilings), a beat with an unknown outcome is counted as an error beat, a
+// cooldown or alert marker beyond the longest backoff is pulled in to it, and a
+// ledger with too many beats keeps the newest. After it, Validate passes.
+func (s *Store) Normalize(l *Ledger) []string {
+	now := s.now()
+	var notes []string
+	future, unknown, clipped := 0, 0, 0
+	for i := range l.Beats {
+		b := &l.Beats[i]
+		if b.At.IsZero() || b.At.After(now.Add(clockSkew)) {
+			b.At = now
+			future++
+		}
+		switch b.Outcome {
+		case OutcomeOK, OutcomeRateLimit, OutcomeError, OutcomeExhausted:
+		default:
+			b.Outcome = OutcomeError
+			unknown++
+		}
+		if len(b.Note) > maxNote {
+			b.Note = clipUTF8(b.Note, maxNote)
+			clipped++
+		}
+	}
+	if len(l.Beats) > maxBeats {
+		notes = append(notes, fmt.Sprintf("kept the newest %d of %d beats", maxBeats, len(l.Beats)))
+		l.Beats = l.Beats[len(l.Beats)-maxBeats:]
+	}
+	limit := s.Limits.BackoffMax
+	if limit <= 0 || limit > maxAhead {
+		limit = maxAhead
+	}
+	if l.CooldownUntil.After(now.Add(limit)) {
+		l.CooldownUntil = now.Add(limit)
+		notes = append(notes, "pulled the cooldown in to the longest backoff")
+	}
+	if l.AlertedFor.After(now.Add(limit)) {
+		l.AlertedFor = now.Add(limit)
+	}
+	if future > 0 {
+		notes = append(notes, fmt.Sprintf("counted %d beats dated in the future as now", future))
+	}
+	if unknown > 0 {
+		notes = append(notes, fmt.Sprintf("counted %d beats with an unknown outcome as errors", unknown))
+	}
+	if clipped > 0 {
+		notes = append(notes, fmt.Sprintf("clipped %d long notes", clipped))
+	}
+	return notes
+}
+
 // Save validates the ledger and writes it atomically (internal/statefile). A
 // half-written ledger read by the next beat would look like an empty one, which
 // would silently disable the whole ceiling; a ledger that fails validation is
@@ -219,6 +280,10 @@ func (s *Store) Load() (*Ledger, error) {
 func (s *Store) Save(l *Ledger) error {
 	// Keep the file bounded. Two days of history is more than any limit reads.
 	l.Beats = prune(l.Beats, s.now().Add(-48*time.Hour))
+	// Bring the in-memory ledger within bounds before the strict check: a
+	// refused save would drop the beat just recorded, and the next beat would
+	// run on a ledger that never heard about it.
+	s.Normalize(l)
 	return statefile.Write(s.Path, l, s.opts(l))
 }
 

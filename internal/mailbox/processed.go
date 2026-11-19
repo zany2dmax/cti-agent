@@ -229,9 +229,17 @@ func (s *Store) retain() time.Duration {
 // quietly stop being cleaned.
 func (s *Store) Load() (*Log, error) {
 	var l Log
-	err := statefile.Read(s.Path, &l, s.opts(&l))
+	// Parsing only: a file that does not parse fails closed. A file that parses
+	// is REPAIRED, entry by entry (Normalize), not rejected: this log is
+	// trusted by the mailbox cleanup, and one bad entry (a clock that stepped
+	// back, a subject longer than an older version allowed) must not stop every
+	// lane until someone deletes the file by hand.
+	err := statefile.Read(s.Path, &l, statefile.Options{MaxBytes: maxLogBytes})
 	switch {
 	case err == nil:
+		if notes := l.Normalize(s.now()); len(notes) > 0 {
+			fmt.Fprintf(os.Stderr, "mailbox: repaired %s: %s\n", s.Path, strings.Join(notes, "; "))
+		}
 		return &l, nil
 	case errors.Is(err, os.ErrNotExist):
 		return &Log{}, nil
@@ -284,7 +292,57 @@ func (l *Log) Validate(now time.Time) error {
 }
 
 func (s *Store) opts(l *Log) statefile.Options {
-	return statefile.Options{Validate: func() error { return l.Validate(s.now()) }}
+	return statefile.Options{MaxBytes: maxLogBytes, Validate: func() error { return l.Validate(s.now()) }}
+}
+
+// maxLogBytes caps the file: far above maxEntries' worth of indented entries
+// (about 500 bytes each), so the entry cap is what limits the log, not the size
+// cap.
+const maxLogBytes = 32 << 20
+
+// Normalize repairs what a log written by an older version, or under a skewed
+// clock, can hold, and says what it did. It drops entries with no usable
+// message id (empty, over-long or a repeat of an earlier one), pulls a read time
+// that is ahead of the clock back to now (so it expires like any other entry and
+// still counts as read), and clips a subject or ref to its limit. After it,
+// Validate passes. Only an unparseable file is a failure.
+func (l *Log) Normalize(now time.Time) []string {
+	var notes []string
+	seen := make(map[string]bool, len(l.Entries))
+	out := l.Entries[:0:0]
+	dropped, clamped, clipped := 0, 0, 0
+	for _, e := range l.Entries {
+		if strings.TrimSpace(e.ID) == "" || len(e.ID) > maxIDLen || seen[e.ID] {
+			dropped++
+			continue
+		}
+		seen[e.ID] = true
+		if e.ReadAt.After(now.Add(readAtSkew)) {
+			e.ReadAt = now
+			clamped++
+		}
+		if len(e.Subject) > maxSubject || len(e.Ref) > maxRef {
+			e.Subject, e.Ref = clipUTF8(e.Subject, maxSubject), clipUTF8(e.Ref, maxRef)
+			clipped++
+		}
+		out = append(out, e)
+	}
+	l.Entries = out
+	if len(l.Entries) > maxEntries {
+		sort.Slice(l.Entries, func(i, j int) bool { return l.Entries[i].ReadAt.After(l.Entries[j].ReadAt) })
+		notes = append(notes, fmt.Sprintf("kept the newest %d of %d entries", maxEntries, len(l.Entries)))
+		l.Entries = l.Entries[:maxEntries]
+	}
+	if dropped > 0 {
+		notes = append(notes, fmt.Sprintf("dropped %d entries with no usable id", dropped))
+	}
+	if clamped > 0 {
+		notes = append(notes, fmt.Sprintf("pulled %d future read times back to now", clamped))
+	}
+	if clipped > 0 {
+		notes = append(notes, fmt.Sprintf("clipped %d long subjects or refs", clipped))
+	}
+	return notes
 }
 
 // Record adds entries, replacing any with the same ID, and prunes old ones.

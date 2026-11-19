@@ -272,26 +272,38 @@ def connect(create=False):
 _AUDIT_PENDING = []
 
 
-def audit_event(action, subject, outcome, detail=""):
-    """Write one line to the fleet's audit trail (RFC 5424 syslog, /var/log/
-    cti-agent, see cti-audit(1)). The changes table in owners.db stays the
-    history of what the owners data became; this is the shared trail an
-    auditor or a SIEM reads, and it also records the attempts that changed
-    nothing (a refused edit). Best effort and never fatal: an audit problem
+def audit_events(events):
+    """Write events - (action, subject, outcome, detail) tuples - to the fleet's
+    audit trail (RFC 5424 syslog, /var/log/cti-agent, see cti-audit(1)), in ONE
+    cti-audit call. The changes table in owners.db stays the history of what
+    the owners data became; this is the shared trail an auditor or a SIEM
+    reads, and it also records the attempts that changed nothing (a refused
+    edit). One call, not one per event: an import writes hundreds, and a dead
+    collector is paid for once. Best effort and never fatal: an audit problem
     must not undo or block an owners change. Skipped quietly when cti-audit is
     not installed, as on a development machine."""
+    if not events:
+        return
     exe = os.path.join(os.environ.get("FLEET_CODE") or "/opt/cti-agent", "bin", "cti-audit")
     if not os.access(exe, os.X_OK):
         return
     # One run id for everything this invocation writes, so its events can be
-    # followed together (cti-audit would otherwise invent one per call).
-    os.environ.setdefault("FLEET_RUN_ID", os.urandom(8).hex())
+    # followed together. Under a systemd unit the unit's invocation id is the
+    # run id, so it is left to win.
+    if not (os.environ.get("FLEET_RUN_ID") or os.environ.get("INVOCATION_ID")):
+        os.environ["FLEET_RUN_ID"] = os.urandom(8).hex()
+    lines = "".join(json.dumps({"action": "owners." + a.replace(" ", "."), "target": subj,
+                                "outcome": outcome, "detail": detail[:200]}) + "\n"
+                    for a, subj, outcome, detail in events)
     try:
-        subprocess.run([exe, "--lane", "fleet-owners", "--action", "owners." + action.replace(" ", "."),  # nosec B603
-                        "--target", subject, "--outcome", outcome, "--detail", detail[:200]],
-                       stdin=subprocess.DEVNULL, timeout=10, check=False)
+        subprocess.run([exe, "--lane", "fleet-owners", "--stdin"],  # nosec B603
+                       input=lines, text=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"fleet-owners: audit event not written: {e}", file=sys.stderr)
+        print(f"fleet-owners: audit events not written: {e}", file=sys.stderr)
+
+
+def audit_event(action, subject, outcome, detail=""):
+    audit_events([(action, subject, outcome, detail)])
 
 
 def record(c, action, subject, detail=""):
@@ -360,6 +372,7 @@ def change(c, fn):
     and a published snapshot always matches a committed state. The whole of
     it holds a lock, so of two people editing at once the later commit is
     always the snapshot left in place."""
+    committed = []
     lock = os.open(os.path.join(DIR, ".owners.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -376,9 +389,11 @@ def change(c, fn):
                 os.unlink(tmp)
             _AUDIT_PENDING.clear()
             raise
-        # Committed: now it happened.
-        for action, subject, detail in _AUDIT_PENDING:
-            audit_event(action, subject, "success", detail)
+        # Committed: now it happened. The events are written below, after the
+        # snapshot is published and the lock released, so an import's worth of
+        # them never keeps other editors waiting or the snapshot stale, and an
+        # interrupt while they are written cannot leave a half-published change.
+        committed = list(_AUDIT_PENDING)
         _AUDIT_PENDING.clear()
         try:
             os.replace(tmp, SNAPSHOT)
@@ -389,6 +404,7 @@ def change(c, fn):
                           f"'fleet-owners snapshot' once the cause is fixed") from e
     finally:
         os.close(lock)
+        audit_events([(a, subj, "success", d) for a, subj, d in committed])
 
 
 def require_app(c, key):

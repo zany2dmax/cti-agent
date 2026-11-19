@@ -454,9 +454,10 @@ class Sync(unittest.TestCase):
 
 
 class OwnersAuditTrail(unittest.TestCase):
-    """fleet-owners writes the shared audit trail through cti-audit: one line
-    per committed change, and one for an attempt that was refused. The owners.db
-    changes table stays the history of the data itself."""
+    """fleet-owners writes the shared audit trail through cti-audit, in ONE call
+    per command: one event per committed change (after the snapshot is
+    published and the lock released) and one for a refused attempt. The
+    owners.db changes table stays the history of the data itself."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -466,56 +467,90 @@ class OwnersAuditTrail(unittest.TestCase):
         (pathlib.Path(self.code) / "bin").mkdir()
         self.log = os.path.join(self.code, "calls.txt")
         fake = pathlib.Path(self.code) / "bin" / "cti-audit"
-        # One line per call: the arguments, tab separated.
-        fake.write_text('#!/bin/sh\nprintf "%s\\t" "$@" >> "$AUDIT_CALLS"\nprintf "\\n" >> "$AUDIT_CALLS"\n')
+        # One line per call to record the arguments and the run id, then the JSON
+        # events it was given on standard input, each prefixed with "EVENT ".
+        fake.write_text('#!/bin/sh\n'
+                        'echo "CALL run=$FLEET_RUN_ID args=$*" >> "$AUDIT_CALLS"\n'
+                        'while IFS= read -r l; do echo "EVENT $l" >> "$AUDIT_CALLS"; done\n')
         fake.chmod(0o755)
         self.env = dict(os.environ, FLEET_OWNERS_DIR=self.dir, SUDO_USER="tester", FLEET_GROUP="no-such-group-here",
                         FLEET_CODE=self.code, AUDIT_CALLS=self.log)
+        self.env.pop("FLEET_RUN_ID", None)
+        self.env.pop("INVOCATION_ID", None)
 
-    def tool(self, *args):
-        return subprocess.run([sys.executable, str(TOOL), *args], env=self.env,
+    def tool(self, *args, env=None):
+        return subprocess.run([sys.executable, str(TOOL), *args], env=env or self.env,
                               capture_output=True, text=True, timeout=30, check=False)
 
-    def calls(self):
+    def read(self):
         if not os.path.exists(self.log):
-            return []
+            return [], []
         with open(self.log, encoding="utf-8") as f:
-            return [line.rstrip("\n").split("\t")[:-1] for line in f if line.strip()]
+            lines = [line.rstrip("\n") for line in f if line.strip()]
+        calls = [x for x in lines if x.startswith("CALL ")]
+        events = [json.loads(x[len("EVENT "):]) for x in lines if x.startswith("EVENT ")]
+        return calls, events
 
-    def test_a_committed_change_is_audited_after_it_commits(self):
+    def test_a_committed_change_is_audited_in_one_call(self):
         self.assertEqual(self.tool("init").returncode, 0)
         r = self.tool("set", "id:12345", "--owner", "lead@example.com")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        mine = [c for c in self.calls() if "owners.add" in c or "owners.set" in c]
-        self.assertEqual(len(mine), 1, self.calls())
-        c = mine[0]
-        self.assertEqual(c[c.index("--lane") + 1], "fleet-owners")
-        self.assertEqual(c[c.index("--outcome") + 1], "success")
-        self.assertEqual(c[c.index("--target") + 1], "id:12345")
+        calls, events = self.read()
+        mine = [e for e in events if e["action"] in ("owners.add", "owners.set")]
+        self.assertEqual(len(mine), 1, events)
+        self.assertEqual((mine[0]["outcome"], mine[0]["target"]), ("success", "id:12345"))
+        self.assertTrue(all("--stdin" in c and "--lane fleet-owners" in c for c in calls), calls)
+
+    def test_an_import_of_many_changes_is_one_call_not_one_per_event(self):
+        self.tool("init")
+        r = self.tool("import", str(SAMPLE), "--allow-domains", "example.com, devshop.example")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls, events = self.read()
+        self.assertGreater(len(events), 3, "the import should have produced several events")
+        # init is one call; the import's events share ONE more
+        self.assertEqual(len(calls), 2, calls)
 
     def test_a_refused_attempt_is_audited_and_changes_nothing(self):
         self.tool("init")
-        before = len(self.calls())
+        _, before = self.read()
         r = self.tool("set", "site:example.com", "--owner", "lead@example.com")  # a site is not an application
         self.assertNotEqual(r.returncode, 0)
-        new = self.calls()[before:]
+        _, after = self.read()
+        new = after[len(before):]
         self.assertEqual(len(new), 1, new)
-        self.assertIn("owners.refused", new[0])
-        self.assertEqual(new[0][new[0].index("--outcome") + 1], "refused")
-        # no committed-change event for it
-        self.assertFalse([c for c in new if "owners.add" in c or "owners.set" in c])
+        self.assertEqual((new[0]["action"], new[0]["outcome"]), ("owners.refused", "refused"))
 
-    def test_the_events_of_one_run_share_a_run_id(self):
-        # The fake records its environment's FLEET_RUN_ID alongside its arguments.
-        fake = pathlib.Path(self.code) / "bin" / "cti-audit"
-        fake.write_text('#!/bin/sh\nprintf "%s %s\\n" "$FLEET_RUN_ID" "$*" >> "$AUDIT_CALLS"\n')
-        fake.chmod(0o755)
+    def test_the_events_of_one_run_share_a_run_id_and_a_unit_keeps_its_own(self):
         self.tool("init")
         self.tool("set", "id:12345", "--owner", "lead@example.com")
-        # two separate invocations: each has its own id; inside one they match
-        ids = {line.split(" ", 1)[0] for line in open(self.log, encoding="utf-8").read().splitlines() if line.strip()}
-        self.assertTrue(ids and all(len(i) == 16 for i in ids), ids)
-        self.assertEqual(len(ids), 2, "one id per invocation (init, set)")
+        calls, _ = self.read()
+        ids = [c.split("run=")[1].split(" ")[0] for c in calls]
+        self.assertTrue(all(len(i) == 16 for i in ids), ids)
+        self.assertEqual(len(set(ids)), 2, "one id per invocation (init, set)")
+        # Under a systemd unit the invocation id is the run id: it is left to win.
+        open(self.log, "w").close()
+        env = dict(self.env, INVOCATION_ID="unit-run-abc")
+        self.assertEqual(self.tool("set", "id:999", "--owner", "lead@example.com", env=env).returncode, 0)
+        calls, _ = self.read()
+        self.assertTrue(calls)
+        # fleet-owners sets no id of its own: cti-audit takes INVOCATION_ID
+        # (the fake echoes only FLEET_RUN_ID, which must therefore be empty).
+        for c in calls:
+            self.assertTrue(c.split("run=")[1].startswith(" "),
+                            f"fleet-owners replaced the unit's run id with its own: {c}")
+
+    def test_events_are_written_after_the_snapshot_is_published(self):
+        """The audit call happens after owners.json holds the change, so a slow
+        or hung collector cannot leave the snapshot stale."""
+        self.tool("init")
+        fake = pathlib.Path(self.code) / "bin" / "cti-audit"
+        snap = os.path.join(self.dir, "owners.json")
+        fake.write_text('#!/bin/sh\ncat >/dev/null\ngrep -c "id:777" "%s" >> "$AUDIT_CALLS"\n' % snap)
+        fake.chmod(0o755)
+        r = self.tool("set", "id:777", "--owner", "lead@example.com")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(self.log, encoding="utf-8") as f:
+            self.assertEqual(f.read().split()[-1], "1", "the snapshot did not hold the change when the audit call ran")
 
     def test_without_cti_audit_installed_nothing_changes(self):
         env = dict(self.env, FLEET_CODE=os.path.join(self.code, "nowhere"))
@@ -523,7 +558,3 @@ class OwnersAuditTrail(unittest.TestCase):
                            timeout=30, check=False)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("audit", r.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

@@ -42,5 +42,6 @@ func tail(id string, n int) string {
 }
 
 func sendDetail(req SendMailRequest) string {
-	return "from=" + req.From + "; attachments=" + strconv.Itoa(len(req.Attachments))
+	return "from=" + req.From + "; recipients=" + strconv.Itoa(len(req.To)+len(req.CC)) +
+		"; attachments=" + strconv.Itoa(len(req.Attachments))
 }

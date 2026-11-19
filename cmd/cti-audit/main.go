@@ -4,6 +4,7 @@
 // the retention rule.
 //
 //	cti-audit --action jira.issue.create --target CR-100 --outcome success
+//	cti-audit --stdin --lane fleet-owners   write many events, one JSON object per line on stdin
 //	cti-audit --prune --days 120            delete audit files older than that
 //	cti-audit --prune --days 120 --dry-run  say which, delete nothing
 //	cti-audit --check                       is the trail writable, and is the collector reachable
@@ -15,6 +16,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -28,9 +31,9 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 )
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cti-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	action := fs.String("action", "", "event: what was done, e.g. owners.add (becomes the syslog MSGID)")
@@ -39,7 +42,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	detail := fs.String("detail", "", "event: a short safe note; never a body or a secret")
 	lane := fs.String("lane", "", "event: the lane or command name (default cti-audit)")
 	prune := fs.Bool("prune", false, "delete audit files older than --days")
-	days := fs.Int("days", 0, "with --prune: how many days to keep (the cleanup passes AUDIT_RETAIN_DAYS, default 120)")
+	stdin := fs.Bool("stdin", false, `write many events: one JSON object per line on standard input, {"action":..,"target":..,"outcome":..,"detail":..}`)
+	// A string, parsed with Atoi: flag.Int reads base 0, so a leading zero from
+	// AUDIT_RETAIN_DAYS ("0120") would mean octal and delete 40 days early.
+	daysStr := fs.String("days", "", "with --prune: how many days to keep, 1 or more (the cleanup passes AUDIT_RETAIN_DAYS, default 120)")
 	dry := fs.Bool("dry-run", false, "with --prune: list what would be deleted, delete nothing")
 	check := fs.Bool("check", false, "report whether the trail is writable and whether the collector (if any) is reachable; exit 1 if not")
 	if err := fs.Parse(args); err != nil {
@@ -47,20 +53,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fleetenv.Load()
 
+	days := 0
+	if *daysStr != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(*daysStr))
+		if err != nil || n < 1 {
+			_, _ = fmt.Fprintf(stderr, "cti-audit: --days %q is not a whole number of days, 1 or more\n", *daysStr)
+			return 2
+		}
+		days = n
+	}
+
 	modes := 0
-	for _, on := range []bool{*action != "", *prune, *check} {
+	for _, on := range []bool{*action != "", *stdin, *prune, *check} {
 		if on {
 			modes++
 		}
 	}
 	switch {
 	case modes != 1:
-		_, _ = fmt.Fprintln(stderr, "cti-audit: say what to do - one of --action (write an event), --prune, or --check. See: cti-agent cti-audit --help")
+		_, _ = fmt.Fprintln(stderr, "cti-audit: say what to do - one of --action (write an event), --stdin (write many), --prune, or --check. See: cti-agent cti-audit --help")
 		return 2
 	case *dry && !*prune:
 		_, _ = fmt.Fprintln(stderr, "cti-audit: --dry-run goes with --prune")
 		return 2
-	case *days != 0 && !*prune:
+	case days != 0 && !*prune:
 		_, _ = fmt.Fprintln(stderr, "cti-audit: --days goes with --prune")
 		return 2
 	}
@@ -69,7 +85,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	l.Warn = stderr
 	switch {
 	case *prune:
-		return doPrune(l, *days, *dry, stdout, stderr)
+		return doPrune(l, days, *dry, stdout, stderr)
+	case *stdin:
+		if *lane != "" {
+			l.Lane = *lane
+		}
+		return doStdin(l, in, stderr)
 	case *check:
 		return doCheck(l, stdout)
 	}
@@ -85,6 +106,39 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// A write problem is already reported on stderr by the logger; the caller
 	// (a script mid-task) must not fail because of it.
 	_ = l.Emit(audit.Event{Action: *action, Target: *target, Outcome: o, Detail: *detail})
+	return 0
+}
+
+// doStdin writes one event per JSON line, so a script that has many to write
+// (fleet-owners after an import) starts one process, not one per event, and a
+// dead collector is paid for once. A line that is not an event is named and
+// skipped; the rest are written.
+func doStdin(l *audit.Logger, in io.Reader, stderr io.Writer) int {
+	sc := bufio.NewScanner(io.LimitReader(in, 4<<20))
+	sc.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	n, skipped := 0, 0
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var e struct {
+			Action, Target, Outcome, Detail string
+		}
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&e); err != nil || strings.TrimSpace(e.Action) == "" {
+			skipped++
+			_, _ = fmt.Fprintf(stderr, "cti-audit: line %d is not an event (want action, target, outcome, detail as JSON); skipped\n", n+skipped)
+			continue
+		}
+		o := strings.ToLower(strings.TrimSpace(e.Outcome))
+		if o != audit.Success && o != audit.Failure && o != audit.Refused {
+			o = audit.Failure // an event that does not say how it ended did not end well
+		}
+		_ = l.Emit(audit.Event{Action: e.Action, Target: e.Target, Outcome: o, Detail: e.Detail})
+		n++
+	}
 	return 0
 }
 

@@ -58,16 +58,57 @@ func TestDeliveredLogValidateRefusesAFutureDateAndAnOddStatus(t *testing.T) {
 	}
 }
 
-func TestAnInvalidDeliveredLogStopsTheCommitInsteadOfBeingOverwritten(t *testing.T) {
+// An old entry that no longer validates must not stop every later commit: it is
+// repaired (a future time pulled back, an invalid entry dropped, so that
+// application is simply reported again), and only an unparseable file fails.
+func TestAnInvalidDeliveredLogIsRepairedNotFatal(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "delivered.json")
-	bad := `{"id:1":{"ref":"r","at":"2099-01-01T00:00:00Z","status":"sent"}}`
+	bad := `{"id:1":{"ref":"r","at":"2099-01-01T00:00:00Z","status":"sent"},` +
+		`"id:2":{"ref":"r","at":"2026-11-01T00:00:00Z","status":"SENT!!"}}`
 	if err := os.WriteFile(p, []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := CommitDelivered(p, strings.NewReader("id:2\tr\tsent"), dnow); err == nil {
-		t.Fatal("committed on top of an invalid log")
+	n, _, err := CommitDelivered(p, strings.NewReader("id:3\tr\tsent"), dnow)
+	if err != nil || n != 1 {
+		t.Fatalf("a repairable log stopped the commit: n=%d err=%v", n, err)
 	}
-	if b, _ := os.ReadFile(p); string(b) != bad {
-		t.Error("the invalid log was overwritten")
+	l, err := LoadDeliveredLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l["id:2"]; ok {
+		t.Error("the invalid entry was kept")
+	}
+	if e, ok := l["id:1"]; !ok || e.At.After(time.Now().Add(48*time.Hour)) {
+		t.Errorf("the future delivery should be kept with its time pulled back: %+v", e)
+	}
+	if _, ok := l["id:3"]; !ok {
+		t.Error("the new delivery was not recorded")
+	}
+	// unparseable still stops
+	if err := os.WriteFile(p, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := CommitDelivered(p, strings.NewReader("id:4\tr\tsent"), dnow); err == nil {
+		t.Fatal("committed on top of an unparseable log")
+	}
+}
+
+// A held scan whose reason runs long, or carries a control character, is
+// recorded (repaired), not refused: a refused held scan is re-reported on every
+// run.
+func TestAHeldReasonThatIsLongOrHasAControlCharacterIsRepaired(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "delivered.json")
+	long := "held: " + strings.Repeat("é", 600) + "\x1b[0m end"
+	n, bad, err := CommitDelivered(p, strings.NewReader("id:1\tscan-1\t"+long+"\nid:2\tscan\x01-2\theld: why\x07"), dnow)
+	if err != nil || n != 2 || len(bad) != 0 {
+		t.Fatalf("n=%d bad=%v err=%v", n, bad, err)
+	}
+	l, _ := LoadDeliveredLog(p)
+	if len(l["id:1"].Status) > maxStatus || strings.ContainsRune(l["id:1"].Status, '\uFFFD') || strings.ContainsAny(l["id:1"].Status, "\x1b") {
+		t.Errorf("status not repaired cleanly: %d bytes", len(l["id:1"].Status))
+	}
+	if strings.ContainsAny(l["id:2"].Ref+l["id:2"].Status, "\x01\x07") {
+		t.Errorf("control characters survived: %+v", l["id:2"])
 	}
 }

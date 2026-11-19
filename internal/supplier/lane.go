@@ -327,7 +327,9 @@ func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) 
 		if m.ID == primary.ID || len(replies) >= maxReplies {
 			continue
 		}
-		replies = append(replies, fmt.Sprintf("REPLY from %s: %s", m.From, oneLine(m.BodyText, 1000)))
+		// The reply's sender as a domain, never an address: the model is told the
+		// same about the thread's starter (see senderDomain).
+		replies = append(replies, fmt.Sprintf("REPLY from %s: %s", senderDomain(m.From), oneLine(m.BodyText, 1000)))
 	}
 	if len(replies) > 0 {
 		body += "\n\n" + strings.Join(replies, "\n")

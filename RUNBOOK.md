@@ -2978,8 +2978,9 @@ AUDIT_SYSLOG_PROTO=tls
 
 then `sudo cti-agent cti-audit --check`. `tls` is the default and verifies the
 certificate and host name. `tcp` and `udp` are unencrypted and have to be named.
-Forwarding is in addition to the file, and a dead collector costs one warning
-per run. Without any setting, you can instead point a collector's file reader at
+Forwarding is in addition to the file. A dead or hung collector costs one
+2-second timeout and one warning per run, then forwarding is off for the rest of
+that run, so it cannot slow every event; the file still has every event. Without any setting, you can instead point a collector's file reader at
 `/var/log/cti-agent/audit-*.log`.
 
 **Retention.** The daily mailbox cleanup lane prunes first, before it touches

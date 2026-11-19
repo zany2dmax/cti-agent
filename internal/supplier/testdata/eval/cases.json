@@ -759,7 +759,7 @@
     "subject": "New supplier request",
     "sender": "requester@example.test",
     "state": "read",
-    "body": "Please set them up.\n\nREPLY from buyer@example.test: for the record, they host our product data in their own data center and we sync to it nightly.",
+    "body": "Please set them up.\n\nREPLY from example.test: for the record, they host our product data in their own data center and we sync to it nightly.",
     "form": {
       "Request": "New Supplier",
       "Branch": "Corporate",

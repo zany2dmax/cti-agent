@@ -128,6 +128,15 @@ func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, 
 	if res.Key != "" {
 		target = res.Key
 	}
+	var ce *ContinuationError
+	if errors.As(err, &ce) && res.Key != "" {
+		// The ticket exists: a query for created tickets must find it. The
+		// comments that carry the rest of a long description are a separate,
+		// failed, write.
+		auditJira("jira.issue.create", target, "type="+r.IssueType, nil)
+		auditJira("jira.comment.add", target, "continuation of a long description", err)
+		return res, err
+	}
 	auditJira("jira.issue.create", target, "type="+r.IssueType, err)
 	return res, err
 }
@@ -754,5 +763,7 @@ func (c *Client) GetProperty(ctx context.Context, issueKey, propKey string, out 
 func (c *Client) SetProperty(ctx context.Context, issueKey, propKey string, value any) error {
 	path := "/rest/api/2/issue/" + url.PathEscape(issueKey) +
 		"/properties/" + url.PathEscape(propKey)
-	return c.do(ctx, http.MethodPut, path, value, nil)
+	err := c.do(ctx, http.MethodPut, path, value, nil)
+	auditJira("jira.property.set", issueKey, "property="+propKey, err)
+	return err
 }

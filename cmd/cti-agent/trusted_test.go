@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+	"strings"
 	"testing"
 
 	"github.com/zany2dmax/cti-agent/internal/graph"
@@ -98,5 +100,35 @@ func TestTriageSendersDefaultsToTheFeedList(t *testing.T) {
 	t.Setenv("TRIAGE_SENDERS", "none")
 	if got := triageSenders("@a.example"); got != nil {
 		t.Errorf("none = %v", got)
+	}
+}
+
+// On a tenant whose gateway hides the sender, every feed email fails the check.
+// The digest must say so, once per sender, and name what to set; it used to
+// stop trusting its feeds without a word.
+func TestAnUnvouchedFeedSenderIsReportedOncePerSender(t *testing.T) {
+	var buf strings.Builder
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+	unvouchedMu.Lock()
+	unvouchedSeen = map[string]bool{}
+	unvouchedMu.Unlock()
+	t.Setenv(graph.UnauthenticatedSendersEnv, "")
+	m := graph.Message{From: "intel@feed.example", AuthenticationResults: "dmarc=fail"}
+	for i := 0; i < 3; i++ {
+		if trustedSource(m, []string{"@feed.example"}) {
+			t.Fatal("an unauthenticated feed sender was trusted")
+		}
+		if intelSource(m, []string{"@feed.example"}) {
+			t.Fatal("an unauthenticated intel sender was read")
+		}
+	}
+	out := buf.String()
+	if strings.Count(out, "intel@feed.example is not trusted") != 1 {
+		t.Fatalf("want one line for the sender, got:\n%s", out)
+	}
+	if !strings.Contains(out, graph.UnauthenticatedSendersEnv) {
+		t.Errorf("the line should say what to set:\n%s", out)
 	}
 }

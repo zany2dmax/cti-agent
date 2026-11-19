@@ -14,6 +14,10 @@ cti-audit \- write to the fleet's audit trail, prune it, or check it
 .RB [ \-\-lane
 .IR NAME ]
 .PP
+.B cti-audit \-\-stdin
+.RB [ \-\-lane
+.IR NAME ]
+.PP
 .B cti-audit \-\-prune \-\-days
 .I N
 .RB [ \-\-dry\-run ]
@@ -57,7 +61,11 @@ characters, capped, and the three characters RFC 5424 escapes are escaped), so
 a hostile subject or recipient cannot forge a line. No message bodies and no
 credentials are ever written, and a
 .B \-\-dry\-run
-writes nothing because nothing happened.
+writes no event for a change because nothing changed. The one exception is the
+decision to read mail from a sender domain listed in
+.BR FLEET_UNAUTHENTICATED_SENDERS :
+that is a trust decision, not a write, and it is recorded (first acceptance of
+each domain in a run) even in a dry run.
 .PP
 If the directory cannot be written, the event goes to stderr, which every unit
 sends to the journal, and one warning says why: a missing directory never
@@ -80,8 +88,9 @@ is
 or
 .BR udp ;
 a plaintext protocol has to be asked for by name. TLS and TCP use RFC 6587
-octet counting. A collector that is down costs one warning per run and
-nothing else; the local file still has the event. The other way to ship the
+octet counting. A collector that is down or hung costs one 2-second timeout
+and one warning per run, after which forwarding is off for the rest of that
+run (so it cannot slow every event); the local file still has every event. The other way to ship the
 trail needs no setting here: point the collector's file reader at
 .BR audit\-*.log .
 .SH OPTIONS
@@ -113,6 +122,16 @@ a short safe note. Never a body or a secret.
 With
 .BR \-\-action :
 the lane or command name (default cti-audit).
+.TP
+.B \-\-stdin
+Write many events in one call: one JSON object per line on standard input,
+.BR {"action":...,"target":...,"outcome":...,"detail":...} .
+.B \-\-lane
+names the lane. A line that is not an event, or has an unknown field, is named on
+standard error and skipped; an unknown outcome is recorded as a failure.
+.BR fleet\-owners (1)
+uses it, so an import of hundreds of changes is one process and a dead collector
+is paid for once.
 .TP
 .B \-\-prune
 Delete audit files older than
@@ -194,7 +213,24 @@ in fleet.env, then run the check above.
 .SH FILES
 .TP
 .B /var/log/cti\-agent/audit\-YYYY\-MM\-DD.log
-The trail.
+The trail. The files are mode 0600 (the units' umask is 0077) in a 0750
+directory owned by the service account: a collector that runs as root reads them
+as they are. A collector that runs as another user needs read access granted,
+for example
+.BR "setfacl -m u:splunk:r /var/log/cti\-agent/audit\-*.log" ,
+plus
+.B x
+on the directory, or the forwarding setting instead.
+.SH NOTES
+.B AUDIT_DIR
+must be an absolute path.
+.B AUDIT_DIR=off
+discards events and also turns forwarding off. The Python mailer kept as a
+rollback fallback
+.RB ( mailer.py )
+does not write audit events; the live path,
+.BR cti\-mailer (1),
+does.
 .SH SEE ALSO
 .BR run\-mailbox\-cleanup (1),
 .BR fleet\-owners (1),

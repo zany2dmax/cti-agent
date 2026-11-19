@@ -133,3 +133,49 @@ func TestTransitionsAreAudited(t *testing.T) {
 		t.Fatalf("events: %v", lines)
 	}
 }
+
+func TestIssuePropertyWritesAreAudited(t *testing.T) {
+	dir := auditTo(t)
+	srv := jiraServer(t, http.StatusOK, `{}`)
+	c := New(srv.URL, "svc@example.com", "tok")
+	if err := c.SetProperty(context.Background(), "CR-7", "cti-appscan-state", map[string]string{"k": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := auditLines(t, dir)
+	if len(lines) != 1 || !strings.Contains(lines[0], " jira.property.set ") || !strings.Contains(lines[0], `target="CR-7"`) ||
+		!strings.Contains(lines[0], "property=cti-appscan-state") {
+		t.Fatalf("events: %v", lines)
+	}
+}
+
+// A ticket that was created is a SUCCESS in the trail even when the comments
+// carrying the rest of a long description failed: a query for created tickets
+// must find it. The failed comments are their own event.
+func TestACreatedTicketWithFailedContinuationCommentsIsStillASuccess(t *testing.T) {
+	dir := auditTo(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comment") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"1","key":"CR-9","self":"x"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "svc@example.com", "tok")
+	long := strings.Repeat("word ", MaxText) // well over one description
+	_, err := c.CreateIssue(context.Background(), IssueRequest{ProjectKey: "CR", IssueType: "Task", Summary: "s", Description: long})
+	if err == nil {
+		t.Fatal("want the continuation error back")
+	}
+	lines := auditLines(t, dir)
+	if len(lines) != 2 {
+		t.Fatalf("want a create and a comment event, got:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[0], " jira.issue.create ") || !strings.Contains(lines[0], `outcome="success"`) || !strings.Contains(lines[0], `target="CR-9"`) {
+		t.Errorf("the created ticket should be a success: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], " jira.comment.add ") || !strings.Contains(lines[1], `outcome="failure"`) {
+		t.Errorf("the failed continuation should be its own failure: %s", lines[1])
+	}
+}

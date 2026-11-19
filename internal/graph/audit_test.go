@@ -43,7 +43,7 @@ func TestASentMailIsAuditedWithItsRecipientsAndNotItsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := auditText(t, dir)
-	for _, want := range []string{" mail.send ", `target="operator@example.com,copy@example.com"`, `outcome="success"`, "from=security@example.com", "attachments=1"} {
+	for _, want := range []string{" mail.send ", `target="operator@example.com,copy@example.com"`, `outcome="success"`, "from=security@example.com", "recipients=2", "attachments=1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("trail lacks %q:\n%s", want, got)
 		}

@@ -105,6 +105,7 @@ flag: --dry-run | with --prune: list what would be deleted and delete nothing
 flag: --lane STRING | with --action: the lane or command name (default cti-audit)
 flag: --outcome STRING | with --action: success, failure or refused
 flag: --prune | delete audit-DATE.log files older than --days
+flag: --stdin | write many events in one call: one JSON object per line on standard input, {"action":..,"target":..,"outcome":..,"detail":..}; a line that is not an event is named and skipped
 flag: --target STRING | with --action: what it was done to
 risk: --prune changes
 

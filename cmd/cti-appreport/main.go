@@ -663,7 +663,16 @@ func doDeliveries(ctx context.Context, src appscan.OwnerReportSource, path, dir 
 
 // tsvField keeps a value on one TSV field.
 func tsvField(s string) string {
-	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+	// Every control character, not just the three that break a TSV line: the
+	// delivered log refuses control characters in a ref or a status, and a held
+	// scan that is refused is re-reported on every run. Hold text embeds the
+	// scanner's own status strings.
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 var slugRE = regexp.MustCompile(`[^a-z0-9]+`)

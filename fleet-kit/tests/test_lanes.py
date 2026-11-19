@@ -3194,8 +3194,10 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             (d / "plain").write_text("")
             out = d / "t.jsonl"
             big = json.dumps({"type": "user", "message": {"content": "x" * 700000}})
+            # --keep full: in the default mode a 700 KB message is kept as a
+            # stub and never reaches the cap, which is the point of the default.
             r = self._fleet_trace(d, "tee", "--out", str(out), "--plain", str(d / "plain"),
-                                  "--max-mb", "1",
+                                  "--max-mb", "1", "--keep", "full",
                                   stdin="not json\n" + (big + "\n") * 3 + json.dumps(self.BEAT[-1]) + "\n")
             self.assertEqual(r.returncode, 1)
             self.assertIn("trace stopped at 1 MB", r.stderr)
@@ -3308,6 +3310,47 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             self.assertEqual(lines[-1]["usage"], {"input_tokens": 100, "output_tokens": 10})
             # the journal timeline still says how much the tool returned
             self.assertIn("-> ok, 5017 chars", r.stdout)
+
+    def test_a_shape_the_code_has_not_seen_is_not_kept_by_default(self):
+        """minimize() is an allowlist: content in any event shape other than the
+        few it knows is kept only as a size and a hash."""
+        odd = [
+            {"type": "system", "subtype": "init", "model": "m", "tools": [], "mcp_servers": []},
+            {"type": "system", "subtype": "hook_response", "stdout": "SECRET-HOOK-OUTPUT"},
+            {"type": "user", "message": {"content": "SECRET-COMPACTION-SUMMARY of the mail"}},
+            {"type": "user", "message": {"content": [
+                {"type": "text", "text": "SECRET-META-TEXT"}, "SECRET-BARE-STRING",
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": "false", "structuredContent": {"x": "SECRET-STRUCTURED"},
+                 "content": "SECRET-STRING-FLAG-IS-NOT-AN-ERROR"}]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "web_fetch_tool_result", "content": "SECRET-SERVER-RESULT"},
+                {"type": "tool_result", "content": "SECRET-RESULT-IN-ASSISTANT"},
+                {"type": "text", "text": "kept: what the model said"}]}},
+            {"type": "user", "mcp_output": "SECRET-MCP-KEY", "toolUseResult": {"stdout": "SECRET-TOOLUSERESULT"},
+             "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "is_error": False,
+                                      "content": [{"type": "text", "text": 12345}]}]}},  # a non-string text must not crash
+            {"type": "brand_new_event", "payload": "SECRET-NEW-EVENT"},
+            {"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "total_cost_usd": 0.01,
+             "usage": {}, "permission_denials": [], "result": "verdict"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            (d / "plain").write_text("")
+            out = d / "t.jsonl"
+            r = self._fleet_trace(d, "tee", "--out", str(out), "--plain", str(d / "plain"),
+                                  stdin="".join(json.dumps(e) + "\n" for e in odd))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = out.read_text()
+            self.assertNotIn("SECRET", text)
+            self.assertIn("kept: what the model said", text)
+            lines = [json.loads(l) for l in text.splitlines()]
+            self.assertEqual(len(lines), 1 + len(odd), "every event must leave a record, even a malformed one")
+            self.assertEqual(lines[-1]["result"], "verdict")
+            # a string "false" is not an error, so its content is not kept
+            tr = [b for l in lines if l.get("type") == "user" for b in (l.get("message") or {}).get("content", [])
+                  if isinstance(b, dict) and b.get("tool_use_id") == "t1"][0]
+            self.assertFalse(tr["is_error"])
+            self.assertEqual(tr["content"][0]["type"], "fleet_trace_redacted")
 
     def test_full_keeps_every_event_as_it_came(self):
         with tempfile.TemporaryDirectory() as d:
@@ -6116,6 +6159,9 @@ class FleetDbWritesAreChecked(unittest.TestCase):
         self.refused("digests", "sent", "2026-11-19", "-1", "2", "3", "4", "5", "mid", why="outside")
         self.refused("digests", "sent", "2026-11-19", *ok, "Daily!", why="digest kind")
         self.refused("digests", "sent", "2026-11-19", "1", why="takes a date")
+        # an empty message id is recorded as "unknown" (the mailer's own default)
+        r = self.run_db("sent", "2026-11-20", "1", "2", "3", "4", "5", "")
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_note_refuses_a_bad_cve_or_a_huge_note_but_clears_on_empty(self):
         self.assertEqual(self.run_db("finding", "upsert", stdin=json.dumps(
@@ -6142,10 +6188,23 @@ class FleetDbWritesAreChecked(unittest.TestCase):
             {"cve": "CVE-2026-6666", "status": "NOT_PRESENT", "epss_pct": 0.0, "qids": "", "kev": False},
         ]
         r = self.run_db("finding", "upsert", stdin=json.dumps(rows))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("upserted 2 findings (6 skipped", r.stdout)
-        self.assertEqual(r.stderr.count("skipped:"), 6, r.stderr)
-        self.assertEqual(self.count("findings"), 2)
+        # exit 3: every valid row is written, and the caller can tell rows were skipped
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn("upserted 3 findings (5 skipped", r.stdout)
+        self.assertEqual(r.stderr.count("skipped:"), 5, r.stderr)
+        self.assertEqual(self.count("findings"), 3)
+        # the row with a stray control character was REPAIRED, not lost
+        import sqlite3
+        c = sqlite3.connect(os.path.join(self.home, "state", "memory.db"))
+        try:
+            desc = c.execute("SELECT description FROM findings WHERE cve='CVE-2026-5555'").fetchone()[0]
+        finally:
+            c.close()
+        self.assertNotIn("\x00", desc)
+        self.assertIn("bad", desc)
+        # a clean batch still exits 0
+        ok = self.run_db("finding", "upsert", stdin=json.dumps([{"cve": "CVE-2026-7777", "priority": "Sev3"}]))
+        self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertNotEqual(self.run_db("finding", "upsert", stdin="{not json").returncode, 0)
 
     def test_the_limits_are_the_heartbeat_guards(self):
@@ -6164,6 +6223,7 @@ class FleetDbWritesAreChecked(unittest.TestCase):
         guard = load_file("checkin_guard_for_db", self.GUARD)
         db = load_file("fleet_db_for_guard", self.DB)
         self.assertEqual(db.MAX_MEMORY_CONTENT, guard.MAX_MEMORY_CONTENT)
+        self.assertIn(f"_text({db.MAX_TASK_TITLE})", self.GUARD.read_text(), "the task title limit drifted from the guard's")
         self.assertEqual(db.MAX_MAIL_BODY, guard.MAX_BOARD_MESSAGE)
         self.assertEqual(db.ID_RX.pattern, guard.ID.pattern)
         self.assertEqual(db.NUM_ID_RX.pattern, guard.NUM_ID.pattern)
