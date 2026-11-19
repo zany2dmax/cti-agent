@@ -17,12 +17,14 @@
 package budget
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
+	"unicode/utf8"
+
+	"github.com/zany2dmax/cti-agent/internal/statefile"
 )
 
 // Outcome is how a beat ended. It drives backoff, so the distinction between
@@ -142,57 +144,82 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-// Load reads the ledger. A missing file is an empty ledger, not an error: the
-// first beat on a fresh install must not be blocked by its own bookkeeping.
-// A corrupt file is also an empty ledger, loudly - refusing to run because a
-// counter file got truncated would turn a cosmetic problem into an outage.
-func (s *Store) Load() (*Ledger, error) {
-	// s.Path is the ledger location from the service
-	// configuration, written only by this package.
-	b, err := os.ReadFile(s.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Ledger{}, nil
+// Bounds on what a ledger may hold. They are generous (a beat every half hour
+// is about a hundred entries in the 48 hours Save keeps) and exist so a damaged
+// or edited file is refused instead of steering the ceiling: a cooldown in the
+// year 9999 would stop the heartbeat for good.
+const (
+	maxBeats = 5000
+	maxNote  = 500
+	// A recorded time may run a little ahead of this host's clock (NTP skew),
+	// and a cooldown or alert marker may sit well ahead (a weekly limit), but
+	// neither may sit beyond maxAhead.
+	clockSkew = time.Hour
+	maxAhead  = 7 * 24 * time.Hour
+)
+
+// Validate says whether the ledger is one this package could have written. now
+// is injected so the check is testable.
+func (l *Ledger) Validate(now time.Time) error {
+	if len(l.Beats) > maxBeats {
+		return fmt.Errorf("%d beats, more than the %d a ledger holds", len(l.Beats), maxBeats)
+	}
+	for i, b := range l.Beats {
+		switch b.Outcome {
+		case OutcomeOK, OutcomeRateLimit, OutcomeError, OutcomeExhausted:
+		default:
+			return fmt.Errorf("beat %d has outcome %q, not one of ok, ratelimit, error, exhausted", i, b.Outcome)
 		}
-		return nil, fmt.Errorf("budget: reading %s: %w", s.Path, err)
+		if b.At.IsZero() {
+			return fmt.Errorf("beat %d has no time", i)
+		}
+		if b.At.After(now.Add(clockSkew)) {
+			return fmt.Errorf("beat %d is dated %s, in the future", i, b.At.UTC().Format(time.RFC3339))
+		}
+		if len(b.Note) > maxNote {
+			return fmt.Errorf("beat %d has a %d byte note, over %d", i, len(b.Note), maxNote)
+		}
 	}
-	var l Ledger
-	if err := json.Unmarshal(b, &l); err != nil {
-		return &Ledger{}, fmt.Errorf("budget: %s is corrupt, starting fresh: %w", s.Path, err)
+	if l.CooldownUntil.After(now.Add(maxAhead)) {
+		return fmt.Errorf("cooldown_until %s is more than %s ahead", l.CooldownUntil.UTC().Format(time.RFC3339), maxAhead)
 	}
-	return &l, nil
+	if l.AlertedFor.After(now.Add(maxAhead)) {
+		return fmt.Errorf("alerted_for %s is more than %s ahead", l.AlertedFor.UTC().Format(time.RFC3339), maxAhead)
+	}
+	return nil
 }
 
-// Save writes atomically. A half-written ledger read by the next beat would
-// look like an empty one, which would silently disable the whole ceiling.
-func (s *Store) Save(l *Ledger) error {
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o750); err != nil {
-		return err
+func (s *Store) opts(l *Ledger) statefile.Options {
+	return statefile.Options{Validate: func() error { return l.Validate(s.now()) }}
+}
+
+// Load reads the ledger. A missing file is an empty ledger, not an error: the
+// first beat on a fresh install must not be blocked by its own bookkeeping.
+// A corrupt or invalid file is also an empty ledger, loudly - refusing to run
+// because a counter file got truncated would turn a cosmetic problem into an
+// outage.
+func (s *Store) Load() (*Ledger, error) {
+	var l Ledger
+	err := statefile.Read(s.Path, &l, s.opts(&l))
+	switch {
+	case err == nil:
+		return &l, nil
+	case errors.Is(err, os.ErrNotExist):
+		return &Ledger{}, nil
+	case errors.Is(err, statefile.ErrInvalid):
+		return &Ledger{}, fmt.Errorf("budget: %s is corrupt, starting fresh: %w", s.Path, err)
 	}
+	return nil, fmt.Errorf("budget: reading %s: %w", s.Path, err)
+}
+
+// Save validates the ledger and writes it atomically (internal/statefile). A
+// half-written ledger read by the next beat would look like an empty one, which
+// would silently disable the whole ceiling; a ledger that fails validation is
+// not written at all.
+func (s *Store) Save(l *Ledger) error {
 	// Keep the file bounded. Two days of history is more than any limit reads.
 	l.Beats = prune(l.Beats, s.now().Add(-48*time.Hour))
-
-	b, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".budget-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), s.Path)
+	return statefile.Write(s.Path, l, s.opts(l))
 }
 
 func prune(beats []Beat, cutoff time.Time) []Beat {
@@ -247,6 +274,9 @@ func (s *Store) Check(l *Ledger) Decision {
 // the binary was missing should not consume quota it never spent.
 func (s *Store) Record(l *Ledger, o Outcome, note string) {
 	now := s.now()
+	if len(note) > maxNote {
+		note = clipUTF8(note, maxNote)
+	}
 	l.Beats = append(l.Beats, Beat{At: now, Outcome: o, Note: note})
 
 	switch o {
@@ -384,4 +414,15 @@ func (s *Store) ShouldAlert(l *Ledger, d Decision) bool {
 	}
 	l.AlertedFor = key
 	return true
+}
+
+// clipUTF8 cuts s to at most n bytes without splitting a character.
+func clipUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

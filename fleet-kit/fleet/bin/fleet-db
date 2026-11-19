@@ -14,15 +14,143 @@
   fleet-db last-sent <kind> [--hours] when the newest digest of a kind went out, or
                                       how many whole hours ago, rounded up (exit 1: never)
   fleet-db vacuum
+
+Every command that writes checks its arguments first (see "WHAT IS CHECKED"
+below) and refuses with "fleet-db: <reason>" and exit 2, before it touches the
+database. Reads are unchanged.
 """
 import json
+import math
 import os
+import re
 import sqlite3
 import sys
 from datetime import date, datetime, timezone
 
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 DB = os.path.join(FLEET_HOME, "state", "memory.db")
+
+# ---- WHAT IS CHECKED ------------------------------------------------------
+#
+# This database is written from several places: the heartbeat (a model, whose
+# arguments checkin-bash-guard already restricts), the enrich and digest lanes,
+# cti-jira, and an operator. The guard protects only the first path, so the
+# command itself refuses what no caller should send: a number that is not a
+# number, a date that is not a date, text with control characters or far past
+# the size anything here stores. The limits below mirror the guard's (a test
+# fails if they drift), so the heartbeat sees one set of rules, not two.
+#
+# A batch (`finding upsert`) is not all-or-nothing: a row that fails is skipped
+# and named on stderr, the rest are written, so one bad value cannot stop the
+# nightly upsert.
+
+MAX_MEMORY_CONTENT = 1500   # mirrors checkin-bash-guard
+MAX_MAIL_BODY = 400         # mirrors checkin-bash-guard (MAX_BOARD_MESSAGE)
+MAX_TASK_TITLE = 200
+MAX_NOTE = 1000
+MAX_COUNT = 10_000_000
+
+ID_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z")
+NUM_ID_RX = re.compile(r"[0-9]{1,9}\Z")
+CATEGORY_RX = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
+TOPIC_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z")
+CVE_RX = re.compile(r"CVE-[0-9]{4}-[0-9]{4,19}\Z")
+KIND_RX = re.compile(r"[a-z]{1,20}\Z")
+CTRL_RX = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")   # tab and newline are allowed
+SEV_VALUES = ("Sev5", "Sev4", "Sev3", "Sev2", "Sev1")
+
+
+class Invalid(ValueError):
+    """An argument the command refuses to write."""
+
+
+def _short(v):
+    v = str(v)
+    v = CTRL_RX.sub("?", v)
+    return v if len(v) <= 40 else v[:40] + "..."
+
+
+def v_text(name, v, limit):
+    if not isinstance(v, str) or not v.strip():
+        raise Invalid(f"{name} is empty")
+    if len(v) > limit:
+        raise Invalid(f"{name} is too long ({len(v)} characters, at most {limit})")
+    if CTRL_RX.search(v):
+        raise Invalid(f"{name} has control characters")
+    return v
+
+
+def v_match(name, v, rx, what):
+    if not isinstance(v, str) or not rx.match(v):
+        raise Invalid(f"{name} {_short(v)!r} is not {what}")
+    return v
+
+
+def v_num_id(name, v):
+    v_match(name, v, NUM_ID_RX, "a row number")
+    n = int(v)
+    if n < 1:
+        raise Invalid(f"{name} {v} is not a row number")
+    return n
+
+
+def v_count(name, v):
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise Invalid(f"{name} {_short(v)!r} is not a whole number") from None
+    if not 0 <= n <= MAX_COUNT:
+        raise Invalid(f"{name} {n} is outside 0 to {MAX_COUNT}")
+    return n
+
+
+def v_day(name, v):
+    v_match(name, v, re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z"), "a date (YYYY-MM-DD)")
+    try:
+        datetime.strptime(v, "%Y-%m-%d")
+    except ValueError:
+        raise Invalid(f"{name} {v} is not a real date") from None
+    return v
+
+
+# findings columns: the longest text each may hold, and numeric ranges.
+FINDING_TEXT = {"status": 80, "provider": 80, "qids": 5000, "last_seen": 100, "sample_hosts": 20000,
+                "cvss_severity": 40, "kev_added": 100, "kev_due": 100, "ransomware": 100,
+                "rationale": 2000, "description": 20000}
+FINDING_RANGE = {"host_count": (0, MAX_COUNT), "qualys_score": (0, MAX_COUNT), "cvss": (0, 10),
+                 "epss": (0, 1), "epss_pct": (0, 100)}
+
+
+def validate_finding(f):
+    """One enriched finding, or Invalid. Unknown keys are ignored (as the
+    upsert always has); a known column must hold what it says it holds."""
+    if not isinstance(f, dict):
+        raise Invalid("a finding is a JSON object")
+    v_match("cve", f.get("cve"), CVE_RX, "a CVE id")
+    for k, limit in FINDING_TEXT.items():
+        v = f.get(k)
+        if v is None:
+            continue
+        if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+            raise Invalid(f"{k} must be text")
+        if len(str(v)) > limit:
+            raise Invalid(f"{k} is too long ({len(str(v))} characters, at most {limit})")
+        if CTRL_RX.search(str(v)):
+            raise Invalid(f"{k} has control characters")
+    for k, (lo, hi) in FINDING_RANGE.items():
+        v = f.get(k)
+        if v is None or v == "":
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise Invalid(f"{k} must be a number")
+        if not lo <= v <= hi:
+            raise Invalid(f"{k} {v} is outside {lo} to {hi}")
+    if f.get("kev") not in (None, 0, 1, True, False):
+        raise Invalid("kev must be 0 or 1")
+    if f.get("priority") is not None and f.get("priority") not in SEV_VALUES:
+        raise Invalid(f"priority {_short(f.get('priority'))!r} is not one of {', '.join(SEV_VALUES)}")
+    return f
+
 
 # Renaming the scale is a data migration, not just a label change: rows
 # already written say P1-P4, and the digests table had four count columns.
@@ -137,6 +265,15 @@ def migrate(c):
 
 
 def main(argv):
+    try:
+        return _main(argv)
+    except Invalid as e:
+        # Before anything was written: say what was refused and why.
+        print(f"fleet-db: {e}", file=sys.stderr)
+        return 2
+
+
+def _main(argv):
     if not argv:
         print(__doc__)
         return 2
@@ -155,7 +292,11 @@ def main(argv):
     migrate(c)
 
     if cmd == "remember":
-        cat, topic, content = args[0], args[1], " ".join(args[2:])
+        if len(args) < 3:
+            raise Invalid("remember takes a category, a topic and the text")
+        cat = v_match("category", args[0], CATEGORY_RX, "a category (lowercase letters, digits, underscore)")
+        topic = v_match("topic", args[1], TOPIC_RX, "a topic")
+        content = v_text("the text", " ".join(args[2:]), MAX_MEMORY_CONTENT)
         c.execute("INSERT INTO memories(category,topic,content,ts) VALUES(?,?,?,?)",
                   (cat, topic, content, now()))
         c.commit()
@@ -181,10 +322,12 @@ def main(argv):
     elif cmd == "task":
         sub = args[0]
         if sub == "add":
-            c.execute("INSERT INTO tasks(title,done,ts) VALUES(?,0,?)",
-                      (" ".join(args[1:]), now()))
+            title = v_text("the title", " ".join(args[1:]), MAX_TASK_TITLE)
+            c.execute("INSERT INTO tasks(title,done,ts) VALUES(?,0,?)", (title, now()))
         elif sub == "done":
-            c.execute("UPDATE tasks SET done=1, done_ts=? WHERE id=?", (now(), int(args[1])))
+            if len(args) != 2:
+                raise Invalid("task done takes one row number")
+            c.execute("UPDATE tasks SET done=1, done_ts=? WHERE id=?", (now(), v_num_id("the task id", args[1])))
         elif sub == "list":
             for r in c.execute("SELECT id,title,done FROM tasks ORDER BY done,id"):
                 print(f"[{'x' if r['done'] else ' '}] #{r['id']} {r['title']}")
@@ -193,25 +336,47 @@ def main(argv):
     elif cmd == "mail":
         sub = args[0]
         if sub == "send":
+            if len(args) < 4:
+                raise Invalid("mail send takes an agent, a kind and the body")
+            agent = v_match("agent", args[1], ID_RX, "an agent name")
+            kind = v_match("kind", args[2], ID_RX, "a message kind")
+            body = v_text("the body", " ".join(args[3:]), MAX_MAIL_BODY)
             c.execute("INSERT INTO mailbox(to_agent,kind,body,acked,ts) VALUES(?,?,?,0,?)",
-                      (args[1], args[2], " ".join(args[3:]), now()))
+                      (agent, kind, body, now()))
         elif sub == "inbox":
             for r in c.execute("SELECT id,kind,body,ts FROM mailbox "
                                "WHERE to_agent=? AND acked=0 ORDER BY id", (args[1],)):
                 print(f"#{r['id']} [{r['kind']}] {r['body']}  ({r['ts']})")
         elif sub == "ack":
-            c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (int(args[1]),))
+            if len(args) != 2:
+                raise Invalid("mail ack takes one row number")
+            c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (v_num_id("the mail id", args[1]),))
         c.commit()
 
     elif cmd == "ack":
-        c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (int(args[0]),))
+        if len(args) != 1:
+            raise Invalid("ack takes one row number")
+        c.execute("UPDATE mailbox SET acked=1 WHERE id=?", (v_num_id("the mail id", args[0]),))
         c.commit()
 
     elif cmd == "finding":
         # upsert from a JSON object or a JSON array on argv or stdin
         raw = " ".join(args[1:]) if len(args) > 1 else sys.stdin.read()
-        payload = json.loads(raw)
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            raise Invalid("finding upsert takes a JSON object or array") from None
         rows = payload if isinstance(payload, list) else [payload]
+        # A batch is not all-or-nothing: a row that fails is skipped and
+        # named, so one bad value cannot stop the nightly upsert.
+        good, skipped = [], 0
+        for i, f in enumerate(rows):
+            try:
+                good.append(validate_finding(f))
+            except Invalid as e:
+                skipped += 1
+                print(f"fleet-db: finding {i + 1} skipped: {e}", file=sys.stderr)
+        rows = good
         for f in rows:
             cols = ("cve status provider qids host_count qualys_score last_seen "
                     "sample_hosts cvss cvss_severity epss epss_pct kev kev_added "
@@ -229,7 +394,7 @@ def main(argv):
             sql = f"INSERT INTO findings({names},first_seen,updated) VALUES({ph},?,?) {upsert}"  # nosec B608
             c.execute(sql, vals + [now(), now()])
         c.commit()
-        print(f"upserted {len(rows)} findings")
+        print(f"upserted {len(rows)} findings" + (f" ({skipped} skipped, see above)" if skipped else ""))
 
     elif cmd == "note":
         # Record that a finding has been handed to somebody. Until now nothing
@@ -240,8 +405,12 @@ def main(argv):
         # Deliberately NOT part of the `finding` upsert: that runs every night
         # from enrich.py and would overwrite the note with null on each pass.
         # The column is excluded from its SET list for the same reason.
-        cve = args[0]
+        if not args:
+            raise Invalid("note takes a CVE id and the text")
+        cve = v_match("cve", args[0], CVE_RX, "a CVE id")
         text = " ".join(args[1:]) if len(args) > 1 else ""
+        if text:  # empty clears the note
+            v_text("the note", text, MAX_NOTE)
         cur = c.execute("UPDATE findings SET remediation_note=?, updated=? "
                         "WHERE cve=?", (text or None, now(), cve))
         c.commit()
@@ -395,8 +564,12 @@ def main(argv):
         # collided because each request id was unique. Silent since the table
         # was written; found by the orchestrator noticing that was-sent said
         # "no" for digests the board confirmed had gone out.
-        day, s5, s4, s3, s2, s1, mid = args[0], *map(int, args[1:6]), args[6]
-        kind = args[7] if len(args) > 7 else "daily"
+        if len(args) < 7:
+            raise Invalid("sent takes a date, five counts and a message id")
+        day = v_day("date", args[0])
+        s5, s4, s3, s2, s1 = (v_count(n, a) for n, a in zip(("sev5", "sev4", "sev3", "sev2", "sev1"), args[1:6]))
+        mid = v_text("message id", args[6], 512)
+        kind = v_match("kind", args[7] if len(args) > 7 else "daily", KIND_RX, "a digest kind (lowercase letters)")
         c.execute("INSERT OR REPLACE INTO digests(kind,day,sev5,sev4,sev3,sev2,sev1,"
                   "message_id,ts) VALUES(?,?,?,?,?,?,?,?,?)",
                   (kind, day, s5, s4, s3, s2, s1, mid, now()))

@@ -133,6 +133,22 @@ control characters, bidirectional and zero\-width characters are removed and
 over\-long lines are cut with a
 .B [cut N chars]
 marker. Outside a heartbeat the output is untouched.
+.SS What is checked
+Every command that writes checks its arguments first and refuses, with exit 2
+and nothing written, what no caller should send: a row number that is not a
+number, a date that is not a real date, a count outside 0 to 10 million, text
+that is empty, has control characters, or is longer than anything here stores
+(a memory 1500 characters, a task title 200, mail 400, a note 1000), or a
+category, topic, agent or kind that is not a plain name. The limits are the
+heartbeat's (checkin\-bash\-guard restricts what a beat may send; this is what
+protects the database from every other caller), and a test fails if they
+drift apart.
+.PP
+.B finding upsert
+is not all-or-nothing: a finding whose CVE id is not a CVE id, or whose
+priority is not Sev1 to Sev5, or whose CVSS, EPSS or counts are out of range,
+is skipped and named on standard error, and the rest are written, so one bad
+value cannot stop the nightly upsert. Unknown keys are ignored, as before.
 .SH COMMANDS
 .TP
 .B init
@@ -399,13 +415,16 @@ query that matched nothing.
 .TP
 .B 1
 .B was\-sent
-found no record; or a missing or malformed argument, invalid JSON for
-.BR finding ,
-or a database error (Python traceback on standard error).
+found no record; or a database error (Python traceback on standard error).
 .TP
 .B 2
 No command, or an unknown one; the usage text is printed. An unknown
-command still creates the schema and runs the migration first.
+command still creates the schema and runs the migration first. Also a write
+command whose arguments were refused (see
+.BR "What is checked" ):
+the reason is printed as
+.B fleet\-db: ...
+on standard error and nothing is written.
 .SH EXAMPLES
 What the fleet remembers, and the band counts:
 .PP

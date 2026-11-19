@@ -1282,6 +1282,42 @@ a run once reported three occurrences of an issue that had twenty-six.
 
 ---
 
+## Validating what is written
+
+The fleet's state is small and written only by its own commands, so the risk
+is not an attacker at the keyboard. It is a bug, a damaged file, or a hostile
+value that arrives from outside (a message id, a subject, an argument from a
+script or the heartbeat) and steers a later run: a budget ledger with a
+cooldown in the year 9999 stops the heartbeat for good; a processed log with an
+entry dated next year is never pruned, so mail stays eligible to move on a
+record that never expires.
+
+- **State files (Go).** The budget ledger, the processed-message log and the
+  owners lane's delivered log are read and written through
+  `internal/statefile`: validate, refuse an oversized value, write a temp file
+  at 0600 in the same directory, flush it, and rename it over the target, so a
+  reader sees the old file or the new one and a refused write changes nothing.
+  Each file has a `Validate` that says what it could hold (known outcomes, no
+  future-dated entries, bounded counts and lengths, no control characters). A
+  file that parses but fails validation is treated as damaged: the budget
+  ledger starts fresh with a warning (an outage over a counter is worse), the
+  processed log fails closed (the cleanup lane stops loudly). Free text that is
+  ordinary data (a mail subject, a note) is clipped on the way in, not refused,
+  so a long subject cannot stop the lane remembering what it read.
+- **The database (`fleet-db`).** Every command that writes checks its
+  arguments first and refuses with exit 2 before touching memory.db: row
+  numbers, real dates, bounded counts, names that are plain names, text with no
+  control characters and within the size each field stores. The limits are the
+  ones `checkin-bash-guard` puts on the heartbeat, and a test fails if they
+  drift, so the model sees one set of rules and every other caller (the lanes,
+  `cti-jira`, an operator) gets the same ones. The nightly `finding upsert` is a
+  batch: a bad row is skipped and named on stderr, the rest are written.
+
+This is validation at the write, not an application service in front of a
+database: the fleet has no server. What it does not do is stop a caller that
+holds the service account from editing the files directly; that is a property
+of one host with one account (see "Encryption at rest" and the audit trail).
+
 ## Failure philosophy
 
 This matters enough to be a security property in its own right.

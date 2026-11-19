@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
+	"github.com/zany2dmax/cti-agent/internal/statefile"
 )
 
 // THE SCANNER'S REPORT, MAILED TO THE APPLICATION'S OWNERS
@@ -180,23 +182,93 @@ func (f DeliveriesFile) JSON() []byte {
 
 // LoadDeliveredLog reads the log; a missing file is an empty log.
 func LoadDeliveredLog(p string) (DeliveredLog, error) {
-	// #nosec G304 -- the runner's own state file
-	b, err := os.ReadFile(p)
-	if os.IsNotExist(err) {
-		return DeliveredLog{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	l := DeliveredLog{}
-	if err := json.Unmarshal(b, &l); err != nil {
+	err := statefile.Read(p, &l, deliveredOpts(&l, time.Now))
+	switch {
+	case err == nil:
+		return l, nil
+	case errors.Is(err, os.ErrNotExist):
+		return DeliveredLog{}, nil
+	case errors.Is(err, statefile.ErrInvalid):
 		return nil, fmt.Errorf("%s is not a delivered log: %w", p, err)
 	}
-	return l, nil
+	return nil, err
+}
+
+// Bounds on the delivered log: one entry per web application, so it is as big
+// as the estate and no bigger. The caps catch a damaged file or a runaway
+// script, not a large legitimate one.
+const (
+	maxDelivered    = 100000
+	maxDeliveredKey = 512
+	maxDeliveredRef = 512
+	maxStatus       = 500
+	deliveredSkew   = 24 * time.Hour
+)
+
+func plainText(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateEntry says whether one recorded delivery is acceptable: the shape the
+// runner writes ("sent", or "held: <why>"), with no control characters in any
+// field, and sized sanely. Anything else is a script bug or hostile text that
+// should be reported, not remembered.
+func ValidateEntry(key string, e DeliveredEntry) error {
+	switch {
+	case key == "" || len(key) > maxDeliveredKey || !plainText(key):
+		return fmt.Errorf("key must be 1 to %d printable characters", maxDeliveredKey)
+	case e.Ref == "" || len(e.Ref) > maxDeliveredRef || !plainText(e.Ref):
+		return fmt.Errorf("ref must be 1 to %d printable characters", maxDeliveredRef)
+	case !(e.Status == "sent" || strings.HasPrefix(e.Status, "held: ")):
+		return errors.New(`status must be "sent" or "held: <why>"`)
+	case len(e.Status) > maxStatus || !plainText(e.Status):
+		return fmt.Errorf("status must be at most %d printable characters", maxStatus)
+	}
+	return nil
+}
+
+// Validate says whether the log is one CommitDelivered could have written.
+func (l DeliveredLog) Validate(now time.Time) error {
+	if len(l) > maxDelivered {
+		return fmt.Errorf("%d entries, more than the %d a delivered log holds", len(l), maxDelivered)
+	}
+	for k, e := range l {
+		if err := ValidateEntry(k, e); err != nil {
+			return fmt.Errorf("entry %q: %v", safeKey(k), err)
+		}
+		if e.At.After(now.Add(deliveredSkew)) {
+			return fmt.Errorf("entry %q is dated %s, in the future", safeKey(k), e.At.UTC().Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
+// safeKey is a key fit to put in an error message.
+func safeKey(k string) string {
+	if len(k) > 40 {
+		k = k[:40] + "..."
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '?'
+		}
+		return r
+	}, k)
+}
+
+func deliveredOpts(l *DeliveredLog, now func() time.Time) statefile.Options {
+	return statefile.Options{Validate: func() error { return l.Validate(now()) }}
 }
 
 // CommitDelivered records "key<TAB>ref<TAB>status" lines in the log,
-// replacing it atomically. A line it cannot read is reported and skipped.
+// replacing it atomically. A line it cannot read, or that fails validation, is
+// reported and skipped; the rest are recorded.
 func CommitDelivered(logPath string, lines io.Reader, now time.Time) (int, []string, error) {
 	l, err := LoadDeliveredLog(logPath)
 	if err != nil {
@@ -217,18 +289,18 @@ func CommitDelivered(logPath string, lines io.Reader, now time.Time) (int, []str
 			bad = append(bad, fmt.Sprintf("line %d: want key, ref and status separated by tabs", i+1))
 			continue
 		}
-		l[f[0]] = DeliveredEntry{Ref: f[1], At: now.UTC(), Status: f[2]}
+		e := DeliveredEntry{Ref: f[1], At: now.UTC(), Status: f[2]}
+		if err := ValidateEntry(f[0], e); err != nil {
+			bad = append(bad, fmt.Sprintf("line %d: %v", i+1, err))
+			continue
+		}
+		l[f[0]] = e
 		n++
 	}
-	out, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
+	if err := statefile.Write(logPath, l, deliveredOpts(&l, func() time.Time { return now })); err != nil {
 		return 0, bad, err
 	}
-	tmp := logPath + ".tmp"
-	if err := writeNew(tmp, append(out, '\n')); err != nil {
-		return 0, bad, err
-	}
-	return n, bad, os.Rename(tmp, logPath)
+	return n, bad, nil
 }
 
 // RedactReport is the scanner's zipped report made fit to mail: every text

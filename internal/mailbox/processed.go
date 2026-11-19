@@ -26,13 +26,16 @@
 package mailbox
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/zany2dmax/cti-agent/internal/statefile"
 )
 
 // Processed is one message a completed run read.
@@ -225,19 +228,63 @@ func (s *Store) retain() time.Duration {
 // the operator would never learn the file was broken, and the inbox would
 // quietly stop being cleaned.
 func (s *Store) Load() (*Log, error) {
-	// #nosec G304 -- s.Path is the log location from the service configuration.
-	b, err := os.ReadFile(s.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Log{}, nil
-		}
-		return nil, fmt.Errorf("mailbox: reading %s: %w", s.Path, err)
-	}
 	var l Log
-	if err := json.Unmarshal(b, &l); err != nil {
+	err := statefile.Read(s.Path, &l, s.opts(&l))
+	switch {
+	case err == nil:
+		return &l, nil
+	case errors.Is(err, os.ErrNotExist):
+		return &Log{}, nil
+	case errors.Is(err, statefile.ErrInvalid):
 		return nil, fmt.Errorf("mailbox: %s is corrupt: %w", s.Path, err)
 	}
-	return &l, nil
+	return nil, fmt.Errorf("mailbox: reading %s: %w", s.Path, err)
+}
+
+// Bounds on a processed log. Mail is kept for two weeks, so even a busy
+// mailbox is a few thousand entries; the caps catch a damaged file, not a
+// large legitimate one. Subjects are clipped on the way in (Record) rather
+// than refused, since a long subject is ordinary mail and a refused write would
+// stop the lane remembering what it had read.
+const (
+	maxEntries = 50000
+	maxIDLen   = 2048
+	maxSubject = 1000
+	maxRef     = 512
+	// ReadAt is set by this host; the sender controls neither it nor Received.
+	readAtSkew = 24 * time.Hour
+)
+
+// Validate says whether the log is one this package could have written.
+func (l *Log) Validate(now time.Time) error {
+	if len(l.Entries) > maxEntries {
+		return fmt.Errorf("%d entries, more than the %d a log holds", len(l.Entries), maxEntries)
+	}
+	seen := make(map[string]bool, len(l.Entries))
+	for i, e := range l.Entries {
+		switch {
+		case strings.TrimSpace(e.ID) == "":
+			return fmt.Errorf("entry %d has no message id", i)
+		case len(e.ID) > maxIDLen:
+			return fmt.Errorf("entry %d has a %d byte message id, over %d", i, len(e.ID), maxIDLen)
+		case seen[e.ID]:
+			return fmt.Errorf("entry %d repeats a message id", i)
+		case e.ReadAt.After(now.Add(readAtSkew)):
+			// An entry dated ahead is never pruned, so mail would stay
+			// eligible to move on a record that never expires.
+			return fmt.Errorf("entry %d is read-dated %s, in the future", i, e.ReadAt.UTC().Format(time.RFC3339))
+		case len(e.Subject) > maxSubject:
+			return fmt.Errorf("entry %d has a %d byte subject, over %d", i, len(e.Subject), maxSubject)
+		case len(e.Ref) > maxRef:
+			return fmt.Errorf("entry %d has a %d byte ref, over %d", i, len(e.Ref), maxRef)
+		}
+		seen[e.ID] = true
+	}
+	return nil
+}
+
+func (s *Store) opts(l *Log) statefile.Options {
+	return statefile.Options{Validate: func() error { return l.Validate(s.now()) }}
 }
 
 // Record adds entries, replacing any with the same ID, and prunes old ones.
@@ -254,6 +301,8 @@ func (s *Store) Record(l *Log, seen []Processed) {
 		if e.ReadAt.IsZero() {
 			e.ReadAt = now
 		}
+		e.Subject = clipUTF8(e.Subject, maxSubject)
+		e.Ref = clipUTF8(e.Ref, maxRef)
 		byID[e.ID] = e
 	}
 	cutoff := now.Add(-s.retain())
@@ -267,36 +316,14 @@ func (s *Store) Record(l *Log, seen []Processed) {
 	l.Entries = out
 }
 
-// Save writes atomically. A half-written log read by the cleanup lane would
-// look like a shorter one, and a shorter one means fewer messages are eligible
-// to move - safe, but it would also mean the lane silently stopped working.
+// Save validates the log and writes it atomically, mode 0600
+// (internal/statefile). A half-written log read by the cleanup lane would look
+// like a shorter one, and a shorter one means fewer messages are eligible to
+// move - safe, but it would also mean the lane silently stopped working. A log
+// that fails validation is not written, and the old one stays. 0600: subject
+// lines from a security mailbox are not for other accounts on the box.
 func (s *Store) Save(l *Log) error {
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o750); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".processed-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	// 0600: subject lines from a security mailbox are not for other accounts
-	// on the box.
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), s.Path)
+	return statefile.Write(s.Path, l, s.opts(l))
 }
 
 // Index is the log keyed by message ID, for the cleanup lane's lookups.
@@ -337,4 +364,15 @@ func (l *Log) ProcessedToday(now time.Time, loc *time.Location) (bool, int) {
 		}
 	}
 	return n > 0, n
+}
+
+// clipUTF8 cuts s to at most n bytes without splitting a character.
+func clipUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

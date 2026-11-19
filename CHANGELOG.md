@@ -284,6 +284,37 @@ journal says why. Advisory triage in the digest stays off until you set
     answered by the disk's encryption and need you to confirm it (SECURITY.md,
     "Encryption at rest") before they are dismissed with that control named.
 
+- **Writes are validated: one state-file writer, and checked `fleet-db`
+  commands.** The budget ledger, the processed-message log and the owners
+  lane's delivered log each had their own copy of "marshal, temp file, rename"
+  and none checked what it was about to write. They now go through
+  `internal/statefile` (validate, refuse an oversized value, temp file at 0600
+  in the same directory, flush, rename), and each has a `Validate`: known
+  outcomes only, no future-dated entries, bounded counts and lengths, no
+  control characters, `sent` or `held: <why>` for a delivery. A cooldown in the
+  year 9999 would have stopped the heartbeat for good; an entry dated next year
+  would never have been pruned. A file that parses but fails validation is
+  treated as damaged: the ledger starts fresh with a warning, the processed log
+  fails closed. A mail subject or a note that is merely long is clipped, not
+  refused. `CommitDelivered` also validates each line it is handed and names
+  the ones it skipped. Every `fleet-db` command that writes (`remember`, `task`,
+  `mail`, `ack`, `note`, `sent`, `finding upsert`) now checks its arguments
+  first and refuses with `fleet-db: <reason>` and exit 2 before touching the
+  database (it used to answer a bad row number with a Python traceback). The
+  limits are the ones `checkin-bash-guard` already puts on the heartbeat, and a
+  test fails if they drift. `finding upsert` is not all-or-nothing: a bad row is
+  skipped and named, the rest are written. SECURITY.md has a new "Validating
+  what is written". **Upgrade:** nothing. If a hand-run `fleet-db` call that
+  used to work is refused, the message says which value to fix.
+  - **Fixed issues found by PrimeSec AI:** guardrail findings "Server-Side
+    Write Validation" (MEDIUM): the three state writers (10785629, 10785630,
+    10785631, 10785632) and the `fleet-db` commands (10785619, 10785620,
+    10785621, 10785622, 10785623, 10785624, 10785625, 10785627, 10785628) are
+    fixed by the entry above. The rule's wording asks for an application
+    service in front of the database; this is validation at the write in a
+    program with no server, so if a re-scan still flags a line, dismiss it as
+    already fixed, naming `internal/statefile` and `fleet-db`'s checks.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed

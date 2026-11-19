@@ -2069,7 +2069,7 @@ class RemediationNote(unittest.TestCase):
     def test_a_note_for_an_unknown_cve_is_not_an_error(self):
         # cti-jira can file a ticket for a CVE the findings table has not seen
         # yet. Failing here would make a filed ticket look unfiled.
-        r = self.run_db("note", "CVE-9999-1", "CR-1")
+        r = self.run_db("note", "CVE-9999-0001", "CR-1")
         self.assertEqual(r.returncode, 0)
         self.assertIn("no finding", r.stdout)
 
@@ -3745,8 +3745,17 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             self.assertIn("[cut ", clean.stdout)
             self.assertLess(max(len(x) for x in clean.stdout.splitlines()), 1100)
             # The same for fleet-db: what a memory says reaches the beat cleaned.
-            subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "remember", "scout",
-                            "t1", "note \x1b[31mred\x1b[0m"], check=True, env=env, capture_output=True)
+            # fleet-db now refuses control characters on write, so the hostile
+            # text is put in the way another writer could have: straight into
+            # the table. The cleaning on read is a second line, not the first.
+            subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "init"],
+                           check=True, env=env, capture_output=True)
+            import sqlite3
+            db = sqlite3.connect(os.path.join(env["FLEET_HOME"], "state", "memory.db"))
+            db.execute("INSERT INTO memories(category,topic,content,ts) VALUES(?,?,?,?)",
+                       ("scout", "t1", "note \x1b[31mred\x1b[0m", "2026-11-19T00:00:00+00:00"))
+            db.commit()
+            db.close()
 
             def db_recent(e):
                 return subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "recent"],
@@ -6024,6 +6033,143 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
             event = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             with self.subTest(example=ex[:40]):
                 self.assertIsNone(mod.verdict(event))
+
+
+class FleetDbWritesAreChecked(unittest.TestCase):
+    """Every fleet-db command that writes checks its arguments first, and
+    refuses with exit 2 before touching the database. checkin-bash-guard
+    already restricts what the heartbeat may send; this is what protects the
+    database from every other caller, and the limits are the guard's."""
+
+    DB = KIT / "fleet" / "bin" / "fleet-db"
+    GUARD = KIT / "fleet" / "bin" / "checkin-bash-guard"
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.env = {"PATH": "/usr/bin:/bin", "FLEET_HOME": self.home}
+        self.assertEqual(self.run_db("init").returncode, 0)
+
+    def run_db(self, *args, stdin=""):
+        return subprocess.run([sys.executable, "-sE", str(self.DB), *args], input=stdin,
+                              capture_output=True, text=True, env=self.env, check=False)
+
+    def count(self, table):
+        import sqlite3
+        c = sqlite3.connect(os.path.join(self.home, "state", "memory.db"))
+        try:
+            return c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # nosec B608
+        finally:
+            c.close()
+
+    def refused(self, table, *args, why):
+        before = self.count(table)
+        r = self.run_db(*args)
+        self.assertEqual(r.returncode, 2, (args, r.stdout, r.stderr))
+        self.assertIn("fleet-db:", r.stderr)
+        self.assertIn(why, r.stderr, args)
+        self.assertNotIn("Traceback", r.stderr, args)
+        self.assertEqual(self.count(table), before, f"{args} wrote a row it refused")
+
+    def test_what_every_caller_sends_today_still_works(self):
+        for args, table in ((("remember", "checkin", "beat_1", "quiet beat, 0 findings"), "memories"),
+                            (("task", "add", "look at the Qualys scan"), "tasks"),
+                            (("mail", "send", "digest", "note", "check the daily"), "mailbox"),
+                            (("sent", "2026-11-19", "1", "2", "3", "4", "5", "AAMkAD-request-id", "daily"), "digests")):
+            before = self.count(table)
+            r = self.run_db(*args)
+            self.assertEqual(r.returncode, 0, (args, r.stderr))
+            self.assertEqual(self.count(table), before + 1)
+        self.assertEqual(self.run_db("task", "done", "1").returncode, 0)
+        self.assertEqual(self.run_db("ack", "1").returncode, 0)
+        self.assertEqual(self.run_db("mail", "ack", "1").returncode, 0)
+
+    def test_remember_refuses_what_is_not_a_memory(self):
+        long_text = "x" * 1501
+        self.refused("memories", "remember", "Bad Cat", "topic", "text", why="category")
+        self.refused("memories", "remember", "cat", "bad topic", "text", why="topic")
+        self.refused("memories", "remember", "cat", "topic", long_text, why="too long")
+        self.refused("memories", "remember", "cat", "topic", "has \x1b[2J escape", why="control characters")
+        self.refused("memories", "remember", "cat", "topic", "   ", why="empty")
+        self.refused("memories", "remember", "cat", why="takes a category")
+
+    def test_task_and_ack_refuse_what_is_not_a_row_number(self):
+        for bad in ("abc", "0", "-3", "1e3", "99999999999", ""):
+            self.refused("tasks", "task", "done", bad, why="row number")
+            self.refused("mailbox", "ack", bad, why="row number")
+            self.refused("mailbox", "mail", "ack", bad, why="row number")
+        self.refused("tasks", "task", "add", "t" * 201, why="too long")
+        self.refused("tasks", "task", "add", why="empty")
+        self.refused("tasks", "task", "done", why="one row number")
+
+    def test_mail_send_refuses_a_bad_agent_kind_or_body(self):
+        self.refused("mailbox", "mail", "send", "bad agent", "k", "body", why="agent")
+        self.refused("mailbox", "mail", "send", "agent", "k;drop", "body", why="kind")
+        self.refused("mailbox", "mail", "send", "agent", "kind", "b" * 401, why="too long")
+        self.refused("mailbox", "mail", "send", "agent", why="takes an agent")
+
+    def test_sent_refuses_a_bad_date_count_or_kind(self):
+        ok = ["1", "2", "3", "4", "5", "mid"]
+        self.refused("digests", "sent", "2026-13-40", *ok, why="real date")
+        self.refused("digests", "sent", "yesterday", *ok, why="date")
+        self.refused("digests", "sent", "2026-11-19", "x", "2", "3", "4", "5", "mid", why="whole number")
+        self.refused("digests", "sent", "2026-11-19", "-1", "2", "3", "4", "5", "mid", why="outside")
+        self.refused("digests", "sent", "2026-11-19", *ok, "Daily!", why="digest kind")
+        self.refused("digests", "sent", "2026-11-19", "1", why="takes a date")
+
+    def test_note_refuses_a_bad_cve_or_a_huge_note_but_clears_on_empty(self):
+        self.assertEqual(self.run_db("finding", "upsert", stdin=json.dumps(
+            [{"cve": "CVE-2026-1234", "status": "PRESENT", "priority": "Sev5"}])).returncode, 0)
+        r = self.run_db("note", "CVE-2026-1234", "CR-100 filed")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.run_db("note", "CVE-2026-1234")  # empty clears
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(cleared)", r.stdout)
+        self.assertEqual(self.run_db("note", "not-a-cve", "x").returncode, 2)
+        self.assertEqual(self.run_db("note", "CVE-2026-1234", "n" * 1001).returncode, 2)
+        self.assertEqual(self.run_db("note").returncode, 2)
+
+    def test_a_finding_batch_skips_bad_rows_and_writes_the_rest(self):
+        rows = [
+            {"cve": "CVE-2026-1111", "status": "PRESENT", "host_count": 3, "cvss": 9.8, "epss": 0.5,
+             "kev": 1, "priority": "Sev5", "description": "d" * 5000},
+            {"cve": "nope"},
+            {"cve": "CVE-2026-2222", "cvss": 99},
+            {"cve": "CVE-2026-3333", "priority": "Critical"},
+            {"cve": "CVE-2026-4444", "host_count": "many"},
+            {"cve": "CVE-2026-5555", "description": "bad \x00 byte"},
+            "not an object",
+            {"cve": "CVE-2026-6666", "status": "NOT_PRESENT", "epss_pct": 0.0, "qids": "", "kev": False},
+        ]
+        r = self.run_db("finding", "upsert", stdin=json.dumps(rows))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("upserted 2 findings (6 skipped", r.stdout)
+        self.assertEqual(r.stderr.count("skipped:"), 6, r.stderr)
+        self.assertEqual(self.count("findings"), 2)
+        self.assertNotEqual(self.run_db("finding", "upsert", stdin="{not json").returncode, 0)
+
+    def test_the_limits_are_the_heartbeat_guards(self):
+        """The guard restricts the heartbeat's calls; the database refuses the
+        same things from every caller. They must not drift apart."""
+        import importlib.machinery
+        import importlib.util
+
+        def load_file(name, path):
+            loader = importlib.machinery.SourceFileLoader(name, str(path))
+            spec = importlib.util.spec_from_loader(name, loader)
+            mod = importlib.util.module_from_spec(spec)
+            loader.exec_module(mod)
+            return mod
+
+        guard = load_file("checkin_guard_for_db", self.GUARD)
+        db = load_file("fleet_db_for_guard", self.DB)
+        self.assertEqual(db.MAX_MEMORY_CONTENT, guard.MAX_MEMORY_CONTENT)
+        self.assertEqual(db.MAX_MAIL_BODY, guard.MAX_BOARD_MESSAGE)
+        self.assertEqual(db.ID_RX.pattern, guard.ID.pattern)
+        self.assertEqual(db.NUM_ID_RX.pattern, guard.NUM_ID.pattern)
+        src = self.GUARD.read_text()
+        self.assertIn(f'r"{db.CATEGORY_RX.pattern}"', src)
+        self.assertIn(f'r"{db.TOPIC_RX.pattern}"', src)
 
 
 class AuditTrailUnits(unittest.TestCase):
