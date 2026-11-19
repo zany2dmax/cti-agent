@@ -280,17 +280,24 @@ esac
 
 # Outbound reachability. firewalld does not filter egress by default, so a
 # failure here is almost always an Azure NSG or a proxy.
+#
+# reach HOST [PORT] - one TCP connect, 6 seconds. The host is passed to bash as
+# an argument, never spliced into the -c string: the second set of hosts comes
+# from fleet.env, and this script runs as root.
+reach() {
+  if timeout 6 bash -c '</dev/tcp/$1/$2' _ "$1" "${2:-443}" 2>/dev/null; then
+    ok "$1:${2:-443}"
+  else
+    warn "$1:${2:-443} unreachable - check the Azure NSG or proxy"
+  fi
+}
 bold "Outbound connectivity"
 for host in login.microsoftonline.com graph.microsoft.com \
             services.nvd.nist.gov api.first.org www.cisa.gov \
             api.msrc.microsoft.com www.bleepingcomputer.com blog.qualys.com; do
-  if timeout 6 bash -c "</dev/tcp/$host/443" 2>/dev/null; then
-    ok "$host:443"
-  else
-    warn "$host:443 unreachable - check the Azure NSG or proxy"
-  fi
+  reach "$host"
 done
-info "also needed: your Qualys pod (QUALYS_BASE_URL) - checked after config"
+info "the hosts your fleet.env names (Qualys, Jira, ...) are checked after config"
 
 # ───────────────────────────────────────────────────── service account ───────
 bold "Service account: $FLEET_USER"
@@ -619,6 +626,60 @@ else
   info "  one domain per line, 'send' after those that send mail; root:$FLEET_GROUP 0640"
 fi
 info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
+
+# ─────────────────────────────────── outbound, to the hosts fleet.env names ───
+# The fixed hosts were checked before config. These depend on settings: the
+# Qualys pod, Jira, and the optional services, each only when its setting is
+# filled in. A value that is not a plain host name (an edit gone wrong, or a
+# template placeholder) is reported and never dialled.
+bold "Outbound connectivity (from fleet.env)"
+# urlhost URL - the host part of https://host[:port]/path, or empty.
+urlhost() {
+  local h="${1#*://}"
+  h="${h%%/*}"; h="${h%%\?*}"; h="${h%%:*}"
+  printf '%s' "$h"
+}
+# reach_cfg WHAT HOST [PORT] - reach a host taken from fleet.env.
+reach_cfg() {
+  case "$2" in
+    "")  return ;;
+    *example*|yourorg.*|*'<'*) info "$1: $2 is still a placeholder - not checked" ;;
+    *[!A-Za-z0-9.-]*|-*) warn "$1: '$2' is not a host name - fix it in fleet.env" ;;
+    *) reach "$2" "${3:-443}" ;;
+  esac
+}
+if [ -r "$CONF_DIR/fleet.env" ]; then
+  checked=0
+  if [ "$(cfgval LOOKUP_PROVIDER)" != none ]; then
+    if [ -n "$(cfgval QUALYS_BASE_URL)" ]; then
+      reach_cfg "Qualys pod" "$(urlhost "$(cfgval QUALYS_BASE_URL)")"; checked=1
+    else
+      warn "QUALYS_BASE_URL is unset - the Qualys lanes cannot run"
+    fi
+  fi
+  # Scoped tokens go through api.atlassian.com whatever JIRA_BASE_URL says.
+  if [ -n "$(cfgval JIRA_CLOUD_ID)" ]; then
+    reach_cfg "Jira" api.atlassian.com; checked=1
+  elif [ -n "$(cfgval JIRA_API_TOKEN)" ]; then
+    reach_cfg "Jira" "$(urlhost "$(cfgval JIRA_BASE_URL)")"; checked=1
+  fi
+  if [ -n "$(cfgval FALCON_BASE_URL)" ]; then
+    reach_cfg "CrowdStrike" "$(urlhost "$(cfgval FALCON_BASE_URL)")"; checked=1
+  fi
+  if [ -n "$(cfgval GODADDY_PAT)" ]; then
+    reach_cfg "GoDaddy" api.godaddy.com; checked=1
+  fi
+  if [ -n "$(cfgval POD_CLUSTER_ID)" ]; then
+    reach_cfg "Proofpoint on Demand log" logstream.proofpoint.com; checked=1
+  fi
+  if [ -n "$(cfgval ANTHROPIC_API_KEY)$(cfgval CLAUDE_CODE_OAUTH_TOKEN)" ]; then
+    reach_cfg "Claude (check-in)" api.anthropic.com; checked=1
+  fi
+  [ "$checked" = 1 ] || info "nothing in fleet.env names a host to check yet"
+  info "port 25 for the domains lane's SMTP probe: RUNBOOK section 4b"
+else
+  info "no readable $CONF_DIR/fleet.env - skipped"
+fi
 
 # ────────────────────────────────────────────────────────── the Go agent ─────
 bold "Go agent"

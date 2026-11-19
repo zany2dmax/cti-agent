@@ -81,6 +81,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   so a desktop app of the same name can't make one look known. Other apps
   with no vendor are still not checked.
 
+### Fixed
+
+- **The installer now checks the hosts fleet.env names.** It printed "also
+  needed: your Qualys pod (QUALYS_BASE_URL) - checked after config", and
+  nothing after config checked it. A new "Outbound connectivity (from
+  fleet.env)" section, after the config section, tries port 443 on each host
+  whose setting is filled in:
+  - the Qualys pod;
+  - Jira (`api.atlassian.com` with `JIRA_CLOUD_ID`, otherwise the
+    `JIRA_BASE_URL` host);
+  - CrowdStrike (`FALCON_BASE_URL`);
+  - GoDaddy, the Proofpoint on Demand log stream, and `api.anthropic.com` for
+    the check-in.
+
+  A template placeholder is reported and not tried. So is anything that isn't
+  a plain host name: the installer runs as root and the value comes from a
+  file. Every check now passes the host to bash as an argument, not inside the
+  `-c` string.
+
 ---
 
 ## 1.6.7 — 2026-11-18

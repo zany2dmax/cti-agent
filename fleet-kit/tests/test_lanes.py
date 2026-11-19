@@ -2509,6 +2509,54 @@ class TestFileShape(unittest.TestCase):
                                      capture_output=True, text=True, env=env, check=False)
                 self.assertEqual(out.stdout, want, unit)
 
+    def test_the_hosts_fleet_env_names_are_checked_after_config(self):
+        """The installer said "checked after config" and never checked.
+
+        It printed "also needed: your Qualys pod (QUALYS_BASE_URL) - checked
+        after config", and nothing after config looked at QUALYS_BASE_URL, Jira
+        or any other host fleet.env names. Now a section after config does. Its
+        helpers run here from the installer's own text: a host comes out of a
+        URL, a placeholder or anything that is not a plain host name is never
+        dialled (the installer runs as root, and the value comes from a file),
+        and a real host is.
+        """
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        promise = installer.find("checked after config")
+        section = installer.find('bold "Outbound connectivity (from fleet.env)"')
+        config = installer.find('if [ -f "$CONF_DIR/fleet.env" ]; then')
+        self.assertGreater(promise, 0)
+        self.assertGreater(section, config, "the fleet.env hosts must be checked after config")
+        self.assertNotIn('bash -c "</dev/tcp/$', installer,
+                         "pass the host to bash as an argument, never inside the -c string")
+        helpers = ""
+        for name in ("urlhost", "reach_cfg"):
+            m = re.search(r"^%s\(\) \{\n.*?^\}\n" % name, installer, re.S | re.M)
+            self.assertIsNotNone(m, name + "() not found in the installer")
+            helpers += m.group(0)
+        stubs = ('ok() { echo "ok $*"; }\ninfo() { echo "info $*"; }\nwarn() { echo "warn $*"; }\n'
+                 'reach() { echo "DIAL $1 ${2:-443}"; }\n')
+
+        def sh(call, *args):
+            return subprocess.run(["bash", "-c", stubs + helpers + call, "t", *args],
+                                  capture_output=True, text=True, check=False).stdout
+
+        for url, host in (("https://qualysapi.qg3.apps.qualys.com", "qualysapi.qg3.apps.qualys.com"),
+                          ("https://qualysapi.qualys.com/api/2.0/", "qualysapi.qualys.com"),
+                          ("https://api.us-2.crowdstrike.com:443/x?y=1", "api.us-2.crowdstrike.com"),
+                          ("api.godaddy.com", "api.godaddy.com"), ("", "")):
+            self.assertEqual(sh('urlhost "$1"', url), host, url)
+        self.assertEqual(sh('reach_cfg Jira "$1"', "acme.atlassian.net"), "DIAL acme.atlassian.net 443\n")
+        self.assertEqual(sh('reach_cfg Jira "$1"', ""), "")
+        for placeholder in ("yourorg.atlassian.net", "qualysapi.example.com", "<pod>"):
+            out = sh('reach_cfg X "$1"', placeholder)
+            self.assertNotIn("DIAL", out, placeholder)
+            self.assertIn("placeholder", out, placeholder)
+        for bad in ("a.com;reboot", "$(id)", "a b", "-oProxyCommand=x", "a.com/../x", "a`id`"):
+            out = sh('reach_cfg X "$1"', bad)
+            self.assertNotIn("DIAL", out, bad)
+            self.assertTrue(out.startswith("warn") or out.startswith("info"), (bad, out))
+
     def test_every_runner_sources_fleet_env(self):
         """The runners load the config; the Go binaries only read the environment.
 
