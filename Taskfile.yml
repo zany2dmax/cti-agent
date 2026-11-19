@@ -476,8 +476,20 @@ tasks:
       - task: lint:py
       - task: bandit
       - task: lint:shell
+      - task: sbom
       - task: cheatsheet:check
       - git push
+
+  sbom:
+    desc: Write the CycloneDX SBOM to dist/sbom and prove the no-dependency rule
+    # The fleet is Go and bash/Python with no third-party code, and the rule is
+    # kept by a check, not a promise: scripts/sbom.py reads go.mod and every
+    # Python import and fails when either holds anything but the standard
+    # library. It runs in `ship` and `check`, so the SBOM is rewritten every
+    # time the code is shipped, a dependency added by accident turns the ship
+    # red, and the file is a build artifact (dist/ is not committed).
+    cmds:
+      - python3 scripts/sbom.py
 
   cheatsheet:check:
     desc: "Fail if CHEATSHEET.md names a different release than the latest tag"
@@ -629,6 +641,7 @@ tasks:
       - task: lint:py
       - task: bandit
       - task: lint:shell
+      - task: sbom
 
 # ── build ────────────────────────────────────────────────────────────────────
 

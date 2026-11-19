@@ -315,6 +315,30 @@ journal says why. Advisory triage in the digest stays off until you set
     program with no server, so if a re-scan still flags a line, dismiss it as
     already fixed, naming `internal/statefile` and `fleet-db`'s checks.
 
+- **An SBOM, made every time the code ships, that proves the no-dependency
+  rule (`task sbom`).** `scripts/sbom.py` writes a CycloneDX 1.5 SBOM to
+  `dist/sbom/` (each Go command as an application, the lanes as one, the Go
+  standard library at the toolchain's version, the host's `python3` and `bash`
+  as platform) and first reads `go.mod` and every Python file's imports: if the
+  module requires anything, or a lane imports anything that is not the standard
+  library, it exits 1. `task ship` and `task check` run it, so a dependency added
+  by accident turns the ship red, and the SBOM is rewritten on every ship and
+  cannot go stale. Deterministic for a commit; `dist/` is not committed.
+  SECURITY.md "Supply chain" says so, and "Known gaps and accepted risks" now
+  records the four findings the owner has decided: the Go source on the
+  production host (accepted until the RPM), test sends using real data
+  (accepted: they go only to the operator), no DAST (not applicable: nothing
+  listens), no FIPS 140-3 (not required). **Upgrade:** nothing; it is build
+  tooling and never installed on the box.
+  - **Fixed issues found by PrimeSec AI:** guardrail finding "SBOM for All
+    Applications" (11583425) is fixed by the entry above. "FIPS 140-3
+    Cryptographic Compliance" (10785588, 10785589, 10785590, 10785591,
+    10785592, 11583438, 11583439, 11583440, 11583441, 11583442) was dismissed
+    in Prime as not applicable on 2026-11-19. "No Source Code in Production"
+    (10785582, 11583418), "Mask Production Data in Testing" (11583415,
+    11583416, 11583417) and "Dynamic Application Security Testing" (10785584)
+    are decisions, not code, and are dismissed in Prime with the reasons above.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed

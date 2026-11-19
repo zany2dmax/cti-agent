@@ -1097,6 +1097,16 @@ transitive dependency tree to audit, no dependency-confusion surface, no
 package-repository compromise in the build path, and nothing to update when a
 popular library has an advisory.
 
+**The SBOM proves it instead of promising it.** `task sbom` (run by `task ship`
+and `task check`) writes a CycloneDX 1.5 SBOM to `dist/sbom/` and, before it
+does, reads `go.mod` and every Python file's imports (`scripts/sbom.py`). It
+lists each Go command as an application, the lanes as one, the Go standard
+library at the toolchain's version, and the host's `python3` and `bash` as
+platform; and it fails, so the ship fails, if `go.mod` requires a module or a
+lane imports anything that is not the standard library. A dependency added by
+accident turns the next ship red. The file is a build artifact (`dist/` is not
+committed) and is deterministic for a commit.
+
 The cost is more code written here. The benefit is that `govulncheck` has a
 small and comprehensible surface — which matters, because this system parses
 untrusted HTML and XML from the public internet through `encoding/xml` and
@@ -1350,6 +1360,33 @@ unusually clean, verify the component did work — not that it exited 0.**
 
 Stated rather than discovered. Everything here was found by fact-checking this
 document against the code; several are worth fixing and are not yet fixed.
+
+**ACCEPTED — the Go source is on the production host.** `cti-agent-update`
+pulls the repository and the installer builds the binaries on the host, so the
+source checkout stays under `/opt/cti-agent/agent` on the system that runs the
+fleet. It is root-owned and read-only to the service account, so a compromised
+lane cannot change the code it will run next; what it does expose is the source
+to someone who is already root. The planned fix is an RPM installed from dnf,
+which removes the build step from the host. Until then this is accepted.
+
+**ACCEPTED — a test send uses real data.** `--to-dev` renders the real report
+and sends it to `FLEET_DEV_EMAIL` only, subject marked `[DEV TEST]`, because the
+point of a test send is to see the real output before the real one. The
+recipient is the operator, the same person the real report reaches; a dry run
+sends nothing at all. Masking the data would make the test send a test of
+something else.
+
+**NOT APPLICABLE — dynamic application security testing.** The fleet has no web
+application and listens on no port: it is timers running commands that call out
+to other services (see "Transport security"). There is no running application to
+point a DAST scanner at. The AppSec lane scans *other* teams' web applications;
+that is its job, not a property of this system.
+
+**NOT APPLICABLE — FIPS 140-3.** The owner has decided it is not required for
+this system (2026-11-19). It would be a property of the host's cryptographic
+module and mode, not of this code, and the lanes already enforce TLS 1.2 or later
+with certificate and host name verification. Revisit only if a contract,
+customer or policy requires it.
 
 **OPEN, VERIFIED, ACCEPTED FOR NOW — the Graph app is not scoped to one
 mailbox.**
