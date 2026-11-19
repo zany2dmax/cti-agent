@@ -44,9 +44,9 @@ func main() {
 	// Advisory triage's input. run-digest passes it when TRIAGE_ENABLED is
 	// on; without it nothing about this run changes.
 	advisoriesOut := flag.String("advisories-out", "",
-		"also write every message from a threat-intel sender (TRIAGE_SENDERS, default "+
-			"MAILBOX_FEED_SENDERS; authenticated; not auto-replies) to this file, for "+
-			"cti-triage --batch")
+		"also write every message that is threat intel to this file, for cti-triage --batch: "+
+			"one holding a CVE, ATT&CK ID, defanged indicator or link, public IP or file hash, "+
+			"from anyone, or any from an authenticated TRIAGE_SENDERS sender; never auto-replies")
 	flag.Parse()
 
 	// fleet.env. run-digest sources it in shell before calling this, so under
@@ -108,10 +108,6 @@ func main() {
 	var skippedSubjects []string
 	var advisories []triage.Advisory
 	intel := triageSenders(cfg.MailboxFeedSenders)
-	if *advisoriesOut != "" && len(intel) == 0 {
-		log.Printf("advisories: no threat-intel senders configured (TRIAGE_SENDERS or " +
-			"MAILBOX_FEED_SENDERS), so nothing is saved for triage")
-	}
 	for _, msg := range messages {
 		// Never read our own report back in.
 		//
@@ -166,17 +162,22 @@ func main() {
 				asked[cve] = true
 			}
 		}
-		// Threat intel is advisory triage's to read, when it is on: mail from
-		// a sender on the threat-intel list whom the receiving server
-		// authenticated, with or without CVEs. Its CVE items are the digest's;
-		// triage judges the rest. Everything else in the mailbox - supplier
-		// requests, replies, auto-replies, colleagues' threads - is not
-		// threat intel and is never sent to a model. Saved here because only
-		// this run has the body before the cleanup lane may archive it.
-		if *advisoriesOut != "" && intelSource(msg, intel) &&
-			!msg.IsAutoReply() && !mailbox.AutoReplySubject(msg.Subject) {
-			advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
-				msg.From, msg.Subject, true, msg.BodyText))
+		// Threat intel is advisory triage's to read, when it is on. Anyone
+		// may send it - a feed, a vendor, a colleague forwarding an advisory
+		// - so the content decides, not the sender: a message holding a CVE,
+		// an ATT&CK ID, a defanged indicator or link, a public IP or a file
+		// hash (triage.IntelMarkers), with or without CVEs; its CVE items are
+		// the digest's and triage judges the rest. An authenticated sender on
+		// TRIAGE_SENDERS is read whatever it holds. Everything else - supplier
+		// requests, W9 and ACH threads, replies, auto-replies - is never sent
+		// to a model. Saved here because only this run has the body before
+		// the cleanup lane may archive it.
+		if *advisoriesOut != "" && !msg.IsAutoReply() && !mailbox.AutoReplySubject(msg.Subject) {
+			listed := intelSource(msg, intel)
+			if listed || len(triage.IntelMarkers(text)) > 0 {
+				advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
+					msg.From, msg.Subject, listed, msg.BodyText))
+			}
 		}
 		subjects = append(subjects, report.ScannedEmail{
 			Subject:  msg.Subject,
@@ -349,7 +350,7 @@ func main() {
 			log.Printf("WARNING: could not write the advisories for triage (%s); "+
 				"today's advisories without a CVE will not be triaged", safelog.Line(err.Error()))
 		} else {
-			log.Printf("advisories: %d message(s) from threat-intel senders saved for triage", len(advisories))
+			log.Printf("advisories: %d threat-intel message(s) saved for triage", len(advisories))
 		}
 	}
 

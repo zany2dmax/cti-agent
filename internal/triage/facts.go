@@ -307,6 +307,12 @@ func compareVersions(a, b string) (int, bool) {
 	return 0, true
 }
 
+// HasLookups reports whether code has anything of its own to look up in the
+// advisory: an indicator, a hash, a defanged link's host, or a technique.
+func HasLookups(body string, ex Extraction) bool {
+	return len(ex.Techniques) > 0 || len(indicators(body, ex)) > 0
+}
+
 var hashRE = regexp.MustCompile(`(?i)\b(?:[a-f0-9]{64}|[a-f0-9]{32})\b`)
 
 // indicators is the lookup list: code's extracted indicators refanged, the

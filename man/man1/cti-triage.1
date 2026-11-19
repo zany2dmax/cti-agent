@@ -90,7 +90,8 @@ is how the daily digest runs it (TRIAGE_ENABLED, see
 every threat-intel message ingest saved. The reader lists each one's
 items with their CVEs; items naming a CVE found in the message are left to
 the CVE report and listed, and the rest go through the lookups and the
-judge, each message with its own
+judge. A message where the reader finds nothing and code has nothing to look
+up is marked not threat intel, and the judge is not asked. Each message has its own
 .BR \-\-timeout ,
 into one
 .B cti\-advisories/1

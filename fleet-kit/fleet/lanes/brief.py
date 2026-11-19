@@ -756,7 +756,7 @@ def _adv_results(rep):
     """Results in reading order: sightings first, then the best relevance."""
     out = []
     for r in rep.get("results") or []:
-        if not isinstance(r, dict):
+        if not isinstance(r, dict) or r.get("not_threat_intel"):
             continue
         v = r.get("verdicts") if isinstance(r.get("verdicts"), dict) else {}
         verdicts = [x for x in (v.get("verdicts") or []) if isinstance(x, dict)]
@@ -767,6 +767,12 @@ def _adv_results(rep):
         out.append((0 if sightings else 1, best, r, verdicts, sightings))
     out.sort(key=lambda t: (t[0], t[1]))
     return out
+
+
+def _adv_not_intel(rep):
+    """Subjects of the messages the reader found no threat in: one line."""
+    return [str(r.get("subject") or "(no subject)") for r in rep.get("results") or []
+            if isinstance(r, dict) and r.get("not_threat_intel")]
 
 
 def _adv_worth(rep):
@@ -789,7 +795,10 @@ def _adv_name(x):
 
 def _adv_sender(r):
     who = str(r.get("sender") or "unknown sender")
-    return who + ("" if r.get("trusted_sender") else " (not an authenticated feed)")
+    if r.get("trusted_sender"):
+        return who + " (a listed threat-intel sender)"
+    why = str(r.get("why") or "")
+    return who + (f" - picked for {why}" if why else "")
 
 
 def advisories_section(data):
@@ -844,6 +853,11 @@ def advisories_section(data):
                 parts.append(f'<div style="color:#718096">Note: {esc(pr)}</div>')
             rows.append('<tr><td style="padding:6px 0;vertical-align:top;'
                         'border-bottom:1px solid #edf2f7">' + "".join(parts) + '</td></tr>')
+        quiet = _adv_not_intel(rep)
+        if quiet:
+            rows.append('<tr><td style="padding:4px 0;color:#718096">Read, no threat found: '
+                        f'{esc("; ".join(quiet[:8]))}'
+                        f'{esc(f" (+{len(quiet) - 8} more)") if len(quiet) > 8 else ""}</td></tr>')
         if rep.get("over_ingest_cap"):
             rows.append(f'<tr><td style="padding:4px 0;color:#718096">+{esc(rep["over_ingest_cap"])} '
                         'more not saved for triage (over the ingest cap).</td></tr>')
@@ -905,6 +919,10 @@ def advisories_text(data):
                     lines.append(f"      Check: {c}")
         for pr in (r.get("problems") or [])[:3]:
             lines.append(f"    Note: {pr}")
+    quiet = _adv_not_intel(rep)
+    if quiet:
+        more = f" (+{len(quiet) - 8} more)" if len(quiet) > 8 else ""
+        lines.append(f"  Read, no threat found: {'; '.join(quiet[:8])}{more}")
     if rep.get("over_ingest_cap"):
         lines.append(f"  +{rep['over_ingest_cap']} more not saved for triage (over the ingest cap).")
     lines.append(f"  {ADV_NOTE}")

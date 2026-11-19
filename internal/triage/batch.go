@@ -47,7 +47,8 @@ type Advisory struct {
 	Received  time.Time `json:"received"`
 	Sender    string    `json:"sender"`
 	Subject   string    `json:"subject"`
-	Trusted   bool      `json:"trusted_sender"` // an authenticated feed sender
+	Trusted   bool      `json:"trusted_sender"` // an authenticated TRIAGE_SENDERS sender
+	Why       string    `json:"why"`            // why ingest picked it: the sender, or what it holds
 	Body      string    `json:"body"`
 	Truncated bool      `json:"body_truncated,omitempty"`
 }
@@ -72,9 +73,14 @@ func CVEItemLines(s *Subjects) []string {
 	return out
 }
 
-// NewAdvisory caps the body.
+// NewAdvisory caps the body. why says what made it threat intel.
 func NewAdvisory(id string, received time.Time, sender, subject string, trusted bool, body string) Advisory {
 	a := Advisory{ID: id, Received: received, Sender: sender, Subject: subject, Trusted: trusted, Body: body}
+	if trusted {
+		a.Why = "a threat-intel sender (TRIAGE_SENDERS)"
+	} else {
+		a.Why = strings.Join(IntelMarkers(subject+"\n"+body), ", ")
+	}
 	if len(a.Body) > MaxAdvisoryBody {
 		a.Body, a.Truncated = a.Body[:MaxAdvisoryBody], true
 	}
@@ -131,10 +137,15 @@ type AdvisoryResult struct {
 	Sender    string    `json:"sender"`
 	Received  time.Time `json:"received"`
 	Trusted   bool      `json:"trusted_sender"`
+	Why       string    `json:"why,omitempty"`
 	Verdicts  *Verdicts `json:"verdicts,omitempty"`
 	// Items the reader found that name a CVE: the CVE digest reports them,
 	// so they are listed here, not judged. "title (CVE-..., ...)".
 	CVEItems []string `json:"cve_items,omitempty"`
+	// NotIntel: the reader found no threat in it and code had nothing to
+	// look up - a newsletter's chatter, a reply quoting an advisory ID.
+	// Listed as one line; nobody was asked to judge it.
+	NotIntel bool     `json:"not_threat_intel,omitempty"`
 	Problems []string `json:"problems,omitempty"` // a stage that failed; the verdicts say what survived
 	Skipped  string   `json:"not_triaged,omitempty"`
 }

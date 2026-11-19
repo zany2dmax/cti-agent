@@ -154,8 +154,9 @@ fi
 
 # ── ADVISORY TRIAGE (TRIAGE_ENABLED) ────────────────────────────────────────
 # Daily only. TRIAGE_ENABLED is 0 or 1; only 1 turns it on. Ingest saves
-# every message from a threat-intel sender (TRIAGE_SENDERS, default
-# MAILBOX_FEED_SENDERS) beside the enriched file; step 2c triages them
+# every threat-intel message - from anyone, if it holds a CVE, ATT&CK ID,
+# defanged indicator or link, public IP or file hash; any from an
+# authenticated TRIAGE_SENDERS sender - beside the enriched file; step 2c triages them
 # and leaves the report there too, which is where brief.py looks. Both names
 # follow ENRICHED, so a dry run's land in its own directory. Today's old
 # copies are removed just before ingest (after the already-sent check, so a
@@ -353,7 +354,7 @@ if [ -n "$TRIAGE_ON" ]; then
   if [ ! -x "$TRIAGE" ]; then
     say "triage: $TRIAGE not installed - skipped"
   elif [ ! -s "$ADV_IN" ]; then
-    say "triage: ingest saved no threat-intel mail (TRIAGE_SENDERS) - nothing to triage"
+    say "triage: ingest found no threat-intel mail - nothing to triage"
   else
     say "triage: reader, Falcon and judge for each threat-intel message (items without a CVE)"
     if timeout 25m "$TRIAGE" --batch "$ADV_IN" --out "$ADV_OUT" --batch-timeout 20m; then

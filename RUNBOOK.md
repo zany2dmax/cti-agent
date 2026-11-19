@@ -2869,15 +2869,11 @@ TRIAGE_ENABLED=1
 TRIAGE_MAX_PER_RUN=10
 ```
 
-**Who counts as threat intel** is your list. Check it before turning this on:
-
-```bash
-sudo grep -E '^(MAILBOX_FEED_SENDERS|TRIAGE_SENDERS)=' /etc/cti-agent/fleet.env
-```
-
-Empty means nothing is triaged, and ingest says so. Set `TRIAGE_SENDERS` if
-the triage list should differ from the feed list (same `name@example.com`
-or `@example.com` form).
+**Prose-only advisories.** An article forwarded with no CVE, technique ID,
+indicator or hash in it isn't picked up from just anyone. Put feeds that
+write that way on `TRIAGE_SENDERS` (or `MAILBOX_FEED_SENDERS`), in
+`name@example.com` or `@example.com` form. Their authenticated mail is read
+whatever it holds.
 
 `TRIAGE_ENABLED` is `0` or `1`. Only `1` turns it on. `0` or unset is off,
 and the digest's log says `triage: off`. Any other value is also off, and the
@@ -2892,15 +2888,19 @@ sudo journalctl -u cti-agent-digest --since today | grep -E "triage|advisories"
 
 What the daily does with it:
 
-1. **Ingest** saves every message from a threat-intel sender to
-   `state/enriched-DATE-advisory-input.json`. That means a sender on
-   `TRIAGE_SENDERS` (default: `MAILBOX_FEED_SENDERS`) whom Exchange
-   authenticated, with or without CVEs. Nothing else in the mailbox is
-   sent to a model: not supplier requests, colleagues' threads, scanner
-   notices or auto-replies.
+1. **Ingest** saves every threat-intel message to
+   `state/enriched-DATE-advisory-input.json`, whoever sent it. A message
+   counts if it holds a CVE, an ATT&CK ID, a defanged indicator or link, a
+   public IP or a file hash, so a colleague's forward counts. So does
+   anything from an authenticated sender on `TRIAGE_SENDERS` (default:
+   `MAILBOX_FEED_SENDERS`), even prose with none of those. Supplier
+   requests, W9 and ACH threads and auto-replies hold none and never reach
+   a model.
 2. **Step 2c** runs `cti-triage --batch` on it. The reader lists each
    message's items and their CVEs. Items naming a CVE are left to the CVE
-   report and listed as such. The rest go through Falcon and the judge. It judges at most
+   report and listed as such. The rest go through Falcon and the judge. A message where the reader finds
+   nothing, and code has nothing to look up, is listed on one line as "no
+   threat found". The judge isn't asked about it. It judges at most
    `TRIAGE_MAX_PER_RUN` and starts none after 20 minutes. The report goes
    to `state/enriched-DATE-advisories.json`.
 3. **The brief** lists every one under **FLEET ADVISORIES**: sightings

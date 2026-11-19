@@ -50,10 +50,13 @@ journal says why. Advisory triage in the digest stays off until you set
 ### Added
 
 - **Advisory triage in the daily digest: FLEET ADVISORIES (`TRIAGE_ENABLED`,
-  off by default).** With it on, ingest saves every message from an
-  authenticated threat-intel sender (`TRIAGE_SENDERS`, default
-  `MAILBOX_FEED_SENDERS`), with or without CVEs; nothing else in the mailbox
-  goes to a model. run-digest runs the new `cti-triage --batch` on them
+  off by default).** With it on, ingest saves every threat-intel message,
+  whoever sent it: one holding a CVE, ATT&CK ID, defanged indicator or link,
+  public IP or file hash, so a colleague's forward counts; and anything from
+  an authenticated `TRIAGE_SENDERS` sender (default `MAILBOX_FEED_SENDERS`).
+  Supplier requests, W9 and ACH threads and auto-replies never reach a model.
+  A message the reader finds no threat in is one "no threat found" line, and
+  the judge is not asked. run-digest runs the new `cti-triage --batch` on them
   before the brief: the reader lists each message's items and their CVEs
   (`cti-subjects/2`), items naming a CVE are left to the CVE report and
   listed, and the rest go through the Falcon lookups and the judge, authenticated feed senders

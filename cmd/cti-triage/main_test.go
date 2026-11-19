@@ -375,3 +375,32 @@ func TestBatchLeavesCVEItemsToTheCVEDigest(t *testing.T) {
 		t.Fatal("no verdicts block")
 	}
 }
+
+func TestBatchMarksMailWithNoThreatAsNotIntel(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "r.md", "reader"))
+	t.Setenv("TRIAGE_JUDGE_INSTRUCTIONS", write(t, "j.md", "judge"))
+	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
+	p := filepath.Join(t.TempDir(), "in.json")
+	msgs := []triage.Advisory{triage.NewAdvisory("id", time.Unix(0, 0), "news@intel.example", "This week in security", true,
+		"Welcome to our newsletter. Our webinar is on Tuesday.")}
+	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	judged := false
+	callModel = func(_ context.Context, m triage.ModelCall, _ string) (string, triage.Usage, error) {
+		if m.Instructions == "judge" {
+			judged = true
+		}
+		return `{"schema":"cti-subjects/2","items":[],"refusal":null}`, triage.Usage{}, nil
+	}
+	out := filepath.Join(t.TempDir(), "adv.json")
+	var o, e bytes.Buffer
+	if code := run([]string{"--batch", p, "--out", out}, &o, &e); code != exitOK {
+		t.Fatalf("exit %d: %s", code, e.String())
+	}
+	r := readReport(t, out).Results[0]
+	if judged || !r.NotIntel {
+		t.Fatalf("judged %v, result %+v", judged, r)
+	}
+}

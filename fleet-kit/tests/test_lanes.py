@@ -1536,6 +1536,8 @@ class DigestAdvisories(unittest.TestCase):
                                         "facts": [{"id": "F1", "text": "indicator \"evil.example\" seen on 2"}],
                                         "suggested_checks": ["isolate the 2 hosts"]}]}},
             {"subject": "Third", "sender": "c@d.example", "not_triaged": "over the cap of 2"},
+            {"subject": "Re: lunch", "sender": "x@corp.example", "why": "1 public IP address(es)",
+             "not_threat_intel": True, "verdicts": {"sightings": [], "verdicts": []}},
             {"subject": "CVE roundup", "sender": "feed@example.com", "trusted_sender": True,
              "cve_items": ["Chrome bug (CVE-2026-1)"],
              "verdicts": {"sightings": [], "verdicts": []}},
@@ -1553,7 +1555,10 @@ class DigestAdvisories(unittest.TestCase):
         self.assertIn("Not triaged: over the cap of 2", txt)
         self.assertIn("Raised by code:", txt)
         self.assertIn("Check: isolate the 2 hosts", txt)
-        self.assertIn("(not an authenticated feed)", txt)
+        self.assertIn("a@b.example", txt)
+        self.assertIn("(a listed threat-intel sender)", txt)
+        self.assertIn("Read, no threat found: Re: lunch", txt)
+        self.assertNotIn("    from x@corp.example", txt)
         self.assertIn("Model cost: $0.06", txt)
         self.assertIn("In the CVE report above, not judged here: Chrome bug (CVE-2026-1)", txt)
 

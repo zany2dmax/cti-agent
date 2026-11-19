@@ -44,7 +44,7 @@ func runBatch(inPath, outPath string, perItem, whole time.Duration, logf func(st
 		Read: len(in.Messages) + in.Dropped, Dropped: in.Dropped}
 	msgs := triage.Order(in.Messages)
 	result := func(a triage.Advisory) triage.AdvisoryResult {
-		return triage.AdvisoryResult{MessageID: a.ID, Subject: a.Subject, Sender: a.Sender, Received: a.Received, Trusted: a.Trusted}
+		return triage.AdvisoryResult{MessageID: a.ID, Subject: a.Subject, Sender: a.Sender, Received: a.Received, Trusted: a.Trusted, Why: a.Why}
 	}
 	finish := func(code int) int {
 		if err := triage.WriteAdvisoryReport(outPath, rep); err != nil {
@@ -96,9 +96,9 @@ func runBatch(inPath, outPath string, perItem, whole time.Duration, logf func(st
 			continue
 		}
 		ctx, cancel := context.WithTimeout(batchCtx, perItem)
-		v, problems, cveItems, u := triageOne(ctx, src, a, readerInstr, logf)
+		v, problems, cveItems, notIntel, u := triageOne(ctx, src, a, readerInstr, logf)
 		cancel()
-		r.Verdicts, r.Problems, r.CVEItems = &v, problems, cveItems
+		r.Verdicts, r.Problems, r.CVEItems, r.NotIntel = &v, problems, cveItems, notIntel
 		rep.Triaged++
 		rep.CostUSD += u.CostUSD
 		rep.Tokens += u.InputTokens + u.OutputTokens + u.CacheRead + u.CacheWrite
@@ -115,10 +115,12 @@ func runBatch(inPath, outPath string, perItem, whole time.Duration, logf func(st
 // advisory's own techniques to look up; a judge that fails still leaves
 // code's verdicts and the sightings.
 //
-// Items that name a CVE are set aside for the CVE digest. When those are all
-// the reader found, the judge is not asked: there is nothing left for it,
-// and code still reports any indicator our hosts saw.
-func triageOne(ctx context.Context, src triage.FactSource, a triage.Advisory, readerInstr string, logf func(string, ...any)) (triage.Verdicts, []string, []string, triage.Usage) {
+// Items that name a CVE are set aside for the CVE digest. When the reader
+// found nothing else, the judge is not asked: there is nothing left for it,
+// and code still reports any indicator our hosts saw. When code has nothing
+// to look up either, the message is not threat intel (notIntel) and nothing
+// more is spent on it.
+func triageOne(ctx context.Context, src triage.FactSource, a triage.Advisory, readerInstr string, logf func(string, ...any)) (triage.Verdicts, []string, []string, bool, triage.Usage) {
 	var problems []string
 	var total triage.Usage
 	addUsage := func(u triage.Usage) {
@@ -152,13 +154,18 @@ func triageOne(ctx context.Context, src triage.FactSource, a triage.Advisory, re
 	}
 
 	cveItems := triage.CVEItemLines(subj)
+	nothingFound := subj != nil && subj.Refusal == nil && len(subj.Items) == 0
+	if nothingFound && len(cveItems) == 0 && !triage.HasLookups(a.Body, ex) {
+		return triage.Verdicts{Schema: triage.VerdictsSchema, MessageID: a.ID, Sightings: []triage.IndicatorFact{},
+			Verdicts: []triage.Verdict{}}, problems, nil, true, total
+	}
 	sheet := triage.Gather(ctx, src, a.Body, ex, subj, removed, now(), os.Getenv("TRIAGE_BLIND_SPOTS"))
 	if ctx.Err() != nil {
 		problems = append(problems, "timed out during the lookups; the facts are incomplete")
 	}
-	if subj != nil && len(subj.Items) == 0 && len(cveItems) > 0 {
+	if nothingFound {
 		return triage.Verdicts{Schema: triage.VerdictsSchema, MessageID: a.ID, Sightings: triage.Sightings(sheet),
-			Gaps: triage.Gaps(sheet), Verdicts: []triage.Verdict{}}, problems, cveItems, total
+			Gaps: triage.Gaps(sheet), Verdicts: []triage.Verdict{}}, problems, cveItems, false, total
 	}
 	in := triage.BuildJudgeInput(msg, sheet)
 	saved := ""
@@ -170,5 +177,5 @@ func triageOne(ctx context.Context, src triage.FactSource, a triage.Advisory, re
 	if down != "" {
 		problems = append(problems, s(down))
 	}
-	return triage.VerifyJudgement(j, in, sheet, a.ID, down), problems, cveItems, total
+	return triage.VerifyJudgement(j, in, sheet, a.ID, down), problems, cveItems, false, total
 }

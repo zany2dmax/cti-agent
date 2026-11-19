@@ -146,8 +146,11 @@ eval:supplier`) runs the same arguments.
 >   The reader may later be given web search, because it never holds our data.
 >
 > **In the daily digest behind `TRIAGE_ENABLED` (off by default).** Ingest
-> saves mail from authenticated threat-intel senders only (`TRIAGE_SENDERS`),
-> so supplier requests and colleagues' mail never reach a model, `cti-triage --batch` triages them, and
+> saves only threat-intel mail: anyone's mail holding a CVE, ATT&CK ID,
+> defanged indicator, public IP or hash, and anything from an authenticated
+> `TRIAGE_SENDERS` sender. Supplier and finance threads never reach a model.
+> Anyone can therefore spend reader calls by mailing an indicator, up to
+> `TRIAGE_MAX_PER_RUN` a day, and the reader holds nothing of ours to leak. `cti-triage --batch` triages them, and
 > `brief.py` renders FLEET ADVISORIES with every value escaped and nothing
 > made a link. Any failure costs the section, never the digest. Until it is
 > turned on, nothing here runs on a timer.

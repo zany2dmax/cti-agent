@@ -118,11 +118,11 @@ Only with
 .BR "triage: off" )
 ingest is run with
 .B \-\-advisories\-out
-and saves every message from an authenticated threat-intel sender
-.RB ( TRIAGE_SENDERS ,
-default
-.BR MAILBOX_FEED_SENDERS )
-as
+and saves every threat-intel message, whoever sent it (one holding a CVE,
+ATT&CK ID, defanged indicator or link, public IP or file hash), plus any
+from an authenticated
+.B TRIAGE_SENDERS
+sender, as
 .IR state/enriched\-DATE\-advisory\-input.json .
 .B cti\-triage \-\-batch
 then has the reader list each one's items; items naming a CVE are left to
@@ -307,7 +307,8 @@ Any other value is off, and the log says it is not 0 or 1.
 How many advisories step 2c triages. Default 10, at most 50.
 .TP
 .B TRIAGE_SENDERS
-Who sends threat intel; only their authenticated mail is triaged. Default:
+Senders whose authenticated mail is triaged even with no CVE, ATT&CK ID,
+indicator or hash in it. Default:
 .BR MAILBOX_FEED_SENDERS ;
 .B none
 for nobody.
