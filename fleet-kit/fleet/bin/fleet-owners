@@ -269,9 +269,37 @@ def connect(create=False):
     return c
 
 
+_AUDIT_PENDING = []
+
+
+def audit_event(action, subject, outcome, detail=""):
+    """Write one line to the fleet's audit trail (RFC 5424 syslog, /var/log/
+    cti-agent, see cti-audit(1)). The changes table in owners.db stays the
+    history of what the owners data became; this is the shared trail an
+    auditor or a SIEM reads, and it also records the attempts that changed
+    nothing (a refused edit). Best effort and never fatal: an audit problem
+    must not undo or block an owners change. Skipped quietly when cti-audit is
+    not installed, as on a development machine."""
+    exe = os.path.join(os.environ.get("FLEET_CODE") or "/opt/cti-agent", "bin", "cti-audit")
+    if not os.access(exe, os.X_OK):
+        return
+    # One run id for everything this invocation writes, so its events can be
+    # followed together (cti-audit would otherwise invent one per call).
+    os.environ.setdefault("FLEET_RUN_ID", os.urandom(8).hex())
+    try:
+        subprocess.run([exe, "--lane", "fleet-owners", "--action", "owners." + action.replace(" ", "."),  # nosec B603
+                        "--target", subject, "--outcome", outcome, "--detail", detail[:200]],
+                       stdin=subprocess.DEVNULL, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"fleet-owners: audit event not written: {e}", file=sys.stderr)
+
+
 def record(c, action, subject, detail=""):
     c.execute("INSERT INTO changes(at,by,action,subject,detail) VALUES(?,?,?,?,?)",
               (now(), who(), action, subject, detail))
+    # Held until the transaction commits: an event for a change that rolled
+    # back would be a lie in the trail.
+    _AUDIT_PENDING.append((action, subject, detail))
 
 
 def build_snapshot(c):
@@ -346,7 +374,12 @@ def change(c, fn):
                 c.execute("ROLLBACK")
             if tmp:
                 os.unlink(tmp)
+            _AUDIT_PENDING.clear()
             raise
+        # Committed: now it happened.
+        for action, subject, detail in _AUDIT_PENDING:
+            audit_event(action, subject, "success", detail)
+        _AUDIT_PENDING.clear()
         try:
             os.replace(tmp, SNAPSHOT)
         except OSError as e:
@@ -1169,13 +1202,16 @@ def main(argv):
     if a.cmd == "site" and a.op == "set" and not a.owner:
         print("fleet-owners: site set needs --owner", file=sys.stderr)
         return 2
+    what = " ".join(x for x in (a.cmd, getattr(a, "op", None)) if x)
     try:
         return a.fn(a)
     except Refused as e:
         print(f"fleet-owners: {e}", file=sys.stderr)
+        audit_event("refused", what, "refused", str(e))
         return 1
     except sqlite3.Error as e:
         print(f"fleet-owners: {DB}: {e}", file=sys.stderr)
+        audit_event("error", what, "failure", "database error")
         return 1
 
 

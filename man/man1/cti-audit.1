@@ -1,0 +1,202 @@
+.TH CTI-AUDIT 1 "2026-11-19" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-audit \- write to the fleet's audit trail, prune it, or check it
+.SH SYNOPSIS
+.B cti-audit
+.B \-\-action
+.I ACTION
+.B \-\-outcome
+.IR success | failure | refused
+.RB [ \-\-target
+.IR TARGET ]
+.RB [ \-\-detail
+.IR TEXT ]
+.RB [ \-\-lane
+.IR NAME ]
+.PP
+.B cti-audit \-\-prune \-\-days
+.I N
+.RB [ \-\-dry\-run ]
+.PP
+.B cti-audit \-\-check
+.SH DESCRIPTION
+The fleet keeps an audit trail of every security-relevant action it takes: a
+mail sent, a ticket filed, mail moved, an owner changed. Each event says what
+was done, to what, by whom, when, and whether it worked.
+.PP
+The Go commands write their events themselves, at the Graph and Jira clients,
+so a new command that sends mail or edits a ticket is covered without
+remembering to.
+.B cti-audit
+is the same writer for scripts
+.RB ( fleet\-owners (1)
+uses it), plus the retention rule and a check.
+.SS The trail
+RFC 5424 syslog lines, one per event, in
+.B /var/log/cti\-agent/audit\-YYYY\-MM\-DD.log
+(one file per UTC day; the directory is
+.B AUDIT_DIR
+and systemd creates it for the service account). RFC 5424 is what rsyslog,
+syslog-ng, Splunk, Elastic, Wazuh, Azure Monitor and every SIEM read, so a
+collector can tail the files, or the fleet can send the same lines on
+(see FORWARDING). Example, wrapped:
+.PP
+.nf
+<86>1 2026-11-19T16:04:05.123Z host-a cti\-jira 4242 jira.issue.create
+  [audit@32473 v="1" lane="cti\-jira" actor="ctiagent" run="b3f2..."
+  target="CR\-100" outcome="success"] type=Task
+.fi
+.PP
+The priority is facility authpriv with severity info for a success, warning
+for a failure and notice for a refusal. The message id is the action. The
+.B run
+is systemd's invocation id (or
+.BR FLEET_RUN_ID ),
+so every line one unit run wrote shares it. Values are sanitised (no control
+characters, capped, and the three characters RFC 5424 escapes are escaped), so
+a hostile subject or recipient cannot forge a line. No message bodies and no
+credentials are ever written, and a
+.B \-\-dry\-run
+writes nothing because nothing happened.
+.PP
+If the directory cannot be written, the event goes to stderr, which every unit
+sends to the journal, and one warning says why: a missing directory never
+stops a lane, and an event is not silently lost.
+.SS What the trail does not prove
+The writer is the same service account that runs the lanes, so a lane
+compromised as that account could alter the local files. The files are a
+record, not tamper-proof evidence. Shipping them off the host is what makes
+them evidence.
+.SS Forwarding
+Off unless
+.B AUDIT_SYSLOG_ADDR
+(host:port) is set; nothing in the fleet knows which product is on the other
+end.
+.B AUDIT_SYSLOG_PROTO
+is
+.B tls
+(the default: certificate and host name verified, TLS 1.2 or better),
+.BR tcp ,
+or
+.BR udp ;
+a plaintext protocol has to be asked for by name. TLS and TCP use RFC 6587
+octet counting. A collector that is down costs one warning per run and
+nothing else; the local file still has the event. The other way to ship the
+trail needs no setting here: point the collector's file reader at
+.BR audit\-*.log .
+.SH OPTIONS
+.TP
+.BI \-\-action " ACTION"
+Write one event. ACTION is what was done, such as
+.BR owners.set ;
+it becomes the syslog message id.
+.TP
+.BI \-\-outcome " OUTCOME"
+With
+.BR \-\-action :
+.BR success ,
+.B failure
+or
+.BR refused .
+.TP
+.BI \-\-target " TARGET"
+With
+.BR \-\-action :
+what it was done to.
+.TP
+.BI \-\-detail " TEXT"
+With
+.BR \-\-action :
+a short safe note. Never a body or a secret.
+.TP
+.BI \-\-lane " NAME"
+With
+.BR \-\-action :
+the lane or command name (default cti-audit).
+.TP
+.B \-\-prune
+Delete audit files older than
+.BR \-\-days .
+Only regular files named
+.B audit\-DATE.log
+in the audit directory are touched; a symlink, a directory or any other name
+is left alone.
+.TP
+.BI \-\-days " N"
+With
+.BR \-\-prune :
+how many days to keep, 1 or more. The mailbox cleanup lane passes
+.B AUDIT_RETAIN_DAYS
+(default 120).
+.TP
+.B \-\-dry\-run
+With
+.BR \-\-prune :
+list what would be deleted and delete nothing.
+.TP
+.B \-\-check
+Report whether the trail directory is writable, and whether the collector, if
+one is configured, is reachable. Exit 1 if either is not.
+.SH ENVIRONMENT
+.TP
+.B AUDIT_DIR
+Where the trail is kept (default /var/log/cti\-agent).
+.B off
+discards events, for tests and development machines only.
+.TP
+.B AUDIT_RETAIN_DAYS
+How long the cleanup keeps files (default 120).
+.TP
+.B AUDIT_SYSLOG_ADDR
+host:port of a syslog collector. Unset means no forwarding.
+.TP
+.B AUDIT_SYSLOG_PROTO
+tls (default), tcp or udp.
+.SH EXIT STATUS
+0 on success, including when a write fell back to stderr (a script mid-task
+must not fail because the log is unwritable). 1 when
+.B \-\-check
+finds a problem or a prune fails. 2 for a usage error.
+.SH EXAMPLES
+Is the trail writable, and is the collector reachable:
+.PP
+.nf
+sudo cti\-agent cti\-audit \-\-check
+.fi
+.PP
+Write one event from a script (what
+.BR fleet\-owners (1)
+does after a change commits):
+.PP
+.nf
+cti\-audit \-\-lane fleet\-owners \-\-action owners.set \e
+    \-\-target id:12345 \-\-outcome success \-\-detail "owner changed"
+.fi
+.PP
+See what the cleanup would delete, then delete it:
+.PP
+.nf
+sudo cti\-agent cti\-audit \-\-prune \-\-days 120 \-\-dry\-run
+sudo cti\-agent cti\-audit \-\-prune \-\-days 120
+.fi
+.PP
+Read today's trail, and follow one unit run (the run id is systemd's
+invocation id):
+.PP
+.nf
+sudo tail \-f /var/log/cti\-agent/audit\-$(date \-u +%F).log
+sudo grep 'run="b3f2' /var/log/cti\-agent/audit\-*.log
+.fi
+.PP
+Ship the trail to a collector: set
+.B AUDIT_SYSLOG_ADDR=siem.example.com:6514
+in fleet.env, then run the check above.
+.SH FILES
+.TP
+.B /var/log/cti\-agent/audit\-YYYY\-MM\-DD.log
+The trail.
+.SH SEE ALSO
+.BR run\-mailbox\-cleanup (1),
+.BR fleet\-owners (1),
+.BR cti\-mailer (1),
+.BR cti\-jira (1)

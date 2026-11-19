@@ -49,6 +49,57 @@ journal says why. Advisory triage in the digest stays off until you set
 
 ### Added
 
+- **An audit trail, in syslog format (`cti-audit`, `/var/log/cti-agent`).**
+  Every mail sent or moved, every Jira ticket filed or changed, and every
+  change to the owners data now writes one RFC 5424 syslog line: who did it,
+  to what, when, and whether it worked, with a run id (systemd's invocation
+  id) shared by everything one unit run did. Syslog is what rsyslog,
+  syslog-ng, Splunk, Elastic, Wazuh and every SIEM read. The files are
+  `/var/log/cti-agent/audit-YYYY-MM-DD.log`, one per UTC day, created by
+  systemd (`LogsDirectory=cti-agent`) for the units that change something. The
+  events are written inside the Graph and Jira clients, so `cti-mailer`,
+  `cti-alert`, `cti-mailbox` and `cti-jira` are all covered, and so is any
+  command added later. `fleet-owners` writes its own after a change commits,
+  and writes one for a refused attempt too. No message body, subject, ticket
+  text or credential is ever written; recipients are. A `--dry-run` writes
+  nothing. An unwritable directory sends the event to the journal with one
+  warning and never stops a lane. The orchestrator and scout have no log
+  directory on purpose: the heartbeat must not be able to write or delete the
+  trail it is accountable to, so its events fall back to the journal.
+  - **Retention: 120 days.** The daily mailbox cleanup now runs
+    `cti-audit --prune --days $AUDIT_RETAIN_DAYS` first (default 120), which
+    deletes only `audit-DATE.log` files past the window. A prune failure is a
+    board WARN and never fails the unit; a bad value falls back to 120 with a
+    WARN; `--dry-run` lists and deletes nothing. `--purge` does not delete the
+    trail.
+  - **Shipping it (optional, off by default).** `AUDIT_SYSLOG_ADDR=host:port`
+    sends the same lines to a collector as they are written, in addition to
+    the file: TLS by default (certificate and host name verified, TLS 1.2 or
+    better), `AUDIT_SYSLOG_PROTO=tcp|udp` if asked for by name. A collector
+    that is down costs one warning. Or point the collector's file reader at
+    `audit-*.log` and set nothing. No SIEM is built or bundled.
+  - **New command `cti-audit`:** `--action` writes an event (for scripts),
+    `--prune --days N [--dry-run]`, and `--check` (is the trail writable, is
+    the collector reachable). `sudo cti-agent cti-audit --check`. Settings
+    `AUDIT_DIR`, `AUDIT_RETAIN_DAYS`, `AUDIT_SYSLOG_ADDR`, `AUDIT_SYSLOG_PROTO`
+    are in `fleet.env.example`; man `cti-audit(1)`; SECURITY.md "The audit
+    trail" says what it does not prove (the writer is the service account, so
+    the files are a record, not tamper-proof evidence until they are shipped
+    off the host). **Upgrade:** `sudo cti-agent-update --for-real` builds
+    `cti-audit`, creates `/var/log/cti-agent` and reloads the units; nothing to
+    configure. Then `sudo cti-agent cti-audit --check`. To ship to a SIEM, set
+    the two `AUDIT_SYSLOG_*` variables and check again.
+  - **Fixed issues found by PrimeSec AI:** guardrail findings "Audit Logging
+    Implementation" (HIGH and MEDIUM: 10785634, 10785635, 10785636, 10785637,
+    10785639, 10785640, 10785641, 10785642, 10785643, 11583432) are fixed by
+    the entry above. 11583431 (the heartbeat trace is not an audit trail) is
+    right, and the trace is not meant to be one: dismissed, with the audit
+    trail named as the answer. "Centralized Security Event Logging" (11583421,
+    11583422, 11583423, 11583424) and "SIEM Audit Log Collection" (11583420)
+    are mitigated and need your collector: the trail is in syslog format and
+    can be forwarded, but nothing reaches a central system until
+    `AUDIT_SYSLOG_ADDR` is set or a collector reads the files.
+
 - **Advisory triage in the daily digest: FLEET ADVISORIES (`TRIAGE_ENABLED`,
   off by default).** With it on, ingest saves every threat-intel message,
   whoever sent it: one holding a CVE, ATT&CK ID, defanged indicator or link,

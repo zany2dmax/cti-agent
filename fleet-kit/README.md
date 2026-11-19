@@ -279,6 +279,7 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent run-<lane> --to-dev` | Test send for `run-digest`, `run-patchtuesday`, `run-appscan`, `run-vmscan`, `run-supplier` and `run-domains`: the real lane, mailed to `FLEET_DEV_EMAIL` only (subject `[DEV TEST] ...`), with everything else a dry run - nothing recorded, no tickets, no baseline. `cti-alert --to-dev` likewise |
 | `sudo cti-agent cti-mailer --to-dev --html FILE --subject S` | Send any rendered file to `FLEET_DEV_EMAIL` only, subject `[DEV TEST] ...`, to see it in a real mail client without mailing the team |
 | `sudo cti-agent cti-mailer --check` | Decode the token, list granted app roles |
+| `sudo cti-agent cti-audit --check` | Is the audit trail directory writable and, if forwarding is set, is the collector reachable. Exit 1 if not. `cti-audit --prune --days N --dry-run` lists what retention would delete; see `man cti-audit` |
 | `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |
 | `sudo cti-agent fleet-board tail 30` | Recent board lines |
 | `systemctl list-timers 'cti-agent-*'` | What is scheduled and when |
@@ -1189,6 +1190,24 @@ Two specific things to check first:
   implementations of "is this a safe link" that disagree is a bug waiting for
   whichever email gets the odd URL.
 
+### Audit trail
+
+All optional. The fleet writes one RFC 5424 syslog line for each mail sent or
+moved, Jira write and owners change to `AUDIT_DIR`, one file per UTC day. Detail
+in [SECURITY.md](../SECURITY.md#the-audit-trail), [RUNBOOK.md](../RUNBOOK.md#11l-the-audit-trail)
+and `man cti-audit`.
+
+| Variable | Notes |
+|---|---|
+| `AUDIT_DIR` | Where the trail is written (default `/var/log/cti-agent`). `off` discards it; tests and development only |
+| `AUDIT_RETAIN_DAYS` | The daily mailbox cleanup deletes audit files older than this (default 120). A non-numeric or zero value falls back to 120 with a board WARN |
+| `AUDIT_SYSLOG_ADDR` | `host:port` of a collector to forward each line to, in addition to the file. Unset: no forwarding |
+| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name, TLS 1.2 or later), `tcp` or `udp`. `tcp` and `udp` are unencrypted and must be asked for by name |
+
+```bash
+sudo cti-agent cti-audit --check     # directory writable? collector reachable?
+```
+
 ### 5. Report content
 
 | Variable | Notes |
@@ -1992,6 +2011,12 @@ journald handles rotation and retention rather than the kit hand-rolling it:
 journalctl -u cti-agent-digest -f
 journalctl -u 'cti-agent-*' --since today
 ```
+
+The audit trail is separate: `/var/log/cti-agent/audit-YYYY-MM-DD.log`, one
+syslog line per mail sent or moved, Jira write and owners change. The
+heartbeat and scout do not write there (on purpose), so their events stay in
+the journal. See [SECURITY.md](../SECURITY.md#the-audit-trail) and
+[RUNBOOK.md](../RUNBOOK.md#11l-the-audit-trail).
 
 Asking the fleet something directly needs the orchestrator's own directory
 (root-owned; it holds `CLAUDE.md` and `.claude/skills`), since they are

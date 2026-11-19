@@ -131,6 +131,13 @@ func (c *Client) FindChildFolder(ctx context.Context, mailbox, parent, name stri
 
 // CreateChildFolder makes the folder called name under parent.
 func (c *Client) CreateChildFolder(ctx context.Context, mailbox, parent, name string) (ChildFolder, error) {
+	f, err := c.createChildFolder(ctx, mailbox, parent, name)
+	auditMail("mail.folder.create", mailbox, "parent="+parent+"; name="+name, err)
+	return f, err
+}
+
+// createChildFolder is CreateChildFolder without the audit event.
+func (c *Client) createChildFolder(ctx context.Context, mailbox, parent, name string) (ChildFolder, error) {
 	if err := ValidFolderName(name); err != nil {
 		return ChildFolder{}, err
 	}
@@ -164,6 +171,13 @@ func (c *Client) CreateChildFolder(ctx context.Context, mailbox, parent, name st
 // MoveToChildFolder moves one message into a folder FindChildFolder or
 // CreateChildFolder returned, and returns its new ID.
 func (c *Client) MoveToChildFolder(ctx context.Context, mailbox, messageID string, dest ChildFolder) (string, error) {
+	newID, err := c.moveToChildFolder(ctx, mailbox, messageID, dest)
+	auditMail("mail.move", mailbox, "to="+dest.Name+"; msg=..."+tail(messageID, 24), err)
+	return newID, err
+}
+
+// moveToChildFolder is MoveToChildFolder without the audit event.
+func (c *Client) moveToChildFolder(ctx context.Context, mailbox, messageID string, dest ChildFolder) (string, error) {
 	if dest.id == "" {
 		return "", fmt.Errorf("MoveToChildFolder: no folder - look it up with FindChildFolder first")
 	}

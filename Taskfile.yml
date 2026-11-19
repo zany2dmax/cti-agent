@@ -663,6 +663,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-triage ./cmd/cti-triage
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-patchtuesday ./cmd/cti-patchtuesday
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-mailbox ./cmd/cti-mailbox
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-audit ./cmd/cti-audit
       # cti-mailer and cti-jira were missing from this list while being built
       # by the installer - the same hand-maintained-list drift that left
       # run-mailbox-cleanup uninstalled. A `task build` that silently omits

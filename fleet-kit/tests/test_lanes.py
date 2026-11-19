@@ -4599,6 +4599,61 @@ class RunnersToDev(unittest.TestCase):
                          "a dry run must not mail the operator")
         self.assertIn("would alert the operator", r.stdout)
 
+    def _fake_audit(self, exit_code=0):
+        a = self.code / "bin" / "cti-audit"
+        a.write_text('#!/usr/bin/env bash\necho "cti-audit $*" >> "$STUB_LOG"\n'
+                     f"exit {exit_code}\n")
+        a.chmod(0o755)
+
+    def test_the_cleanup_prunes_the_audit_trail_to_120_days(self):
+        """The housekeeping lane enforces the audit trail's retention: 120 days
+        by default, AUDIT_RETAIN_DAYS to change it, a dry run only lists."""
+        self._fake_audit()
+        self._fake_mailbox()
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("cti-audit --prune --days 120", calls)
+        self.assertNotIn("cti-audit --prune --days 120 --dry-run", calls)
+        self.assertLess(calls.index("cti-audit --prune --days 120"),
+                        next(i for i, c in enumerate(calls) if c.startswith("cti-mailbox ")),
+                        "retention must run before the mailbox work, so a Graph failure cannot skip it")
+
+        self.log.write_text("")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real", env="AUDIT_RETAIN_DAYS=30\n")
+        self.assertIn("cti-audit --prune --days 30", calls)
+
+        self.log.write_text("")
+        r, calls = self.run_lane("run-mailbox-cleanup", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("cti-audit --prune --days 120 --dry-run", calls)
+        self.assertNotIn("cti-audit --prune --days 120", calls, "a dry run must not delete audit files")
+
+    def test_a_nonsense_retention_setting_falls_back_to_120_and_says_so(self):
+        self._fake_audit()
+        self._fake_mailbox()
+        for bad in ("0", "abc", "-5", "12d"):
+            self.log.write_text("")
+            r, calls = self.run_lane("run-mailbox-cleanup", "--for-real", env=f"AUDIT_RETAIN_DAYS={bad}\n")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("cti-audit --prune --days 120", calls, bad)
+            self.assertTrue(any(c.startswith("fleet-board post @mailbox @you WARN AUDIT_RETAIN_DAYS=") for c in calls), (bad, calls))
+
+    def test_a_failed_prune_warns_and_the_mailbox_work_still_runs(self):
+        self._fake_audit(exit_code=1)
+        self._fake_mailbox()
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, "a retention problem must not fail the unit")
+        self.assertTrue(any(c.startswith("cti-mailbox ") for c in calls), calls)
+        self.assertTrue(any(c.startswith("fleet-board post @mailbox @you WARN audit trail retention failed") for c in calls), calls)
+
+    def test_without_cti_audit_the_lane_says_so_and_carries_on(self):
+        self._fake_mailbox()
+        (self.code / "bin" / "cti-audit").unlink(missing_ok=True)
+        r, calls = self.run_lane("run-mailbox-cleanup", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("not being pruned", r.stdout)
+        self.assertTrue(any(c.startswith("cti-mailbox ") for c in calls), calls)
+
     def _fake_mailbox(self, *lines):
         clean = self.code / "bin" / "cti-mailbox"
         body = "".join(f"echo '{ln}'\n" for ln in lines)
@@ -5854,6 +5909,38 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
             event = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             with self.subTest(example=ex[:40]):
                 self.assertIsNone(mod.verdict(event))
+
+
+class AuditTrailUnits(unittest.TestCase):
+    """Every unit whose lane changes something gets /var/log/cti-agent from
+    systemd (LogsDirectory=), so the audit trail is writable under
+    ProtectSystem=strict. The orchestrator's unit is the exception on purpose:
+    the heartbeat must not be able to write, alter or delete the trail it is
+    itself accountable to, so its events fall back to the journal."""
+
+    UNITS = KIT / "fleet" / "systemd-fedora"
+    WITH = ("alert@", "appowners", "appscan", "digest", "domains", "mailbox",
+            "patchtuesday", "supplier", "vmscan", "weekly")
+    WITHOUT = ("checkin", "scout")
+
+    def test_the_units_that_change_things_get_the_log_directory(self):
+        for name in self.WITH:
+            text = (self.UNITS / f"cti-agent-{name}.service").read_text()
+            self.assertIn("\nLogsDirectory=cti-agent\n", text, name)
+            if "StateDirectory=" in text:
+                self.assertIn("\nLogsDirectoryMode=0750\n", text, name)
+
+    def test_the_orchestrator_cannot_write_the_trail(self):
+        for name in self.WITHOUT:
+            text = (self.UNITS / f"cti-agent-{name}.service").read_text()
+            self.assertNotIn("LogsDirectory", text, name)
+
+    def test_every_service_unit_is_classified(self):
+        """A new unit has to be put in WITH or WITHOUT, so nobody forgets to
+        decide whether it should write the trail."""
+        have = {p.name[len("cti-agent-"):-len(".service")] for p in self.UNITS.glob("cti-agent-*.service")}
+        self.assertEqual(have, set(self.WITH) | set(self.WITHOUT),
+                         "a unit was added or removed: decide whether it writes the audit trail")
 
 
 class TlsFloor(unittest.TestCase):

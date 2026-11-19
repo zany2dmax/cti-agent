@@ -453,5 +453,77 @@ class Sync(unittest.TestCase):
         self.assertIn("Qualys lists 3 web app(s)", self.run_tool("names").stdout)
 
 
+class OwnersAuditTrail(unittest.TestCase):
+    """fleet-owners writes the shared audit trail through cti-audit: one line
+    per committed change, and one for an attempt that was refused. The owners.db
+    changes table stays the history of the data itself."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.chmod(self.dir, 0o700)
+        self.code = tempfile.mkdtemp()
+        self.addCleanup(subprocess.run, ["rm", "-rf", self.dir, self.code])
+        (pathlib.Path(self.code) / "bin").mkdir()
+        self.log = os.path.join(self.code, "calls.txt")
+        fake = pathlib.Path(self.code) / "bin" / "cti-audit"
+        # One line per call: the arguments, tab separated.
+        fake.write_text('#!/bin/sh\nprintf "%s\\t" "$@" >> "$AUDIT_CALLS"\nprintf "\\n" >> "$AUDIT_CALLS"\n')
+        fake.chmod(0o755)
+        self.env = dict(os.environ, FLEET_OWNERS_DIR=self.dir, SUDO_USER="tester", FLEET_GROUP="no-such-group-here",
+                        FLEET_CODE=self.code, AUDIT_CALLS=self.log)
+
+    def tool(self, *args):
+        return subprocess.run([sys.executable, str(TOOL), *args], env=self.env,
+                              capture_output=True, text=True, timeout=30, check=False)
+
+    def calls(self):
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            return [line.rstrip("\n").split("\t")[:-1] for line in f if line.strip()]
+
+    def test_a_committed_change_is_audited_after_it_commits(self):
+        self.assertEqual(self.tool("init").returncode, 0)
+        r = self.tool("set", "id:12345", "--owner", "lead@example.com")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        mine = [c for c in self.calls() if "owners.add" in c or "owners.set" in c]
+        self.assertEqual(len(mine), 1, self.calls())
+        c = mine[0]
+        self.assertEqual(c[c.index("--lane") + 1], "fleet-owners")
+        self.assertEqual(c[c.index("--outcome") + 1], "success")
+        self.assertEqual(c[c.index("--target") + 1], "id:12345")
+
+    def test_a_refused_attempt_is_audited_and_changes_nothing(self):
+        self.tool("init")
+        before = len(self.calls())
+        r = self.tool("set", "site:example.com", "--owner", "lead@example.com")  # a site is not an application
+        self.assertNotEqual(r.returncode, 0)
+        new = self.calls()[before:]
+        self.assertEqual(len(new), 1, new)
+        self.assertIn("owners.refused", new[0])
+        self.assertEqual(new[0][new[0].index("--outcome") + 1], "refused")
+        # no committed-change event for it
+        self.assertFalse([c for c in new if "owners.add" in c or "owners.set" in c])
+
+    def test_the_events_of_one_run_share_a_run_id(self):
+        # The fake records its environment's FLEET_RUN_ID alongside its arguments.
+        fake = pathlib.Path(self.code) / "bin" / "cti-audit"
+        fake.write_text('#!/bin/sh\nprintf "%s %s\\n" "$FLEET_RUN_ID" "$*" >> "$AUDIT_CALLS"\n')
+        fake.chmod(0o755)
+        self.tool("init")
+        self.tool("set", "id:12345", "--owner", "lead@example.com")
+        # two separate invocations: each has its own id; inside one they match
+        ids = {line.split(" ", 1)[0] for line in open(self.log, encoding="utf-8").read().splitlines() if line.strip()}
+        self.assertTrue(ids and all(len(i) == 16 for i in ids), ids)
+        self.assertEqual(len(ids), 2, "one id per invocation (init, set)")
+
+    def test_without_cti_audit_installed_nothing_changes(self):
+        env = dict(self.env, FLEET_CODE=os.path.join(self.code, "nowhere"))
+        r = subprocess.run([sys.executable, str(TOOL), "init"], env=env, capture_output=True, text=True,
+                           timeout=30, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("audit", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

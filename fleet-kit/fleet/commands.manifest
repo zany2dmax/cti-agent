@@ -94,6 +94,20 @@ flag: --text-out STRING | write the plain-text version here
 flag: --ticket-slot | leave a slot in the report for --stamp-tickets to fill with each application's ticket
 flag: --tickets-out STRING | write one Jira ticket's input per application (active findings of Serious or above, with where, risk and fix) here, for cti-jira --appscan-tickets
 
+command: cti-audit
+about: Write to the audit trail (RFC 5424 syslog lines in /var/log/cti-agent), prune it to the retention window, or check it
+runs: local
+flag: --action STRING | write one event: what was done, e.g. owners.set (becomes the syslog MSGID)
+flag: --check | report whether the trail is writable and the collector, if any, reachable; exit 1 if not
+flag: --days INT | with --prune: how many days to keep; the cleanup lane passes AUDIT_RETAIN_DAYS (default 120)
+flag: --detail STRING | with --action: a short safe note; never a body or a secret
+flag: --dry-run | with --prune: list what would be deleted and delete nothing
+flag: --lane STRING | with --action: the lane or command name (default cti-audit)
+flag: --outcome STRING | with --action: success, failure or refused
+flag: --prune | delete audit-DATE.log files older than --days
+flag: --target STRING | with --action: what it was done to
+risk: --prune changes
+
 command: cti-budget
 about: The heartbeat's share of the Claude subscription: gate and ledger
 runs: local

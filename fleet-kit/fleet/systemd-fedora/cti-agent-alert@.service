@@ -23,6 +23,13 @@ Environment=HOME=/var/lib/cti-agent
 Environment=FLEET_HOME=/var/lib/cti-agent
 Environment=FLEET_CODE=/opt/cti-agent
 Environment=FLEET_ENV=/etc/cti-agent/fleet.env
+
+# The audit trail: RFC 5424 syslog lines in /var/log/cti-agent/audit-DATE.log
+# (cti-audit(1), internal/audit). systemd creates the directory for the service
+# account and keeps it writable under ProtectSystem=strict. The cleanup lane
+# deletes files past AUDIT_RETAIN_DAYS (default 120).
+LogsDirectory=cti-agent
+LogsDirectoryMode=0750
 ExecStart=/opt/cti-agent/bin/cti-alert --for-real --unit %i
 TimeoutStartSec=120
 

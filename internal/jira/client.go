@@ -123,6 +123,17 @@ func (c *Client) BrowseURL(key string) string {
 // those comments fail the issue is real, so the result is returned along with
 // a *ContinuationError rather than an empty result.
 func (c *Client) CreateIssue(ctx context.Context, r IssueRequest) (IssueResult, error) {
+	res, err := c.createIssue(ctx, r)
+	target := r.ProjectKey
+	if res.Key != "" {
+		target = res.Key
+	}
+	auditJira("jira.issue.create", target, "type="+r.IssueType, err)
+	return res, err
+}
+
+// createIssue is CreateIssue without the audit event.
+func (c *Client) createIssue(ctx context.Context, r IssueRequest) (IssueResult, error) {
 	parts := SplitText(r.Description, MaxText)
 	r.Description = parts[0]
 	if len(parts) > 1 {
@@ -322,6 +333,13 @@ func (i Issue) IsDone() bool { return i.Fields.Status.StatusCategory.Key == "don
 // error says which; the caller sees a failure and retries from the start, so a
 // part can appear twice, which is better than a list that never arrives.
 func (c *Client) AddComment(ctx context.Context, key, text string) error {
+	err := c.addComments(ctx, key, text)
+	auditJira("jira.comment.add", key, "", err)
+	return err
+}
+
+// addComments posts the comment, in parts if it is long, without the audit event.
+func (c *Client) addComments(ctx context.Context, key, text string) error {
 	parts := SplitText(text, MaxText)
 	for i, part := range parts {
 		if err := c.addComment(ctx, key, part); err != nil {
@@ -344,6 +362,13 @@ func (c *Client) addComment(ctx context.Context, key, text string) error {
 // watching is harmless, so callers may repeat it every run. Needs the "Manage
 // watcher list" permission (or the user adding themselves).
 func (c *Client) AddWatcher(ctx context.Context, key, accountID string) error {
+	err := c.addWatcher(ctx, key, accountID)
+	auditJira("jira.watcher.add", key, "", err)
+	return err
+}
+
+// addWatcher is AddWatcher without the audit event.
+func (c *Client) addWatcher(ctx context.Context, key, accountID string) error {
 	// The API takes a bare JSON string: json.Marshal of a Go string is that.
 	path := "/rest/api/2/issue/" + url.PathEscape(key) + "/watchers"
 	return c.do(ctx, http.MethodPost, path, accountID, nil)
@@ -355,6 +380,13 @@ const RelatesLink = "Relates"
 // LinkIssues links two issues with a link type by NAME. Needs the "Link
 // issues" project permission.
 func (c *Client) LinkIssues(ctx context.Context, linkType, inwardKey, outwardKey string) error {
+	err := c.linkIssues(ctx, linkType, inwardKey, outwardKey)
+	auditJira("jira.issue.link", inwardKey+" -> "+outwardKey, "type="+linkType, err)
+	return err
+}
+
+// linkIssues is LinkIssues without the audit event.
+func (c *Client) linkIssues(ctx context.Context, linkType, inwardKey, outwardKey string) error {
 	body := map[string]any{
 		"type":         map[string]string{"name": linkType},
 		"inwardIssue":  map[string]string{"key": inwardKey},
@@ -374,6 +406,13 @@ func (c *Client) LinkIssues(ctx context.Context, linkType, inwardKey, outwardKey
 //   - multipart/form-data with the field named exactly "file". Not "files",
 //     not the filename.
 func (c *Client) Attach(ctx context.Context, key, name string, content []byte) error {
+	err := c.attach(ctx, key, name, content)
+	auditJira("jira.attachment.add", key, "", err)
+	return err
+}
+
+// attach is Attach without the audit event.
+func (c *Client) attach(ctx context.Context, key, name string, content []byte) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	part, err := w.CreateFormFile("file", name)

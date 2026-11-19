@@ -127,6 +127,15 @@ journalctl -u cti-agent-digest.service --since today --no-pager | grep -E 'FAILE
 journalctl -u cti-agent-digest.service --since today --no-pager | grep -E 'ticket|follow-up|WRITE GATE'
 ```
 
+The audit trail (who sent, moved or closed what; one file per UTC day):
+
+```bash
+sudo cti-agent cti-audit --check                          # directory writable? collector reachable?
+sudo tail -f /var/log/cti-agent/audit-$(date -u +%F).log  # follow today's events
+sudo cti-agent cti-audit --prune --days 120 --dry-run     # what retention would delete; deletes nothing
+sudo grep 'run="<invocation-id>"' /var/log/cti-agent/audit-*.log   # every event from one unit run
+```
+
 ## 6. Dry runs: see what it would send
 
 None of these send mail, file tickets or advance a baseline.

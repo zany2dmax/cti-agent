@@ -194,6 +194,15 @@ waits for a CVE: a quiet day archives like any other.
 the message board, because the whole premise is that a quiet inbox means a
 quiet day — which only holds if a broken pipeline is loud.
 
+**An audit trail.** Every mail sent or moved, every Jira write and every change
+to the application owners is written as one RFC 5424 syslog line to
+`/var/log/cti-agent/audit-YYYY-MM-DD.log`, so any SIEM can read it unchanged.
+Message bodies, ticket text and credentials are never written. Forwarding to a
+collector is optional (`AUDIT_SYSLOG_ADDR`); no SIEM is bundled, and the local
+files are a record, not tamper-proof evidence. See
+[SECURITY.md](SECURITY.md#the-audit-trail),
+[RUNBOOK.md](RUNBOOK.md#11l-the-audit-trail) and `man cti-audit`.
+
 ---
 
 ## The design pattern

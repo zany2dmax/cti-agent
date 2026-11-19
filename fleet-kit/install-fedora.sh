@@ -78,6 +78,7 @@ trap _on_exit EXIT
 CODE_DIR=/opt/cti-agent
 CONF_DIR=/etc/cti-agent
 STATE_DIR=/var/lib/cti-agent
+LOG_DIR=/var/log/cti-agent   # the audit trail (cti-audit(1)); systemd units also create it
 UNIT_DIR=/etc/systemd/system
 FLEET_USER=ctiagent
 FLEET_GROUP=ctiagent
@@ -215,6 +216,10 @@ if [ "$ACTION" != install ]; then
       rm -rf "$CONF_DIR" "$STATE_DIR"
       userdel "$FLEET_USER" 2>/dev/null || true
       ok "removed $CONF_DIR, $STATE_DIR and the $FLEET_USER account"
+      # The audit trail is evidence. A purge of the fleet does not delete it:
+      # that is a separate decision, and the retention rule (120 days) will not
+      # run once the cleanup lane is gone.
+      info "kept $LOG_DIR (the audit trail); delete it by hand when its retention requires"
     else
       info "aborted; config and state kept"
     fi
@@ -222,6 +227,7 @@ if [ "$ACTION" != install ]; then
     bold "Kept"
     info "$CONF_DIR   (config and secrets)"
     info "$STATE_DIR  (findings db, reports, caches)"
+    info "$LOG_DIR  (the audit trail; kept even by --purge)"
     info "the $FLEET_USER account"
     info "--purge --for-real removes these too"
   fi
@@ -301,6 +307,11 @@ run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" \
 info "$CODE_DIR   code   (root:root 0755, read-only to the service)"
 info "$CONF_DIR   config (root:$FLEET_GROUP 0750)"
 info "$STATE_DIR  state  ($FLEET_USER:$FLEET_GROUP 0750)"
+# The audit trail. The units create this themselves (LogsDirectory=); it is
+# made here too so a command run by hand as the service account (sudo
+# cti-agent cti-jira ...) can write its events before any timer has fired.
+run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$LOG_DIR"
+info "$LOG_DIR  audit trail  ($FLEET_USER:$FLEET_GROUP 0750, RFC 5424 syslog lines, kept AUDIT_RETAIN_DAYS=120 days)"
 
 bold "Installing code"
 # Everything in fleet/bin, not a hand-written list.
@@ -793,6 +804,13 @@ if [ "$MODE" != dryrun ]; then
   # also the only one whose app-registration requirement is Mail.ReadWrite
   # rather than Mail.Read. It dry-runs unless given --for-real; the unit
   # passes that flag explicitly so the decision is visible in the unit.
+  # The audit trail's writer and retention tool: scripts (fleet-owners) write
+  # events through it, the mailbox cleanup prunes with it, and `cti-audit
+  # --check` says whether the trail is writable and the collector reachable.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-audit" ./cmd/cti-audit )
+  chmod 0755 "$CODE_DIR/bin/cti-audit"
+  ok "built $CODE_DIR/bin/cti-audit"
+
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-mailbox" ./cmd/cti-mailbox )
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
@@ -1202,7 +1220,7 @@ FAIL=0
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" "$CODE_DIR/bin/cti-triage" \
          "$CODE_DIR/bin/cti-patchtuesday" \
-         "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
+         "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
          "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do

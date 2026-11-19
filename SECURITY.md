@@ -453,6 +453,71 @@ gitignored.
 
 ---
 
+## The audit trail
+
+The fleet writes one syslog line for each security-relevant action, so "who
+sent that mail, who moved those messages, who closed that ticket" has an
+answer that does not depend on reading a journal.
+
+- **What is logged.** Mail sent (`mail.send`: the recipients, the sending
+  mailbox and the attachment count), mail moved (`mail.move`) and folders
+  made (`mail.folder.create`) at the Graph client. At the Jira client:
+  `jira.issue.create`, `jira.comment.add`, `jira.watcher.add`,
+  `jira.issue.link`, `jira.attachment.add`, `jira.issue.close` and
+  `jira.issue.transition`. Changes to the application owners (`owners.set`,
+  `owners.rm` and the rest), written only after the change commits, and
+  refused attempts (`owners.refused`, outcome `refused`).
+- **Where.** The events are written inside the clients, so `cti-mailer`,
+  `cti-alert`, `cti-mailbox` and `cti-jira` are all covered, and a new command
+  that uses a client is covered without anyone remembering to add it. Reads
+  and `--dry-run` write nothing.
+- **File.** `/var/log/cti-agent/audit-YYYY-MM-DD.log`, one file per UTC day,
+  in the directory `AUDIT_DIR`. systemd creates it (`LogsDirectory=cti-agent`)
+  for each unit that changes something, and the installer creates it too,
+  owned by `ctiagent`, mode 0750.
+- **Format.** RFC 5424 syslog, facility `authpriv`, so rsyslog, syslog-ng,
+  Splunk, Elastic, Wazuh, Azure Monitor and any other SIEM read it unchanged.
+  Severity is `info` for success, `warning` for failure and `notice` for a
+  refusal. The message id is the action. `run` is systemd's `INVOCATION_ID`
+  (or `FLEET_RUN_ID`), so every line from one unit run shares it.
+
+  ```
+  <86>1 2026-01-15T07:00:02.123Z host-a cti-mailer 4121 mail.send [audit@32473 v="1" lane="cti-mailer" actor="ctiagent" run="a1b2c3d4e5f6" target="secops@example.com" outcome="success"] from=reports@example.com; attachments=1
+  ```
+- **Never logged.** Message bodies, subjects, ticket text and credentials.
+  Recipients are logged; they are the point. Values are sanitised and escaped,
+  so hostile text in a field cannot forge or split a line.
+- **Forwarding.** Optional. `AUDIT_SYSLOG_ADDR` (`host:port`) sends the same
+  line to a collector as it is written, in addition to the file. The protocol
+  is `AUDIT_SYSLOG_PROTO`: `tls` (the default; certificate and host name
+  verified, TLS 1.2 or later), or `tcp` or `udp`, which are unencrypted and
+  have to be asked for by name. A dead collector costs one warning per run and
+  the file still has the event. No SIEM is built or bundled; forwarding is
+  only the option to ship to one. The other way needs no setting: point the
+  collector's file reader at `/var/log/cti-agent/audit-*.log`.
+- **Retention.** The daily mailbox cleanup lane runs `cti-audit --prune
+  --days $AUDIT_RETAIN_DAYS` (default 120) before it touches the mailbox. It
+  deletes only regular `audit-YYYY-MM-DD.log` files older than that. A prune
+  failure is a board WARN and never fails the unit. The installer's `--purge`
+  does not delete `/var/log/cti-agent`, because the trail is evidence.
+- **If the directory cannot be written,** the event goes to stderr (the
+  journal) with one warning, and the lane carries on. A missing directory never
+  stops work.
+- **The orchestrator is the exception, on purpose.** The heartbeat
+  (`cti-agent-checkin.service`) and scout have no `LogsDirectory`. The
+  heartbeat must not be able to write or delete the trail it is accountable
+  to, so its events fall back to the journal.
+
+**The limit.** The writer is the same service account that runs the lanes, so
+a lane compromised as that account could alter the local files. The local files
+are a record, not tamper-proof evidence. Shipping them off the host is what
+makes them evidence. The trail does not replace the `changes` table in
+`owners.db`, which stays the history of the owners data, and it is not
+`fleet-trace`, which is an operational trace of the heartbeat. See
+`man cti-audit` and the [RUNBOOK](RUNBOOK.md#11l-the-audit-trail).
+
+---
+
 ## Transport security (outbound calls)
 
 Every credential the fleet holds travels on an outbound HTTPS call, so the

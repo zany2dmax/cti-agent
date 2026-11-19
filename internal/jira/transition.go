@@ -134,6 +134,13 @@ func ChooseClose(ts []Transition, prefer string) (CloseChoice, error) {
 // Close performs the chosen transition with comment as an explanatory comment
 // in the same request. Needs the "Transition issues" permission.
 func (c *Client) Close(ctx context.Context, key string, ch CloseChoice, comment string) error {
+	err := c.closeIssue(ctx, key, ch, comment)
+	auditJira("jira.issue.close", key, "transition="+ch.Transition.Name, err)
+	return err
+}
+
+// closeIssue is Close without the audit event.
+func (c *Client) closeIssue(ctx context.Context, key string, ch CloseChoice, comment string) error {
 	body := map[string]any{
 		"transition": map[string]string{"id": ch.Transition.ID},
 		"update": map[string]any{
@@ -185,6 +192,13 @@ func ChooseStatus(ts []Transition, name string) (Transition, error) {
 // it is for moving between working statuses, never for closing. Needs the
 // "Transition issues" permission.
 func (c *Client) MoveTo(ctx context.Context, key, name string) error {
+	err := c.moveTo(ctx, key, name)
+	auditJira("jira.issue.transition", key, "to="+name, err)
+	return err
+}
+
+// moveTo is MoveTo without the audit event.
+func (c *Client) moveTo(ctx context.Context, key, name string) error {
 	ts, err := c.Transitions(ctx, key)
 	if err != nil {
 		return err

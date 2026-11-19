@@ -527,6 +527,13 @@ type SendMailResult struct {
 }
 
 func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (SendMailResult, error) {
+	res, err := c.sendMail(ctx, req)
+	auditMail("mail.send", recipients(req), sendDetail(req), err)
+	return res, err
+}
+
+// sendMail is SendMail without the audit event.
+func (c *Client) sendMail(ctx context.Context, req SendMailRequest) (SendMailResult, error) {
 	if req.From == "" {
 		return SendMailResult{}, fmt.Errorf("SendMail: From is required (the sending mailbox)")
 	}
@@ -738,6 +745,13 @@ const (
 // returned because the caller records what it did, and a record pointing at an
 // ID that no longer resolves cannot be checked afterwards.
 func (c *Client) MoveMessage(ctx context.Context, mailbox, messageID string, dest Folder) (string, error) {
+	newID, err := c.moveMessage(ctx, mailbox, messageID, dest)
+	auditMail("mail.move", mailbox, "to="+string(dest)+"; msg=..."+tail(messageID, 24), err)
+	return newID, err
+}
+
+// moveMessage is MoveMessage without the audit event.
+func (c *Client) moveMessage(ctx context.Context, mailbox, messageID string, dest Folder) (string, error) {
 	switch dest {
 	case FolderArchive, FolderDeletedItems:
 	default:

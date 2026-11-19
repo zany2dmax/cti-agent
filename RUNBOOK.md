@@ -30,6 +30,7 @@ document assumes you have decided to run it.
 - [11i. Cutting a release](#11i-cutting-a-release)
 - [11j. The CrowdStrike API client](#11j-the-crowdstrike-api-client)
 - [11k. Advisory triage by hand](#11k-advisory-triage-by-hand)
+- [11l. The audit trail](#11l-the-audit-trail)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -229,6 +230,10 @@ regression test.
 | `MAILBOX_STALE_DAYS` | Inbox mail older than this many days that no rule moved goes to `MAILBOX_STALE_FOLDER`. Default 30; 0 turns the sweep off; must be longer than `MAILBOX_LOOKBACK_HOURS` |
 | `MAILBOX_STALE_FOLDER` | The folder under the inbox the sweep moves into, created on first use. Default `Unhandled` |
 | `MAILBOX_STALE_MAX` | The most messages one cleanup run sweeps, 1-5000. Default 200 |
+| `AUDIT_DIR` | Where the audit trail is written. Default `/var/log/cti-agent`; `off` discards it (tests and development only). See [11l](#11l-the-audit-trail) |
+| `AUDIT_RETAIN_DAYS` | Audit files older than this many days are deleted by the daily mailbox cleanup. Default 120 |
+| `AUDIT_SYSLOG_ADDR` | `host:port` of a syslog collector to forward each audit line to, as well as the file. Unset: no forwarding |
+| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name), `tcp` or `udp`. The last two are unencrypted |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Only for the orchestrator heartbeat |
 | `FLEET_BUDGET_*` | Quota ceilings for the heartbeat. See [fleet-kit/README.md → Quota ceilings](fleet-kit/README.md#8-quota-ceilings) |
 
@@ -2922,6 +2927,81 @@ sudo cti-agent cti-triage --batch /var/lib/cti-agent/state/enriched-$(date +%F)-
 
 To turn it off, remove `TRIAGE_ENABLED` or set it to `0`. Nothing else
 changes.
+
+---
+
+## 11l. The audit trail
+
+Every mail sent or moved, every Jira write and every change to the application
+owners leaves one syslog line in `/var/log/cti-agent/`, one file per UTC day.
+What is logged, and the limits of the trail, are in
+[SECURITY.md](SECURITY.md#the-audit-trail). Nothing needs setting up for the
+files; the installer creates the directory and systemd creates it for each unit
+that changes something.
+
+**Look at it.**
+
+```bash
+ls -l /var/log/cti-agent
+sudo tail -f /var/log/cti-agent/audit-$(date -u +%F).log
+sudo grep ' mail.send ' /var/log/cti-agent/audit-*.log          # one action
+sudo grep 'run="<invocation-id>"' /var/log/cti-agent/audit-*.log  # one unit run
+```
+
+The message id (after the process id) is the action, and `run` is the unit's
+invocation id, so every line one run wrote shares it.
+
+**Check it.**
+
+```bash
+sudo cti-agent cti-audit --check
+```
+
+It reports whether the directory is writable and, when forwarding is set,
+whether the collector answers. It exits 1 if either fails. If it says the
+directory is not writable, make it:
+
+```bash
+sudo install -d -m 0750 -o ctiagent -g ctiagent /var/log/cti-agent
+```
+
+While the directory is unwritable no lane stops: the events go to the journal
+with one warning per run.
+
+**Ship it to a SIEM.** Nothing is bundled; this only sends the lines on. In
+`/etc/cti-agent/fleet.env`:
+
+```
+AUDIT_SYSLOG_ADDR=siem.example.com:6514
+AUDIT_SYSLOG_PROTO=tls
+```
+
+then `sudo cti-agent cti-audit --check`. `tls` is the default and verifies the
+certificate and host name. `tcp` and `udp` are unencrypted and have to be named.
+Forwarding is in addition to the file, and a dead collector costs one warning
+per run. Without any setting, you can instead point a collector's file reader at
+`/var/log/cti-agent/audit-*.log`.
+
+**Retention.** The daily mailbox cleanup lane prunes first, before it touches
+mail: `cti-audit --prune --days $AUDIT_RETAIN_DAYS`, default 120. It deletes
+only `audit-YYYY-MM-DD.log` files older than that. To change it, set
+`AUDIT_RETAIN_DAYS` in `fleet.env`. A value that is not a number, or is zero,
+falls back to 120 with a board WARN. A prune failure is a board WARN and never
+fails the unit. To see what it would delete:
+
+```bash
+sudo cti-agent cti-audit --prune --days 120 --dry-run
+```
+
+The installer's `--purge` leaves `/var/log/cti-agent` in place.
+
+**The heartbeat and scout write to the journal, not the files.** They have no
+write access to the directory on purpose (see SECURITY.md), so their events
+fall back to the journal:
+
+```bash
+sudo journalctl -u cti-agent-checkin --since today | grep audit@32473
+```
 
 ---
 

@@ -60,6 +60,38 @@ fail() { say "FAILED: $*"; "$BOARD" post @mailbox @you ERROR \
 
 [ -x "$CLEAN" ] || fail "cti-mailbox not found at $CLEAN - rerun the installer"
 
+# THE AUDIT TRAIL'S RETENTION. This is the fleet's daily housekeeping lane, so
+# it also enforces how long the audit trail is kept: files in AUDIT_DIR
+# (default /var/log/cti-agent) older than AUDIT_RETAIN_DAYS (default 120) are
+# deleted by cti-audit, which touches only audit-DATE.log files. It runs BEFORE
+# the mailbox work so a Graph failure below cannot stop the trail from being
+# pruned, and a pruning problem never stops the mailbox work: it is a board
+# WARN, not a failed unit. A dry run lists what it would delete and deletes
+# nothing.
+AUDIT_TOOL="$FLEET_CODE/bin/cti-audit"
+AUDIT_RETAIN_DAYS="${AUDIT_RETAIN_DAYS:-120}"
+case "$AUDIT_RETAIN_DAYS" in
+  ''|*[!0-9]*|0)
+    say "warn: AUDIT_RETAIN_DAYS='$AUDIT_RETAIN_DAYS' is not a number of days (1 or more); using 120"
+    "$BOARD" post @mailbox @you WARN \
+      "AUDIT_RETAIN_DAYS='$AUDIT_RETAIN_DAYS' is not a number of days; the audit trail is kept 120 days" 2>/dev/null || true
+    AUDIT_RETAIN_DAYS=120 ;;
+esac
+if [ -x "$AUDIT_TOOL" ]; then
+  if [ -n "$DRY" ]; then
+    "$AUDIT_TOOL" --prune --days "$AUDIT_RETAIN_DAYS" --dry-run \
+      || say "warn: the audit trail could not be checked for pruning (see above)"
+  else
+    "$AUDIT_TOOL" --prune --days "$AUDIT_RETAIN_DAYS" || {
+      say "warn: the audit trail could not be pruned"
+      "$BOARD" post @mailbox @you WARN \
+        "audit trail retention failed: cti-audit --prune --days $AUDIT_RETAIN_DAYS (run it by hand to see why)" 2>/dev/null || true
+    }
+  fi
+else
+  say "warn: $AUDIT_TOOL not found - the audit trail is not being pruned; rerun the installer"
+fi
+
 PLAN="$FLEET_HOME/state/mailbox-cleanup-$(date +%F).json"
 
 # Pass the threshold through only when it is set, so the binary's own default

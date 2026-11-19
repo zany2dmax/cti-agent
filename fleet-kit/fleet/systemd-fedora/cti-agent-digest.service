@@ -29,6 +29,13 @@ UMask=0077
 #   /var/lib/cti-agent state     systemd creates and chowns this
 StateDirectory=cti-agent
 StateDirectoryMode=0750
+
+# The audit trail: RFC 5424 syslog lines in /var/log/cti-agent/audit-DATE.log
+# (cti-audit(1), internal/audit). systemd creates the directory for the service
+# account and keeps it writable under ProtectSystem=strict. The cleanup lane
+# deletes files past AUDIT_RETAIN_DAYS (default 120).
+LogsDirectory=cti-agent
+LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/cti-agent
 # EnvironmentFile FIRST, then Environment=. systemd applies these in
 # written order and the last assignment wins, so with the file last a
