@@ -483,8 +483,8 @@ const maxAskedPerMessage = 5
 // composite auth for the From domain. The From address alone is a claim, and
 // "anyone can pad the daily" is the thing the list exists to stop.
 //
-// SenderAuthenticated, not VouchedFor: FLEET_SENDER_AUTH=off is for a tenant
-// behind a mail gateway, which is where a forged From of the org's own
+// SenderAuthenticated, not VouchedFor: FLEET_UNAUTHENTICATED_SENDERS is for a
+// tenant behind a mail gateway, which is where a forged From of the org's own
 // domain is easiest, and the team list defaults to that domain.
 func teamSource(msg graph.Message, team []string) bool {
 	if len(team) == 0 || !mailbox.SenderIn(msg.From, team) {

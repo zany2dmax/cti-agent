@@ -173,19 +173,28 @@ func defuse(s string) string {
 }
 
 // formLines renders the form's answers for the model, blanks marked as blank.
+//
+// ONLY WHAT THE QUESTION NEEDS. The model judges whether a supplier touches
+// company data, systems or technology, so it is shown what kind of request
+// this is, whether the spend is an expense or inventory, who the supplier is,
+// and what the requester said about them. It is NOT shown the remittance
+// address, the accounts-receivable contact, payment and credit terms, spend,
+// the branch, the ERP, or the names of the requester and approver: none bears on
+// the question, all are business or personal data, and the lane's own code (not
+// the model) enforces the rules that use the sender and the form's structure.
+// The full form still goes to the people who file and review the request.
+// Every value is run through RedactSensitive as well, because free text is
+// where a tax id or an account number gets pasted.
 func formLines(f Form) string {
 	rows := []struct{ label, val string }{
-		{"Request", f.Request}, {"Branch/market", f.Branch}, {"ERP", f.ERP},
-		{"Expense or inventory", f.Class}, {"Supplier name", f.Name},
-		{"Remittance address", f.Address}, {"Accounts receivable contact", f.ARContact},
-		{"Payment terms", f.PaymentTerms}, {"Anticipated monthly spend", f.MonthlySpend},
-		{"Credit limit", f.CreditLimit}, {"PO required", f.PORequired},
-		{"Requested by", f.RequestedBy}, {"Approved by", f.ApprovedBy},
+		{"Request", f.Request},
+		{"Expense or inventory", f.Class},
+		{"Supplier name", f.Name},
 		{"Additional notes", f.Notes},
 	}
 	var b strings.Builder
 	for _, r := range rows {
-		v := strings.TrimSpace(r.val)
+		v := strings.TrimSpace(RedactSensitive(r.val))
 		if v == "" {
 			v = "(blank)"
 		}
@@ -194,16 +203,30 @@ func formLines(f Form) string {
 	return b.String()
 }
 
+// senderDomain is what the model is told about the sender: the domain, never
+// the person's address. Code has already decided whether the domain is
+// internal; the model has no use for who wrote it.
+func senderDomain(from string) string {
+	s := strings.TrimSpace(from)
+	if i := strings.LastIndex(s, "<"); i >= 0 {
+		s = strings.TrimSuffix(strings.TrimSpace(s[i+1:]), ">")
+	}
+	if at := strings.LastIndex(s, "@"); at >= 0 && at < len(s)-1 {
+		return strings.ToLower(strings.TrimSpace(s[at+1:]))
+	}
+	return "(unknown)"
+}
+
 // Source is the untrusted text exactly as the model reads it. Evidence quotes
 // are checked against this, so it is built once and used for both.
 func (in Input) Source() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "SENDER: %s\nSUBJECT: %s\n", defuse(in.Sender), defuse(in.Subject))
+	fmt.Fprintf(&b, "SENDER DOMAIN: %s\nSUBJECT: %s\n", defuse(senderDomain(in.Sender)), defuse(RedactSensitive(in.Subject)))
 	if in.State == StateRead && in.Form != nil {
 		b.WriteString("FORM FIELDS:\n")
 		b.WriteString(defuse(formLines(*in.Form)))
 	}
-	body := in.Body
+	body := RedactSensitive(in.Body)
 	truncated := false
 	if len(body) > maxBody {
 		body, truncated = body[:maxBody], true

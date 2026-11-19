@@ -1,23 +1,100 @@
 package graph
 
 import (
+	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
+
+	"github.com/zany2dmax/cti-agent/internal/audit"
 )
 
-// SenderAuthEnv turns the sender check off when set to "off". It is for a
-// tenant whose inbound path hides the sender from Exchange Online (a gateway
-// in front without enhanced filtering for connectors): there every genuine
-// notice fails, and each one is reported as a problem until this is set.
-const SenderAuthEnv = "FLEET_SENDER_AUTH"
+// UnauthenticatedSendersEnv lists From domains whose mail is read even when the
+// receiving server did not authenticate it: "qualys.net,scanner.example". It is
+// for a tenant whose inbound path hides the sender from Exchange Online (a
+// gateway in front without enhanced filtering for connectors), where every
+// genuine notice fails the check and is reported as a problem.
+//
+// It replaces FLEET_SENDER_AUTH=off, which switched the check off for EVERY
+// sender: with it set, a forged From of any scanner or feed address was read,
+// and a forged intel email reached a model. A list names the few domains a
+// gateway really hides, and everything else is still checked. Exact domains
+// only: no wildcard, no subdomain match. It is still a bypass for the domains
+// on it (a forged From of a listed domain is believed), so list as few as the
+// problem needs, and prefer fixing the connector.
+const UnauthenticatedSendersEnv = "FLEET_UNAUTHENTICATED_SENDERS"
 
-// VouchedFor is SenderAuthenticated unless FLEET_SENDER_AUTH=off. Lanes that
-// act on a message because of who sent it call this.
+// legacySenderAuthEnv is the switch this list replaced. It is no longer
+// honoured, and a message that would have passed because of it says so.
+const legacySenderAuthEnv = "FLEET_SENDER_AUTH"
+
+var domainRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// ParseUnauthenticatedSenders splits the setting into valid domains and the
+// entries it refused (a wildcard, an address, anything that is not a plain
+// domain name).
+func ParseUnauthenticatedSenders(v string) (domains, bad []string) {
+	for _, e := range strings.Split(v, ",") {
+		e = strings.ToLower(strings.TrimSpace(e))
+		switch {
+		case e == "":
+		case domainRE.MatchString(e):
+			domains = append(domains, e)
+		default:
+			bad = append(bad, e)
+		}
+	}
+	return domains, bad
+}
+
+var (
+	warnOnce  sync.Once
+	acceptedM sync.Mutex
+	accepted  = map[string]bool{}
+)
+
+// VouchedFor is SenderAuthenticated, or true when the From domain is listed in
+// FLEET_UNAUTHENTICATED_SENDERS. Lanes that act on a message because of who
+// sent it call this. A message accepted only because its domain is listed is
+// written to the audit trail, once per domain per run: the bypass is visible.
 func (m Message) VouchedFor() (bool, string) {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(SenderAuthEnv)), "off") {
+	ok, why := m.SenderAuthenticated()
+	if ok {
 		return true, ""
 	}
-	return m.SenderAuthenticated()
+	listed, bad := ParseUnauthenticatedSenders(os.Getenv(UnauthenticatedSendersEnv))
+	if len(bad) > 0 {
+		warnOnce.Do(func() {
+			_, _ = fmt.Fprintf(os.Stderr, "%s: ignoring %q (exact domain names only, such as qualys.net)\n",
+				UnauthenticatedSendersEnv, strings.Join(bad, ","))
+		})
+	}
+	if d := fromDomain(m.From); d != "" {
+		for _, l := range listed {
+			if d == l {
+				auditAccepted(d, why)
+				return true, ""
+			}
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(legacySenderAuthEnv)), "off") {
+		why += "; " + legacySenderAuthEnv + "=off is no longer honoured: list the sender's domain in " +
+			UnauthenticatedSendersEnv + " instead"
+	}
+	return false, why
+}
+
+func auditAccepted(domain, why string) {
+	acceptedM.Lock()
+	seen := accepted[domain]
+	accepted[domain] = true
+	acceptedM.Unlock()
+	if seen {
+		return
+	}
+	audit.Emit(audit.Event{Action: "sender.unauthenticated.accepted", Target: domain, Outcome: audit.Success,
+		Detail: "read on the strength of " + UnauthenticatedSendersEnv + "; the check said: " + why})
 }
 
 // SenderAuthenticated reports whether the receiving server authenticated the

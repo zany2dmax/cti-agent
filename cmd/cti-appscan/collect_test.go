@@ -107,7 +107,9 @@ const qualysAuth = "spf=pass smtp.mailfrom=qualys.net; dkim=pass header.d=qualys
 
 // PrimeSec 10786562: the From address is the sender's claim. A notice the
 // receiving server did not authenticate is neither parsed nor claimed, and
-// says why; FLEET_SENDER_AUTH=off restores the old behaviour.
+// says why; listing the sender's domain in FLEET_UNAUTHENTICATED_SENDERS
+// (for a tenant whose gateway hides the sender) restores reading it, for that
+// domain only. The old FLEET_SENDER_AUTH=off switch no longer does anything.
 func TestAnUnauthenticatedNoticeIsReportedNotRead(t *testing.T) {
 	forged := graph.Message{ID: "res", From: "qualys@qualys.net", Subject: noticeSubject,
 		BodyHTML:              wasNotice("Finished : OK"),
@@ -120,9 +122,22 @@ func TestAnUnauthenticatedNoticeIsReportedNotRead(t *testing.T) {
 		t.Errorf("problems = %v", problems)
 	}
 
-	t.Setenv(graph.SenderAuthEnv, "off")
+	// The legacy blanket switch is gone, and the message says what replaced it.
+	t.Setenv("FLEET_SENDER_AUTH", "off")
+	if scans, _, probs := collect([]graph.Message{forged}); len(scans) != 0 ||
+		len(probs) != 1 || !strings.Contains(probs[0], graph.UnauthenticatedSendersEnv) {
+		t.Errorf("FLEET_SENDER_AUTH=off still reads, or does not name its replacement: %d scans, %v", len(scans), probs)
+	}
+
+	// A listed sender domain is read; an unlisted one is still refused.
+	t.Setenv("FLEET_SENDER_AUTH", "")
+	t.Setenv(graph.UnauthenticatedSendersEnv, "qualys.net")
 	if scans, _, _ := collect([]graph.Message{forged}); len(scans) != 1 {
-		t.Errorf("%s=off did not restore reading it: %d scans", graph.SenderAuthEnv, len(scans))
+		t.Errorf("a listed domain was not read: %d scans", len(scans))
+	}
+	t.Setenv(graph.UnauthenticatedSendersEnv, "other.example")
+	if scans, _, _ := collect([]graph.Message{forged}); len(scans) != 0 {
+		t.Errorf("an unlisted domain was read: %d scans", len(scans))
 	}
 }
 

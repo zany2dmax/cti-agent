@@ -132,7 +132,7 @@ or
 .B dmarc=pass
 for the From domain. Anything else is logged as a problem and not read, and its
 companion notices are not claimed. See
-.BR FLEET_SENDER_AUTH .
+.BR FLEET_UNAUTHENTICATED_SENDERS .
 .PP
 Only the results notices of the expected scans are recorded as used, for the
 mailbox cleanup to archive. For a scan that finished, its
@@ -248,12 +248,13 @@ does this only after a real send.
 Extra scan titles to expect, comma separated, on top of the scan schedules.
 Optional and rarely needed.
 .TP
-.B FLEET_SENDER_AUTH
-Set to
-.B off
-to read a notice on its From address alone, without the sender
+.B FLEET_UNAUTHENTICATED_SENDERS
+Exact From domains, comma separated, whose notices are read without the sender
 authentication check. Only for a tenant whose inbound gateway hides the real
-sender from Exchange Online, which makes every genuine notice fail.
+sender from Exchange Online, which makes every genuine notice fail. The domains
+listed only; each acceptance is written to the audit trail. It replaces
+.BR FLEET_SENDER_AUTH=off ,
+which switched the check off for every sender and is no longer honoured.
 .TP
 .B SUBNETS_DRIVE_ID
 .TQ

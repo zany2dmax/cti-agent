@@ -106,6 +106,24 @@ it would fail first. The standing instructions are root-owned
 text are all inside an untrusted block whose markers are removed from hostile
 text.
 
+**What the model is sent is cut to what the question needs.** The model judges
+one thing, whether the supplier touches company data, systems or technology, and
+the model is a third-party service, so it is shown the request type, whether it
+is an expense or inventory, the supplier's name, the requester's notes, the
+subject and the message text, and the sender's **domain, not their address**. It
+is not shown the remittance address, the accounts-receivable contact, payment and
+credit terms, spend, the branch, the ERP, or the requester's and approver's
+names. The rules that use the sender and the form's structure run in code, so the
+model does not need them. Every value, and the subject and body, then passes
+`RedactSensitive`, which replaces tax ids, bank account and routing numbers,
+IBANs and Luhn-valid card numbers with a marker, because a requester will paste
+them into the notes even though the form has attachments for them. It is blunt
+on purpose and misses numbers written as words, which is why the field list is
+short and the redaction is only a net under it. The people who file and review a
+request still get the full form; only the model's copy is cut. What still leaves
+the host is a supplier's name, what it supplies and the requester's own
+description, under the company's terms for the Claude service.
+
 What code does with the answer is the control. `cti-supplier` parses it
 strictly, requires every quoted line to appear in the request, and can **only
 move an answer toward Unsure**: a No is refused when the form was not read, when

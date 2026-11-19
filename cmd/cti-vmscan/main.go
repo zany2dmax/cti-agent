@@ -498,8 +498,8 @@ func collect(msgs []graph.Message, expected []string) ([]vmscan.Scan, []mailbox.
 			problems = append(problems, fmt.Sprintf(
 				"%q claims to come from %s, but %s, so it was not read. If every genuine "+
 					"notice says this, mail reaches Exchange Online through a gateway that "+
-					"hides the sender; fix the connector, or set %s=off",
-				short(m.Subject), safelog.Line(m.From), why, graph.SenderAuthEnv))
+					"hides the sender; fix the connector, or list the sender's domain in %s",
+				short(m.Subject), safelog.Line(m.From), why, graph.UnauthenticatedSendersEnv))
 			continue
 		}
 		body := m.BodyHTML

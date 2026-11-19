@@ -1,6 +1,13 @@
 package graph
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/zany2dmax/cti-agent/internal/audit"
+)
 
 // PrimeSec 10786562: a From address alone is the sender's claim. These are
 // synthetic Exchange Online Authentication-Results values.
@@ -74,5 +81,96 @@ func TestADuplicatedAuthAsIsNotInternal(t *testing.T) {
 		{"name":"x-ms-exchange-organization-authas","value":"Anonymous"}`))
 	if len(two) != 1 || two[0].Internal() {
 		t.Errorf("two AuthAs headers counted as internal: %q", two[0].AuthAs)
+	}
+}
+
+// ---- FLEET_UNAUTHENTICATED_SENDERS: a list, not a switch ----
+
+func clearSenderEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(UnauthenticatedSendersEnv, "")
+	t.Setenv(legacySenderAuthEnv, "")
+}
+
+func TestOnlyListedDomainsSkipTheSenderCheck(t *testing.T) {
+	clearSenderEnv(t)
+	forged := Message{From: "Scanner <noreply@qualys.net>", AuthenticationResults: "dmarc=fail header.from=qualys.net;compauth=fail"}
+	if ok, why := forged.VouchedFor(); ok || why == "" {
+		t.Fatalf("an unauthenticated message passed with nothing listed: %v %q", ok, why)
+	}
+	t.Setenv(UnauthenticatedSendersEnv, "Qualys.NET , other.example")
+	if ok, _ := forged.VouchedFor(); !ok {
+		t.Error("a listed domain (any case, with spaces) was refused")
+	}
+	for _, from := range []string{"x@evil.example", "x@sub.qualys.net", "x@qualys.net.evil.example", "x@notqualys.net", "", "not an address"} {
+		m := Message{From: from, AuthenticationResults: "dmarc=fail"}
+		if ok, _ := m.VouchedFor(); ok {
+			t.Errorf("From %q passed on a list that names only qualys.net and other.example", from)
+		}
+	}
+}
+
+func TestAnAuthenticatedMessageStillPassesWhateverIsListed(t *testing.T) {
+	clearSenderEnv(t)
+	m := Message{From: "x@feed.example", AuthenticationResults: "dmarc=pass header.from=feed.example;compauth=pass"}
+	if ok, why := m.VouchedFor(); !ok || why != "" {
+		t.Fatalf("%v %q", ok, why)
+	}
+}
+
+func TestTheListTakesExactDomainsNotWildcardsOrAddresses(t *testing.T) {
+	good, bad := ParseUnauthenticatedSenders("qualys.net, *.qualys.net, a@b.example, , localhost, .bad.example, ok.example,-x.example")
+	if strings.Join(good, ",") != "qualys.net,ok.example" {
+		t.Errorf("good = %v", good)
+	}
+	if len(bad) != 5 {
+		t.Errorf("bad = %v", bad)
+	}
+	clearSenderEnv(t)
+	t.Setenv(UnauthenticatedSendersEnv, "*")
+	if ok, _ := (Message{From: "x@anything.example", AuthenticationResults: "dmarc=fail"}).VouchedFor(); ok {
+		t.Error("a bare * switched the check off")
+	}
+}
+
+// The old blanket switch is gone: it does nothing except say what replaced it.
+func TestTheOldOffSwitchIsNoLongerHonoured(t *testing.T) {
+	clearSenderEnv(t)
+	t.Setenv(legacySenderAuthEnv, "off")
+	ok, why := (Message{From: "x@any.example", AuthenticationResults: "dmarc=fail"}).VouchedFor()
+	if ok {
+		t.Fatal("FLEET_SENDER_AUTH=off still skips the check")
+	}
+	if !strings.Contains(why, UnauthenticatedSendersEnv) || !strings.Contains(why, "no longer honoured") {
+		t.Errorf("the refusal should name the replacement: %q", why)
+	}
+}
+
+func TestAcceptingAListedDomainLeavesAnAuditEventOncePerDomain(t *testing.T) {
+	clearSenderEnv(t)
+	dir := t.TempDir()
+	restore := audit.SetDefault(&audit.Logger{Dir: dir, Lane: "cti-vmscan", Actor: "tester", Run: "r", Host: "h", Pid: 1})
+	t.Cleanup(restore)
+	acceptedM.Lock()
+	accepted = map[string]bool{}
+	acceptedM.Unlock()
+	t.Setenv(UnauthenticatedSendersEnv, "qualys.net")
+	m := Message{From: "x@qualys.net", AuthenticationResults: "dmarc=fail"}
+	for i := 0; i < 3; i++ {
+		if ok, _ := m.VouchedFor(); !ok {
+			t.Fatal("listed domain refused")
+		}
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "audit-*.log"))
+	var got strings.Builder
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		got.Write(b)
+	}
+	if n := strings.Count(got.String(), "sender.unauthenticated.accepted"); n != 1 {
+		t.Fatalf("want one audit event for three messages from one domain, got %d:\n%s", n, got.String())
+	}
+	if !strings.Contains(got.String(), `target="qualys.net"`) {
+		t.Errorf("event should name the domain:\n%s", got.String())
 	}
 }

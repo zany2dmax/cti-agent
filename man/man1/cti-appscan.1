@@ -343,7 +343,7 @@ Microsoft Graph, to read the mailbox. Required.
 .I fleet.env
 section 1.
 .TP
-.B FLEET_SENDER_AUTH
+.B FLEET_UNAUTHENTICATED_SENDERS
 A notice from the scanner's address is read only when Exchange Online's own
 .B Authentication\-Results
 header records
@@ -351,10 +351,15 @@ header records
 or
 .B dmarc=pass
 for its From domain; anything else is a problem line, and the notice stays in
-the inbox. Set to
-.B off
-to trust the From address alone, for a tenant whose inbound gateway hides the
-real sender.
+the inbox. For a tenant whose inbound gateway hides the real sender, list the
+scanner's From domain here (exact domains, comma separated, such as
+.BR qualys.net )
+to read its notices without the check. It applies to the listed domains only,
+every acceptance is written to the audit trail, and a forged From of a listed
+domain is believed, so list as few as needed and prefer fixing the connector. It
+replaces
+.BR FLEET_SENDER_AUTH=off ,
+which switched the check off for every sender and is no longer honoured.
 .TP
 .B GRAPH_FOLDER
 Folder to read. Default:\~\fBinbox\fR. Section 1.

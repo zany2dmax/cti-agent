@@ -53,11 +53,12 @@ func TestATeamSourceIsAnAuthenticatedColleague(t *testing.T) {
 	if teamSource(graph.Message{From: "ana@corp.example", AuthAs: "Internal"}, nil) {
 		t.Error("an empty team list matched")
 	}
-	// The gateway switch turns sender authentication off for the feeds; it
-	// must not let a forged From of the org's own domain ask.
-	t.Setenv(graph.SenderAuthEnv, "off")
+	// The gateway setting lets listed feed and scanner domains through the
+	// sender check; it must not let a forged From of the org's own domain ask,
+	// even when that domain is listed.
+	t.Setenv(graph.UnauthenticatedSendersEnv, "corp.example")
 	if teamSource(graph.Message{From: "ana@corp.example"}, team) {
-		t.Error("FLEET_SENDER_AUTH=off let an unauthenticated colleague address ask")
+		t.Error("FLEET_UNAUTHENTICATED_SENDERS let an unauthenticated colleague address ask")
 	}
 }
 

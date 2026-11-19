@@ -610,8 +610,8 @@ func lookalike(m graph.Message) string {
 func unvouched(m graph.Message, why string) string {
 	return fmt.Sprintf("%s: claims to come from %s, but %s, so it was not read. "+
 		"If every genuine notice says this, mail reaches Exchange Online through "+
-		"a gateway that hides the sender; fix the connector, or set %s=off",
-		shortSubject(m.Subject), safelog.Line(m.From), why, graph.SenderAuthEnv)
+		"a gateway that hides the sender; fix the connector, or list the sender's domain in %s",
+		shortSubject(m.Subject), safelog.Line(m.From), why, graph.UnauthenticatedSendersEnv)
 }
 
 // writeSeen writes the notices a report covered, 0600: subject lines from a

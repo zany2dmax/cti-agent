@@ -339,6 +339,53 @@ journal says why. Advisory triage in the digest stays off until you set
     11583416, 11583417) and "Dynamic Application Security Testing" (10785584)
     are decisions, not code, and are dismissed in Prime with the reasons above.
 
+- **`FLEET_SENDER_AUTH=off` is gone; a short list of sender domains replaces
+  it (`FLEET_UNAUTHENTICATED_SENDERS`). ACTION REQUIRED if your `fleet.env`
+  sets the old variable.** `off` made `VouchedFor()` say yes for every sender, so
+  with it set a forged From of any scanner or feed address was read, and a forged
+  intel email reached a model. It is no longer honoured. A tenant whose mail
+  gateway hides the real sender from Exchange Online (where every genuine notice
+  fails the check) now lists the exact From domains to accept, such as
+  `qualys.net`: no wildcard, no subdomain, the listed domains only, and the first
+  acceptance of each domain in a run is written to the audit trail
+  (`sender.unauthenticated.accepted`). A forged From of a listed domain is still
+  believed, so list as few as the problem needs and prefer fixing the connector.
+  A message that fails the check while the old variable is set says in its report
+  line what to set instead. **Upgrade:** `grep FLEET_SENDER_AUTH
+  /etc/cti-agent/fleet.env`. Nothing printed (or the value is blank): nothing to
+  do. `off`: after the update the Qualys weekly and the scan reports will report
+  every notice as unauthenticated until you add
+  `FLEET_UNAUTHENTICATED_SENDERS=<the scanner's From domain>` (and the feed
+  domains, if the triage lane is on); then remove the old line. The man pages and
+  `fleet.env.example` say the same.
+- **The supplier lane sends the model less, and redacts what remains
+  (`RedactSensitive`).** The model judges one thing: does the supplier touch
+  company data, systems or technology. It was being shown the whole form
+  (remittance address, accounts-receivable contact, payment and credit terms,
+  spend, branch, ERP, the requester's and approver's names), the sender's full
+  address, and the message text as written. It now sees the request type,
+  expense or inventory, the supplier's name, the requester's notes, the subject,
+  the message text, and the sender's **domain**. The rules that use the sender
+  and the form's structure run in code and are unchanged. Every value, the subject
+  and the body also pass `RedactSensitive`, which replaces tax ids (EIN, SSN),
+  bank account and routing numbers (on a line that mentions accounts or
+  routing), IBANs and Luhn-valid card numbers with a `[redacted: ...]` marker. It
+  is blunt on purpose and a net under the field list, not a replacement for it.
+  Evidence quotes are checked against the same redacted text, so a redaction
+  cannot make a real quote look invented. The people who file and review the
+  request still get the full form. SECURITY.md says what still leaves the host.
+  **Upgrade:** nothing. If the model's verdicts look different after the update
+  (it has less to go on), `task eval:supplier` runs the invented cases against the
+  real model and reports how often it is right (by hand: it costs tokens).
+  - **Fixed issues found by PrimeSec AI:** guardrail finding "Zero Trust
+    Application Access" (11583419, HIGH) is fixed by the first entry above;
+    "Prohibit Sensitive Data in AI Tools" (11583414, HIGH) is addressed by the
+    second: the model gets less, and what it gets is redacted, though what a
+    supplier's name and a requester's note may be sent to the Claude service is
+    still the company's data-terms decision. "Permission-Controlled Reporting
+    Exports" (10785633) and "AI Read-Only Scoped Access" (11583433) are
+    decisions, not code, and are dismissed in Prime with their reasons.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed
