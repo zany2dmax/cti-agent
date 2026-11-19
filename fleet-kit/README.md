@@ -178,6 +178,7 @@ Every way to run this, in one place. `task` targets wrap `dev-run`; use either.
 | `task kev` | `cti-kev` | CISA KEV deadlines for findings present in the estate | no |
 | — | `cti-falcon --check` | Read-only check of the CrowdStrike API client: a token, then one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts); counts only (needs `FALCON_BASE_URL`, `FALCON_CLIENT_ID`, `FALCON_CLIENT_SECRET`) | no |
 | — | `cti-falcon --find-app NAME` / `--new-apps DAYS` | Falcon Discover: which installed apps match a name, with host, version and platform counts; or which apps first appeared in the last N days that the estate never had before. No host names | no |
+| — | `cti-triage --show-input \| --read \| --facts --message FILE` | Advisory triage by hand. The no-tools reader names an advisory's products, versions and techniques, and code removes any claim the advisory doesn't support. Then Falcon lookups: which of those products we run, whether our hosts saw its indicators, alerts on its techniques. Prints each model call's tokens and cost | no |
 | — | `cti-podprobe` | Read-only probe of the PoD Log API for one archived window: counts only (needs `POD_CLUSTER_ID`, `POD_API_TOKEN`) | no |
 | `task test:kev` | — | Deadline bands, sign convention, present-only filtering | no |
 | `task patchtuesday` | `run-patchtuesday --dry-run` | Build the monthly Patch Tuesday synopsis. Never writes the release manifest | **dry run** |

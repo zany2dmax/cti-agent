@@ -321,6 +321,8 @@ sudo cti-agent cti-falcon --check              # CrowdStrike API client: token a
 sudo cti-agent cti-falcon --find-app chrome    # do we run it? hosts, versions, platforms (no host names)
 sudo cti-agent cti-falcon --new-apps 1         # apps first seen today that the estate never had before
 sudo cti-agent cti-falcon --fields             # field names of one Discover record, no values
+sudo cti-agent cti-triage --show-input --message adv.txt   # what the reader would see; no model call
+sudo cti-agent cti-triage --facts --message adv.txt        # reader + Falcon fact sheet; prints the model's cost
 sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500   # PoD Log API counts, read only
 ```
 

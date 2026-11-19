@@ -80,6 +80,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   were never looked up. They're now looked up by name among extensions only,
   so a desktop app of the same name can't make one look known. Other apps
   with no vendor are still not checked.
+- `cti-triage`: advisory triage by hand, phase 3. A no-tools reader model,
+  shown only the advisory, names its vendors, products, versions and ATT&CK
+  techniques. Code removes every claim the advisory doesn't support, then
+  looks the rest up in Falcon: matching installed apps (with about how many
+  hosts are below the fixed version), hosts that saw each indicator, and
+  alerts naming each technique in the last 30 days. Lookups are capped and
+  each input is re-checked for its exact shape. Every model call's tokens and
+  cost are printed. It writes nothing. RUNBOOK §11k. **Upgrade:** to use it,
+  set `TRIAGE_MODEL` (and optionally `TRIAGE_BLIND_SPOTS`) in `fleet.env`.
 
 ### Fixed
 

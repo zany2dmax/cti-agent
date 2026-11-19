@@ -354,6 +354,10 @@ info "lanes/email-tokens.json"
 run install -d -m 0755 -o root -g root "$CODE_DIR/agents/supplier"
 run install -m 0644 -o root -g root "$SRC/fleet/agents/supplier/CLAUDE.md" "$CODE_DIR/agents/supplier/CLAUDE.md"
 info "agents/supplier/CLAUDE.md"
+# The advisory triage reader's instructions, root-owned for the same reason.
+run install -d -m 0755 -o root -g root "$CODE_DIR/agents/triage-reader"
+run install -m 0644 -o root -g root "$SRC/fleet/agents/triage-reader/CLAUDE.md" "$CODE_DIR/agents/triage-reader/CLAUDE.md"
+info "agents/triage-reader/CLAUDE.md"
 # The list of fleet commands and what each takes, and what answers questions
 # about it: `cti-agent` with no arguments, `cti-agent CMD --help`, and the TAB
 # completions all read this one file.
@@ -756,6 +760,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-falcon" ./cmd/cti-falcon )
   chmod 0755 "$CODE_DIR/bin/cti-falcon"
   ok "built $CODE_DIR/bin/cti-falcon"
+
+  # Advisory triage by hand (phase 3): the no-tools reader model, then Falcon
+  # lookups. Needs TRIAGE_MODEL and the FALCON_* settings; nothing runs it on
+  # a timer yet.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-triage" ./cmd/cti-triage )
+  chmod 0755 "$CODE_DIR/bin/cti-triage"
+  ok "built $CODE_DIR/bin/cti-triage"
 
   # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
   # against Qualys, so it needs outbound 443 to two more hosts - checked in
@@ -1175,7 +1186,7 @@ FAIL=0
 [ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
-         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" \
+         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" "$CODE_DIR/bin/cti-triage" \
          "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \

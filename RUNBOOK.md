@@ -29,6 +29,7 @@ document assumes you have decided to run it.
 - [11h. Man pages](#11h-man-pages)
 - [11i. Cutting a release](#11i-cutting-a-release)
 - [11j. The CrowdStrike API client](#11j-the-crowdstrike-api-client)
+- [11k. Advisory triage by hand](#11k-advisory-triage-by-hand)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -2693,6 +2694,81 @@ returned, which carry `®`, `+`, `:` and non-Latin scripts. They're checked
 only for the characters that could leave the quoted filter value (quote,
 backslash, `*`, control characters). Names coming back from Discover are cleaned of control characters
 before they're printed. Neither mode ever prints a host name or ID.
+
+---
+
+## 11k. Advisory triage by hand
+
+`cti-triage` is phase 3 of advisory triage: it turns one advisory into facts
+from our own tools. Phase 4 adds the judge and puts the result in the Daily
+Brief. Until then you run it by hand, and it writes nothing.
+
+**Set up** in `/etc/cti-agent/fleet.env`, next to the `FALCON_*` settings:
+
+```
+TRIAGE_MODEL=sonnet
+TRIAGE_BLIND_SPOTS=sites without the Falcon sensor; servers outside Falcon
+```
+
+The reader runs with a stripped environment and an empty home directory: no
+Falcon secret, no mail credentials, and no `.claude` folder (the fleet's home
+holds the orchestrator's). So it needs `ANTHROPIC_API_KEY` or
+`CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`, as the timers already use. A login
+stored under a home directory isn't seen.
+
+`TRIAGE_BLIND_SPOTS` is your own words for what Falcon can't see. It's
+printed on every fact sheet, so "not installed" never reads as "not affected".
+
+**Run it** on an advisory saved as a text file (paste the mail body):
+
+```bash
+sudo cti-agent cti-triage --show-input --message adv.txt
+sudo cti-agent cti-triage --facts --message adv.txt --subject "the mail's subject"
+```
+
+What happens:
+
+1. **Code extracts** CVEs, ATT&CK IDs, defanged indicators and links (no
+   model).
+2. **The reader**, a model started with no tools, sees only the advisory. It
+   names the vendors, products, versions and techniques it concerns. It never
+   sees our data, so a poisoned advisory can at worst make it name a wrong
+   product.
+3. **Code removes** every claim the advisory doesn't support: a product,
+   vendor or fixed version not in the text as a whole word (`1.0` doesn't
+   count because `131.0` is there, nor `SQL` because `MySQL` is), a product
+   too short or too common to look up, a quote not in the text word for
+   word, a technique that isn't an ATT&CK ID. Techniques the reader added are
+   marked *inferred*. The title, affected-versions text and any refusal
+   reason are printed as the reader's words.
+4. **Falcon lookups**, capped per advisory (5 products, 25 indicators, 10
+   techniques), each value re-checked for its exact shape first:
+   - **Products**: installed apps that match, with host counts, host types,
+     exposure, and about how many run a version older than the fixed one.
+   - **Indicators**: hosts that saw each domain, IP or hash, plus the hosts of
+     defanged links. Ordinary reference links aren't looked up. A hit prints
+     `SEEN ON N HOST(S)`. Treat it as an incident lead, whatever else the
+     sheet says. "Not seen" covers only Falcon's own lookback for this
+     lookup, which is limited. It's not proof the indicator never reached a
+     host.
+   - **Techniques**: Falcon alerts naming it in the last 30 days. A
+     sub-technique is counted under its parent.
+
+**Cost:** `--read` and `--facts` make one model call and print its tokens
+and cost on stderr. `--show-input` makes none. To compare runs without paying
+again, save the reader's answer and replay it:
+
+```bash
+sudo cti-agent cti-triage --read --json --message adv.txt > saved.json
+sudo cti-agent cti-triage --facts --message adv.txt --subjects-file saved.json
+```
+
+| What you see | What it means |
+|---|---|
+| `LOOKUP FAILED` on every technique | The Alerts filter field `technique_id` is wrong for this tenant. The rest of the sheet is fine. |
+| `not looked up: the product name has characters a lookup does not allow` | The reader's product name holds `+`, `'` or similar. Try `cti-falcon --find-app` with a shorter name. |
+| `READER REFUSED` | The reader judged the advisory to be trying to change its task. Only code's own extraction was looked up. |
+| `reader claims removed` | What the reader said that the advisory doesn't support. A few are normal. Many means the reader is guessing. |
 
 ---
 

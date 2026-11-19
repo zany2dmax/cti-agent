@@ -30,8 +30,9 @@ import (
 // not a transport for a file.
 const DefaultMax = 300
 
-// Line makes a string safe to put in a log record: every control character is
-// replaced, and the result is capped at DefaultMax runes.
+// Line makes a string safe to put in a log record or on a terminal: every
+// control and invisible formatting character is replaced, and the result is
+// capped at DefaultMax runes.
 //
 // Replaces rather than strips, so the mangling is visible. A message that
 // arrived with newlines in it should look odd, not look clean - "odd" is the
@@ -41,11 +42,12 @@ func Line(s string) string { return LineMax(s, DefaultMax) }
 // LineMax is Line with an explicit cap, for callers printing into a
 // fixed-width column.
 func LineMax(s string, max int) string {
-	// unicode.IsControl covers it: newline, carriage return and tab are all C0
-	// controls, as are the C1 range and DEL. Listing them separately would be
-	// three redundant comparisons in front of the check that decides.
+	// unicode.IsControl covers newline, carriage return, tab, the C1 range
+	// and DEL. Format characters (Cf) are replaced too: a right-to-left
+	// override (U+202E) or the isolates (U+2066-2069) make a line display
+	// differently from what it holds, and zero-width characters hide text.
 	out := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return '?'
 		}
 		return r

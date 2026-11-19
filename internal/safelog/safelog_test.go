@@ -151,3 +151,13 @@ func TestAForgedSubjectLineCannotForgeAJournalRecord(t *testing.T) {
 		t.Errorf("the real subject should survive, mangled visibly: %q", got)
 	}
 }
+
+func TestLineReplacesInvisibleFormattingCharacters(t *testing.T) {
+	in := "invoice\u202Etxt.exe \u2066x\u2069 zero\u200Bwidth"
+	got := Line(in)
+	for _, r := range []rune{0x202E, 0x2066, 0x2069, 0x200B} {
+		if strings.ContainsRune(got, r) {
+			t.Fatalf("Line(%q) = %q still holds U+%04X", in, got, r)
+		}
+	}
+}

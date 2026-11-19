@@ -1,0 +1,135 @@
+.TH CTI-TRIAGE 1 "2026-11-18" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-triage \- turn one threat-intel advisory into facts from our own tools
+.SH SYNOPSIS
+.B cti\-triage
+.BR \-\-show\-input " | " \-\-read " | " \-\-facts
+.B \-\-message
+.I FILE
+.RB [ \-\-subject
+.IR S ]
+.RB [ \-\-sender
+.IR S ]
+.RB [ \-\-subjects\-file
+.IR F ]
+.RB [ \-\-json ]
+.RB [ \-\-timeout
+.IR D ]
+.PP
+.B sudo cti\-agent cti\-triage \-\-facts \-\-message
+.I advisory.txt
+.SH DESCRIPTION
+.B cti-triage
+is advisory triage run by hand (phase 3 of the triage redesign). It reads
+one advisory, a text file holding its body, and writes nothing.
+.PP
+A model, the
+.IR reader ,
+is started with no tools, no MCP servers and no session file, and is shown
+the advisory alone. It never sees the organisation's data. It answers with
+the vendors, products, versions and ATT&CK techniques the advisory concerns.
+Code then removes every claim the advisory does not support: a product,
+vendor or fixed version not in the advisory text, a quote not in it word
+for word, a technique that is not an ATT&CK ID. Techniques the reader added
+that the advisory does not name are marked as inferred.
+.PP
+.B \-\-facts
+then looks the rest up in Falcon: which installed applications match each
+product, with host counts and about how many run a version older than the
+fixed one; how many hosts saw each indicator (the domains, IPs and hashes
+code extracted, and the hosts of defanged links); and how many Falcon alerts
+named each technique in the last 30 days. Every value is re-checked for its
+exact shape before it goes into a query, and lookups are capped per
+advisory: 5 products, 25 indicators, 10 techniques.
+.PP
+Every model call's tokens and cost are printed on stderr.
+.SH OPTIONS
+Exactly one of
+.BR \-\-show\-input ,
+.B \-\-read
+or
+.B \-\-facts
+is required.
+.TP
+.B \-\-show\-input
+Print what the reader would be shown. No model call, no lookups.
+.TP
+.B \-\-read
+Run the reader and print its answer after the checks, with what was removed.
+.TP
+.B \-\-facts
+Run the reader, then the Falcon lookups, and print the fact sheet.
+.TP
+.BI \-\-message " FILE"
+The advisory's body, up to 256 KiB.
+.TP
+.BI \-\-subject " S"
+.TQ
+.BI \-\-sender " S"
+Header lines for the reader, if known.
+.TP
+.BI \-\-subjects\-file " F"
+With
+.BR \-\-facts :
+use a saved reader answer instead of a model call.
+.TP
+.B \-\-json
+Print JSON
+.RB ( cti\-subjects/1
+or
+.BR cti\-facts/1 ).
+.TP
+.BI \-\-timeout " D"
+Give up after this long. Default: 5m.
+.SH ENVIRONMENT
+.TP
+.B TRIAGE_MODEL
+The reader's model: an alias or a full id. Required for a model call.
+.TP
+.B CLAUDE_BIN
+The claude CLI, if it is not on the path.
+.TP
+.B TRIAGE_READER_INSTRUCTIONS
+The reader's instructions. Default:
+.IR $FLEET_CODE/agents/triage-reader/CLAUDE.md .
+.TP
+.B TRIAGE_BLIND_SPOTS
+What Falcon cannot see, repeated on every fact sheet.
+.TP
+.BR FALCON_BASE_URL ", " FALCON_CLIENT_ID ", " FALCON_CLIENT_SECRET
+As for
+.BR cti\-falcon (1).
+.SH EXIT STATUS
+.TP
+.B 0
+Done. A lookup that failed is shown on the sheet, not in the exit status.
+.TP
+.B 1
+The advisory, the instructions or the reader's answer could not be read, the
+model call failed, Falcon could not be reached, or the run timed out.
+.TP
+.B 2
+Bad usage.
+.SH EXAMPLES
+What the reader would see:
+.PP
+.RS
+.B sudo cti\-agent cti\-triage \-\-show\-input \-\-message adv.txt
+.RE
+.PP
+The fact sheet:
+.PP
+.RS
+.B sudo cti\-agent cti\-triage \-\-facts \-\-message adv.txt \-\-subject "Weekly threat roundup"
+.RE
+.PP
+Replay a saved answer without paying for another call:
+.PP
+.RS
+.B sudo cti\-agent cti\-triage \-\-read \-\-message adv.txt \-\-json > saved.json
+.br
+.B sudo cti\-agent cti\-triage \-\-facts \-\-message adv.txt \-\-subjects\-file saved.json
+.RE
+.SH SEE ALSO
+.BR cti\-falcon (1),
+RUNBOOK.md section 11k, SECURITY.md.

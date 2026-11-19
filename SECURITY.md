@@ -118,12 +118,22 @@ eval:supplier`) runs the same arguments.
 
 ## AI triage: untrusted input reaching a model with tools
 
-> **STATUS: DESIGN. NOT YET IMPLEMENTED.**
-> No code in this repository does any of what this section describes. It is
-> written down before the build so the trust boundaries are agreed first, and
-> so that a later change cannot quietly hand the analysis agent a capability
-> this section rules out. Read every "must" below as a requirement on work not
-> yet done, not as a description of a control that exists.
+> **STATUS: PARTLY BUILT, NOT LIVE (2026-11-18).** The design changed. Relevance
+> is no longer judged against a hand-written organisation profile but against
+> facts from the organisation's own tools, in two model steps:
+>
+> - **The reader** (`cti-triage`, `agents/triage-reader/CLAUDE.md`) is a
+>   no-tools model shown only the advisory. Code checks its answer against
+>   the advisory text (`internal/triage/subjects.go`).
+> - **Deterministic Falcon lookups** follow (`internal/triage/facts.go`,
+>   `internal/falcon`). Each re-checks the shape of its hostile input.
+> - **The judge** (not built) will be a second no-tools model that sees the
+>   fact sheet. It is the only model that sees our data, so it has no tools.
+>   The reader may later be given web search, because it never holds our data.
+>
+> The extractor and verifier below exist. Nothing runs on a timer, and
+> nothing reaches the brief yet. Read every "must" about the judge and the
+> brief as a requirement on work not yet done.
 
 This is the newest and sharpest boundary in the system, and the one most
 likely to be got wrong by a well-meaning change. The agent's standing
