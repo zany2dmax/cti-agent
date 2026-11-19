@@ -443,7 +443,18 @@ or
 and each optional one as
 .B OK
 or
-.BR none .
+.BR none ,
+then the owner lane as the lane itself decides it:
+.B armed
+with the number of allowed domains and where they are kept
+.RI ( owners.db ,
+or
+.B OWNER_ALLOW_DOMAINS
+without it),
+.BR off ,
+or
+.B FAIL
+when the owners cannot be read.
 If any required setting is unset it stops there. Otherwise it requests a
 token and reports the tenant, the app ID and the granted application roles:
 .B Mail.Read

@@ -92,6 +92,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **`cti-mailer --check` reports the owner lane as it really is.** It listed
+  `OWNER_ALLOW_DOMAINS` as unset with "unset means it will not send", which is
+  false once `owners.db` keeps the allowed domains (the variable is then
+  ignored). The check-in's daily credential check recorded that as fact (beat
+  trace `checkin-20261118T103109`). `--check` now prints one "owner lane" line
+  with the lane's own decision: armed with N allowed domains in `owners.db`
+  (or in `OWNER_ALLOW_DOMAINS` without it), off, or FAIL if the owners cannot
+  be read.
+
 - **The installer now checks the hosts fleet.env names.** It printed "also
   needed: your Qualys pod (QUALYS_BASE_URL) - checked after config", and
   nothing after config checked it. A new "Outbound connectivity (from

@@ -431,6 +431,25 @@ func ownerAllowlist(o appscan.Owners) (list, name string) {
 	return os.Getenv(mailer.OwnerAllowVar), mailer.OwnerAllowVar
 }
 
+// ownerCheckLine is --check's line for the owner lane: armed or off, and
+// where its allowed domains come from (owners.db, or OWNER_ALLOW_DOMAINS
+// without it). The same decision --armed and every send make.
+func ownerCheckLine(o appscan.Owners, src string, err error) (state, text string) {
+	if err != nil {
+		return "FAIL ", "owners unreadable (" + err.Error() + ") - the owner lane cannot send"
+	}
+	list, name := ownerAllowlist(o)
+	n := len(mailer.SplitList(list))
+	from := ""
+	if src != "" {
+		from = ", owners from " + src
+	}
+	if n == 0 {
+		return "none ", fmt.Sprintf("off - %s is empty, so no owner emails are sent%s", name, from)
+	}
+	return "OK   ", fmt.Sprintf("armed - %d allowed domain(s) in %s%s", n, name, from)
+}
+
 // ownerArmed is --lane owner --armed: whether the lane may send at all.
 func ownerArmed() int {
 	owners, src, _, err := appscan.LoadConfiguredOwners()
@@ -542,7 +561,6 @@ var optional = [][2]string{
 	{"SUPPLIER_TO", "--lane supplier recipients; the supplier-request digest, security team only"},
 	{"SUPPLIER_ALLOW_TO", "--lane supplier allowlist; NO fallback - unset means it will not send"},
 	{"WAS_OWNER_CC", "--lane owner: the security team, copied on every owner email; each address must be at an allowed domain"},
-	{"OWNER_ALLOW_DOMAINS", "--lane owner: domains an app owner or watcher may be at; unset means it will not send"},
 	{"NVD_API_KEY", "without it NVD throttles to 5 requests/30s"},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "heartbeat only; digests do not need it"},
 }
@@ -599,6 +617,18 @@ func preflight(mailbox string) int {
 		}
 		logf("  %s %-22s %s", state, kv[0], kv[1])
 	}
+	// The owner lane, as the lane itself decides it. Not the raw
+	// OWNER_ALLOW_DOMAINS value: with owners.db keeping the allowed domains
+	// that variable is ignored, and "unset means it will not send" printed
+	// here was false - the check-in recorded it as fact (trace
+	// checkin-20261118T103109). Optional, so never counted as missing.
+	o, src, _, oerr := appscan.LoadConfiguredOwners()
+	srcName := ""
+	if src != nil {
+		srcName = src.Name()
+	}
+	st, txt := ownerCheckLine(o, srcName, oerr)
+	logf("  %s %-22s %s", st, "owner lane", safelog.Line(txt))
 	if _, note, err := mailer.VMAllow(os.LookupEnv); err != nil {
 		logf("  FAIL %s", safelog.Line(err.Error()))
 		missing++
