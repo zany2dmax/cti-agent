@@ -1,8 +1,8 @@
 # The agent harness: what the fleet has, and what it is missing
 
-> **STATUS: H1, H2 AND H3 BUILT.** H1 (beat traces) shipped in 1.6.1; H2
-> (evals for the check-in, `task eval:checkin`) and H3 (the `cti-checkin/1`
-> verdict) are built and unreleased; see
+> **STATUS: H1 TO H4 BUILT.** H1 (beat traces) shipped in 1.6.1; H2 (evals
+> for the check-in, `task eval:checkin`), H3 (the `cti-checkin/1` verdict) and
+> H4 (the shared model-lane library) are built and unreleased; see
 > [CHANGELOG.md](CHANGELOG.md). The other work items are in
 > [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
 > argued about before any code depends on it.
@@ -227,7 +227,34 @@ The plan as written:
 - An invalid or missing verdict is a board ERROR, not a silent pass.
 - Evals (H2) then score the verdict directly.
 
-### H4. Shared model-lane runner (only when a second model lane is real)
+### H4. Shared model-lane runner (built, unreleased)
+
+What was built (2026-11-19): `fleet-kit/fleet/share/model-lane.sh`, sourced
+by `run-checkin` and `run-supplier`, with the controls every model lane needs:
+`ml_find_claude` and `ml_claude_trusted` (on Linux only a root-owned binary in
+a system location, or `CLAUDE_BIN`), `ml_model_ok`, `ml_auth_check` (at most one
+credential, named in the journal, never its value; `env-only` for a lane
+whose model gets an empty HOME), `ml_scrub_env`, `ml_trace_start`,
+`ml_timeout` and `ml_root_owned`. Each prints its reason and returns
+non-zero; the runner decides what that means (the heartbeat refuses the beat,
+the supplier judges nothing and every request is Unsure). The library is
+installed root-owned and covered by `run-checkin`'s ownership check.
+
+A library, not one runner, because the two lanes call the model in different
+shapes - one beat with tools, a guard and a settings file, against one call
+per request with no tools - so what they share is the policy, not the loop.
+Moving them onto it showed the drift H4 was meant to stop: `run-supplier`
+took any `claude` on PATH with no ownership check, did not validate
+`SUPPLIER_MODEL`, and its scrub dropped `ANTHROPIC_AUTH_TOKEN`, so a box set up
+that way failed every call silently. All three are fixed by sharing the rule.
+Not shared, deliberately: the budget gate (the supplier has none; adding one
+changes its daily run, so it is its own decision), the heartbeat's grants,
+guard, settings, integrity and steering checks, lock and verdict. Check: the
+runners' plumbing tests unchanged, the library's own tests, and
+`task eval:checkin` through the refactored runner; `task eval:supplier` calls
+the model from Go and does not exercise `run-supplier`, so it was not rerun.
+
+The plan as written:
 
 - Pull the policy half of `run-checkin` into one runner: binary discovery and
   ownership checks, config isolation, allowlist assembly, budget gate and

@@ -29,6 +29,9 @@
 set -euo pipefail
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+# What every model lane needs around the call (HARNESS H4).
+# shellcheck source=../share/model-lane.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/model-lane.sh"
 
 # Sourced here AND loaded by the binary, as every runner does: the `sudo
 # cti-agent` wrapper passes only the layout variables, so the credentials can
@@ -154,56 +157,63 @@ log "${#INPUTS[@]} new request(s)"
 
 # ── the model ───────────────────────────────────────────────────────────────
 # THE MODEL'S ENVIRONMENT. The unit loads fleet.env as its environment and this
-# runner sources it with set -a, so every fleet secret - the Falcon secret,
-# the mail and Jira credentials - is exported, and a child inherits all of it.
-# The model has no tools, but the CLI and anything it spawns would see it.
-# scrub_env runs inside the subshell that starts claude: it unsets every
-# exported variable but what the CLI needs to run and to authenticate, and
-# points HOME and TMPDIR at an empty folder, so no user CLAUDE.md, settings
-# or session reaches the model. It unsets rather than building `env -i
-# KEY=...`, which would put the API key on the command line, where ps shows
-# it. advisory triage does the same in Go (internal/triage/model.go).
-CLAUDE_ENV_KEEP=" PATH USER LOGNAME LANG LC_ALL TZ ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS "
-scrub_env() {
-  local home="$1" v
-  for v in $(compgen -e); do
-    case "$CLAUDE_ENV_KEEP" in *" $v "*) ;; *) unset "$v" 2>/dev/null || true ;; esac
-  done
-  export HOME="$home" TMPDIR="$home"
-}
-
+# runner sources it with set -a, so every fleet secret is exported and a child
+# inherits all of it. The model has no tools, but the CLI and anything it
+# spawns would see it, so each call runs ml_scrub_env (model-lane.sh) in the
+# subshell that starts claude: every variable but what the CLI needs to run
+# and authenticate is unset, and HOME and TMPDIR point at an empty folder, so
+# no user CLAUDE.md, settings or session reaches the model. advisory triage
+# does the same in Go (internal/triage/model.go).
 judge_all() {
   local instr="${SUPPLIER_INSTRUCTIONS:-$FLEET_CODE/agents/supplier/CLAUDE.md}"
-  local claude="${CLAUDE_BIN:-}"
-  [ -n "$claude" ] || claude="$(command -v claude 2>/dev/null || true)"
   if [ -z "${SUPPLIER_MODEL:-}" ]; then
     log "SUPPLIER_MODEL is not set: no judgement is run, so every request is Unsure and gets a Kanban item"
+    return 0
+  fi
+  # The model-lane rules (model-lane.sh), the same as the heartbeat's. Any of
+  # them failing means no judgement: every request is Unsure, as with no model.
+  if ! ml_model_ok "$SUPPLIER_MODEL"; then
+    log "warn: SUPPLIER_MODEL='$SUPPLIER_MODEL' is not a model (an alias such as sonnet, or a full claude-... id) - no judgement is run, every request is Unsure"
     return 0
   fi
   if [ ! -r "$instr" ]; then
     log "warn: the agent's instructions are not at $instr - no judgement is run, every request is Unsure"
     return 0
   fi
-  if [ -z "$claude" ] || [ ! -x "$claude" ]; then
-    log "warn: the claude binary was not found (set CLAUDE_BIN in $FLEET_ENV) - no judgement is run, every request is Unsure"
+  local claude
+  if ! claude="$(ml_find_claude run-supplier)"; then
+    log "warn: the claude binary was not found (install it system-wide, or set CLAUDE_BIN in $FLEET_ENV) - no judgement is run, every request is Unsure"
     return 0
   fi
+  # On Linux it must be root-owned: it runs with the fleet's environment in
+  # reach until the scrub, and a copy the service account can replace is not
+  # one to trust with that. This lane used to take any claude on PATH.
+  if ! ml_claude_trusted run-supplier "$claude"; then
+    log "warn: $claude is not root-owned - no judgement is run, every request is Unsure"
+    return 0
+  fi
+  # At most one credential, and one in the environment: the scrub gives the
+  # model an empty HOME, so a login stored in ~/.claude does not reach it.
+  if ! ml_auth_check run-supplier env-only; then
+    log "warn: no usable Claude credential for this lane (see above) - no judgement is run, every request is Unsure"
+    return 0
+  fi
+  log "model: $SUPPLIER_MODEL via $claude, auth: $ML_AUTH_VIA"
   local prompt; prompt="$(cat "$instr")"
-  local limit=()
-  if command -v timeout >/dev/null 2>&1; then limit=(timeout "${SUPPLIER_MODEL_TIMEOUT:-180}"); fi
+  ml_timeout "${SUPPLIER_MODEL_TIMEOUT:-180}"
+  local limit=(${ML_TIMEOUT[@]+"${ML_TIMEOUT[@]}"})
   # WHAT IT COST. With fleet-trace on the box each call asks for JSON, and
   # fleet-trace unwrap hands back the same answer text mode gave while adding
   # the call's cost to state/traces/supplier-<timestamp>.jsonl, so
   # `fleet-trace list` shows this lane's spend beside the heartbeat's. Without
   # fleet-trace the call is text mode, as before. A trace directory that
   # cannot be written loses the cost record, never a judgement.
-  local trace_tool="$FLEET_CODE/bin/fleet-trace" cost_trace="" json=""
+  local trace_tool="$FLEET_CODE/bin/fleet-trace" cost_trace="" json="" trc=0
   if [ -x "$trace_tool" ]; then
     json=1
-    if "$trace_tool" init >/dev/null 2>&1; then
-      cost_trace="$FLEET_HOME/state/traces/supplier-$(date '+%Y%m%dT%H%M%S').jsonl"
-      [ -e "$cost_trace" ] && cost_trace="${cost_trace%.jsonl}-$$.jsonl"
-    else
+    cost_trace="$(ml_trace_start supplier)" || trc=$?
+    if [ "$trc" -ne 0 ]; then
+      cost_trace=""
       log "warn: fleet-trace init failed - the requests are judged, but what they cost is not recorded"
     fi
   fi
@@ -228,7 +238,7 @@ judge_all() {
     # set -e: every failure below is caught by "|| rc=$?" and means Unsure.
     local rc=0 urc=0
     if [ -n "$json" ]; then
-      ( cd "$WORK" && scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
+      ( cd "$WORK" && ml_scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
           --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
           --output-format json --system-prompt "$prompt" < "$in" > "$out.reply" 2> "$out.err" ) || rc=$?
       # Unwrapped even when claude exited non-zero: an error result is still
@@ -241,7 +251,7 @@ judge_all() {
         [ "$rc" -ne 0 ] || rc=1
       fi
     else
-      ( cd "$WORK" && scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
+      ( cd "$WORK" && ml_scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
           --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
           --system-prompt "$prompt" < "$in" > "$out.tmp" 2> "$out.err" ) || rc=$?
     fi

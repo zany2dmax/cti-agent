@@ -2738,6 +2738,9 @@ class TestFileShape(unittest.TestCase):
         # Sourced by every runner that changes something (the "say how" rule).
         shutil.copy(root / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh",
                     code / "share" / "fleet-mode.sh")
+        # The model-lane library (HARNESS H4): sourced next to it.
+        shutil.copy(root / "fleet-kit" / "fleet" / "share" / "model-lane.sh",
+                    code / "share" / "model-lane.sh")
         for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert") + (
                 ("cti-budget",) if trace else ()):
             (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
@@ -5105,6 +5108,67 @@ class TestUserAgent(unittest.TestCase):
             src = (LANES / f"{name}.py").read_text()
             self.assertNotRegex(src, r"mailto:[A-Za-z0-9]", name)
 
+class ModelLaneLibrary(unittest.TestCase):
+    """share/model-lane.sh, the rules every model lane shares (HARNESS H4),
+    called directly - each runner's tests cover how it uses them."""
+
+    LIB = KIT / "fleet" / "share" / "model-lane.sh"
+
+    def bash(self, script, env=None, linux=False):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = "/usr/bin:/bin"
+        if linux:
+            (tmp / "uname").write_text("#!/bin/sh\necho Linux\n")
+            (tmp / "uname").chmod(0o755)
+            path = f"{tmp}:{path}"
+        e = {"PATH": path, "HOME": str(tmp), **(env or {})}
+        return subprocess.run(["bash", "-c", f'. "{self.LIB}"; {script}'], env=e,
+                              capture_output=True, text=True, check=False), tmp
+
+    def test_model_names(self):
+        for name, ok in [("", True), ("sonnet", True), ("haiku", True), ("claude-sonnet-5-5", True),
+                         ("claude-", False), ("Sonnet", False), ("gpt-4", False),
+                         ("sonnet --dangerously-skip-permissions", False), ("claude-x;rm", False)]:
+            with self.subTest(name=name):
+                r, _ = self.bash(f"ml_model_ok {shlex.quote(name)}")
+                self.assertEqual(r.returncode == 0, ok, name)
+
+    def test_one_credential_is_named_never_its_value(self):
+        r, _ = self.bash('ml_auth_check t; echo "rc=$? via=$ML_AUTH_VIA"',
+                         env={"ANTHROPIC_AUTH_TOKEN": "secret-value"}, linux=True)
+        self.assertIn("rc=0 via=ANTHROPIC_AUTH_TOKEN", r.stdout)
+        self.assertNotIn("secret-value", r.stdout + r.stderr)
+        r, _ = self.bash('ml_auth_check t; echo "rc=$?"',
+                         env={"ANTHROPIC_API_KEY": "a", "CLAUDE_CODE_OAUTH_TOKEN": "b"}, linux=True)
+        self.assertIn("rc=1", r.stdout)
+        self.assertIn("MORE THAN ONE", r.stderr)
+
+    def test_a_stored_login_does_not_count_for_a_scrubbed_lane(self):
+        script = ('mkdir -p "$HOME/.claude"; echo "{}" > "$HOME/.claude/.credentials.json"; '
+                  'ml_auth_check t; echo "rc=$?"; ml_auth_check t env-only; echo "rc=$?"')
+        r, _ = self.bash(script, linux=True)
+        self.assertEqual(re.findall(r"rc=\d", r.stdout), ["rc=0", "rc=2"], r.stdout + r.stderr)
+        self.assertIn("empty HOME", r.stderr)
+
+    def test_the_scrub_keeps_only_what_the_cli_needs(self):
+        r, tmp = self.bash('( ml_scrub_env "$HOME/empty"; env | sort )',
+                           env={"ANTHROPIC_AUTH_TOKEN": "t", "FALCON_CLIENT_SECRET": "s",
+                                "CLIENT_SECRET": "graph", "LANG": "C"})
+        self.assertIn("ANTHROPIC_AUTH_TOKEN=t", r.stdout)
+        self.assertIn("LANG=C", r.stdout)
+        self.assertIn(f"HOME={tmp}/empty", r.stdout)
+        for gone in ("FALCON_CLIENT_SECRET", "CLIENT_SECRET"):
+            self.assertNotIn(gone, r.stdout)
+
+    def test_on_linux_only_system_locations_are_searched(self):
+        # A claude in the service account's own HOME or PATH is not used.
+        r, tmp = self.bash('mkdir -p "$HOME/.local/bin"; printf "#!/bin/sh\\n" > "$HOME/.local/bin/claude"; '
+                           'chmod +x "$HOME/.local/bin/claude"; PATH="$HOME/.local/bin:$PATH"; '
+                           'ml_find_claude t; echo "rc=$?"', linux=True)
+        self.assertNotIn(".local/bin/claude", r.stdout)
+
+
 class SupplierRunner(unittest.TestCase):
     """run-supplier with the three programs it calls replaced by stubs that
     record their arguments, so the test says exactly what the runner asked of
@@ -5121,6 +5185,7 @@ class SupplierRunner(unittest.TestCase):
         (self.code / "share").mkdir()
         (self.code / "agents" / "supplier").mkdir(parents=True)
         shutil.copy(KIT / "fleet" / "share" / "fleet-mode.sh", self.code / "share")
+        shutil.copy(KIT / "fleet" / "share" / "model-lane.sh", self.code / "share")
         (self.code / "agents" / "supplier" / "CLAUDE.md").write_text("STANDING INSTRUCTIONS")
         self.home = self.tmp / "home"
         self.home.mkdir()
@@ -5172,10 +5237,51 @@ fi
         e = {"PATH": "/usr/bin:/bin", "HOME": str(self.home), "FLEET_HOME": str(self.home),
              "FLEET_CODE": str(self.code), "FLEET_ENV": str(self.tmp / "none.env"),
              "CALLS": str(self.log), "FLEET_DEV_EMAIL": "dev@example.test",
-             "CLAUDE_BIN": str(self.code / "bin" / "claude")}
+             "CLAUDE_BIN": str(self.code / "bin" / "claude"),
+             # One credential, as the model-lane rules require (HARNESS H4).
+             "ANTHROPIC_API_KEY": "test-placeholder"}
         e.update(env or {})
+        e = {k: v for k, v in e.items() if v is not None}  # None removes a default
         return subprocess.run(["bash", str(self.RUNNER), *args], check=False,
                               capture_output=True, text=True, env=e)
+
+    # ─── the model-lane rules it now shares with the heartbeat (H4) ──────────
+
+    def model_calls(self):
+        return [c for c in self.calls() if c.startswith("claude ")]
+
+    def test_two_credentials_mean_no_judgement(self):
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet",
+                                          "CLAUDE_CODE_OAUTH_TOKEN": "seat-token"})
+        self.assertIn("MORE THAN ONE credential", r.stderr)
+        self.assertIn("every request is Unsure", r.stderr)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_an_auth_token_reaches_the_model_through_the_scrub(self):
+        # It used to be dropped by the keep list, so every call failed.
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet", "ANTHROPIC_API_KEY": None,
+                                           "ANTHROPIC_AUTH_TOKEN": "gateway-token"})
+        self.assertNotEqual(self.model_calls(), [], r.stderr)
+        self.assertIn("ANTHROPIC_AUTH_TOKEN=gateway-token", (self.tmp / "claude.env").read_text())
+        self.assertIn("auth: ANTHROPIC_AUTH_TOKEN", r.stderr)
+
+    def test_a_model_name_that_is_not_one_means_no_judgement(self):
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet --dangerously-skip-permissions"})
+        self.assertIn("is not a model", r.stderr)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_on_linux_a_claude_the_service_could_replace_is_not_run(self):
+        fake = self.tmp / "fakebin"
+        fake.mkdir()
+        (fake / "uname").write_text("#!/bin/sh\necho Linux\n")
+        # stat -L -c %u / %a: owned by uid 1000, the service account.
+        (fake / "stat").write_text('#!/bin/sh\ncase "$3" in %u) echo 1000;; %a) echo 755;; esac\n')
+        for f in fake.iterdir():
+            f.chmod(0o755)
+        r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet", "PATH": f"{fake}:/usr/bin:/bin"})
+        self.assertIn("REFUSING", r.stderr)
+        self.assertIn("not root-owned", r.stderr)
+        self.assertEqual(self.model_calls(), [])
 
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []

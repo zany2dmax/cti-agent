@@ -37,6 +37,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+**Upgrade:** `sudo cti-agent-update --for-real`. The supplier lane now checks
+its model setup the way the heartbeat does (H4): on Linux its `claude` must be
+root-owned in `/usr/bin` or `/usr/local/bin` (or named by `CLAUDE_BIN`),
+`SUPPLIER_MODEL` must be a model name, and exactly one Claude credential must
+be set in `fleet.env` (the model gets an empty HOME, so a login stored in
+`~/.claude` never reached it). A box where the heartbeat runs needs nothing;
+if one fails, the supplier judges nothing (every request Unsure) and the
+journal says why.
+
 ### Added
 
 - **Every check-in beat ends with a checked verdict (HARNESS H3).** The beat's
@@ -158,6 +167,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `-c` string.
 
 ---
+
+
+### Changed
+
+- **One copy of the model-call rules for every lane (HARNESS H4).**
+  `share/model-lane.sh` holds what `run-checkin` and `run-supplier` both need
+  around a `claude` call - finding and vetting the binary, the model name, the
+  credentials, scrubbing the model's environment, starting a trace - so a
+  control added for one lane is there for the next. Moving the supplier lane
+  onto it fixed three gaps it had: it took any `claude` on PATH without an
+  ownership check, did not validate `SUPPLIER_MODEL`, and dropped
+  `ANTHROPIC_AUTH_TOKEN` from the model's environment, so a box using that
+  credential failed every judgement silently. The heartbeat behaves as
+  before; its ownership check now covers `share/` too.
 
 ## 1.6.7 — 2026-11-18
 

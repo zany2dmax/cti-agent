@@ -17,6 +17,10 @@ set -euo pipefail
 
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+# What every model lane needs around the call (HARNESS H4): finding and vetting
+# claude, the model name, the credentials, the trace.
+# shellcheck source=../share/model-lane.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/model-lane.sh"
 
 # Say how to run it, as every command that changes something must:
 #   --for-real           fire one beat
@@ -56,11 +60,7 @@ FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
 # ── platform ────────────────────────────────────────────────────────────────
 # The fleet runs on Linux in production and on macOS for development, and the
 # two disagree on stat(1) flags. Detect once, branch explicitly.
-case "$(uname -s)" in
-  Darwin) FLEET_OS="macos" ;;
-  Linux)  FLEET_OS="linux" ;;
-  *)      FLEET_OS="other" ;;
-esac
+FLEET_OS="$ML_OS"  # from model-lane.sh
 
 # mtime in epoch seconds. Getting this wrong fails SILENTLY: stat errors, the
 # caller sees 0, every lock looks infinitely old, and the lock stops locking.
@@ -88,27 +88,7 @@ mtime() {
 # Skipped on macOS only, where this is a developer's own checkout, owned by
 # design; it says so on every beat rather than skipping silently. Any other
 # platform is checked, and refuses if its stat(1) cannot answer.
-code_owned_by_root() {
-  local p owner mode
-  for p in "$@"; do
-    # A dangling symlink is a path someone can make real later; refuse it.
-    if [ -L "$p" ] && [ ! -e "$p" ]; then
-      echo "run-checkin: REFUSING to start: $p is a dangling symlink." >&2
-      return 1
-    fi
-    [ -e "$p" ] || continue
-    # -L: judge what a symlink points at - that is what gets executed.
-    owner="$(stat -L -c %u "$p" 2>/dev/null || echo unknown)"
-    mode="$(stat -L -c %a "$p" 2>/dev/null || echo 7777)"
-    if [ "$owner" != 0 ] || [ $(( 8#$mode & 8#022 )) -ne 0 ] || [ -w "$p" ]; then
-      echo "run-checkin: REFUSING to start: $p is writable by the service" >&2
-      echo "  account or not root-owned (owner uid $owner, mode $mode)." >&2
-      echo "  The fleet's code must be root-owned and read-only to the service;" >&2
-      echo "  reinstall with install-fedora.sh --for-real, which puts it in /opt/cti-agent." >&2
-      return 1
-    fi
-  done
-}
+code_owned_by_root() { ml_root_owned run-checkin "$@"; }
 
 # ── what steers the beat: root-owned too ───────────────────────────────────
 # Code is not the only thing a beat runs on. Claude Code also loads CLAUDE.md,
@@ -143,6 +123,7 @@ if [ "$FLEET_OS" != "macos" ]; then
   # them and the timers run the rest.
   code_owned_by_root "$SELF" "$(dirname "$SELF")" \
     "$FLEET_CODE" "$FLEET_CODE/bin" "$FLEET_CODE"/bin/* \
+    "$FLEET_CODE/share" "$FLEET_CODE"/share/* \
     "$CHECKIN_SETTINGS" \
     "$AGENT_DIR" "$AGENT_DIR/CLAUDE.md" "$AGENT_DIR/.claude" \
     "$AGENT_DIR/.claude/skills" "$AGENT_DIR"/.claude/skills/* \
@@ -276,34 +257,8 @@ if [ "$AUDIT_ONLY" = 1 ]; then
   exit 0
 fi
 
-find_claude() {
-  if [ -n "${CLAUDE_BIN:-}" ]; then
-    [ -x "$CLAUDE_BIN" ] && { echo "$CLAUDE_BIN"; return 0; }
-    echo "run-checkin: CLAUDE_BIN=$CLAUDE_BIN is not executable" >&2
-    return 1
-  fi
-  local c
-  # On Linux, only the system locations. ~/.local/bin is the service
-  # account's own HOME, so a claude found there - or anywhere on a PATH that
-  # reaches it - is a binary the account can replace, and it runs every beat
-  # with the fleet's credentials. It was also searched FIRST, so a planted
-  # copy won even on a box with the dnf package installed.
-  if [ "$FLEET_OS" = "linux" ]; then
-    for c in /usr/bin/claude /usr/local/bin/claude; do
-      [ -x "$c" ] && { echo "$c"; return 0; }
-    done
-    return 1
-  fi
-  for c in "$HOME/.local/bin/claude" /usr/bin/claude /usr/local/bin/claude \
-           /opt/homebrew/bin/claude /snap/bin/claude; do
-    [ -x "$c" ] && { echo "$c"; return 0; }
-  done
-  c="$(command -v claude 2>/dev/null || true)"
-  [ -n "$c" ] && { echo "$c"; return 0; }
-  return 1
-}
 
-CLAUDE="$(find_claude)" || {
+CLAUDE="$(ml_find_claude run-checkin)" || {
   echo "run-checkin: cannot find the claude binary." >&2
   echo "  On Linux install it system-wide (sudo dnf install claude-code), so it" >&2
   echo "  is root-owned; a copy in the service account's HOME is not used." >&2
@@ -314,7 +269,7 @@ CLAUDE="$(find_claude)" || {
 }
 # The binary that runs the beat is code too. Same rule, same refusal.
 if [ "$FLEET_OS" = "linux" ]; then
-  code_owned_by_root "$CLAUDE" || exit 1
+  ml_claude_trusted run-checkin "$CLAUDE" || exit 1
 fi
 
 # CHECKIN_MODEL - which model the beat runs on. Unset: the account's default,
@@ -328,16 +283,7 @@ fi
 CHECKIN_MODEL="${CHECKIN_MODEL:-}"
 MODEL_ARGS=()
 if [ -n "$CHECKIN_MODEL" ]; then
-  model_ok=1
-  case "$CHECKIN_MODEL" in
-    haiku|sonnet|opus|fable) ;;
-    claude-?*)
-      case "$CHECKIN_MODEL" in
-        *[!abcdefghijklmnopqrstuvwxyz0123456789.-]*) model_ok=0 ;;
-      esac ;;
-    *) model_ok=0 ;;
-  esac
-  if [ "$model_ok" != 1 ]; then
+  if ! ml_model_ok "$CHECKIN_MODEL"; then
     echo "run-checkin: CHECKIN_MODEL='$CHECKIN_MODEL' in $FLEET_ENV is not a model." >&2
     echo "  Use an alias (haiku, sonnet, opus, fable) or a full id (claude-...)," >&2
     echo "  or leave it blank for the account's default." >&2
@@ -368,77 +314,31 @@ case "$CHECKIN_TRACE_MAX_MB" in
     CHECKIN_TRACE_MAX_MB=20 ;;
 esac
 
-# A stored login does not live in the same place on both platforms, and
-# checking the wrong one is worse than not checking at all. On Linux the token
-# is a file under the config dir; on macOS it is a Keychain item and that file
-# NEVER exists, so a file-only test would reject every dev run on a machine
-# that is perfectly well authenticated.
-has_stored_credentials() {
-  if [ "$FLEET_OS" = "macos" ]; then
-    # Existence only - no -w, which would read the secret and can prompt.
-    security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1
-  else
-    [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]
-  fi
-}
-
 # Finding the binary is not the same as being able to use it. The service
 # account has no browser and no TTY, so an unauthenticated claude blocks or
 # errors in a way that reads like a hang rather than a config problem. Check
-# for credentials up front and name the fix.
-# WHICH credential, not just whether one exists.
-#
-# This check used to ask only "is at least one set", while fleet.env.example
-# said "Set EXACTLY ONE of these". A documented invariant that nothing
-# enforces is not an invariant, and this one bills real money to the wrong
-# account: with both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN present,
-# claude uses the Console key, so a fleet configured against a subscription
-# seat quietly draws down an org credit balance instead. When that balance
-# hit zero the failure read "Credit balance is too low" on a box whose
-# operator had deliberately wired it to a subscription - and nothing in any
-# log had ever said which credential was in use.
-#
-# So: name the credential on every beat, and refuse when the answer is
-# ambiguous. Refusing is the right direction because the alternative is
-# silently charging somebody who did not agree to pay.
-AUTH_SET=""
-[ -n "${ANTHROPIC_API_KEY:-}" ]       && AUTH_SET="$AUTH_SET ANTHROPIC_API_KEY"
-[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]    && AUTH_SET="$AUTH_SET ANTHROPIC_AUTH_TOKEN"
-[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && AUTH_SET="$AUTH_SET CLAUDE_CODE_OAUTH_TOKEN"
-AUTH_SET="${AUTH_SET# }"
-AUTH_COUNT=$(printf '%s\n' $AUTH_SET | grep -c . || true)
-
-if [ "$AUTH_COUNT" -gt 1 ]; then
-  echo "run-checkin: MORE THAN ONE credential is set: $AUTH_SET" >&2
-  echo "  claude picks one, and the one it picks is probably not the one you" >&2
-  echo "  meant - ANTHROPIC_API_KEY bills a Console balance, while" >&2
-  echo "  CLAUDE_CODE_OAUTH_TOKEN draws on a subscription seat." >&2
-  echo "  Blank all but one in $FLEET_ENV." >&2
+# for credentials up front and name the fix - and WHICH credential, not just
+# whether one exists: with both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
+# present claude uses the Console key, so a fleet wired to a subscription seat
+# quietly drew down an org credit balance until "Credit balance is too low".
+# So name the credential on every beat, and refuse when it is ambiguous.
+# ml_auth_check (model-lane.sh) holds the rule, shared with every model lane;
+# the board line stays here.
+arc=0
+ml_auth_check run-checkin || arc=$?
+if [ "$arc" -eq 1 ]; then
   "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
-    "heartbeat refused: more than one Claude credential set ($AUTH_SET); blank all but one in fleet.env" 2>/dev/null || true
+    "heartbeat refused: more than one Claude credential set ($ML_AUTH_VIA); blank all but one in fleet.env" 2>/dev/null || true
   exit 1
 fi
-
-if [ "$AUTH_COUNT" -eq 0 ] && ! has_stored_credentials; then
-  echo "run-checkin: claude is installed at $CLAUDE but not authenticated." >&2
-  echo "  Set one of these in $FLEET_ENV:" >&2
-  echo "    ANTHROPIC_API_KEY        Console key, billed per token" >&2
-  echo "    CLAUDE_CODE_OAUTH_TOKEN  subscription token from 'claude setup-token'" >&2
-  echo "  or, if this account has a login shell, authenticate it once:" >&2
-  echo "    sudo -u $(id -un) HOME=$HOME claude" >&2
+if [ "$arc" -ne 0 ]; then
   "$FLEET_CODE/bin/fleet-board" post @you @operator ERROR \
     "heartbeat cannot start: claude not authenticated; set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in fleet.env" 2>/dev/null || true
   exit 1
 fi
-
 # The NAME only. Never the value, and never a prefix of it - a few characters
 # of a live token in a journal is still a few characters of a live token.
-if [ "$AUTH_COUNT" -eq 1 ]; then
-  AUTH_VIA="$AUTH_SET"
-else
-  AUTH_VIA="stored credentials in ${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-fi
-echo "[run-checkin $(date '+%F %H:%M:%S')] auth: $AUTH_VIA"
+echo "[run-checkin $(date '+%F %H:%M:%S')] auth: $ML_AUTH_VIA"
 
 # A heartbeat that overlaps itself corrupts nothing (the board is lock-safe) but
 # wastes a slot and doubles token spend. Skip if the previous beat is still up.
@@ -687,11 +587,10 @@ CLAUDE_ARGS=(-p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode
 # the beat runs exactly as it did before traces existed.
 TRACE_TOOL="$FLEET_CODE/bin/fleet-trace"
 TRACE=""
-if [ "$CHECKIN_TRACE_DAYS" -gt 0 ] && [ -x "$TRACE_TOOL" ]; then
-  if "$TRACE_TOOL" init >/dev/null 2>&1; then
-    TRACE="$FLEET_HOME/state/traces/checkin-$(date '+%Y%m%dT%H%M%S').jsonl"
-    [ -e "$TRACE" ] && TRACE="${TRACE%.jsonl}-$$.jsonl"
-  else
+if [ "$CHECKIN_TRACE_DAYS" -gt 0 ]; then
+  trc=0
+  TRACE="$(ml_trace_start checkin)" || trc=$?
+  if [ "$trc" -eq 2 ]; then
     echo "[run-checkin $(date '+%F %H:%M:%S')] trace: off - fleet-trace init failed; beat runs in text mode" >&2
   fi
 fi

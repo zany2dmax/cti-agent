@@ -334,6 +334,7 @@ def build_fleet(scenario, root, gobin=None):
     (code / "bin").mkdir(parents=True)
     (code / "share").mkdir()
     shutil.copy2(FLEET / "share" / "fleet-mode.sh", code / "share" / "fleet-mode.sh")
+    shutil.copy2(FLEET / "share" / "model-lane.sh", code / "share" / "model-lane.sh")
     for b in REAL_BIN:
         shutil.copy2(FLEET / "bin" / b, code / "bin" / b)
     for b in GO_BIN:

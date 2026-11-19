@@ -107,6 +107,27 @@ Recipients and the allowlist they are checked against. No fallback.
 .TP
 .B SUPPLIER_MODEL
 The model alias or id that judges each request. Unset: every request is Unsure.
+The same rules as the heartbeat apply, from
+.IR share/model-lane.sh :
+the name must be an alias (haiku, sonnet, opus, fable) or a full
+.B claude\-
+id; on Linux the
+.B claude
+binary must be root-owned, in
+.I /usr/bin
+or
+.I /usr/local/bin
+or named by
+.BR CLAUDE_BIN ;
+and exactly one of
+.BR ANTHROPIC_API_KEY ,
+.B ANTHROPIC_AUTH_TOKEN
+or
+.B CLAUDE_CODE_OAUTH_TOKEN
+must be set, because the model gets an empty HOME and a login stored in
+.I ~/.claude
+does not reach it. If any of these fails, no request is judged and every one
+is Unsure, with the reason in the journal.
 .TP
 .B SUPPLIER_JIRA_PROJECT
 The project for the Kanban items; it must also be in

@@ -366,7 +366,11 @@ run install -m 0755 -o root -g root "$SRC/fleet/share/cti-agent-usage" "$CODE_DI
 # Sourced by every runner that changes something: the "say how to run it" rule.
 # Not executable, and the runners fail at start without it, so it is checked.
 run install -m 0644 -o root -g root "$SRC/fleet/share/fleet-mode.sh" "$CODE_DIR/share/fleet-mode.sh"
-info "commands.manifest, share/cti-agent-usage, share/fleet-mode.sh"
+# What every model lane needs around a claude call (HARNESS H4), sourced by
+# run-checkin and run-supplier. Root-owned like bin/: run-checkin refuses to
+# start if the service account could change it.
+run install -m 0644 -o root -g root "$SRC/fleet/share/model-lane.sh" "$CODE_DIR/share/model-lane.sh"
+info "commands.manifest, share/cti-agent-usage, share/fleet-mode.sh, share/model-lane.sh"
 # Shell completion: bash-completion's directory and zsh's site-functions. The
 # CODE_DIR in each is filled in, so a relocated install still completes.
 if [ "$MODE" != dryrun ]; then

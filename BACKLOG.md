@@ -76,10 +76,10 @@ is real, not before. Finished work moves out of this file into
     is an INFO board line to @all, not an ERROR, so the next beat does not
     email it. Left: use the saved verdicts (a lane-health line in the digest,
     a trend of attention/degraded beats)
-  - H4. Shared model-lane runner pulled out of `run-checkin`. The condition
-    is met: `run-supplier` is a second model lane with its own copy of the
-    model-call setup. Do it with `task eval:checkin` and `task eval:supplier`
-    as the before-and-after check
+  - H4. Shared model-lane library: **built** (`share/model-lane.sh`; see
+    HARNESS.md). Left: decide whether the supplier lane goes through
+    `cti-budget` like the heartbeat; the next model lane (the advisory triage
+    reader) should source the library rather than grow its own copy
   - H5. Optional learning exercise: reproduce one beat with the Claude Agent
     SDK outside production. Not a migration
 - AppSec remediation is tracked by email, not Jira (decided 2026-11-07). The
