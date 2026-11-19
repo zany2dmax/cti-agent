@@ -26,6 +26,8 @@ fleet-trace \- keep and read a record of what each heartbeat did, and what each 
 .I FILE
 .RB [ \-\-max\-mb
 .IR N ]
+.RB [ \-\-keep
+.IR minimal | full ]
 .PP
 .B sudo cti\-agent fleet\-trace
 .I subcommand
@@ -46,9 +48,24 @@ Before traces, the only account of a beat was whatever the model chose to
 print. A trace answers "why did the heartbeat escalate on Tuesday?" from what
 it actually did.
 .PP
-A trace holds everything the beat read, including untrusted advisory and mail
-text. It is handled like a report: mode 0600 in a 0700 directory, never
-mailed, never committed. The beat itself cannot read it:
+By default a trace keeps the beat's decisions and their cost, not the content
+the beat read. It records what the model said, every tool call and its
+arguments, what was denied, the turns, tokens, cost and the final verdict. A
+tool result (a mail body, an advisory, a report) is replaced by its size and the
+first 16 characters of its SHA-256, so "what did it look at" has an answer and
+the trace is not a second copy of the mailbox. A failed tool call keeps its
+first 300 characters, because the reason for a refusal is what an operator
+needs. The model's private reasoning is kept as a length.
+.B \-\-keep full
+(set
+.B CHECKIN_TRACE_KEEP=full
+in fleet.env) keeps every event as it came, for an investigation; untrusted
+advisory and mail text then sits in the file, so set it back afterwards.
+.PP
+Either way a trace is handled like a report: mode 0600 in a 0700 directory,
+deleted after
+.BR CHECKIN_TRACE_DAYS ,
+never mailed, never committed. The beat itself cannot read it:
 .B run\-checkin
 grants no
 .B Read
@@ -105,11 +122,11 @@ it. Prints the directory.
 .B run\-checkin
 runs it before each beat and runs the beat untraced if it fails.
 .TP
-.BI "tee \-\-out " FILE " \-\-plain " FILE " \fR[\fP\-\-max\-mb " N\fR]\fP
+.BI "tee \-\-out " FILE " \-\-plain " FILE " \fR[\fP\-\-max\-mb " N\fR] [\fP\-\-keep " minimal\fR|\fPfull\fR]\fP
 Used by
 .BR run\-checkin ,
 not by people. Reads the beat's output on standard input and does three
-things with it: keeps every line in the new file
+things with it: keeps its events in the new file
 .B \-\-out
 (created 0600, refused if it exists), prints the timeline to standard output
 for the journal, and writes to
@@ -124,6 +141,19 @@ and
 .BR billing ;
 the timeline's token counts or the tool output in front of it would turn
 ordinary beats into holds.
+.IP
+.B \-\-keep
+says how much: the default
+.B minimal
+drops the content of successful tool results (kept as a size and a short hash)
+and the model's private reasoning, and caps a failed result and stray standard
+error at 300 and 2000 characters;
+.B full
+keeps every event as it came. The trace's first line records which.
+.B show \-\-full
+on a minimal trace prints
+.B [content not kept]
+where the content was.
 .IP
 The trace stops at
 .B \-\-max\-mb

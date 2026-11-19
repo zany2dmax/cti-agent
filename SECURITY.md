@@ -397,6 +397,50 @@ is unset, but the pseudonyms in it are not meaningfully protective.
 
 ---
 
+## Encryption at rest
+
+The fleet stores sensitive things on one host: the findings database and
+reports (named machines and their exposure), the AppSec reports, the owners
+database (people and who gets which email), the memory database, the
+heartbeat's traces, and `fleet.env` (credentials: see the next section). Mode
+0600 and a 0700 directory are **access control**, not encryption: they stop
+another account on the host, not someone holding the disk or a snapshot of it.
+
+**The control is the disk, not the application.** The host is an Azure VM, so
+the answer to "is it encrypted at rest" is the encryption of its OS and data
+disks (Azure encryption at host, or server-side encryption with a platform- or
+customer-managed key). The fleet does not encrypt its own files with AES in
+code, on purpose: the key would have to be readable by the same service
+account that reads the files, so it would add key handling and no protection
+against the one thing an attacker on the box already has, while the disk
+control covers the disk and snapshot theft that application encryption is
+supposed to cover. What the application owes is to **store less and keep it
+shorter**, which is where the effort goes:
+
+- **Traces store decisions, not what the beat read.** The default
+  (`CHECKIN_TRACE_KEEP=minimal`) keeps what the model said and did, its cost
+  and its verdict, and replaces every tool result (a mail body, an advisory, a
+  report) with its size and a short hash. A failed call keeps 300 characters;
+  stray stderr is capped. `full` exists for an investigation and puts mail text
+  in the file, so it is a deliberate, temporary setting. Traces are deleted
+  after `CHECKIN_TRACE_DAYS` (14).
+- **The audit trail carries no content**: recipients, keys and outcomes, never
+  bodies or credentials, and is pruned after 120 days.
+- **Credentials are not in the data stores**: they are in `fleet.env`, never
+  in a report, a trace or the database.
+
+**To confirm the control** (the fleet cannot check this itself; it is an Azure
+setting): in the portal, or with `az vm show -g RESOURCE_GROUP -n VM_NAME
+--query securityProfile.encryptionAtHost` and `az disk show -g RESOURCE_GROUP
+-n DISK_NAME --query encryption`, note the encryption type and who owns the
+key. Record it in the deployment's own notes (not in this public repository),
+with the date, and look again when a disk is added or the VM is rebuilt.
+
+**What this does not cover.** A running host exposes its files to anything that
+runs as the service account, encrypted disk or not. Backups and snapshots are
+covered only if they inherit the disk's encryption; copies the operator makes
+by hand (an exported report, a downloaded trace) are the operator's to protect.
+
 ## Credentials and secrets
 
 - All credentials live in one file — `fleet.env` in production, `.env` in a

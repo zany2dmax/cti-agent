@@ -3,9 +3,11 @@
 each model call in the fleet cost.
 
   fleet-trace init                    create the trace directory (0700)
-  fleet-trace tee --out FILE --plain FILE [--max-mb N]
+  fleet-trace tee --out FILE --plain FILE [--max-mb N] [--keep minimal|full]
                                       read a beat's stream-json on stdin: keep
-                                      every line in --out, print a timeline for
+                                      its events in --out (by default without
+                                      the content the beat read; --keep full
+                                      keeps everything), print a timeline for
                                       the journal, write the beat's plain text
                                       (what cti-budget classifies) to --plain
   fleet-trace unwrap --result FILE [--trace FILE]
@@ -19,10 +21,21 @@ each model call in the fleet cost.
                                       what they cost and a total
   fleet-trace prune --days N          delete traces older than N days
 
-Traces live in $FLEET_HOME/state/traces, 0600 in a 0700 directory. A trace
-holds everything the beat read, including untrusted advisory and mail text,
-so it is handled like a report: never mailed, never committed, and not
-readable by the beat itself (run-checkin grants no Read on state/).
+Traces live in $FLEET_HOME/state/traces, 0600 in a 0700 directory.
+
+What a trace keeps (--keep, CHECKIN_TRACE_KEEP in run-checkin). By default
+MINIMAL: the beat's decisions and their cost - what the model said, every
+tool call and its arguments, what was denied, the turns, tokens, cost and the
+final verdict - and NOT the content the beat read. A tool result (a mail body,
+an advisory, a report) is replaced by its size and the first 16 characters of
+its SHA-256, so "what did it look at" is answerable and "what did it say" is
+the mail's own record, not a second copy here. A failed tool call keeps its
+first 300 characters, because the refusal's reason is what an operator needs.
+The model's private reasoning is kept as a length. FULL keeps every event as it
+came, for an investigation: untrusted advisory and mail text then sits in the
+trace, so it is handled like a report: never mailed, never committed, and not
+readable by the beat itself (run-checkin grants no Read on state/). A trace is
+also deleted after CHECKIN_TRACE_DAYS.
 
 Why --plain exists. cti-budget tells "the quota refused us" from "the account
 is out of credit" from "the script broke" by matching words such as "429",
@@ -45,6 +58,7 @@ This program never stops reading stdin. If it exited early, claude would die
 of SIGPIPE in the middle of a beat; so a failure to write the trace stops the
 trace, not the reading.
 """
+import hashlib
 import json
 import math
 import os
@@ -97,11 +111,22 @@ def tool_summary(name, inp):
     return ",".join(sorted(inp))
 
 
+REDACTED = "fleet_trace_redacted"
+
+
+def _chars(c):
+    """Characters one content block stands for (a redacted block remembers)."""
+    if c.get("type") == REDACTED:
+        n = c.get("chars")
+        return n if isinstance(n, int) and n >= 0 else 0
+    return len(c.get("text") or "")
+
+
 def result_size(content):
     if isinstance(content, str):
         return len(content)
     if isinstance(content, list):
-        return sum(len(c.get("text", "")) for c in content if isinstance(c, dict))
+        return sum(_chars(c) for c in content if isinstance(c, dict))
     return 0
 
 
@@ -109,8 +134,50 @@ def result_text(content):
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "\n".join(c.get("text", "") for c in content if isinstance(c, dict))
+        out = []
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") == REDACTED:
+                out.append(f"[content not kept: {_chars(c)} chars, sha256 {clean(c.get('sha256'), 16)}]")
+            else:
+                out.append(c.get("text") or "")
+        return "\n".join(out)
     return ""
+
+
+def _redacted(text):
+    """What stands in for content the trace does not keep: its size, and a
+    short hash, so two traces can be told to have seen the same thing."""
+    text = "" if text is None else str(text)
+    return {"type": REDACTED, "chars": len(text),
+            "sha256": hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]}
+
+
+def minimize(ev):
+    """The event as the default trace keeps it: the decision and the cost, not
+    the content the beat read. See the module docstring."""
+    ev = dict(ev)
+    # Claude Code repeats a tool's output on the event itself as well.
+    for key in ("tool_use_result", "toolUseResult"):
+        if key in ev:
+            ev[key] = _redacted(json.dumps(ev[key], ensure_ascii=False, sort_keys=True))
+    msg = ev.get("message")
+    if not isinstance(msg, dict) or not isinstance(msg.get("content"), list):
+        return ev
+    blocks = []
+    for b in msg["content"]:
+        if isinstance(b, dict) and ev.get("type") == "user" and b.get("type") == "tool_result":
+            b = dict(b)
+            text = result_text(b.get("content"))
+            # A refusal's reason is what an operator needs; a success's content
+            # is somebody's mail.
+            b["content"] = clean(text, 300) if b.get("is_error") else [_redacted(text)]
+        elif isinstance(b, dict) and ev.get("type") == "assistant" and b.get("type") in ("thinking", "redacted_thinking"):
+            b = {"type": b["type"], "chars": len(str(b.get("thinking") or b.get("data") or ""))}
+        blocks.append(b)
+    ev["message"] = dict(msg, content=blocks)
+    return ev
 
 
 class Timeline:
@@ -254,6 +321,7 @@ def _open_new(path):
 def cmd_tee(args):
     out_path = plain_path = None
     max_mb = 20
+    keep_mode = "minimal"
     it = iter(args)
     for a in it:
         if a == "--out":
@@ -265,6 +333,10 @@ def cmd_tee(args):
             if not v.isdigit() or int(v) < 1:
                 usage("--max-mb takes a whole number of megabytes, 1 or more")
             max_mb = int(v)
+        elif a == "--keep":
+            keep_mode = next(it, "")
+            if keep_mode not in ("minimal", "full"):
+                usage("--keep takes minimal or full")
         else:
             usage(f"unknown argument {a!r}")
     if not out_path or not plain_path:
@@ -310,7 +382,7 @@ def cmd_tee(args):
                 pass
             trace = None
 
-    keep(json.dumps({"type": "fleet_trace", "version": 1, "unit": "checkin",
+    keep(json.dumps({"type": "fleet_trace", "version": 1, "unit": "checkin", "keep": keep_mode,
                      "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
     tl = Timeline(sys.stdout)
     for rawb in sys.stdin.buffer:
@@ -320,8 +392,15 @@ def cmd_tee(args):
                 continue
             ev = parse(raw)
             # Every trace line is JSON, so a non-JSON line is wrapped.
-            keep(raw if ev is not None else
-                 json.dumps({"type": "fleet_trace_text", "text": raw}, ensure_ascii=False))
+            if ev is None:
+                # Not JSON: stderr or a crash message. Capped in the default
+                # trace, since it can echo what the beat was reading.
+                text = raw if keep_mode == "full" else clean(raw, 2000, oneline=False)
+                keep(json.dumps({"type": "fleet_trace_text", "text": text}, ensure_ascii=False))
+            elif keep_mode == "full":
+                keep(raw)
+            else:
+                keep(json.dumps(minimize(ev), ensure_ascii=False))
             if ev is None:
                 # Not JSON: stderr or a crash message. Shown as it came,
                 # because that is what the journal always showed.

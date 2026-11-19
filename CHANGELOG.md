@@ -255,6 +255,35 @@ journal says why. Advisory triage in the digest stays off until you set
       "TLS for Data Transit" 10785645 (the domains website probe, which
       measures plain http on purpose) is dismissed as not applicable.
 
+- **Heartbeat traces keep decisions, not what the beat read
+  (`CHECKIN_TRACE_KEEP`).** A trace was a second copy of everything the
+  orchestrator read: mail bodies, advisories, report text, in a plaintext file
+  for 14 days. By default (`minimal`) a trace now keeps what the model said and
+  did (each tool call and its arguments, what was denied), the turns, tokens,
+  cost and the final verdict, and replaces every successful tool result with
+  its size and the first 16 characters of its SHA-256. A failed call keeps its
+  first 300 characters (the reason for a refusal), stray stderr is capped at
+  2,000, and the model's private reasoning is kept as a length. `fleet-trace
+  show` and `list` and `cti-checkin-verdict` work as before (`show --full` says
+  `[content not kept]`); the journal timeline still says how much each tool
+  returned. `CHECKIN_TRACE_KEEP=full` (or `fleet-trace tee --keep full`)
+  restores every event for an investigation, with mail text in the file, so set
+  it back afterwards; anything else warns and uses `minimal`, so a typo cannot
+  widen what is stored. The trace's first line records which. SECURITY.md has a
+  new "Encryption at rest" section: the control for the databases and reports
+  is the disk (Azure encryption), why the application does not encrypt its own
+  files, and how to confirm it. **Upgrade:** nothing; the next beat writes
+  minimal traces and older ones age out after `CHECKIN_TRACE_DAYS`.
+  - **Fixed issues found by PrimeSec AI:** guardrail findings "Data
+    Minimization in Storage" (11583430) is fixed by the entry above, and the
+    two trace findings under "AES-256 At-Rest Encryption" (11583427) and
+    "Encryption at Rest" (11583436) no longer describe what is stored: the
+    trace holds no mail or advisory text by default. The other thirteen
+    findings in the two encryption rules (the reports, `fleet-db`,
+    `fleet-owners` and its snapshot, the digest and enrichment files) are
+    answered by the disk's encryption and need you to confirm it (SECURITY.md,
+    "Encryption at rest") before they are dismissed with that control named.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed

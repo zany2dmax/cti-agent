@@ -3242,6 +3242,121 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             self.assertTrue(new.exists())
             self.assertTrue(other.exists())
 
+    # ─── what a trace keeps (CHECKIN_TRACE_KEEP) ─────────────────────────────
+
+    CONTENT_BEAT = [
+        {"type": "system", "subtype": "init", "model": "m", "tools": ["Bash"], "mcp_servers": []},
+        {"type": "assistant", "message": {"content": [
+            {"type": "thinking", "thinking": "SECRET-THINKING about the mail"},
+            {"type": "text", "text": "Reading the mailbox."},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "fleet-board read"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": False,
+             "content": "SECRET-MAIL-BODY " + "x" * 5000}]},
+         "tool_use_result": {"stdout": "SECRET-STDOUT"}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "cti-alert"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t2", "is_error": True,
+             "content": [{"type": "text", "text": "DENIED by the guard: " + "e" * 600}]}]}},
+        {"type": "result", "subtype": "success", "is_error": False, "num_turns": 2,
+         "duration_ms": 1000, "total_cost_usd": 0.01,
+         "usage": {"input_tokens": 100, "output_tokens": 10},
+         "permission_denials": [], "result": "VERDICT-TEXT the beat's final message"},
+    ]
+
+    def _tee(self, d, *extra):
+        stdin = "SECRET-STDERR " + "s" * 3000 + "\n" + "".join(json.dumps(e) + "\n" for e in self.CONTENT_BEAT)
+        (d / "plain").write_text("")
+        out = d / "t.jsonl"
+        r = self._fleet_trace(d, "tee", "--out", str(out), "--plain", str(d / "plain"), *extra, stdin=stdin)
+        return r, out
+
+    def test_the_default_trace_keeps_decisions_not_what_the_beat_read(self):
+        """A trace used to be a second copy of whatever the beat read: mail
+        bodies, advisories, report text. Now it keeps what the model said and
+        did, what it cost and what it concluded, and for everything it read
+        only the size and a short hash."""
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            r, out = self._tee(d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = out.read_text()
+            for secret in ("SECRET-MAIL-BODY", "SECRET-STDOUT", "SECRET-THINKING"):
+                self.assertNotIn(secret, text)
+            lines = [json.loads(l) for l in text.splitlines()]
+            self.assertEqual(lines[0]["keep"], "minimal")
+            # what the model did survives
+            self.assertIn("fleet-board read", text)
+            self.assertIn("Reading the mailbox.", text)
+            # a success's content became a size and a short hash
+            red = [b for l in lines if l.get("type") == "user"
+                   for b in l["message"]["content"] if not b.get("is_error")][0]["content"][0]
+            self.assertEqual(red["type"], "fleet_trace_redacted")
+            self.assertEqual(red["chars"], len("SECRET-MAIL-BODY ") + 5000)
+            self.assertRegex(red["sha256"], r"^[0-9a-f]{16}$")
+            # a failed call keeps its reason, capped
+            err = [b for l in lines if l.get("type") == "user"
+                   for b in l["message"]["content"] if b.get("is_error")][0]["content"]
+            self.assertTrue(err.startswith("DENIED by the guard: "))
+            self.assertLess(len(err), 400)
+            # stray stderr is capped
+            self.assertLess(len(lines[1]["text"]), 2100)
+            # the verdict and the cost are intact: cti-checkin-verdict and `list` read them
+            self.assertEqual(lines[-1]["result"], "VERDICT-TEXT the beat's final message")
+            self.assertEqual(lines[-1]["total_cost_usd"], 0.01)
+            self.assertEqual(lines[-1]["usage"], {"input_tokens": 100, "output_tokens": 10})
+            # the journal timeline still says how much the tool returned
+            self.assertIn("-> ok, 5017 chars", r.stdout)
+
+    def test_full_keeps_every_event_as_it_came(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            r, out = self._tee(d, "--keep", "full")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = out.read_text()
+            for kept in ("SECRET-MAIL-BODY", "SECRET-STDOUT", "SECRET-THINKING", "SECRET-STDERR"):
+                self.assertIn(kept, text)
+            self.assertEqual(json.loads(text.splitlines()[0])["keep"], "full")
+
+    def test_keep_takes_minimal_or_full_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            r, _ = self._tee(d, "--keep", "everything")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("--keep takes minimal or full", r.stderr)
+
+    def test_show_on_a_minimal_trace_says_the_content_was_not_kept(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = pathlib.Path(d)
+            self._fleet_trace(home, "init")
+            _, out = self._tee(home)
+            traces = home / "state" / "traces"
+            (traces / "checkin-20260101T000000.jsonl").write_text(out.read_text())
+            for args in (("show", "--last"), ("show", "--last", "--full"), ("list",)):
+                with self.subTest(args=args):
+                    r = self._fleet_trace(home, *args)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    for secret in ("SECRET-MAIL-BODY", "SECRET-STDOUT", "SECRET-THINKING"):
+                        self.assertNotIn(secret, r.stdout)
+            r = self._fleet_trace(home, "show", "--last", "--full")
+            self.assertIn("[content not kept: 5017 chars, sha256 ", r.stdout)
+            self.assertIn("-> ok, 5017 chars", r.stdout)
+            self.assertIn("$0.0100", self._fleet_trace(home, "show", "--last").stdout)
+
+    def test_the_runner_defaults_to_minimal_and_a_typo_cannot_widen_it(self):
+        header = {}
+        for label, env in (("default", {}), ("full", {"CHECKIN_TRACE_KEEP": "full"}),
+                           ("typo", {"CHECKIN_TRACE_KEEP": "ful"})):
+            r, ran = self._checkin_box(trace=True, stream=self.BEAT, extra_env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            m = re.search(r"\[trace\] kept in (\S+)", r.stdout)
+            self.assertIsNotNone(m, r.stdout)
+            header[label] = json.loads(pathlib.Path(m.group(1)).read_text().splitlines()[0])["keep"]
+            if label == "typo":
+                self.assertIn("CHECKIN_TRACE_KEEP='ful' is not minimal or full; using minimal", r.stderr)
+        self.assertEqual(header, {"default": "minimal", "full": "full", "typo": "minimal"})
+
     def test_fleet_journal_reads_the_fleets_units_and_nothing_else(self):
         """journalctl:* granted --cursor-file=PATH, which overwrites PATH as the
         service account: state/budget.json (resetting the quota) or memory.db.

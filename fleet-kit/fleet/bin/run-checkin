@@ -295,7 +295,8 @@ if [ -n "$CHECKIN_MODEL" ]; then
 fi
 
 # CHECKIN_TRACE_DAYS / CHECKIN_TRACE_MAX_MB - the beat trace (HARNESS.md, H1).
-# Each beat's full stream-json is kept in state/traces for this many days, so
+# Each beat's stream-json is kept in state/traces for this many days (see
+# CHECKIN_TRACE_KEEP below for how much of it), so
 # "why did the heartbeat do that?" has an answer that is not whatever the
 # model chose to print. 0 keeps no traces and runs the beat in text mode, as
 # before. Unlike CHECKIN_MODEL a bad value does not refuse the beat: a typo in
@@ -303,6 +304,18 @@ fi
 # the default.
 CHECKIN_TRACE_DAYS="${CHECKIN_TRACE_DAYS:-14}"
 CHECKIN_TRACE_MAX_MB="${CHECKIN_TRACE_MAX_MB:-20}"
+# CHECKIN_TRACE_KEEP - what a trace keeps. minimal (the default): the beat's
+# decisions and cost, not the content it read (mail and advisory text are
+# replaced by their size and a short hash). full: every event as it came, for
+# an investigation, with untrusted mail text in the file. Anything else warns
+# and uses minimal: a typo must not widen what is stored.
+CHECKIN_TRACE_KEEP="${CHECKIN_TRACE_KEEP:-minimal}"
+case "$CHECKIN_TRACE_KEEP" in
+  minimal|full) ;;
+  *)
+    echo "run-checkin: CHECKIN_TRACE_KEEP='$CHECKIN_TRACE_KEEP' is not minimal or full; using minimal" >&2
+    CHECKIN_TRACE_KEEP=minimal ;;
+esac
 case "$CHECKIN_TRACE_DAYS" in
   ''|*[!0123456789]*)
     echo "run-checkin: CHECKIN_TRACE_DAYS='$CHECKIN_TRACE_DAYS' is not a number of days; using 14" >&2
@@ -598,7 +611,7 @@ fi
 if [ -n "$TRACE" ]; then
   "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} --output-format stream-json --verbose \
     < /dev/null 2>&1 \
-    | "$TRACE_TOOL" tee --out "$TRACE" --plain "$beat_log" --max-mb "$CHECKIN_TRACE_MAX_MB"
+    | "$TRACE_TOOL" tee --out "$TRACE" --plain "$beat_log" --max-mb "$CHECKIN_TRACE_MAX_MB" --keep "$CHECKIN_TRACE_KEEP"
   # One statement, so both are read from the same pipeline.
   rc="${PIPESTATUS[0]}" trace_rc="${PIPESTATUS[1]}"
   if [ "$trace_rc" -ne 0 ]; then

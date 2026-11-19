@@ -573,6 +573,17 @@ not a number warns and uses 14; it does not stop the beat.
 The most one beat's trace may grow to before it stops recording (the beat
 goes on). Default 20.
 .TP
+.B CHECKIN_TRACE_KEEP
+What a trace keeps.
+.B minimal
+(the default) is the beat's decisions and cost, and not the content it read:
+a tool result is kept as its size and a short hash.
+.B full
+keeps every event as it came, for an investigation, with untrusted mail and
+advisory text in the file; set it back afterwards. Anything else warns and uses
+minimal. See
+.BR fleet\-trace (1).
+.TP
 .BR ANTHROPIC_API_KEY ", " ANTHROPIC_AUTH_TOKEN ", " CLAUDE_CODE_OAUTH_TOKEN
 The credential. At most one may be set (section 7).
 .TP

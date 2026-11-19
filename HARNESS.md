@@ -119,7 +119,9 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
   24 September outage taught us breaks silently. Add a test for both.
 - **Watch:** a trace holds everything the agent read, including untrusted
   advisory text. Same handling as reports: 0600, never mailed, never
-  committed.
+  committed. Since the encryption-at-rest work (`CHECKIN_TRACE_KEEP`) the
+  default trace keeps the beat's decisions and cost and replaces the content it
+  read with a size and a short hash; `full` restores it for an investigation.
 
 ### H2. Eval harness for the check-in (built, unreleased)
 

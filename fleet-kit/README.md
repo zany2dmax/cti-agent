@@ -1933,7 +1933,7 @@ fleet-kit/
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
     │   ├── fleet-journal          the beat's restricted journal reader (cti-agent-* units only)
     │   ├── fleet-timers           the beat's restricted timer lister (--all and cti-agent-* only)
-    │   ├── fleet-trace            each beat's record in state/traces: show, list, prune (operator only)
+    │   ├── fleet-trace            each beat's record in state/traces (decisions and cost, not mail text; CHECKIN_TRACE_KEEP): show, list, prune (operator only)
     │   ├── checkin-bash-guard     the beat's Bash hook: refuses shell syntax (redirects, pipes, chaining, $ expansion, globs, ~)
     │   ├── run-digest             deterministic ingest→enrich→brief→send
     │   └── run-checkin            resolves the claude binary, audits, fires one beat
