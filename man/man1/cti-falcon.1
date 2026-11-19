@@ -67,7 +67,9 @@ whose name contains
 .I NAME
 (or equals it, with
 .BR \-\-exact ),
-with its host count, top versions and platforms. Over
+with its host count, top versions and platforms, and, where Falcon knows
+them, the hosts' types (workstation, server), internet exposure and
+criticality, and how many hosts Falcon flags it as suspicious on. Over
 .B \-\-max\-rows
 it says the counts are a lower bound.
 .PP
@@ -77,7 +79,9 @@ last
 .I DAYS
 (1 to 90) with no record from the same vendor before the window, by exact
 name or, when the name carries a version number, by the same name at any
-version. It lists, with the reason, the ones it could not check (no vendor,
+version. A browser extension, which has no vendor, is looked up by name
+among extensions only. It lists, with the reason, the ones it could not
+check (no vendor and not an extension,
 over the cap of 500, or a name holding a quote, backslash,
 .B *
 or control character), which should be treated as possibly new, and counts

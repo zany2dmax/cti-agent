@@ -424,3 +424,85 @@ func TestATotalTheAPIDidNotSendIsUnknownNotTheReadCount(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 }
+
+func TestAnExtensionIsLookedUpOnlyAmongExtensions(t *testing.T) {
+	f, c := newFake(t)
+	ext := rec("", "HubSpot Sales", "3.4", "h1", "Windows")
+	ext.SoftwareType = "browser_extension"
+	af := &appsFake{total: 1, pages: [][]app{{ext}}, before: map[string]int{"HubSpot Sales": 9}}
+	f.routes[appsRoute] = af.handler
+	rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.SeenBefore != 1 || rep.ByType != 1 || len(rep.NotChecked) != 0 {
+		t.Fatalf("rep = %+v", rep)
+	}
+	lookup := af.filters[len(af.filters)-1]
+	if !strings.Contains(lookup, "+software_type:'browser_extension'+") || strings.Contains(lookup, "vendor:") {
+		t.Fatalf("lookup = %q", lookup)
+	}
+}
+
+func TestHostFactsAreCountedPerHost(t *testing.T) {
+	a := rec("Kaseya", "RMM Agent.app", "4.4", "h1", "Mac")
+	a.Host.HostType, a.Host.Exposure, a.Host.Criticality, a.IsSuspicious = "Workstation", "Not exposed", "Unassigned", true
+	b := rec("Kaseya", "RMM Agent.app", "4.4", "h2", "Windows")
+	b.Host.HostType = "Server"
+	got := summarise([]app{a, a, b})[0]
+	if got.Hosts != 2 || got.Suspicious != 1 || got.HostTypes["Workstation"] != 1 || got.HostTypes["Server"] != 1 ||
+		got.Exposure["Not exposed"] != 1 || got.Exposure["unknown"] != 1 || got.Criticality["Unassigned"] != 1 {
+		t.Fatalf("summary = %+v", got)
+	}
+}
+
+func TestTheSameNameAsAnAppAndAnExtensionAreKeptApart(t *testing.T) {
+	app1 := rec("", "Grammarly", "1", "h1", "Windows")
+	app1.SoftwareType = "application"
+	ext := rec("", "Grammarly", "1", "h2", "Windows")
+	ext.SoftwareType = "browser_extension"
+	if got := summarise([]app{app1, ext}); len(got) != 2 {
+		t.Fatalf("merged: %+v", got)
+	}
+}
+
+func TestAVendorlessDesktopAppIsNotLookedUpByNameAlone(t *testing.T) {
+	f, c := newFake(t)
+	a := rec("", "RMM Agent", "1", "h1", "Windows")
+	a.SoftwareType = "application"
+	af := &appsFake{total: 1, pages: [][]app{{a}}, before: map[string]int{"RMM Agent": 40}}
+	f.routes[appsRoute] = af.handler
+	rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.SeenBefore != 0 || rep.Reasons[ReasonNoVendor] != 1 || rep.ByType != 0 || len(af.filters) != 1 {
+		t.Fatalf("rep = %+v filters = %v", rep, af.filters)
+	}
+}
+
+func TestASuspiciousAppIsNeverOnlyACount(t *testing.T) {
+	f, c := newFake(t)
+	a := rec("Acme", "Helper", "1", "h1", "Windows")
+	a.IsSuspicious = true
+	b := rec("Acme", "Helper", "1", "", "Windows")
+	b.IsSuspicious = true
+	af := &appsFake{total: 2, pages: [][]app{{a, b}}, before: map[string]int{"Helper": 3}}
+	f.routes[appsRoute] = af.handler
+	rep, err := c.NewApps(context.Background(), time.Now(), NewAppsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.SuspiciousKnown) != 1 || rep.SuspiciousKnown[0].Suspicious != 1 || rep.SuspiciousKnown[0].SuspiciousNoHost != 1 {
+		t.Fatalf("rep = %+v", rep)
+	}
+}
+
+func TestAVendoredAppIsOneAppWhateverItsTypeLabels(t *testing.T) {
+	x := rec("Acme", "Tool", "1", "h1", "Windows")
+	y := rec("Acme", "Tool", "1", "h2", "Windows")
+	y.SoftwareType = "application"
+	if got := summarise([]app{x, y}); len(got) != 1 || got[0].Hosts != 2 {
+		t.Fatalf("split: %+v", got)
+	}
+}

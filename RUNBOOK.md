@@ -2651,9 +2651,15 @@ sudo cti-agent cti-falcon --fields
   Hosting`), by the same name at any version. An earlier record counts only if
   its name differs in the version numbers alone, so `Zoom Rooms` never makes a
   new `Zoom 6.1` look known. Up to 500 apps, 4 lookups at a time.
+- A browser extension has no vendor in Discover. It's looked up by name
+  among extensions only (a software type containing "extension"), so a
+  desktop app of the same name can't make it look known. Any other app with
+  no vendor is not checked. The limit: Discover gives no publisher for an extension, so a
+  malicious extension that copies the exact name of one already installed
+  counts as seen before. Falcon's `SUSPICIOUS` flag is the check on that.
 - It lists the **new** ones, and the ones it **could not check**, by reason,
-  which you should treat as possibly new: no vendor (a name-only lookup would
-  match look-alikes), over the 500 cap, a name holding a quote, backslash,
+  which you should treat as possibly new: no vendor and not an extension (a
+  name-only lookup would match look-alikes), over the 500 cap, a name holding a quote, backslash,
   `*` or control character, or a lookup the API rejected. One rejected
   lookup marks that one app, never the whole run. Updates and new hosts for
   something we already run are only counted.
@@ -2666,6 +2672,13 @@ sudo cti-agent cti-falcon --fields
   one week of November 2026, more than the 10,000 it reads by default. When it
   can't read the whole window it prints `WARNING: INCOMPLETE` with the share
   it did read. Apps first seen in the rest are missing from every list.
+- Both modes show, per app, what Falcon knows about the hosts: **host type**
+  (workstation, server, domain controller), **exposure** (Falcon's internet
+  exposure) and **criticality**. Each line appears only when Falcon gave a
+  value. **`SUSPICIOUS`** appears when Falcon flags the application itself.
+  An app already in the estate that Falcon flags is listed under its own
+  heading, never only counted.
+  The software type is shown in brackets when it isn't a plain application.
 - `--fields` prints the field names of one Discover record, with their types
   and never their values. Use it to see where a field lives. It was added
   because the platform came back `unknown`.

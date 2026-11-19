@@ -302,6 +302,15 @@ func listNewApps(ctx context.Context, c *falcon.Client, days, maxRows int, asJSO
 	}
 	p("seen before: %d applications (updates, or new hosts for something we already run; %d matched only at another version)",
 		rep.SeenBefore, rep.SeenAsOtherVersion)
+	if rep.ByType > 0 {
+		p("browser extensions: %d checked by name among extensions (included in the counts above)", rep.ByType)
+	}
+	if len(rep.SuspiciousKnown) > 0 {
+		p("ALREADY IN THE ESTATE BUT FLAGGED SUSPICIOUS BY FALCON: %d", len(rep.SuspiciousKnown))
+		for _, a := range rep.SuspiciousKnown {
+			printApp(w, a.AppSummary, "  ")
+		}
+	}
 	return exitOK
 }
 
@@ -319,9 +328,29 @@ func printApp(w io.Writer, a falcon.AppSummary, indent string) {
 	if a.NoHost > 0 {
 		extra = fmt.Sprintf(", plus %d record(s) naming no host", a.NoHost)
 	}
+	if t := strings.TrimSpace(a.SoftwareType); t != "" && !strings.EqualFold(t, "application") {
+		extra += " [" + safelog.LineMax(t, 40) + "]"
+	}
 	_, _ = fmt.Fprintf(w, "%s%s - %d host(s)%s\n", indent, name, a.Hosts, extra)
+	if a.Suspicious > 0 || a.SuspiciousNoHost > 0 {
+		_, _ = fmt.Fprintf(w, "%s    SUSPICIOUS: Falcon flags it on %d host(s)", indent, a.Suspicious)
+		if a.SuspiciousNoHost > 0 {
+			_, _ = fmt.Fprintf(w, " and %d record(s) naming no host", a.SuspiciousNoHost)
+		}
+		_, _ = fmt.Fprintln(w)
+	}
 	_, _ = fmt.Fprintf(w, "%s    versions : %s\n", indent, top(a.Versions, 5))
 	_, _ = fmt.Fprintf(w, "%s    platforms: %s\n", indent, top(a.Platforms, 5))
+	// The host lines are printed only when Falcon said something: an all-
+	// "unknown" line is noise.
+	for _, l := range []struct {
+		label string
+		m     map[string]int
+	}{{"host type", a.HostTypes}, {"exposure ", a.Exposure}, {"critical.", a.Criticality}} {
+		if known(l.m) {
+			_, _ = fmt.Fprintf(w, "%s    %s: %s\n", indent, l.label, top(l.m, 4))
+		}
+	}
 }
 
 // top prints the n largest entries of a count map, "value (count)".
@@ -366,4 +395,14 @@ func reasons(m map[string]int) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// known: the map holds something other than "unknown".
+func known(m map[string]int) bool {
+	for k := range m {
+		if k != "unknown" {
+			return true
+		}
+	}
+	return false
 }

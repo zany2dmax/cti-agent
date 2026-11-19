@@ -86,3 +86,19 @@ func TestAHostileAppNameCannotForgeALine(t *testing.T) {
 		t.Fatalf("output = %q", out)
 	}
 }
+
+func TestHostFactsArePrintedOnlyWhenFalconKnowsThem(t *testing.T) {
+	var b bytes.Buffer
+	printApp(&b, falcon.AppSummary{
+		Vendor: "Kaseya", Name: "RMM Agent.app", SoftwareType: "application", Hosts: 1, Suspicious: 1,
+		Versions: map[string]int{"4.4": 1}, Platforms: map[string]int{"Mac": 1},
+		HostTypes: map[string]int{"Workstation": 1}, Exposure: map[string]int{"unknown": 1},
+	}, "")
+	out := b.String()
+	if !strings.Contains(out, "SUSPICIOUS: Falcon flags it on 1 host(s)") || !strings.Contains(out, "host type: Workstation (1)") {
+		t.Fatalf("out = %q", out)
+	}
+	if strings.Contains(out, "exposure") || strings.Contains(out, "[application]") {
+		t.Fatalf("printed an unknown line or the default type: %q", out)
+	}
+}

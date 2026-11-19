@@ -141,23 +141,36 @@ func trimForError(s string) string {
 // app is the part of a Discover record the fleet reads. Host identity is
 // kept only to count distinct hosts; it is never printed or stored.
 type app struct {
-	Name      string `json:"name"`
-	Vendor    string `json:"vendor"`
-	Version   string `json:"version"`
-	FirstSeen string `json:"first_seen_timestamp"`
-	Host      struct {
-		ID       string `json:"id"`
-		Platform string `json:"platform_name"`
+	Name         string `json:"name"`
+	Vendor       string `json:"vendor"`
+	Version      string `json:"version"`
+	FirstSeen    string `json:"first_seen_timestamp"`
+	SoftwareType string `json:"software_type"`
+	IsSuspicious bool   `json:"is_suspicious"`
+	Host         struct {
+		ID          string `json:"id"`
+		Platform    string `json:"platform_name"`
+		HostType    string `json:"product_type_desc"` // Workstation, Server, Domain Controller
+		Exposure    string `json:"internet_exposure"`
+		Criticality string `json:"criticality"`
 	} `json:"host"`
 }
 
 // AppSummary is one application, aggregated over hosts. Counts only.
 type AppSummary struct {
-	Vendor    string         `json:"vendor"`
-	Name      string         `json:"name"`
-	Hosts     int            `json:"hosts"`     // distinct hosts
-	Versions  map[string]int `json:"versions"`  // version -> distinct hosts with it
-	Platforms map[string]int `json:"platforms"` // Windows, Mac, Linux -> distinct hosts
+	Vendor       string         `json:"vendor"`
+	Name         string         `json:"name"`
+	SoftwareType string         `json:"software_type,omitempty"` // as Discover labels it
+	Hosts        int            `json:"hosts"`                   // distinct hosts
+	Versions     map[string]int `json:"versions"`                // version -> distinct hosts with it
+	Platforms    map[string]int `json:"platforms"`               // Windows, Mac, Linux -> distinct hosts
+	HostTypes    map[string]int `json:"host_types"`              // Workstation, Server, ... -> distinct hosts
+	Exposure     map[string]int `json:"internet_exposure"`       // Falcon's internet exposure -> distinct hosts
+	Criticality  map[string]int `json:"criticality"`             // Falcon's host criticality -> distinct hosts
+	// Suspicious counts distinct hosts where Falcon flagged this application;
+	// SuspiciousNoHost the flagged records that named no host.
+	Suspicious       int `json:"suspicious_hosts,omitempty"`
+	SuspiciousNoHost int `json:"suspicious_no_host,omitempty"`
 	// NoHost counts records that named no host. They are not added to
 	// Hosts, since they cannot be told apart.
 	NoHost int `json:"no_host,omitempty"`
@@ -266,47 +279,74 @@ func max0(a, b int) int {
 	return b
 }
 
-// summarise groups records by vendor and name and counts distinct hosts -
-// overall, per version and per platform, so a host with two versions of an
-// app counts toward both.
+// summarise groups records by vendor, name and software type and counts
+// distinct hosts - overall, and per version, platform, host type, exposure
+// and criticality, so a host with two versions of an app counts toward both.
 func summarise(rows []app) []AppSummary {
+	const (
+		aVersion = iota
+		aPlatform
+		aHostType
+		aExposure
+		aCriticality
+		nAttrs
+	)
 	type acc struct {
-		s         AppSummary
-		hosts     map[string]bool
-		versions  map[string]map[string]bool
-		platforms map[string]map[string]bool
-	}
-	add := func(m map[string]map[string]bool, k, host string) {
-		if m[k] == nil {
-			m[k] = map[string]bool{}
-		}
-		m[k][host] = true
+		s          AppSummary
+		hosts      map[string]bool
+		suspicious map[string]bool
+		attrs      [nAttrs]map[string]map[string]bool
 	}
 	by := map[string]*acc{}
 	var order []string
 	for _, r := range rows {
+		// The type splits groups only when there is no vendor: there it
+		// decides which lookup is safe. A vendored app is one app whatever
+		// Discover labels each record.
 		k := strings.ToLower(r.Vendor) + "\x00" + strings.ToLower(r.Name)
+		if strings.TrimSpace(r.Vendor) == "" {
+			k += "\x00" + strings.ToLower(r.SoftwareType)
+		}
 		a := by[k]
 		if a == nil {
-			a = &acc{s: AppSummary{Vendor: r.Vendor, Name: r.Name}, hosts: map[string]bool{},
-				versions: map[string]map[string]bool{}, platforms: map[string]map[string]bool{}}
+			a = &acc{s: AppSummary{Vendor: r.Vendor, Name: r.Name, SoftwareType: r.SoftwareType},
+				hosts: map[string]bool{}, suspicious: map[string]bool{}}
+			for i := range a.attrs {
+				a.attrs[i] = map[string]map[string]bool{}
+			}
 			by[k] = a
 			order = append(order, k)
 		}
 		if r.Host.ID == "" {
 			a.s.NoHost++
+			if r.IsSuspicious {
+				a.s.SuspiciousNoHost++
+			}
 			continue
 		}
-		a.hosts[r.Host.ID] = true
-		add(a.versions, orUnknown(r.Version), r.Host.ID)
-		add(a.platforms, orUnknown(r.Host.Platform), r.Host.ID)
+		h := r.Host.ID
+		a.hosts[h] = true
+		if r.IsSuspicious {
+			a.suspicious[h] = true
+		}
+		for i, v := range [nAttrs]string{r.Version, r.Host.Platform, r.Host.HostType, r.Host.Exposure, r.Host.Criticality} {
+			k := orUnknown(v)
+			if a.attrs[i][k] == nil {
+				a.attrs[i][k] = map[string]bool{}
+			}
+			a.attrs[i][k][h] = true
+		}
 	}
 	out := make([]AppSummary, 0, len(by))
 	for _, k := range order {
 		a := by[k]
 		a.s.Hosts = len(a.hosts)
-		a.s.Versions = counts(a.versions)
-		a.s.Platforms = counts(a.platforms)
+		a.s.Suspicious = len(a.suspicious)
+		a.s.Versions = counts(a.attrs[aVersion])
+		a.s.Platforms = counts(a.attrs[aPlatform])
+		a.s.HostTypes = counts(a.attrs[aHostType])
+		a.s.Exposure = counts(a.attrs[aExposure])
+		a.s.Criticality = counts(a.attrs[aCriticality])
 		out = append(out, a.s)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -342,7 +382,7 @@ const (
 
 // Why an application was not checked.
 const (
-	ReasonNoVendor = "no-vendor"       // a name-only lookup would match look-alikes from any vendor
+	ReasonNoVendor = "no-vendor"       // no vendor and no software type: a name-only lookup would match look-alikes
 	ReasonOverCap  = "over-cap"        // more applications than MaxChecks
 	ReasonRefused  = "name-refused"    // the name or vendor holds a character a lookup cannot carry
 	ReasonRejected = "lookup-rejected" // the API refused this one lookup (4xx), so it could not be checked
@@ -384,6 +424,12 @@ type NewAppsReport struct {
 	// SeenAsOtherVersion is the part of SeenBefore that matched only once the
 	// version number was taken out of the name.
 	SeenAsOtherVersion int `json:"seen_as_other_version"`
+	// ByType counts the browser extensions (no vendor) that were looked up
+	// by name among extensions and answered.
+	ByType int `json:"checked_by_type"`
+	// SuspiciousKnown lists apps already in the estate that Falcon flags as
+	// suspicious: not new, but never to be hidden in a count.
+	SuspiciousKnown []NewApp `json:"suspicious_known,omitempty"`
 }
 
 // NewAppsOpts caps the work.
@@ -417,22 +463,41 @@ func (c *Client) NewApps(ctx context.Context, since time.Time, o NewAppsOpts) (*
 	rep := &NewAppsReport{Since: since.UTC(), Total: total, Read: len(rows), Truncated: truncated, Reasons: map[string]int{}}
 
 	type job struct {
-		i       int
-		s       AppSummary
-		n, v, p string
+		i     int
+		s     AppSummary
+		n, p  string
+		scope string // the clause that keeps the lookup to the same kind of thing
 	}
 	apps := summarise(rows)
 	results := make([]NewApp, len(apps))
 	otherVersion := make([]bool, len(apps))
 	var jobs []job
 	for i, s := range apps {
-		reason := ""
+		// The lookup is kept to the same vendor. Browser extensions carry no
+		// vendor, so for one of those it is kept to extensions instead, and a
+		// desktop app of the same name cannot make it look known. Anything
+		// else without a vendor is not checked: a name-only lookup would
+		// match look-alikes.
+		reason, scope := "", ""
 		n, nerr := apiLiteral(s.Name)
-		v, verr := apiLiteral(s.Vendor)
 		switch {
-		case strings.TrimSpace(s.Vendor) == "":
+		case strings.TrimSpace(s.Vendor) != "":
+			v, verr := apiLiteral(s.Vendor)
+			if verr != nil {
+				nerr = verr
+			}
+			scope = clause("vendor", v, true)
+		case isExtensionType(s.SoftwareType):
+			t, terr := apiLiteral(s.SoftwareType)
+			if terr != nil {
+				nerr = terr
+			}
+			scope = clause("software_type", t, true)
+		}
+		switch {
+		case scope == "" && nerr == nil:
 			reason = ReasonNoVendor
-		case nerr != nil || verr != nil:
+		case nerr != nil:
 			reason = ReasonRefused
 		case len(jobs) >= o.MaxChecks:
 			reason = ReasonOverCap
@@ -441,7 +506,7 @@ func (c *Client) NewApps(ctx context.Context, since time.Time, o NewAppsOpts) (*
 			results[i] = NewApp{AppSummary: s, Status: NotChecked, Reason: reason}
 			continue
 		}
-		jobs = append(jobs, job{i: i, s: s, n: n, v: v, p: versionPattern(n)})
+		jobs = append(jobs, job{i: i, s: s, n: n, p: versionPattern(n), scope: scope})
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -457,7 +522,7 @@ func (c *Client) NewApps(ctx context.Context, since time.Time, o NewAppsOpts) (*
 		go func() {
 			defer wg.Done()
 			for j := range work {
-				seen, other, err := c.seenBefore(ctx, j.n, j.v, j.p, ts)
+				seen, other, err := c.seenBefore(ctx, j.n, j.scope, j.p, ts)
 				if rejected(err) {
 					results[j.i] = NewApp{AppSummary: j.s, Status: NotChecked, Reason: ReasonRejected}
 					continue
@@ -498,6 +563,10 @@ feed:
 	}
 
 	for i, r := range results {
+		// Looked up by type, and the lookup answered.
+		if strings.TrimSpace(r.Vendor) == "" && (r.Status == NewToEstate || r.Status == SeenBefore) {
+			rep.ByType++
+		}
 		switch r.Status {
 		case NewToEstate:
 			rep.New = append(rep.New, r)
@@ -505,6 +574,9 @@ feed:
 			rep.SeenBefore++
 			if otherVersion[i] {
 				rep.SeenAsOtherVersion++
+			}
+			if r.Suspicious > 0 || r.SuspiciousNoHost > 0 {
+				rep.SuspiciousKnown = append(rep.SuspiciousKnown, r)
 			}
 		case NotChecked:
 			rep.NotChecked = append(rep.NotChecked, r)
@@ -516,9 +588,9 @@ feed:
 
 // seenBefore asks whether the same vendor had this application before the
 // window: by exact name, then by pattern (any version), if there is one.
-func (c *Client) seenBefore(ctx context.Context, name, vendor, pattern, ts string) (seen, otherVersion bool, err error) {
+func (c *Client) seenBefore(ctx context.Context, name, scope, pattern, ts string) (seen, otherVersion bool, err error) {
 	ask := func(nameClause string) (bool, error) {
-		filter := nameClause + "+" + clause("vendor", vendor, true) + "+first_seen_timestamp:<='" + ts + "'"
+		filter := nameClause + "+" + scope + "+first_seen_timestamp:<='" + ts + "'"
 		resp, err := c.Get(ctx, appsRoute, url.Values{"filter": {filter}, "limit": {"1"}})
 		if err != nil {
 			return false, err
@@ -536,7 +608,7 @@ func (c *Client) seenBefore(ctx context.Context, name, vendor, pattern, ts strin
 	// Discover keeps a record per host, so many copies of one look-alike can
 	// fill a page; up to 300 records are read. Past that the app is called
 	// new - the safe way to be wrong.
-	filter := "name:*'" + pattern + "'+" + clause("vendor", vendor, true) + "+first_seen_timestamp:<='" + ts + "'"
+	filter := "name:*'" + pattern + "'+" + scope + "+first_seen_timestamp:<='" + ts + "'"
 	earlier, _, _, err := c.readApps(ctx, filter, 300)
 	if err != nil {
 		return false, false, err
@@ -558,6 +630,15 @@ func patternRegexp(pattern string) *regexp.Regexp {
 		parts[i] = regexp.QuoteMeta(p)
 	}
 	return regexp.MustCompile(`(?i)^` + strings.Join(parts, `\(?v?\d+(\.\d+)+`+versionSuffix+`\)?`) + `$`)
+}
+
+// isExtensionType: a software type that names a browser extension. Only
+// those get a lookup scoped by type. "application", Discover's default, is
+// on most vendor-less records, and scoping by it would be a name-only lookup
+// across every app in the estate - the look-alike risk "no vendor" exists
+// to avoid.
+func isExtensionType(t string) bool {
+	return strings.Contains(strings.ToLower(t), "extension")
 }
 
 // hasResources: the answer carried at least one record, whatever its meta said.

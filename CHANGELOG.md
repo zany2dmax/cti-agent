@@ -72,6 +72,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     window read. Run it daily, `--new-apps 1`.
   - **New `--fields`** prints one Discover record's field names and types,
     never values.
+- `cti-falcon --find-app` and `--new-apps` show what Falcon knows about the
+  hosts behind each app: host type (workstation, server, domain controller),
+  internet exposure and criticality, plus `SUSPICIOUS` where Falcon flags the
+  application. An app already in the estate that Falcon flags is listed,
+  never only counted. Browser extensions have no vendor in Discover, so they
+  were never looked up. They're now looked up by name among extensions only,
+  so a desktop app of the same name can't make one look known. Other apps
+  with no vendor are still not checked.
 
 ---
 
