@@ -66,6 +66,31 @@ def log(m):
     print(f"[mailer] {m}", file=sys.stderr)
 
 
+def tls_context():
+    """The TLS context for every outbound request: certificate and hostname
+    checks on (the default), and TLS 1.2 as the floor."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect. Graph and the token endpoint never legitimately
+    redirect, and urllib (unlike Go's client) copies the Authorization header
+    to whatever host a redirect names, so following one would hand the bearer
+    token to it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, "redirect refused: the mailer follows none", headers, fp)
+
+
+def _open(req, timeout):
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=tls_context()), _NoRedirect())
+    return opener.open(req, timeout=timeout)
+
+
 def die(m, code=1):
     log(f"ERROR: {m}")
     sys.exit(code)
@@ -123,8 +148,7 @@ def token():
         req = urllib.request.Request(url, data=body, headers={
             "Content-Type": "application/x-www-form-urlencoded"})
         # The URL is built above as https://login.microsoftonline.com.
-        with urllib.request.urlopen(req, timeout=30,  # nosec B310
-                                    context=ssl.create_default_context()) as r:
+        with _open(req, 30) as r:  # nosec B310
             return json.loads(r.read())["access_token"]
     except urllib.error.HTTPError as e:
         die(f"token request failed HTTP {e.code}: {e.read().decode()[:400]}")
@@ -140,8 +164,7 @@ def graph_post(path, payload, tok, retries=3):
                 "Authorization": f"Bearer {tok}",
                 "Content-Type": "application/json"})
             # GRAPH is the https Graph endpoint constant.
-            with urllib.request.urlopen(req, timeout=60,  # nosec B310
-                                        context=ssl.create_default_context()) as r:
+            with _open(req, 60) as r:  # nosec B310
                 return r.status, dict(r.headers), r.read().decode() or ""
         except urllib.error.HTTPError as e:
             detail = e.read().decode()[:600]

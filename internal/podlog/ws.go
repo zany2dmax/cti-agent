@@ -210,6 +210,13 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	cfg := c.TLSConfig
 	if cfg == nil {
 		cfg = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}
+	} else {
+		// A caller's config may change who is trusted (tests do), but never
+		// lowers the version floor.
+		cfg = cfg.Clone()
+		if cfg.MinVersion < tls.VersionTLS12 {
+			cfg.MinVersion = tls.VersionTLS12
+		}
 	}
 	td := &tls.Dialer{NetDialer: d, Config: cfg}
 	return td.DialContext(ctx, "tcp", c.addr())

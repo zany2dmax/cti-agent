@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/domains"
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 )
 
 // DefaultBaseURL is GoDaddy's production API. There is no separate read
@@ -49,7 +50,7 @@ type Client struct {
 // New builds a client for the production API.
 func New(token string) *Client {
 	return &Client{BaseURL: DefaultBaseURL, Token: token,
-		HTTP: &http.Client{Timeout: 60 * time.Second}}
+		HTTP: httpx.New(60 * time.Second)}
 }
 
 // Name implements domains.Registrar.

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 )
 
 type Client struct {
@@ -174,7 +176,7 @@ func New(tenantID, clientID, clientSecret string) *Client {
 		tenantID:     tenantID,
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		http:         &http.Client{Timeout: 60 * time.Second},
+		http:         httpx.New(60 * time.Second),
 		tokenEndpoint: fmt.Sprintf(
 			"https://login.microsoftonline.com/%s/oauth2/v2.0/token", tenantID),
 		graphBase: "https://graph.microsoft.com/v1.0",

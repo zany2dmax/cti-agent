@@ -39,6 +39,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/useragent"
 )
@@ -125,7 +126,7 @@ func New(base, clientID, secret string) (*Client, error) {
 	if clientID == "" || secret == "" {
 		return nil, errors.New("FALCON_CLIENT_ID and FALCON_CLIENT_SECRET must both be set")
 	}
-	return newClient(b, clientID, secret, &http.Client{Timeout: 60 * time.Second}), nil
+	return newClient(b, clientID, secret, httpx.New(60*time.Second)), nil
 }
 
 // newClient skips the host check, for tests against httptest servers.

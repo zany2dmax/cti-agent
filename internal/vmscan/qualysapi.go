@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/qualysrl"
 )
 
@@ -118,7 +119,7 @@ func qualysGet(ctx context.Context, baseURL, username, password, path string, q 
 	if l.Logf == nil {
 		l.Logf = func(f string, a ...any) { _, _ = fmt.Fprintf(os.Stderr, "[qualys] "+f+"\n", a...) }
 	}
-	client := &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l}
+	client := &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l, CheckRedirect: httpx.CheckRedirect}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err

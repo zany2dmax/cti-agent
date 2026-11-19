@@ -47,6 +47,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 )
 
 // Defaults for the two settings. Both can be changed in fleet.env without a
@@ -131,9 +133,9 @@ const attemptTimeout = 120 * time.Second
 
 // New is a limiter with the settings from the environment.
 func New() *Limiter {
-	base := http.DefaultTransport.(*http.Transport).Clone()
+	base := httpx.Transport()
 	base.ResponseHeaderTimeout = attemptTimeout
-	l := &Limiter{Base: base, Reserve: DefaultReserve, MaxWait: DefaultMaxWait}
+	l := &Limiter{Base: httpx.Guard(base), Reserve: DefaultReserve, MaxWait: DefaultMaxWait}
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("QUALYS_RL_RESERVE"))); err == nil && v >= 0 {
 		l.Reserve = v
 	}
@@ -207,7 +209,7 @@ func (l *Limiter) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	base := l.Base
 	if base == nil {
-		base = http.DefaultTransport
+		base = httpx.Guard(httpx.Transport())
 	}
 
 	for attempt := 1; ; attempt++ {

@@ -59,6 +59,33 @@ def user_agent(product, env=os.environ):
     return f"{ua} (+mailto:{contact})"
 
 
+
+def tls_context():
+    """The TLS context for every outbound request: certificate and hostname
+    checks on (the default), and TLS 1.2 as the floor."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+class _HTTPSOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect to anything but https, so a feed or an API cannot
+    walk a request (and any credential on it) down to plain http."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.lower().startswith("https://"):
+            raise urllib.error.HTTPError(
+                req.full_url, code, "redirect to a non-https URL refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open(req, timeout):
+    ctx = tls_context()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=ctx), _HTTPSOnlyRedirect())
+    return opener.open(req, timeout=timeout)
+
+
 UA = user_agent("cti-agent-scout/1.0")
 
 
@@ -71,18 +98,20 @@ MAX_FEED_BYTES = 10 * 1024 * 1024
 
 def fetch(url, timeout=30):
     # feeds.txt is an operator's file, but urlopen also opens file:// and ftp://,
-    # so a pasted line could read a local file into the report. http(s) only.
-    if not url.lower().startswith(("https://", "http://")):
-        log(f"FEED FAIL {url} :: not an http(s) URL")
+    # so a pasted line could read a local file into the report. And a plain
+    # http:// feed can be altered in transit and fed into the digest as if it
+    # were advisory text. https only.
+    if not url.lower().startswith("https://"):
+        log(f"FEED FAIL {url} :: not an https URL (plain http feeds are refused)")
         return None
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": UA,
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
         })
-        # The scheme is checked at the top of this function.
-        with urllib.request.urlopen(req, timeout=timeout,  # nosec B310
-                                    context=ssl.create_default_context()) as r:
+        # The scheme is checked at the top of this function, and _open
+        # refuses a redirect to anything but https.
+        with _open(req, timeout) as r:  # nosec B310
             # A feed is a few hundred KB; a hostile or broken server could
             # stream without end. One byte over the cap means refuse it.
             body = r.read(MAX_FEED_BYTES + 1)

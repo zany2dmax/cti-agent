@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zany2dmax/cti-agent/internal/appscan"
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/qualysrl"
 )
 
@@ -61,7 +62,7 @@ func NewAPI(baseURL, username, password string) *API {
 		// five-minute rate-limit wait dies at two minutes looking like a
 		// network fault. A hung server is still caught per attempt, by the
 		// limiter's transport (ResponseHeaderTimeout).
-		http:    &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l},
+		http:    &http.Client{Timeout: 120*time.Second + l.WaitBudget(), Transport: l, CheckRedirect: httpx.CheckRedirect},
 		limiter: l,
 	}
 }

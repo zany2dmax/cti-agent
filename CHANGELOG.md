@@ -174,6 +174,36 @@ journal says why. Advisory triage in the digest stays off until you set
   `CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`. A login stored under the service
   account's home is no longer seen.
 
+- **Every outbound HTTP call now has a TLS 1.2 floor and goes over https
+  only.** Nine Go clients (Graph, Jira, the three Qualys clients, Falcon,
+  GoDaddy, Patch Tuesday) were built from the defaults: no minimum TLS
+  version, and a base URL mistyped or planted as `http://` would have sent
+  the Basic or Bearer credential in clear. They now come from one place,
+  `internal/httpx`: TLS 1.2 minimum; a request to anything but `https://`
+  (loopback excepted, for tests) is refused before it is sent, so the
+  `Authorization` header never leaves the process; a redirect to `http://`
+  is refused and chains stop at ten hops. The Qualys rate limiter's own
+  transport is built the same way. The Python lanes (scout, enrich, mailer)
+  share the TLS 1.2 floor. Scout refuses `http://` feeds (it used to accept
+  them), and scout and enrich refuse a redirect to plain http. The mailer
+  follows no redirect at all: it never needs one, and Python's urllib copies
+  the `Authorization` header to whatever host a redirect names, even another
+  https host, which would have handed the Graph token over. A repo test
+  (`TestNoClientBypassesHTTPX`, which reads the code's syntax tree) fails when
+  new code builds an `http.Client` or `http.Transport` by hand, or uses the
+  `net/http` defaults; the one exception, the domains website probe, is on
+    its allowlist with the reason. **Upgrade:** nothing for a normal install.
+  If `fleet.env` names an `http://` base URL it now fails with the host named
+  (set it to https), and a feed in `feeds.txt` that starts `http://` is
+  refused: the digest says `FEED FAIL ... not an https URL`.
+  - **Fixed issues found by PrimeSec AI:**
+    - Guardrail findings "TLS Version Requirement" (HIGH; 10785607,
+      10785608, 10785609, 10785610, 10785611, 10785612, 10785613, 10785614,
+      10785615, 10785616, 10785617, 10785618) and "TLS for Data Transit"
+      (HIGH and MEDIUM; 11583437, 11583429) - fixed in the entry above.
+      "TLS for Data Transit" 10785645 (the domains website probe, which
+      measures plain http on purpose) is dismissed as not applicable.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed

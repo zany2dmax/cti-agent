@@ -453,6 +453,39 @@ gitignored.
 
 ---
 
+## Transport security (outbound calls)
+
+Every credential the fleet holds travels on an outbound HTTPS call, so the
+call itself is a control, not a detail.
+
+- **Go:** every HTTP client comes from `internal/httpx`. TLS 1.2 is the
+  minimum. A request to anything but `https://` is refused **before it is
+  sent**, so an `Authorization` header already on the request never leaves
+  the process; a base URL mistyped or planted as `http://` fails with the
+  host named. Loopback is the one exception, for tests against local servers.
+  A redirect to `http://` is refused and chains stop at ten hops (Go also
+  drops `Authorization` on a redirect to another host). `TestNoClientBypassesHTTPX`
+  reads the code and fails when new code builds an `http.Client` or
+  `http.Transport` by hand or uses the `net/http` defaults.
+- **Exceptions, each on purpose:** the domains website probe measures what
+  other people's sites serve (plain http, bad certificates) and sends no
+  credential; the domains certificate and mail-server probes dial directly
+  for the same reason; the Proofpoint log stream (`internal/podlog`) dials TLS
+  itself for a WebSocket and forces TLS 1.2 even on a config a caller
+  supplies.
+- **Python lanes:** `scout`, `enrich` and the mailer use a context with TLS
+  1.2 as the floor and certificate and hostname checks on. `scout` refuses
+  `http://` feeds; `scout` and `enrich` refuse a redirect to plain http. The
+  mailer follows **no** redirect: urllib copies the `Authorization` header to
+  whatever host a redirect names, so a Graph redirect would otherwise hand
+  over the bearer token. The Go mailer (`cti-mailer`) is the live path since
+  1.6.6; `mailer.py` is a rollback fallback with the same protections.
+- **What this does not claim:** it is a version floor and an https-only rule.
+  It is not FIPS 140-3 validation (that is a property of the host's crypto
+  module and mode, not of this code), and it does not pin certificates. Go's
+  client wraps a refused request's error with the full URL, so no fleet client
+  may put a secret in a URL's path or query.
+
 ## Microsoft Graph permissions
 
 Application permissions, each optional except the first. The first three are mail; the fourth is for one lane only:

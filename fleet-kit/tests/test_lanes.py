@@ -27,6 +27,8 @@ import tempfile
 import time
 import unicodedata
 import unittest
+import urllib.error
+import urllib.request
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 LANES = KIT / "fleet" / "lanes"
@@ -2194,13 +2196,25 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
         with quiet():
             self.assertEqual(len(self.scout.parse_feed(plain, "https://example.invalid/f")), 1)
 
-    def test_only_http_urls_are_fetched(self):
+    def test_only_https_urls_are_fetched(self):
         # urlopen also opens file:// and ftp://: a pasted feeds.txt line must
-        # not read a local file into the report.
+        # not read a local file into the report. A plain http:// feed can be
+        # altered in transit, so it is refused too (Prime guardrail "TLS for
+        # Data Transit").
         with contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertIsNone(self.scout.fetch("file:///etc/passwd"))
             self.assertIsNone(self.scout.fetch("ftp://example.invalid/feed"))
-        self.assertIn("not an http(s) URL", err.getvalue())
+            self.assertIsNone(self.scout.fetch("http://example.invalid/feed"))
+        self.assertIn("not an https URL", err.getvalue())
+        self.assertEqual(err.getvalue().count("FEED FAIL"), 3)
+
+    def test_a_redirect_to_plain_http_is_refused(self):
+        handler = self.scout._HTTPSOnlyRedirect()
+        req = urllib.request.Request("https://example.invalid/feed")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {},
+                                     "http://example.invalid/feed")
+        cm.exception.close()
 
     def test_the_dead_msrc_blog_feed_is_no_longer_polled(self):
         # Belt and braces: the URL is commented out in feeds.txt, and a future
@@ -5842,6 +5856,50 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
                 self.assertIsNone(mod.verdict(event))
 
 
+class TlsFloor(unittest.TestCase):
+    """Every lane that makes an outbound request negotiates TLS 1.2 or better,
+    and the lanes that carry a credential refuse a redirect to plain http.
+    (Prime guardrails "TLS Version Requirement" and "FIPS" are different
+    findings: this is only the version floor.)"""
+
+    def test_each_lane_context_has_a_tls_12_floor(self):
+        import ssl
+        for name in ("scout", "enrich", "mailer"):
+            ctx = load(name).tls_context()
+            self.assertGreaterEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2, name)
+            self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED, name)
+            self.assertTrue(ctx.check_hostname, name)
+
+    def test_no_lane_builds_its_own_unfloored_context(self):
+        for name in ("scout", "enrich", "mailer", "brief"):
+            src = (LANES / f"{name}.py").read_text()
+            for ln, line in enumerate(src.splitlines(), 1):
+                if "create_default_context" in line:
+                    # Only inside tls_context(), which sets minimum_version on
+                    # the next line.
+                    nxt = src.splitlines()[ln]
+                    self.assertIn("minimum_version", nxt, f"{name}.py:{ln}")
+
+    def test_the_mailer_refuses_every_redirect(self):
+        # urllib copies Authorization to whatever host a redirect names, even
+        # another https host, so the mailer (which carries the Graph token and
+        # never legitimately redirects) follows none.
+        handler = load("mailer")._NoRedirect()
+        req = urllib.request.Request("https://graph.microsoft.com/v1.0/x")
+        for target in ("http://graph.microsoft.com/v1.0/x", "https://evil.example/x"):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                handler.redirect_request(req, io.BytesIO(b""), 307, "Redirect", {}, target)
+            cm.exception.close()
+
+    def test_enrich_refuses_a_redirect_to_plain_http(self):
+        # The NVD API key rides on these requests.
+        handler = load("enrich")._HTTPSOnlyRedirect()
+        req = urllib.request.Request("https://services.nvd.nist.gov/x")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {},
+                                     "http://services.nvd.nist.gov/x")
+        cm.exception.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

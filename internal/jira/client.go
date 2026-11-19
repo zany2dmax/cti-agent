@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 )
 
 // Client talks to Jira Cloud's REST API v2.
@@ -77,21 +79,8 @@ func New(baseURL, email, token string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Email:   email,
 		Token:   token,
-		HTTP:    &http.Client{Timeout: 60 * time.Second, CheckRedirect: httpsOnly},
+		HTTP:    httpx.New(60 * time.Second),
 	}
-}
-
-// httpsOnly refuses a redirect to anything but https. Go drops Authorization
-// on a redirect to another host, but not on a same-host downgrade to http,
-// which would send the token in clear.
-func httpsOnly(req *http.Request, via []*http.Request) error {
-	if req.URL.Scheme != "https" {
-		return fmt.Errorf("refusing a redirect to %s://%s: not https", req.URL.Scheme, req.URL.Host)
-	}
-	if len(via) >= 10 {
-		return errors.New("stopped after 10 redirects")
-	}
-	return nil
 }
 
 func (c *Client) authHeader() string {

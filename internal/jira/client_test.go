@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 )
 
 // Every test here runs against httptest, never against a tenant. A client
@@ -447,11 +449,11 @@ func TestMyPermissionsParsesAndSendsTheQuery(t *testing.T) {
 
 func TestRedirectsMustStayOnHTTPS(t *testing.T) {
 	plain, _ := http.NewRequest(http.MethodGet, "http://api.example.com/x", nil)
-	if httpsOnly(plain, nil) == nil {
+	if httpx.CheckRedirect(plain, nil) == nil {
 		t.Error("a redirect to http was allowed")
 	}
 	tls, _ := http.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
-	if err := httpsOnly(tls, nil); err != nil {
+	if err := httpx.CheckRedirect(tls, nil); err != nil {
 		t.Errorf("an https redirect was refused: %v", err)
 	}
 }

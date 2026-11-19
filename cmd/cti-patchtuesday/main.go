@@ -47,6 +47,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
 	"github.com/zany2dmax/cti-agent/internal/sanitize"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
@@ -186,7 +187,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	client := &http.Client{Timeout: *timeout}
+	client := httpx.New(*timeout)
 
 	// Microsoft's own release document first: it is the primary source for
 	// the counts, severities, zero-days and CVE list. See msrc.go.

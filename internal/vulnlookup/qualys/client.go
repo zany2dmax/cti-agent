@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
 
@@ -126,7 +127,7 @@ func New(baseURL, username, password, kbCachePath string, kbMaxAge time.Duration
 		password:    password,
 		kbCachePath: kbCachePath,
 		kbMaxAge:    kbMaxAge,
-		http:        &http.Client{Timeout: 5 * time.Minute},
+		http:        httpx.New(5 * time.Minute),
 	}
 }
 

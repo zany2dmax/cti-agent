@@ -69,6 +69,32 @@ def user_agent(product, env=os.environ):
     return f"{ua} (+mailto:{contact})"
 
 
+
+def tls_context():
+    """The TLS context for every outbound request: certificate and hostname
+    checks on (the default), and TLS 1.2 as the floor."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+class _HTTPSOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect to anything but https: the NVD API key rides on these
+    requests and must never go out in clear."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.lower().startswith("https://"):
+            raise urllib.error.HTTPError(
+                req.full_url, code, "redirect to a non-https URL refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open(req, timeout):
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=tls_context()), _HTTPSOnlyRedirect())
+    return opener.open(req, timeout=timeout)
+
+
 UA = user_agent("cti-agent-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.
@@ -90,9 +116,9 @@ def http_json(url, headers=None, timeout=45, retries=3):
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=hdrs)
-            ctx = ssl.create_default_context()
-            # Every URL is an https constant (NVD, EPSS, KEV, ...).
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:  # nosec B310
+            # Every URL is an https constant (NVD, EPSS, KEV, ...), and _open
+            # refuses a redirect to anything else.
+            with _open(req, timeout) as r:  # nosec B310
                 return json.loads(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
             if e.code in (403, 429, 503) and attempt < retries - 1:
