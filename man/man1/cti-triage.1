@@ -1,9 +1,9 @@
-.TH CTI-TRIAGE 1 "2026-11-18" "cti-agent" "CTI Fleet Manual"
+.TH CTI-TRIAGE 1 "2026-11-19" "cti-agent" "CTI Fleet Manual"
 .SH NAME
 cti-triage \- turn one threat-intel advisory into facts from our own tools
 .SH SYNOPSIS
 .B cti\-triage
-.BR \-\-show\-input " | " \-\-read " | " \-\-facts
+.BR \-\-show\-input " | " \-\-read " | " \-\-facts " | " \-\-judge " | " \-\-show\-judge\-input
 .B \-\-message
 .I FILE
 .RB [ \-\-subject
@@ -11,6 +11,10 @@ cti-triage \- turn one threat-intel advisory into facts from our own tools
 .RB [ \-\-sender
 .IR S ]
 .RB [ \-\-subjects\-file
+.IR F ]
+.RB [ \-\-facts\-file
+.IR F ]
+.RB [ \-\-judgement\-file
 .IR F ]
 .RB [ \-\-json ]
 .RB [ \-\-timeout
@@ -20,7 +24,7 @@ cti-triage \- turn one threat-intel advisory into facts from our own tools
 .I advisory.txt
 .SH DESCRIPTION
 .B cti-triage
-is advisory triage run by hand (phase 3 of the triage redesign). It reads
+is advisory triage run by hand (phases 3 and 4 of the triage redesign). It reads
 one advisory, a text file holding its body, and writes nothing.
 .PP
 A model, the
@@ -42,13 +46,44 @@ named each technique in the last 30 days. Every value is re-checked for its
 exact shape before it goes into a query, and lookups are capped per
 advisory: 5 products, 25 indicators, 10 techniques.
 .PP
+.B \-\-judge
+then hands the fact sheet, and never the advisory, to a second no-tools
+model, the
+.IR judge ,
+which says for each subject
+.BR likely ,
+.BR possible ,
+.B unlikely
+or
+.BR unknown ,
+why, and which facts it relied on, by their IDs. Code checks the answer
+against those facts: an invented or another subject's fact is dropped;
+.B likely
+without a host that runs the product or saw an indicator becomes
+.BR possible ;
+a reason that says whether we are affected or safe, or claims a sighting or
+an installation it cites no fact for, is replaced; a subject the judge
+skipped is
+.BR unknown .
+Code then raises to at least
+.B possible
+any subject whose product is installed and not known to be fixed, and every
+subject when one of our hosts saw one of the advisory's indicators;
+.B unlikely
+becomes
+.B unknown
+when that subject's inventory lookup failed. Sightings are printed first,
+by code, even when the judge fails or refuses.
+.PP
 Every model call's tokens and cost are printed on stderr.
 .SH OPTIONS
 Exactly one of
 .BR \-\-show\-input ,
-.B \-\-read
+.BR \-\-read ,
+.BR \-\-facts ,
+.B \-\-judge
 or
-.B \-\-facts
+.B \-\-show\-judge\-input
 is required.
 .TP
 .B \-\-show\-input
@@ -60,6 +95,14 @@ Run the reader and print its answer after the checks, with what was removed.
 .B \-\-facts
 Run the reader, then the Falcon lookups, and print the fact sheet.
 .TP
+.B \-\-judge
+Run the reader, the lookups and the judge, and print the checked verdicts.
+.TP
+.B \-\-show\-judge\-input
+With
+.BR \-\-facts\-file :
+print what the judge would be shown. No model call, no lookups.
+.TP
 .BI \-\-message " FILE"
 The advisory's body, up to 256 KiB.
 .TP
@@ -70,14 +113,31 @@ Header lines for the reader, if known.
 .TP
 .BI \-\-subjects\-file " F"
 With
-.BR \-\-facts :
+.B \-\-facts
+or
+.BR \-\-judge :
 use a saved reader answer instead of a model call.
+.TP
+.BI \-\-facts\-file " F"
+With
+.B \-\-judge
+or
+.BR \-\-show\-judge\-input :
+use a saved fact sheet
+.RB ( \-\-facts " " \-\-json )
+instead of the reader and the lookups.
+.TP
+.BI \-\-judgement\-file " F"
+With
+.BR \-\-judge :
+check a saved judge answer instead of making the call.
 .TP
 .B \-\-json
 Print JSON
-.RB ( cti\-subjects/1
+.RB ( cti\-subjects/1 ,
+.B cti\-facts/1
 or
-.BR cti\-facts/1 ).
+.BR cti\-verdicts/1 ).
 .TP
 .BI \-\-timeout " D"
 Give up after this long. Default: 5m.
@@ -96,6 +156,14 @@ The reader's instructions. Default:
 .B TRIAGE_BLIND_SPOTS
 What Falcon cannot see, repeated on every fact sheet.
 .TP
+.B TRIAGE_JUDGE_MODEL
+The judge's model. Default:
+.BR TRIAGE_MODEL .
+.TP
+.B TRIAGE_JUDGE_INSTRUCTIONS
+The judge's instructions. Default:
+.IR $FLEET_CODE/agents/triage-judge/CLAUDE.md .
+.TP
 .BR FALCON_BASE_URL ", " FALCON_CLIENT_ID ", " FALCON_CLIENT_SECRET
 As for
 .BR cti\-falcon (1).
@@ -106,7 +174,10 @@ Done. A lookup that failed is shown on the sheet, not in the exit status.
 .TP
 .B 1
 The advisory, the instructions or the reader's answer could not be read, the
-model call failed, Falcon could not be reached, or the run timed out.
+model call failed, Falcon could not be reached, or the run timed out. With
+.BR \-\-judge ,
+a judge that failed, refused or gave an unreadable answer is also 1, after
+the verdicts (code's alone) and the sightings are printed.
 .TP
 .B 2
 Bad usage.
@@ -129,6 +200,16 @@ Replay a saved answer without paying for another call:
 .B sudo cti\-agent cti\-triage \-\-read \-\-message adv.txt \-\-json > saved.json
 .br
 .B sudo cti\-agent cti\-triage \-\-facts \-\-message adv.txt \-\-subjects\-file saved.json
+.RE
+.PP
+Judge a saved fact sheet, and see what the judge is shown:
+.PP
+.RS
+.B sudo cti\-agent cti\-triage \-\-facts \-\-json \-\-message adv.txt > sheet.json
+.br
+.B sudo cti\-agent cti\-triage \-\-show\-judge\-input \-\-message adv.txt \-\-facts\-file sheet.json
+.br
+.B sudo cti\-agent cti\-triage \-\-judge \-\-message adv.txt \-\-facts\-file sheet.json
 .RE
 .SH SEE ALSO
 .BR cti\-falcon (1),

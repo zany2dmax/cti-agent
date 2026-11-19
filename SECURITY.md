@@ -128,7 +128,7 @@ eval:supplier`) runs the same arguments.
 
 ## AI triage: untrusted input reaching a model with tools
 
-> **STATUS: PARTLY BUILT, NOT LIVE (2026-11-18).** The design changed. Relevance
+> **STATUS: PARTLY BUILT, NOT LIVE (2026-11-19).** The design changed. Relevance
 > is no longer judged against a hand-written organisation profile but against
 > facts from the organisation's own tools, in two model steps:
 >
@@ -137,13 +137,17 @@ eval:supplier`) runs the same arguments.
 >   the advisory text (`internal/triage/subjects.go`).
 > - **Deterministic Falcon lookups** follow (`internal/triage/facts.go`,
 >   `internal/falcon`). Each re-checks the shape of its hostile input.
-> - **The judge** (not built) will be a second no-tools model that sees the
->   fact sheet. It is the only model that sees our data, so it has no tools.
+> - **The judge** (`cti-triage --judge`, `agents/triage-judge/CLAUDE.md`) is
+>   a second no-tools model shown the fact sheet and the reader's checked
+>   subjects, never the advisory. It is the only model that sees our data,
+>   so it has no tools. Code checks every claim against the facts it cites
+>   and raises what code knows (`internal/triage/judge.go`). Indicator
+>   sightings are reported by code whatever the judge says.
 >   The reader may later be given web search, because it never holds our data.
 >
-> The extractor and verifier below exist. Nothing runs on a timer, and
-> nothing reaches the brief yet. Read every "must" about the judge and the
-> brief as a requirement on work not yet done.
+> The extractor and verifiers exist. Nothing runs on a timer, and nothing
+> reaches the brief yet. Read every "must" about the brief as a requirement
+> on work not yet done.
 
 This is the newest and sharpest boundary in the system, and the one most
 likely to be got wrong by a well-meaning change. The agent's standing

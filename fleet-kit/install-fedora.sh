@@ -337,6 +337,10 @@ info "agents/supplier/CLAUDE.md"
 run install -d -m 0755 -o root -g root "$CODE_DIR/agents/triage-reader"
 run install -m 0644 -o root -g root "$SRC/fleet/agents/triage-reader/CLAUDE.md" "$CODE_DIR/agents/triage-reader/CLAUDE.md"
 info "agents/triage-reader/CLAUDE.md"
+# The triage judge's instructions: the one triage model that sees our facts.
+run install -d -m 0755 -o root -g root "$CODE_DIR/agents/triage-judge"
+run install -m 0644 -o root -g root "$SRC/fleet/agents/triage-judge/CLAUDE.md" "$CODE_DIR/agents/triage-judge/CLAUDE.md"
+info "agents/triage-judge/CLAUDE.md"
 # The list of fleet commands and what each takes, and what answers questions
 # about it: `cti-agent` with no arguments, `cti-agent CMD --help`, and the TAB
 # completions all read this one file.

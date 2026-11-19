@@ -48,6 +48,21 @@ journal says why.
 
 ### Added
 
+- **Advisory triage phase 4: the judge (`cti-triage --judge`).** After the
+  reader and the Falcon lookups, a second no-tools model sees the fact sheet
+  as numbered facts and the reader's subjects, never the advisory, and says
+  per subject likely, possible, unlikely or unknown, citing the facts it
+  used. Code checks it: invented or another subject's facts are dropped;
+  likely without a host that runs the product or saw an indicator becomes
+  possible; a reason that says we're affected or safe, or claims something it
+  cites no fact for, is replaced; a skipped subject is unknown. Code raises an
+  installed product not known to be fixed to at least possible, every subject
+  when one of our hosts saw an indicator, and turns unlikely into unknown
+  when the lookup failed. Sightings print first, from code, even when the
+  judge fails (exit 1). New: `--facts-file`, `--judgement-file` and
+  `--show-judge-input` to replay without paying; `TRIAGE_JUDGE_MODEL`,
+  `TRIAGE_JUDGE_INSTRUCTIONS`. Still run by hand; nothing reaches the brief.
+
 - **Every check-in beat ends with a checked verdict (HARNESS H3).** The beat's
   final message ends with one `cti-checkin/1` JSON object: overall status (ok,
   attention, escalated, degraded), every lane's state, the alerts it sent, its

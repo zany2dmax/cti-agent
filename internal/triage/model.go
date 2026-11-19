@@ -67,7 +67,7 @@ func (m ModelCall) Run(ctx context.Context, input string) (string, Usage, error)
 		return "", u, errors.New("no model set (TRIAGE_MODEL)")
 	}
 	if strings.TrimSpace(m.Instructions) == "" {
-		return "", u, errors.New("the reader's instructions are empty")
+		return "", u, errors.New("the instructions are empty")
 	}
 	max := m.MaxInput
 	if max <= 0 {

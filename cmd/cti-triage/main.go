@@ -4,6 +4,9 @@
 //	cti-triage --read       --message advisory.txt          # the reader's answer, checked against the advisory
 //	cti-triage --facts      --message advisory.txt          # reader, then Falcon lookups: the fact sheet
 //	cti-triage --facts      --message advisory.txt --subjects-file saved.json   # replay, no model call
+//	cti-triage --judge      --message advisory.txt          # reader, lookups, then the judge: checked verdicts
+//	cti-triage --judge      --message advisory.txt --facts-file sheet.json      # judge a saved sheet, no lookups
+//	cti-triage --show-judge-input --message advisory.txt --facts-file sheet.json # what the judge would be shown
 //
 // # WHAT IT IS FOR
 //
@@ -12,19 +15,28 @@
 // concerns. It never sees our data. Code removes every claim the advisory
 // does not support, then looks the rest up in Falcon: which of those
 // products we run, whether our hosts saw the advisory's indicators, and
-// whether Falcon has alerted on its techniques in the last 30 days. Phase 4
-// adds the judge and puts the result in the Daily Brief. Until then this is
-// run by hand, and it writes nothing.
+// whether Falcon has alerted on its techniques in the last 30 days.
+//
+// Phase 4: --judge hands that fact sheet, and never the advisory, to a
+// second no-tools model, the judge, which says per subject whether it is
+// worth a person's time and cites the facts it relied on. Code checks every
+// claim against those facts (triage.VerifyJudgement), raises what it knows
+// to be worth a look, and reports indicator sightings itself, even when the
+// judge fails. Putting the result in the Daily Brief is the next step; until
+// then this is run by hand, and it writes nothing.
 //
 // # COST
 //
-// --read and --facts make one model call each and print its tokens and cost
-// on stderr. --show-input and --subjects-file make none.
+// --read and --facts make one model call each, --judge two (one with
+// --subjects-file, none with --judgement-file too), and each call's tokens
+// and cost go to stderr. --show-input and --show-judge-input make none.
 //
 // # SETTINGS
 //
 // TRIAGE_MODEL (required for a model call), CLAUDE_BIN,
 // TRIAGE_READER_INSTRUCTIONS (default $FLEET_CODE/agents/triage-reader/CLAUDE.md),
+// TRIAGE_JUDGE_MODEL (default TRIAGE_MODEL), TRIAGE_JUDGE_INSTRUCTIONS
+// (default $FLEET_CODE/agents/triage-judge/CLAUDE.md),
 // TRIAGE_BLIND_SPOTS (free text naming what Falcon cannot see, e.g. sites
 // without the sensor), and the FALCON_* settings cti-falcon uses.
 package main
@@ -87,23 +99,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 	message := fs.String("message", "", "the advisory: a text file holding its body")
 	subject := fs.String("subject", "", "the advisory's subject line, if known")
 	sender := fs.String("sender", "", "the advisory's sender, if known")
-	subjectsFile := fs.String("subjects-file", "", "with --facts: a saved reader answer to use instead of a model call")
+	judge := fs.Bool("judge", false, "run the reader, the lookups and then the judge: checked verdicts")
+	showJudgeInput := fs.Bool("show-judge-input", false, "with --facts-file: print what the judge would be shown; no model call, no lookups")
+	subjectsFile := fs.String("subjects-file", "", "with --facts or --judge: a saved reader answer to use instead of a model call")
+	factsFile := fs.String("facts-file", "", "with --judge or --show-judge-input: a saved fact sheet (--facts --json) instead of the reader and the lookups")
+	judgementFile := fs.String("judgement-file", "", "with --judge: a saved judge answer to check instead of a model call")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	timeout := fs.Duration("timeout", 5*time.Minute, "give up after this long")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: cti-triage --show-input | --read | --facts  --message FILE [--subject S] [--sender S] [--subjects-file F] [--json] [--timeout D]")
+		_, _ = fmt.Fprintln(stderr, "usage: cti-triage --show-input | --read | --facts | --judge | --show-judge-input  --message FILE [--subject S] [--sender S] [--subjects-file F] [--facts-file F] [--judgement-file F] [--json] [--timeout D]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	modes := 0
-	for _, on := range []bool{*showInput, *read, *facts} {
+	for _, on := range []bool{*showInput, *read, *facts, *judge, *showJudgeInput} {
 		if on {
 			modes++
 		}
 	}
-	if modes != 1 || fs.NArg() > 0 || *message == "" || (*subjectsFile != "" && !*facts) {
+	bad := modes != 1 || fs.NArg() > 0 || *message == "" ||
+		(*subjectsFile != "" && !*facts && !*judge) ||
+		(*factsFile != "" && !*judge && !*showJudgeInput) ||
+		(*factsFile != "" && *subjectsFile != "") ||
+		(*showJudgeInput && *factsFile == "") ||
+		(*judgementFile != "" && !*judge)
+	if bad {
 		fs.Usage()
 		return exitUsage
 	}
@@ -124,6 +146,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+
+	if *factsFile != "" {
+		b, err := readBytesCapped(*factsFile, maxMessage)
+		if err != nil {
+			logf("error  : --facts-file: %v", err)
+			return exitErr
+		}
+		var sheet triage.FactSheet
+		if err := json.Unmarshal(b, &sheet); err != nil || sheet.Schema != triage.FactsSchema {
+			logf("error  : --facts-file: not a %s sheet", triage.FactsSchema)
+			return exitErr
+		}
+		in := triage.BuildJudgeInput(msg, sheet)
+		if *showJudgeInput {
+			_, _ = io.WriteString(stdout, in.Text)
+			return exitOK
+		}
+		return runJudge(ctx, msg, sheet, in, *judgementFile, *asJSON, stdout, logf)
+	}
 
 	var answer []byte
 	if *subjectsFile != "" {
@@ -176,6 +217,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if ctx.Err() != nil {
 		logf("error  : gave up after %s; the sheet below is incomplete", *timeout)
 	}
+	if *judge {
+		if ctx.Err() != nil {
+			// No time left for the judge; code still reports the sightings.
+			runJudge(context.Background(), msg, sheet, triage.BuildJudgeInput(msg, sheet), "-", *asJSON, stdout, logf)
+			return exitErr
+		}
+		return runJudge(ctx, msg, sheet, triage.BuildJudgeInput(msg, sheet), *judgementFile, *asJSON, stdout, logf)
+	}
 	if *asJSON {
 		if code := writeJSON(stdout, sheet); code != exitOK {
 			return code
@@ -189,15 +238,123 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-func instructionsPath() string {
-	if p := strings.TrimSpace(os.Getenv("TRIAGE_READER_INSTRUCTIONS")); p != "" {
+func instructionsPath() string { return agentFile("TRIAGE_READER_INSTRUCTIONS", "triage-reader") }
+
+func agentFile(env, agent string) string {
+	if p := strings.TrimSpace(os.Getenv(env)); p != "" {
 		return p
 	}
 	code := strings.TrimSpace(os.Getenv("FLEET_CODE"))
 	if code == "" {
 		code = "/opt/cti-agent"
 	}
-	return filepath.Join(code, "agents", "triage-reader", "CLAUDE.md")
+	return filepath.Join(code, "agents", agent, "CLAUDE.md")
+}
+
+// runJudge asks the judge (or reads a saved answer, or, with "-", skips it),
+// checks the answer and prints the verdicts. Whatever happens to the judge,
+// the verdicts are printed: sightings and code's own floors do not depend
+// on it. A judge that failed is exit 1, after the output.
+func runJudge(ctx context.Context, msg triage.Message, sheet triage.FactSheet, in triage.JudgeInput, saved string, asJSON bool, stdout io.Writer, logf func(string, ...any)) int {
+	var j *triage.Judgement
+	down := ""
+	var raw []byte
+	switch {
+	case saved == "-":
+		down = "the run timed out before the judge was asked"
+	case saved != "":
+		b, err := readBytesCapped(saved, maxMessage)
+		if err != nil {
+			down = "--judgement-file: " + err.Error()
+		}
+		raw = b
+	default:
+		instr, err := readCapped(agentFile("TRIAGE_JUDGE_INSTRUCTIONS", "triage-judge"), 64<<10)
+		if err != nil {
+			down = "the judge's instructions: " + err.Error()
+			break
+		}
+		model := strings.TrimSpace(os.Getenv("TRIAGE_JUDGE_MODEL"))
+		if model == "" {
+			model = os.Getenv("TRIAGE_MODEL")
+		}
+		m := triage.ModelCall{Bin: os.Getenv("CLAUDE_BIN"), Model: model, Instructions: instr}
+		out, usage, err := callModel(ctx, m, in.Text)
+		logf("judge  : %s", usage)
+		if err != nil {
+			down = "judge: " + err.Error()
+		}
+		raw = []byte(out)
+	}
+	if down == "" {
+		var err error
+		if j, err = triage.ParseJudgement(raw); err != nil {
+			down = err.Error()
+		}
+	}
+	v := triage.VerifyJudgement(j, in, sheet, msg.ID, down)
+	if down != "" {
+		logf("error  : %s", s(down))
+	}
+	for _, r := range v.Removed {
+		logf("removed: %s", s(r))
+	}
+	code := exitOK
+	if asJSON {
+		code = writeJSON(stdout, v)
+	} else {
+		printVerdicts(stdout, v)
+	}
+	if down != "" {
+		return exitErr
+	}
+	return code
+}
+
+func printVerdicts(w io.Writer, v triage.Verdicts) {
+	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format+"\n", a...) }
+	if len(v.Sightings) > 0 {
+		p("SIGHTINGS (code, whatever the judge says)")
+		for _, i := range v.Sightings {
+			p("  >>> %s (%s) seen on %d of our host(s)", s(i.Value), s(i.Type), i.Hosts)
+		}
+		p("")
+	}
+	if v.JudgeDown != "" {
+		p("JUDGE UNAVAILABLE: %s - verdicts below are code's alone", s(v.JudgeDown))
+		p("")
+	}
+	for _, x := range v.Verdicts {
+		name := x.Title
+		if x.Name != "" {
+			name += " (" + x.Name + ")"
+		}
+		p("%s %s: %s", x.Subject, strings.ToUpper(x.Relevance), s(name))
+		by := "the judge's words"
+		if x.ReasonBy == "code" {
+			by = "code"
+		}
+		p("    why     : %s (%s)", s(x.Reason), by)
+		if x.RaisedBy != "" {
+			p("    raised  : %s (code)", s(x.RaisedBy))
+		}
+		for _, f := range x.Facts {
+			p("    fact %-3s: %s", f.ID, s(f.Text))
+		}
+		for _, c := range x.Checks {
+			p("    check   : %s (the judge's words)", s(c))
+		}
+	}
+	p("\nNOT COVERED")
+	for _, g := range v.Gaps {
+		p("  %s", s(g))
+	}
+	if len(v.Removed) > 0 {
+		p("\nJUDGE CLAIMS REMOVED: %d", len(v.Removed))
+		for _, r := range v.Removed {
+			p("  %s", s(r))
+		}
+	}
 }
 
 func readBytesCapped(path string, max int64) ([]byte, error) {

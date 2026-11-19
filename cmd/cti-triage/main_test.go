@@ -131,3 +131,108 @@ func TestASavedReadAnswerReplays(t *testing.T) {
 		t.Fatalf("out = %s", o.String())
 	}
 }
+
+func TestJudgeUsage(t *testing.T) {
+	isolate(t)
+	msg := write(t, "a.txt", "x")
+	for _, args := range [][]string{
+		{"--show-judge-input", "--message", msg},
+		{"--facts", "--message", msg, "--facts-file", msg},
+		{"--judge", "--message", msg, "--facts-file", msg, "--subjects-file", msg},
+		{"--facts", "--message", msg, "--judgement-file", msg},
+	} {
+		var o, e bytes.Buffer
+		if code := run(args, &o, &e); code != exitUsage {
+			t.Errorf("%v: exit %d", args, code)
+		}
+	}
+}
+
+// savedSheet runs --facts --json against the stub source.
+func savedSheet(t *testing.T, msg string) string {
+	t.Helper()
+	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
+	ans := write(t, "s.json", `{"schema":"cti-subjects/1","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":["T1566"],"quotes":[]}],"refusal":null}`)
+	var o, e bytes.Buffer
+	if code := run([]string{"--facts", "--json", "--message", msg, "--subjects-file", ans}, &o, &e); code != exitOK {
+		t.Fatalf("facts: %d %s", code, e.String())
+	}
+	return write(t, "sheet.json", o.String())
+}
+
+func TestJudgeASavedSheet(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_JUDGE_INSTRUCTIONS", write(t, "j.md", "judge instructions"))
+	t.Setenv("TRIAGE_JUDGE_MODEL", "judge-model")
+	msg := write(t, "a.txt", "Chrome before 131.0 is exploited via evil[.]example (T1566).")
+	sheet := savedSheet(t, msg)
+	factSource = func() (triage.FactSource, func(), error) {
+		t.Fatal("lookups were made with --facts-file")
+		return nil, nil, nil
+	}
+	var shown string
+	callModel = func(_ context.Context, m triage.ModelCall, input string) (string, triage.Usage, error) {
+		if m.Model != "judge-model" || m.Instructions != "judge instructions" {
+			t.Fatalf("model call = %+v", m)
+		}
+		shown = input
+		return `{"schema":"cti-judgement/1","items":[{"subject":"S1","relevance":"unlikely","reason":"we are not affected","facts":[],"checks":[]}],"refusal":null}`, triage.Usage{InputTokens: 777}, nil
+	}
+	var o, e bytes.Buffer
+	if code := run([]string{"--judge", "--message", msg, "--facts-file", sheet}, &o, &e); code != exitOK {
+		t.Fatalf("exit %d: %s", code, e.String())
+	}
+	if strings.Contains(shown, "exploited via") {
+		t.Fatal("the judge was shown the advisory")
+	}
+	out := o.String()
+	for _, want := range []string{"SIGHTINGS", "evil.example", "S1 POSSIBLE", "reason was removed", "raised", "JUDGE CLAIMS REMOVED"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(e.String(), "777 in") {
+		t.Errorf("judge cost not reported: %s", e.String())
+	}
+}
+
+func TestAFailedJudgeStillReportsSightings(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_JUDGE_INSTRUCTIONS", write(t, "j.md", "judge instructions"))
+	msg := write(t, "a.txt", "Chrome before 131.0 is exploited via evil[.]example (T1566).")
+	sheet := savedSheet(t, msg)
+	for name, answer := range map[string]string{"error": "", "garbage": "not json"} {
+		callModel = func(context.Context, triage.ModelCall, string) (string, triage.Usage, error) {
+			if answer == "" {
+				return "", triage.Usage{}, context.DeadlineExceeded
+			}
+			return answer, triage.Usage{}, nil
+		}
+		var o, e bytes.Buffer
+		if code := run([]string{"--judge", "--json", "--message", msg, "--facts-file", sheet}, &o, &e); code != exitErr {
+			t.Fatalf("%s: exit %d", name, code)
+		}
+		for _, want := range []string{`"cti-verdicts/1"`, `"evil.example"`, `"judge_unavailable"`, `"relevance": "possible"`} {
+			if !strings.Contains(o.String(), want) {
+				t.Errorf("%s: missing %s in %s", name, want, o.String())
+			}
+		}
+	}
+}
+
+func TestShowJudgeInputMakesNoCall(t *testing.T) {
+	isolate(t)
+	msg := write(t, "a.txt", "Chrome before 131.0 is exploited via evil[.]example.")
+	sheet := savedSheet(t, msg)
+	callModel = func(context.Context, triage.ModelCall, string) (string, triage.Usage, error) {
+		t.Fatal("a model call was made")
+		return "", triage.Usage{}, nil
+	}
+	var o, e bytes.Buffer
+	if code := run([]string{"--show-judge-input", "--message", msg, "--facts-file", sheet}, &o, &e); code != exitOK {
+		t.Fatalf("exit %d: %s", code, e.String())
+	}
+	if !strings.Contains(o.String(), "FACTS") || !strings.Contains(o.String(), triage.BeginContent) {
+		t.Fatalf("out = %s", o.String())
+	}
+}

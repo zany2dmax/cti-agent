@@ -137,16 +137,20 @@ flag: --timeout DURATION | give up after this long (--new-apps: at least 15m) (d
 flag: --vendor STRING | with --find-app: the vendor must contain this too
 
 command: cti-triage
-about: Advisory triage, by hand: the reader's answer and the Falcon fact sheet for one advisory
+about: Advisory triage, by hand: the reader's answer, the Falcon fact sheet and the judge's checked verdicts for one advisory
 runs: read
 flag: --facts | run the reader, then look its answer up in Falcon: the fact sheet
+flag: --facts-file STRING | with --judge or --show-judge-input: a saved fact sheet (--facts --json) instead of the reader and the lookups
 flag: --json | print the result as JSON
+flag: --judge | run the reader, the lookups and then the judge: checked verdicts
+flag: --judgement-file STRING | with --judge: a saved judge answer to check instead of a model call
 flag: --message STRING | the advisory: a text file holding its body
 flag: --read | run the reader and print its answer, checked against the advisory
 flag: --sender STRING | the advisory's sender, if known
 flag: --show-input | print what the reader would be shown; no model call, no lookups
+flag: --show-judge-input | with --facts-file: print what the judge would be shown; no model call, no lookups
 flag: --subject STRING | the advisory's subject line, if known
-flag: --subjects-file STRING | with --facts: a saved reader answer to use instead of a model call
+flag: --subjects-file STRING | with --facts or --judge: a saved reader answer to use instead of a model call
 flag: --timeout DURATION | give up after this long (default 5m0s)
 
 command: cti-jira

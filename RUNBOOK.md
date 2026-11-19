@@ -2735,9 +2735,10 @@ before they're printed. Neither mode ever prints a host name or ID.
 
 ## 11k. Advisory triage by hand
 
-`cti-triage` is phase 3 of advisory triage: it turns one advisory into facts
-from our own tools. Phase 4 adds the judge and puts the result in the Daily
-Brief. Until then you run it by hand, and it writes nothing.
+`cti-triage` is advisory triage by hand: it turns one advisory into facts
+from our own tools (phase 3), and `--judge` weighs them (phase 4). Putting
+the result in the Daily Brief is the next step. Until then you run it by
+hand, and it writes nothing.
 
 **Set up** in `/etc/cti-agent/fleet.env`, next to the `FALCON_*` settings:
 
@@ -2805,6 +2806,57 @@ sudo cti-agent cti-triage --facts --message adv.txt --subjects-file saved.json
 | `not looked up: the product name has characters a lookup does not allow` | The reader's product name holds `+`, `'` or similar. Try `cti-falcon --find-app` with a shorter name. |
 | `READER REFUSED` | The reader judged the advisory to be trying to change its task. Only code's own extraction was looked up. |
 | `reader claims removed` | What the reader said that the advisory doesn't support. A few are normal. Many means the reader is guessing. |
+
+### The judge: `--judge`
+
+```bash
+sudo cti-agent cti-triage --judge --message adv.txt --subject "the mail's subject"
+```
+
+This runs everything above, then a second no-tools model, the judge. It sees
+the fact sheet as numbered facts (`F1`, `F2`...) and the reader's subjects
+(`S1`, `S2`...). It never sees the advisory. For each subject it says
+`LIKELY`, `POSSIBLE`, `UNLIKELY` or `UNKNOWN`, why, and which facts it relied
+on. `TRIAGE_JUDGE_MODEL` picks its model (default: `TRIAGE_MODEL`).
+
+Code then checks the answer:
+
+- **Facts it cites must exist** and be about that subject (or the advisory
+  as a whole). Others are dropped.
+- **`likely` needs a strong fact**: a host that runs the product or saw an
+  indicator. Without one it becomes `possible`.
+- **Reasons are checked.** A reason that says we're affected, not affected or
+  safe is replaced, and so is one that claims a sighting or an installation
+  without citing a fact for it. The output then says the reason is by code.
+- **Code raises what it knows**, marked `raised`:
+  - a product installed and not known to be fixed is at least `possible`;
+  - every subject is at least `possible` when one of our hosts saw an
+    indicator;
+  - `unlikely` becomes `unknown` when that subject's inventory lookup failed.
+- **A skipped subject is `unknown`**, never left out.
+
+**`SIGHTINGS` comes first, from code.** It's printed even when the judge
+fails, refuses or answers nonsense. In that case the output says `JUDGE
+UNAVAILABLE`, the verdicts are code's alone, and the exit status is 1.
+
+**Cost:** two model calls, both printed on stderr. To try the judge alone
+on the same facts, save the sheet once:
+
+```bash
+sudo cti-agent cti-triage --facts --json --message adv.txt > sheet.json
+sudo cti-agent cti-triage --show-judge-input --message adv.txt --facts-file sheet.json
+sudo cti-agent cti-triage --judge --message adv.txt --facts-file sheet.json
+```
+
+`--show-judge-input` makes no call: it's exactly what the judge would read.
+`--judgement-file` checks a saved judge answer without a call.
+
+| What you see | What it means |
+|---|---|
+| `raised: F3: the product is installed and not known to be fixed` | The judge said less than code knows. Code's floor wins. |
+| `the judge's reason was removed` | It said we're affected or safe, or claimed something it didn't cite. The facts listed are what's known. |
+| `JUDGE CLAIMS REMOVED` | Everything code changed, one line each. Now and then is normal. On every run, the judge's instructions or model need a look. |
+| `JUDGE UNAVAILABLE` | The call failed, timed out, refused, or wasn't `cti-judgement/1`. Sightings and code's floors are still right. |
 
 ---
 
