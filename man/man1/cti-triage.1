@@ -87,8 +87,10 @@ by code, even when the judge fails or refuses.
 .B \-\-batch
 is how the daily digest runs it (TRIAGE_ENABLED, see
 .BR run\-digest (1)):
-every message ingest saved with no CVE, each through the reader, the
-lookups and the judge with its own
+every threat-intel message ingest saved. The reader lists each one's
+items with their CVEs; items naming a CVE found in the message are left to
+the CVE report and listed, and the rest go through the lookups and the
+judge, each message with its own
 .BR \-\-timeout ,
 into one
 .B cti\-advisories/1

@@ -83,7 +83,7 @@ func TestFactsFromASavedAnswerAndAStubSource(t *testing.T) {
 		return "", triage.Usage{}, nil
 	}
 	msg := write(t, "a.txt", "Chrome before 131.0 is exploited via evil[.]example (T1566).")
-	ans := write(t, "s.json", `{"schema":"cti-subjects/1","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":["T1566"],"quotes":[]}],"refusal":null}`)
+	ans := write(t, "s.json", `{"schema":"cti-subjects/2","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":["T1566"],"quotes":[]}],"refusal":null}`)
 	var o, e bytes.Buffer
 	if code := run([]string{"--facts", "--message", msg, "--subjects-file", ans}, &o, &e); code != exitOK {
 		t.Fatalf("exit %d: %s", code, e.String())
@@ -100,7 +100,7 @@ func TestTheReaderCostIsAlwaysReported(t *testing.T) {
 	isolate(t)
 	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "i.md", "instructions"))
 	callModel = func(context.Context, triage.ModelCall, string) (string, triage.Usage, error) {
-		return `{"schema":"cti-subjects/1","items":[],"refusal":null}`, triage.Usage{InputTokens: 1234, OutputTokens: 56}, nil
+		return `{"schema":"cti-subjects/2","items":[],"refusal":null}`, triage.Usage{InputTokens: 1234, OutputTokens: 56}, nil
 	}
 	msg := write(t, "a.txt", "nothing much")
 	var o, e bytes.Buffer
@@ -116,7 +116,7 @@ func TestASavedReadAnswerReplays(t *testing.T) {
 	isolate(t)
 	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "i.md", "instructions"))
 	callModel = func(context.Context, triage.ModelCall, string) (string, triage.Usage, error) {
-		return `{"schema":"cti-subjects/1","items":[{"title":"t","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"","techniques":["T1203"],"quotes":[]}],"refusal":null}`, triage.Usage{}, nil
+		return `{"schema":"cti-subjects/2","items":[{"title":"t","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"","techniques":["T1203"],"quotes":[]}],"refusal":null}`, triage.Usage{}, nil
 	}
 	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
 	msg := write(t, "a.txt", "Chrome is exploited.")
@@ -154,7 +154,7 @@ func TestJudgeUsage(t *testing.T) {
 func savedSheet(t *testing.T, msg string) string {
 	t.Helper()
 	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
-	ans := write(t, "s.json", `{"schema":"cti-subjects/1","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":["T1566"],"quotes":[]}],"refusal":null}`)
+	ans := write(t, "s.json", `{"schema":"cti-subjects/2","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":["T1566"],"quotes":[]}],"refusal":null}`)
 	var o, e bytes.Buffer
 	if code := run([]string{"--facts", "--json", "--message", msg, "--subjects-file", ans}, &o, &e); code != exitOK {
 		t.Fatalf("facts: %d %s", code, e.String())
@@ -279,7 +279,7 @@ func TestBatch(t *testing.T) {
 			if strings.Contains(input, "Advisory 0") {
 				return "garbage", triage.Usage{CostUSD: 0.01}, nil
 			}
-			return `{"schema":"cti-subjects/1","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":[],"quotes":[]}],"refusal":null}`, triage.Usage{CostUSD: 0.01}, nil
+			return `{"schema":"cti-subjects/2","items":[{"title":"Chrome","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":[],"quotes":[]}],"refusal":null}`, triage.Usage{CostUSD: 0.01}, nil
 		}
 		return `{"schema":"cti-judgement/1","items":[{"subject":"S1","relevance":"likely","reason":"3 hosts below the fix","facts":["F1"],"checks":["patch them"]}],"refusal":null}`, triage.Usage{CostUSD: 0.02}, nil
 	}
@@ -337,5 +337,41 @@ func TestBatchUsage(t *testing.T) {
 		if code := run(args, &o, &e); code != exitUsage {
 			t.Errorf("%v: exit %d", args, code)
 		}
+	}
+}
+
+func TestBatchLeavesCVEItemsToTheCVEDigest(t *testing.T) {
+	isolate(t)
+	t.Setenv("TRIAGE_READER_INSTRUCTIONS", write(t, "r.md", "reader"))
+	t.Setenv("TRIAGE_JUDGE_INSTRUCTIONS", write(t, "j.md", "judge"))
+	factSource = func() (triage.FactSource, func(), error) { return stubSource{}, func() {}, nil }
+	p := filepath.Join(t.TempDir(), "in.json")
+	msgs := []triage.Advisory{triage.NewAdvisory("id", time.Unix(0, 0), "feed@example.com", "Weekly CVE roundup", true,
+		"CVE-2026-1234 affects Chrome before 131.0.")}
+	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	judged := false
+	callModel = func(_ context.Context, m triage.ModelCall, _ string) (string, triage.Usage, error) {
+		if m.Instructions == "judge" {
+			judged = true
+		}
+		return `{"schema":"cti-subjects/2","items":[{"title":"Chrome bug","vendor":"","product":"Chrome","affected_versions":"","fixed_in":"131.0","techniques":[],"cves":["CVE-2026-1234"],"quotes":[]}],"refusal":null}`, triage.Usage{}, nil
+	}
+	out := filepath.Join(t.TempDir(), "adv.json")
+	var o, e bytes.Buffer
+	if code := run([]string{"--batch", p, "--out", out}, &o, &e); code != exitOK {
+		t.Fatalf("exit %d: %s", code, e.String())
+	}
+	r := readReport(t, out).Results[0]
+	if judged {
+		t.Fatal("the judge was asked about an advisory whose only item names a CVE")
+	}
+	if len(r.CVEItems) != 1 || !strings.Contains(r.CVEItems[0], "CVE-2026-1234") || len(r.Verdicts.Verdicts) != 0 {
+		t.Fatalf("result = %+v", r)
+	}
+	// Sightings are still code's: the stub says every indicator was seen.
+	if r.Verdicts == nil {
+		t.Fatal("no verdicts block")
 	}
 }

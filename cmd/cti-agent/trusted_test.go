@@ -60,3 +60,42 @@ func TestATeamSourceIsAnAuthenticatedColleague(t *testing.T) {
 		t.Error("FLEET_SENDER_AUTH=off let an unauthenticated colleague address ask")
 	}
 }
+
+// Advisory triage reads threat intel only: an authenticated sender on the
+// threat-intel list. Supplier requests, colleagues and the scanner are not.
+func TestIntelSourceIsAnAuthenticatedThreatIntelSender(t *testing.T) {
+	pass := "dmarc=pass action=none header.from=intel.example;compauth=pass"
+	list := []string{"@intel.example"}
+	for _, c := range []struct {
+		name, from, ar string
+		want           bool
+	}{
+		{"feed, authenticated", "news@intel.example", pass, true},
+		{"feed, spoofed", "news@intel.example", "dmarc=fail header.from=intel.example;compauth=fail", false},
+		{"supplier request", "vendor@supplier.example", "dmarc=pass header.from=supplier.example;compauth=pass", false},
+		{"qualys is not intel", "noreply@notify.qualys.com", "compauth=pass reason=100", false},
+	} {
+		m := graph.Message{From: c.from, AuthenticationResults: c.ar}
+		if got := intelSource(m, list); got != c.want {
+			t.Errorf("%s: intel = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if intelSource(graph.Message{From: "news@intel.example", AuthenticationResults: pass}, nil) {
+		t.Error("an empty list matched")
+	}
+}
+
+func TestTriageSendersDefaultsToTheFeedList(t *testing.T) {
+	t.Setenv("TRIAGE_SENDERS", "")
+	if got := triageSenders("@a.example, b@c.example"); len(got) != 2 {
+		t.Errorf("default = %v", got)
+	}
+	t.Setenv("TRIAGE_SENDERS", "@intel.example")
+	if got := triageSenders("@a.example"); len(got) != 1 || got[0] != "@intel.example" {
+		t.Errorf("override = %v", got)
+	}
+	t.Setenv("TRIAGE_SENDERS", "none")
+	if got := triageSenders("@a.example"); got != nil {
+		t.Errorf("none = %v", got)
+	}
+}

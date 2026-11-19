@@ -3,12 +3,15 @@ package triage
 // THE DAILY BATCH
 //
 // The digest's ingest reads every message in the mailbox and keeps only the
-// CVEs. A message with no CVE - a campaign write-up, a malicious-package
-// warning, a vendor advisory with no ID yet - used to be counted and then
-// forgotten. With TRIAGE_ENABLED, ingest saves those messages here
-// (AdvisoryInput), and cti-triage --batch runs each through the reader, the
-// Falcon lookups and the judge, writing one AdvisoryReport that brief.py
-// renders as FLEET ADVISORIES.
+// CVEs. The rest of a threat-intel mail - a campaign write-up, a
+// malicious-package warning, a vendor advisory with no ID yet, often in the
+// same roundup as the CVEs - was dropped. With TRIAGE_ENABLED, ingest saves
+// each message from a threat-intel sender (TRIAGE_SENDERS, authenticated)
+// here (AdvisoryInput); nothing else in the mailbox is ever sent to a model.
+// cti-triage --batch runs each through the reader, which lists its items
+// and their CVEs; items with a CVE are set aside for the CVE digest, and the
+// rest go through the Falcon lookups and the judge, into one AdvisoryReport
+// that brief.py renders as FLEET ADVISORIES.
 //
 // Every advisory that was read appears in the report: triaged, failed with
 // its reason, or over the day's cap. A section that silently lists fewer
@@ -21,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -37,7 +41,7 @@ const (
 	MaxAdvisoriesPerRun = 100
 )
 
-// Advisory is one message with no CVE, as ingest read it.
+// Advisory is one threat-intel message, as ingest read it.
 type Advisory struct {
 	ID        string    `json:"id"`
 	Received  time.Time `json:"received"`
@@ -54,6 +58,18 @@ type AdvisoryInput struct {
 	Written  time.Time  `json:"written"`
 	Messages []Advisory `json:"messages"`
 	Dropped  int        `json:"over_ingest_cap,omitempty"`
+}
+
+// CVEItemLines are the set-aside items, one line each.
+func CVEItemLines(s *Subjects) []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for _, it := range s.CVEItems {
+		out = append(out, safeField(it.Title, maxSubjectFieldN)+" ("+strings.Join(it.CVEs, ", ")+")")
+	}
+	return out
 }
 
 // NewAdvisory caps the body.
@@ -116,8 +132,11 @@ type AdvisoryResult struct {
 	Received  time.Time `json:"received"`
 	Trusted   bool      `json:"trusted_sender"`
 	Verdicts  *Verdicts `json:"verdicts,omitempty"`
-	Problems  []string  `json:"problems,omitempty"` // a stage that failed; the verdicts say what survived
-	Skipped   string    `json:"not_triaged,omitempty"`
+	// Items the reader found that name a CVE: the CVE digest reports them,
+	// so they are listed here, not judged. "title (CVE-..., ...)".
+	CVEItems []string `json:"cve_items,omitempty"`
+	Problems []string `json:"problems,omitempty"` // a stage that failed; the verdicts say what survived
+	Skipped  string   `json:"not_triaged,omitempty"`
 }
 
 // AdvisoryReport is the whole day.

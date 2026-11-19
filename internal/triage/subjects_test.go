@@ -10,14 +10,14 @@ confusion in V8 that is being exploited in the wild.
 Attackers send phishing links (T1566.002) that lead to the exploit page.`
 
 func TestParseSubjectsReadsTheObjectOutOfAFence(t *testing.T) {
-	ans := "Here you go:\n```json\n{\"schema\":\"cti-subjects/1\",\"items\":[],\"refusal\":null}\n```"
+	ans := "Here you go:\n```json\n{\"schema\":\"cti-subjects/2\",\"items\":[],\"refusal\":null}\n```"
 	if _, err := ParseSubjects([]byte(ans)); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []string{
 		`no json here`,
-		`{"schema":"cti-subjects/2","items":[]}`,
-		`{"schema":"cti-subjects/1","items":[],"extra":1}`,
+		`{"schema":"cti-subjects/1","items":[]}`,
+		`{"schema":"cti-subjects/2","items":[],"extra":1}`,
 	} {
 		if _, err := ParseSubjects([]byte(bad)); err == nil {
 			t.Errorf("accepted %q", bad)
@@ -117,5 +117,28 @@ func TestAQuoteCannotCarryAFenceMarker(t *testing.T) {
 	VerifySubjects(s, body, nil)
 	if len(s.Items[0].Quotes) != 0 || strings.Contains(s.Items[0].Title, BeginContent) {
 		t.Fatalf("a marker survived: %+v", s.Items[0])
+	}
+}
+
+func TestItemsNamingACVEAreSetAside(t *testing.T) {
+	body := "CVE-2026-1234 in Chrome before 131.0 is exploited. Separately, a campaign uses T1566 phishing from evil[.]example."
+	s := &Subjects{Schema: SubjectsSchema, Items: []Subject{
+		{Title: "Chrome bug", Product: "Chrome", CVEs: []string{"cve-2026-1234"}},
+		{Title: "Phishing campaign", Techniques: []string{"T1566"}},
+		{Title: "made up", Product: "Chrome", CVEs: []string{"CVE-2026-9999"}},
+	}}
+	vs := VerifySubjects(s, body, []string{"T1566"})
+	if len(s.CVEItems) != 1 || s.CVEItems[0].CVEs[0] != "CVE-2026-1234" {
+		t.Fatalf("set aside = %+v", s.CVEItems)
+	}
+	if len(s.Items) != 2 || s.Items[0].Title != "Phishing campaign" || len(s.Items[1].CVEs) != 0 {
+		t.Fatalf("kept = %+v", s.Items)
+	}
+	found := false
+	for _, v := range vs {
+		found = found || (v.Field == "cve" && strings.Contains(v.Reason, "CVE-2026-9999"))
+	}
+	if !found {
+		t.Fatalf("an invented CVE was not reported: %v", vs)
 	}
 }

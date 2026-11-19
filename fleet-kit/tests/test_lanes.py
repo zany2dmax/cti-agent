@@ -1536,6 +1536,9 @@ class DigestAdvisories(unittest.TestCase):
                                         "facts": [{"id": "F1", "text": "indicator \"evil.example\" seen on 2"}],
                                         "suggested_checks": ["isolate the 2 hosts"]}]}},
             {"subject": "Third", "sender": "c@d.example", "not_triaged": "over the cap of 2"},
+            {"subject": "CVE roundup", "sender": "feed@example.com", "trusted_sender": True,
+             "cve_items": ["Chrome bug (CVE-2026-1)"],
+             "verdicts": {"sightings": [], "verdicts": []}},
         ],
     }
 
@@ -1545,13 +1548,14 @@ class DigestAdvisories(unittest.TestCase):
 
     def test_sightings_first_and_every_advisory_listed(self):
         txt = "\n".join(brief.advisories_text(self.data()))
-        self.assertIn("FLEET ADVISORIES - 3 messages with no CVE, 1 worth a look", txt)
+        self.assertIn("FLEET ADVISORIES - 3 threat-intel messages, 1 worth a look", txt)
         self.assertLess(txt.index("SEEN ON OUR HOSTS: evil.example"), txt.index("Quiet one"))
         self.assertIn("Not triaged: over the cap of 2", txt)
         self.assertIn("Raised by code:", txt)
         self.assertIn("Check: isolate the 2 hosts", txt)
         self.assertIn("(not an authenticated feed)", txt)
         self.assertIn("Model cost: $0.06", txt)
+        self.assertIn("In the CVE report above, not judged here: Chrome bug (CVE-2026-1)", txt)
 
     def test_nothing_in_it_is_markup_or_a_link(self):
         html = brief.advisories_section(self.data())

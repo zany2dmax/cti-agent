@@ -44,8 +44,9 @@ func main() {
 	// Advisory triage's input. run-digest passes it when TRIAGE_ENABLED is
 	// on; without it nothing about this run changes.
 	advisoriesOut := flag.String("advisories-out", "",
-		"also write every message read that names no CVE (not auto-replies) to this "+
-			"file, for cti-triage --batch")
+		"also write every message from a threat-intel sender (TRIAGE_SENDERS, default "+
+			"MAILBOX_FEED_SENDERS; authenticated; not auto-replies) to this file, for "+
+			"cti-triage --batch")
 	flag.Parse()
 
 	// fleet.env. run-digest sources it in shell before calling this, so under
@@ -106,6 +107,11 @@ func main() {
 	seen := make([]mailbox.Processed, 0, len(messages))
 	var skippedSubjects []string
 	var advisories []triage.Advisory
+	intel := triageSenders(cfg.MailboxFeedSenders)
+	if *advisoriesOut != "" && len(intel) == 0 {
+		log.Printf("advisories: no threat-intel senders configured (TRIAGE_SENDERS or " +
+			"MAILBOX_FEED_SENDERS), so nothing is saved for triage")
+	}
 	for _, msg := range messages {
 		// Never read our own report back in.
 		//
@@ -160,12 +166,17 @@ func main() {
 				asked[cve] = true
 			}
 		}
-		// No CVE: the message is advisory triage's to read, when it is on.
-		// Auto-replies are not advisories. Saved before the cleanup lane can
-		// archive it, because only this run has its body.
-		if *advisoriesOut != "" && len(found) == 0 && !msg.IsAutoReply() {
+		// Threat intel is advisory triage's to read, when it is on: mail from
+		// a sender on the threat-intel list whom the receiving server
+		// authenticated, with or without CVEs. Its CVE items are the digest's;
+		// triage judges the rest. Everything else in the mailbox - supplier
+		// requests, replies, auto-replies, colleagues' threads - is not
+		// threat intel and is never sent to a model. Saved here because only
+		// this run has the body before the cleanup lane may archive it.
+		if *advisoriesOut != "" && intelSource(msg, intel) &&
+			!msg.IsAutoReply() && !mailbox.AutoReplySubject(msg.Subject) {
 			advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
-				msg.From, msg.Subject, fromFeed, msg.BodyText))
+				msg.From, msg.Subject, true, msg.BodyText))
 		}
 		subjects = append(subjects, report.ScannedEmail{
 			Subject:  msg.Subject,
@@ -338,7 +349,7 @@ func main() {
 			log.Printf("WARNING: could not write the advisories for triage (%s); "+
 				"today's advisories without a CVE will not be triaged", safelog.Line(err.Error()))
 		} else {
-			log.Printf("advisories: %d message(s) with no CVE saved for triage", len(advisories))
+			log.Printf("advisories: %d message(s) from threat-intel senders saved for triage", len(advisories))
 		}
 	}
 
@@ -431,6 +442,31 @@ func splitList(s string) []string {
 // with a domain of their own.
 func trustedSource(msg graph.Message, feed []string) bool {
 	if !mailbox.FleetSender(msg.From, feed) {
+		return false
+	}
+	ok, _ := msg.VouchedFor()
+	return ok
+}
+
+// triageSenders is the threat-intel sender list: TRIAGE_SENDERS, or
+// MAILBOX_FEED_SENDERS when that is unset. "none" is an empty list. The
+// scanner's own domains are not on it: its mail is scan results, not intel.
+func triageSenders(feed string) []string {
+	v := strings.TrimSpace(os.Getenv("TRIAGE_SENDERS"))
+	switch {
+	case strings.EqualFold(v, "none"):
+		return nil
+	case v != "":
+		return splitList(v)
+	}
+	return splitList(feed)
+}
+
+// intelSource reports a message from a threat-intel sender whom the
+// receiving server authenticated: a From address alone is a claim anyone
+// can make, and a model call is spent on each one.
+func intelSource(msg graph.Message, list []string) bool {
+	if len(list) == 0 || !mailbox.SenderIn(msg.From, list) {
 		return false
 	}
 	ok, _ := msg.VouchedFor()

@@ -2869,6 +2869,16 @@ TRIAGE_ENABLED=1
 TRIAGE_MAX_PER_RUN=10
 ```
 
+**Who counts as threat intel** is your list. Check it before turning this on:
+
+```bash
+sudo grep -E '^(MAILBOX_FEED_SENDERS|TRIAGE_SENDERS)=' /etc/cti-agent/fleet.env
+```
+
+Empty means nothing is triaged, and ingest says so. Set `TRIAGE_SENDERS` if
+the triage list should differ from the feed list (same `name@example.com`
+or `@example.com` form).
+
 `TRIAGE_ENABLED` is `0` or `1`. Only `1` turns it on. `0` or unset is off,
 and the digest's log says `triage: off`. Any other value is also off, and the
 log says it isn't 0 or 1.
@@ -2882,10 +2892,15 @@ sudo journalctl -u cti-agent-digest --since today | grep -E "triage|advisories"
 
 What the daily does with it:
 
-1. **Ingest** saves every message with no CVE (not auto-replies, not the
-   fleet's own mail) to `state/enriched-DATE-advisory-input.json`.
-2. **Step 2c** runs `cti-triage --batch` on it: reader, Falcon, judge for
-   each, authenticated feed senders first. It judges at most
+1. **Ingest** saves every message from a threat-intel sender to
+   `state/enriched-DATE-advisory-input.json`. That means a sender on
+   `TRIAGE_SENDERS` (default: `MAILBOX_FEED_SENDERS`) whom Exchange
+   authenticated, with or without CVEs. Nothing else in the mailbox is
+   sent to a model: not supplier requests, colleagues' threads, scanner
+   notices or auto-replies.
+2. **Step 2c** runs `cti-triage --batch` on it. The reader lists each
+   message's items and their CVEs. Items naming a CVE are left to the CVE
+   report and listed as such. The rest go through Falcon and the judge. It judges at most
    `TRIAGE_MAX_PER_RUN` and starts none after 20 minutes. The report goes
    to `state/enriched-DATE-advisories.json`.
 3. **The brief** lists every one under **FLEET ADVISORIES**: sightings

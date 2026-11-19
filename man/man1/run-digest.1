@@ -118,10 +118,15 @@ Only with
 .BR "triage: off" )
 ingest is run with
 .B \-\-advisories\-out
-and saves every message with no CVE (auto-replies aside) as
+and saves every message from an authenticated threat-intel sender
+.RB ( TRIAGE_SENDERS ,
+default
+.BR MAILBOX_FEED_SENDERS )
+as
 .IR state/enriched\-DATE\-advisory\-input.json .
 .B cti\-triage \-\-batch
-then runs each through the reader, the Falcon lookups and the judge
+then has the reader list each one's items; items naming a CVE are left to
+the CVE report, and the rest go through the Falcon lookups and the judge
 (at most
 .BR TRIAGE_MAX_PER_RUN ,
 20 minutes in all) and writes
@@ -300,6 +305,12 @@ Any other value is off, and the log says it is not 0 or 1.
 .TP
 .B TRIAGE_MAX_PER_RUN
 How many advisories step 2c triages. Default 10, at most 50.
+.TP
+.B TRIAGE_SENDERS
+Who sends threat intel; only their authenticated mail is triaged. Default:
+.BR MAILBOX_FEED_SENDERS ;
+.B none
+for nobody.
 .TP
 .B GRAPH_MAILBOX
 The CTI mailbox (section 1). The daily names it in its log, and stops with an

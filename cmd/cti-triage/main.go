@@ -443,6 +443,9 @@ func printSubjects(w io.Writer, subj *triage.Subjects, removed []triage.SubjectV
 			p("    quote     : %q", s(q))
 		}
 	}
+	for _, line := range triage.CVEItemLines(subj) {
+		p("- set aside, names a CVE (the CVE digest's): %s", s(line))
+	}
 	if len(removed) > 0 {
 		p("removed (not supported by the advisory): %d", len(removed))
 		for _, v := range removed {

@@ -154,7 +154,8 @@ fi
 
 # ── ADVISORY TRIAGE (TRIAGE_ENABLED) ────────────────────────────────────────
 # Daily only. TRIAGE_ENABLED is 0 or 1; only 1 turns it on. Ingest saves
-# every message with no CVE beside the enriched file; step 2c triages them
+# every message from a threat-intel sender (TRIAGE_SENDERS, default
+# MAILBOX_FEED_SENDERS) beside the enriched file; step 2c triages them
 # and leaves the report there too, which is where brief.py looks. Both names
 # follow ENRICHED, so a dry run's land in its own directory. Today's old
 # copies are removed just before ingest (after the already-sent check, so a
@@ -330,8 +331,9 @@ elif [ -n "$DRY" ] && [ -x "$JIRA" ]; then
 fi
 
 # ── 2c. advisory triage ──────────────────────────────────────────────────────
-# Each message with no CVE goes through the reader (no tools, never sees our
-# data), the Falcon lookups and the judge (no tools, never sees the
+# Each threat-intel message goes through the reader (no tools, never sees our
+# data), which lists its items; those naming a CVE are left to the CVE
+# report above, and the rest go through the Falcon lookups and the judge (no tools, never sees the
 # advisory). Model calls cost money, so it runs on a dry run too only
 # because the preview must show what the real digest would; at most
 # TRIAGE_MAX_PER_RUN advisories (default 10) are judged.
@@ -351,9 +353,9 @@ if [ -n "$TRIAGE_ON" ]; then
   if [ ! -x "$TRIAGE" ]; then
     say "triage: $TRIAGE not installed - skipped"
   elif [ ! -s "$ADV_IN" ]; then
-    say "triage: ingest saved no advisories - nothing to triage"
+    say "triage: ingest saved no threat-intel mail (TRIAGE_SENDERS) - nothing to triage"
   else
-    say "triage: reader, Falcon and judge for each message with no CVE"
+    say "triage: reader, Falcon and judge for each threat-intel message (items without a CVE)"
     if timeout 25m "$TRIAGE" --batch "$ADV_IN" --out "$ADV_OUT" --batch-timeout 20m; then
       rm -f "$ADV_IN"
     else

@@ -30,7 +30,10 @@ import (
 )
 
 // SubjectsSchema is the only reader output this code parses.
-const SubjectsSchema = "cti-subjects/1"
+//
+// /2 added cves per item: an item that names a CVE is the CVE digest's, and
+// triage sets it aside rather than judging it twice.
+const SubjectsSchema = "cti-subjects/2"
 
 // Caps on what one advisory can make code do.
 const (
@@ -58,6 +61,7 @@ type Subject struct {
 	Affected   string   `json:"affected_versions"` // as the advisory states it, free text
 	FixedIn    string   `json:"fixed_in"`          // the first fixed version, if the advisory gives one
 	Techniques []string `json:"techniques"`
+	CVEs       []string `json:"cves"`
 	Quotes     []string `json:"quotes"`
 
 	// Set by VerifySubjects, never by the model.
@@ -71,6 +75,11 @@ type Subjects struct {
 	Refusal *struct {
 		Reason string `json:"reason"`
 	} `json:"refusal"`
+
+	// Set by VerifySubjects, never by the model: the items that name a CVE
+	// found in the advisory. The CVE digest reports those (looked up in the
+	// scanner, ticketed), so triage does not judge them again.
+	CVEItems []Subject `json:"-"`
 }
 
 // SubjectViolation is one thing VerifySubjects removed, and why.
@@ -106,6 +115,7 @@ func ParseSubjects(b []byte) (*Subjects, error) {
 }
 
 var (
+	cveIDOnly       = regexp.MustCompile(`^CVE-\d{4}-\d{4,7}$`)
 	fixedVersionRE  = regexp.MustCompile(`^\d+(\.\d+){0,4}$`)
 	techniqueIDOnly = regexp.MustCompile(`^T\d{4}(\.\d{3})?$`)
 )
@@ -115,6 +125,7 @@ var (
 // shown; extracted are the techniques code found in it.
 func VerifySubjects(s *Subjects, body string, extracted []string) []SubjectViolation {
 	var vs []SubjectViolation
+	s.CVEItems = nil
 	if s.Refusal != nil {
 		s.Items = nil
 		return nil
@@ -198,6 +209,25 @@ func VerifySubjects(s *Subjects, body string, extracted []string) []SubjectViola
 			}
 		}
 		it.Techniques = techs
+		var cves []string
+		seenCVE := map[string]bool{}
+		for _, c := range it.CVEs {
+			c = strings.ToUpper(strings.TrimSpace(c))
+			switch {
+			case c == "" || seenCVE[c]:
+			case !cveIDOnly.MatchString(c) || !version(c):
+				drop("cve", fmt.Sprintf("%q is not a CVE ID found in the advisory", oneLine(c)))
+			default:
+				cves = append(cves, c)
+			}
+			seenCVE[c] = true
+		}
+		it.CVEs = cves
+		if len(it.CVEs) > 0 {
+			// The CVE digest's item: set aside, not judged again here.
+			s.CVEItems = append(s.CVEItems, it)
+			continue
+		}
 		if it.Product == "" && len(it.Techniques) == 0 {
 			drop("item", "nothing left that a lookup could use")
 			continue

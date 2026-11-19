@@ -166,9 +166,14 @@ received in the last
 through Microsoft Graph.
 .TP
 .BI \-\-advisories\-out " FILE"
-Also writes every message read that names no CVE (not auto-replies, not
-its own mail, not skipped subjects) to
-.IR FILE ,
+Also writes every message from a threat-intel sender to
+.IR FILE :
+a sender on
+.B TRIAGE_SENDERS
+(default
+.BR MAILBOX_FEED_SENDERS )
+whom the receiving server authenticated, with or without CVEs; not
+auto-replies, by header or subject, and not its own mail. Written
 0600, for
 .BR "cti\-triage \-\-batch" .
 Bodies are capped at 256 KiB and the file at 100 messages. run-digest

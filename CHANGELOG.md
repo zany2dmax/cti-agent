@@ -50,9 +50,13 @@ journal says why. Advisory triage in the digest stays off until you set
 ### Added
 
 - **Advisory triage in the daily digest: FLEET ADVISORIES (`TRIAGE_ENABLED`,
-  off by default).** With it on, ingest saves every message with no CVE, and
-  run-digest runs the new `cti-triage --batch` on them before the brief:
-  reader, Falcon lookups and judge for each, authenticated feed senders
+  off by default).** With it on, ingest saves every message from an
+  authenticated threat-intel sender (`TRIAGE_SENDERS`, default
+  `MAILBOX_FEED_SENDERS`), with or without CVEs; nothing else in the mailbox
+  goes to a model. run-digest runs the new `cti-triage --batch` on them
+  before the brief: the reader lists each message's items and their CVEs
+  (`cti-subjects/2`), items naming a CVE are left to the CVE report and
+  listed, and the rest go through the Falcon lookups and the judge, authenticated feed senders
   first, at most `TRIAGE_MAX_PER_RUN` (default 10) and none started after 20
   minutes. The brief lists every one: sightings first, then likely and
   possible with reason, facts and checks, one line for the rest, and any not

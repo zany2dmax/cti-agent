@@ -712,8 +712,8 @@ def fleet_tickets_text(data):
 
 # ── FLEET ADVISORIES ─────────────────────────────────────────────────────────
 #
-# Advisory triage (cti-triage --batch, TRIAGE_ENABLED): every message with no
-# CVE, read by a no-tools model that never sees our data, looked up in
+# Advisory triage (cti-triage --batch, TRIAGE_ENABLED): every message from a
+# threat-intel sender (TRIAGE_SENDERS), its items without a CVE, read by a no-tools model that never sees our data, looked up in
 # Falcon, and judged by a no-tools model that never sees the advisory. The
 # report is code's: cti-triage checked every claim against the facts.
 #
@@ -776,7 +776,7 @@ def _adv_worth(rep):
 def _adv_summary(rep):
     read = int(rep.get("read") or 0)
     worth = _adv_worth(rep)
-    return (f"{read} message{'s' if read != 1 else ''} with no CVE, "
+    return (f"{read} threat-intel message{'s' if read != 1 else ''}, "
             f"{worth} worth a look")
 
 
@@ -800,7 +800,7 @@ def advisories_section(data):
         if not data.get("_triage_enabled"):
             return ""
         body = ('<tr><td style="padding:4px 0;color:#4a5568">Advisory triage is on but '
-                'reported nothing today: it had no mail without a CVE, or it failed. '
+                'reported nothing today: no threat-intel mail arrived, or it failed. '
                 'The digest run log says which.</td></tr>')
         summary = "no report"
     else:
@@ -818,6 +818,11 @@ def advisories_section(data):
                     f'host(s). Treat it as an incident lead.</div>')
             if r.get("not_triaged"):
                 parts.append(f'<div style="color:#718096">Not triaged: {esc(r["not_triaged"])}</div>')
+            cve_items = [str(c) for c in (r.get("cve_items") or [])]
+            if cve_items:
+                parts.append('<div style="color:#718096">In the CVE report above, not judged here: '
+                             f'{esc("; ".join(cve_items[:6]))}'
+                             f'{esc(f" (+{len(cve_items) - 6} more)") if len(cve_items) > 6 else ""}</div>')
             for x in verdicts:
                 rel = str(x.get("relevance") or "unknown")
                 label = f'<b>{esc(rel.upper())}</b> &middot; {esc(_adv_name(x))}'
@@ -870,8 +875,8 @@ def advisories_text(data):
         if not data.get("_triage_enabled"):
             return []
         return [f"{ADV_HEADING} - no report", "-" * 68,
-                "  Advisory triage is on but reported nothing today: it had no mail",
-                "  without a CVE, or it failed. The digest run log says which.", ""]
+                "  Advisory triage is on but reported nothing today: no threat-intel",
+                "  mail arrived, or it failed. The digest run log says which.", ""]
     lines = [f"{ADV_HEADING} - {_adv_summary(rep)}", "-" * 68]
     for _, _, r, verdicts, sightings in _adv_results(rep):
         lines.append(f"  {r.get('subject') or '(no subject)'}")
@@ -881,6 +886,10 @@ def advisories_text(data):
                          f"{x.get('hosts_seen_on')} host(s). Treat it as an incident lead.")
         if r.get("not_triaged"):
             lines.append(f"    Not triaged: {r['not_triaged']}")
+        cve_items = [str(c) for c in (r.get("cve_items") or [])]
+        if cve_items:
+            more = f" (+{len(cve_items) - 6} more)" if len(cve_items) > 6 else ""
+            lines.append(f"    In the CVE report above, not judged here: {'; '.join(cve_items[:6])}{more}")
         for x in verdicts:
             rel = str(x.get("relevance") or "unknown")
             lines.append(f"    {rel.upper()}  {_adv_name(x)}")
