@@ -20,6 +20,7 @@ import os
 import pathlib
 import re
 import sys
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -5075,10 +5076,14 @@ class SupplierRunner(unittest.TestCase):
         self.home.mkdir()
         self.log = self.tmp / "calls.log"
         self.stub("cti-mailer", 'echo "mailer $*" >> "$CALLS"\n')
+        # The model's environment is scrubbed (CALLS included), so this stub
+        # logs to a literal path, and records what environment it got.
         self.stub("claude",
-                  'echo "claude $*" >> "$CALLS"\n'
-                  'echo "stdin: $(head -c 20)" >> "$CALLS"\n'
-                  'echo \'{"schema":"cti-supplier/1"}\'\n')
+                  'echo "claude $*" >> %s\n'
+                  'echo "stdin: $(head -c 20)" >> %s\n'
+                  'env | sort > %s\n'
+                  'echo \'{"schema":"cti-supplier/1"}\'\n' % (shlex.quote(str(self.log)), shlex.quote(str(self.log)),
+                                                          shlex.quote(str(self.tmp / "claude.env"))))
         self.problems = ""
         self.requests = 2
         self.write_supplier()
@@ -5124,6 +5129,32 @@ fi
 
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def assert_scrubbed(self):
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet",
+                                           "FALCON_CLIENT_SECRET": "falcon-secret",
+                                           "GRAPH_CLIENT_SECRET": "graph-secret",
+                                           "JIRA_API_TOKEN": "jira-secret",
+                                           "ANTHROPIC_API_KEY": "model-key"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        env = (self.tmp / "claude.env").read_text()
+        for secret in ("falcon-secret", "graph-secret", "jira-secret", "FLEET_ENV=", "FLEET_HOME="):
+            self.assertNotIn(secret, env)
+        self.assertIn("ANTHROPIC_API_KEY=model-key", env)
+        for var in ("HOME", "TMPDIR"):
+            got = [l for l in env.splitlines() if l.startswith(var + "=")]
+            self.assertEqual(len(got), 1, env)
+            self.assertTrue(got[0].endswith("/.claude-home"), got)
+        # The key never rides on the command line, where ps would show it.
+        self.assertFalse(any("model-key" in c for c in self.calls()))
+
+    def test_the_model_gets_no_fleet_secrets_and_an_empty_home(self):
+        self.assert_scrubbed()
+
+    def test_the_model_gets_no_fleet_secrets_with_cost_tracing_on(self):
+        # The JSON branch is the one the box runs: fleet-trace ships with it.
+        self.with_trace()
+        self.assert_scrubbed()
 
     def test_for_real_files_sends_to_the_lane_and_records(self):
         r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
@@ -5290,7 +5321,8 @@ fi
         (self.code / "bin" / "fleet-trace").chmod(0o755)
         reply_file = self.tmp / "reply.json"
         reply_file.write_text(json.dumps(reply or self.REPLY))
-        self.stub("claude", 'echo "claude $*" >> "$CALLS"\ncat >/dev/null\ncat "%s"\n' % reply_file)
+        self.stub("claude", 'echo "claude $*" >> %s\ncat >/dev/null\nenv | sort > %s\ncat "%s"\n'
+                  % (shlex.quote(str(self.log)), shlex.quote(str(self.tmp / "claude.env")), reply_file))
         # --finish copies what the runner handed it, so the test can read it.
         body = (self.code / "bin" / "cti-supplier").read_text().replace(
             'if [ "$MODE" = finish ]; then',

@@ -91,7 +91,17 @@ the model has **no tools at all**. Each request is passed on stdin to
 `claude -p` started with `--tools ""`, `--strict-mcp-config`,
 `--no-session-persistence` and project-only settings, from an empty work
 directory. It cannot read, write, run or send anything; it returns one JSON
-object. The standing instructions are root-owned
+object. Its environment is stripped (`scrub_env` in the runner) to what the
+CLI needs to run and authenticate, with `HOME` and `TMPDIR` pointing at an
+empty folder. The fleet's secrets reach every runner through `fleet.env`, and
+without the strip the CLI and anything it spawned would have held the Falcon
+secret and the mail and Jira credentials, and could have read a `CLAUDE.md` or
+settings planted in the service account's home between installs. The strip
+unsets variables instead of passing them to `env -i`, so the API key never
+appears on a command line. Each request gets a fresh empty home. What
+`compgen -e` can't name (exported functions, names that aren't valid shell
+names) would pass through. None can come from `fleet.env`, because sourcing
+it would fail first. The standing instructions are root-owned
 (`/opt/cti-agent/agents/supplier/CLAUDE.md`), and the sender, subject, form and
 text are all inside an untrusted block whose markers are removed from hostile
 text.

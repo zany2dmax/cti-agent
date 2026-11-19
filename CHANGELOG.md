@@ -90,6 +90,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   cost are printed. It writes nothing. RUNBOOK §11k. **Upgrade:** to use it,
   set `TRIAGE_MODEL` (and optionally `TRIAGE_BLIND_SPOTS`) in `fleet.env`.
 
+### Security
+
+- **The supplier lane's model no longer holds the fleet's secrets.**
+  `fleet.env` is the unit's environment and the runner exports it, so the
+  `claude` process judging each request inherited every credential: the
+  Falcon secret, and the mail and Jira credentials. The model has no tools,
+  but the CLI and anything it spawned could see them. Now `claude` gets only
+  what it needs to run and authenticate, and a `HOME` that is an empty
+  folder, so a `CLAUDE.md` or settings planted in the service account's home
+  can't reach the model either. The key is never passed on a command line.
+  Found while reviewing advisory triage, which does the same in Go.
+  **Upgrade:** the model must authenticate through `ANTHROPIC_API_KEY` or
+  `CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`. A login stored under the service
+  account's home is no longer seen.
+
 ### Fixed
 
 - **`cti-mailer --check` reports the owner lane as it really is.** It listed

@@ -153,6 +153,25 @@ fi
 log "${#INPUTS[@]} new request(s)"
 
 # ── the model ───────────────────────────────────────────────────────────────
+# THE MODEL'S ENVIRONMENT. The unit loads fleet.env as its environment and this
+# runner sources it with set -a, so every fleet secret - the Falcon secret,
+# the mail and Jira credentials - is exported, and a child inherits all of it.
+# The model has no tools, but the CLI and anything it spawns would see it.
+# scrub_env runs inside the subshell that starts claude: it unsets every
+# exported variable but what the CLI needs to run and to authenticate, and
+# points HOME and TMPDIR at an empty folder, so no user CLAUDE.md, settings
+# or session reaches the model. It unsets rather than building `env -i
+# KEY=...`, which would put the API key on the command line, where ps shows
+# it. advisory triage does the same in Go (internal/triage/model.go).
+CLAUDE_ENV_KEEP=" PATH USER LOGNAME LANG LC_ALL TZ ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS "
+scrub_env() {
+  local home="$1" v
+  for v in $(compgen -e); do
+    case "$CLAUDE_ENV_KEEP" in *" $v "*) ;; *) unset "$v" 2>/dev/null || true ;; esac
+  done
+  export HOME="$home" TMPDIR="$home"
+}
+
 judge_all() {
   local instr="${SUPPLIER_INSTRUCTIONS:-$FLEET_CODE/agents/supplier/CLAUDE.md}"
   local claude="${CLAUDE_BIN:-}"
@@ -191,7 +210,15 @@ judge_all() {
   local trace_arg=()
   [ -n "$cost_trace" ] && trace_arg=(--trace "$cost_trace")
   local in out ok=0 bad=0
+  # Captured before the scrub: SUPPLIER_MODEL is exported, and the command
+  # line is expanded only after scrub_env has run.
+  local model="$SUPPLIER_MODEL"
+  local chome="$WORK/.claude-home"
   for in in ${INPUTS[@]+"${INPUTS[@]}"}; do
+    # A fresh empty home for every request: nothing one call writes there
+    # reaches the next.
+    rm -rf "$chome"
+    mkdir -m 0700 "$chome"
     out="${in%.input.txt}.result.json"
     rm -f "$out.tmp" "$out.reply"
     # No tools (--tools ""), no MCP servers, no session file, no settings from
@@ -201,7 +228,7 @@ judge_all() {
     # set -e: every failure below is caught by "|| rc=$?" and means Unsure.
     local rc=0 urc=0
     if [ -n "$json" ]; then
-      ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
+      ( cd "$WORK" && scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
           --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
           --output-format json --system-prompt "$prompt" < "$in" > "$out.reply" 2> "$out.err" ) || rc=$?
       # Unwrapped even when claude exited non-zero: an error result is still
@@ -214,7 +241,7 @@ judge_all() {
         [ "$rc" -ne 0 ] || rc=1
       fi
     else
-      ( cd "$WORK" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$SUPPLIER_MODEL" \
+      ( cd "$WORK" && scrub_env "$chome" && "${limit[@]+"${limit[@]}"}" "$claude" -p --model "$model" \
           --tools "" --strict-mcp-config --no-session-persistence --setting-sources project \
           --system-prompt "$prompt" < "$in" > "$out.tmp" 2> "$out.err" ) || rc=$?
     fi

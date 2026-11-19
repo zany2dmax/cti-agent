@@ -1573,6 +1573,14 @@ session file) were checked against `claude --help`, not run against the API; the
 tests use stub programs. The first `--dry-run` with `SUPPLIER_MODEL` set is the
 real check.
 
+**The model's environment.** `claude` runs with only `PATH`, the locale, the
+proxy and CA-bundle variables, and `ANTHROPIC_API_KEY` or
+`CLAUDE_CODE_OAUTH_TOKEN`. Its `HOME` is an empty folder inside the work
+directory. So it authenticates only through one of those two settings in
+`fleet.env`. A login stored in the service account's home isn't seen. If the
+judgements suddenly all come back Unsure after an upgrade, check that one of
+them is set.
+
 ### Reports to application owners, by email
 
 `cti-agent-appowners.timer`, daily 07:15, runner `run-appowners`. For every
