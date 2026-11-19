@@ -71,9 +71,11 @@ is real, not before. Finished work moves out of this file into
     real traces and the hard rules; see HARNESS.md). Left: a 3-run baseline
     on Sonnet, a Haiku comparison before any move to a cheaper model, and a
     scenario per PrimeSec vector that touched the orchestrator
-  - H3. Structured check-in verdict: the skill ends in one `cti-checkin/1`
-    JSON object, verified in Go the way `internal/triage` verifies
-    `cti-triage/1`; invalid or missing is a board ERROR
+  - H3. Structured check-in verdict: **built** (`cti-checkin/1`,
+    `internal/checkin`, `cti-checkin-verdict`; see HARNESS.md). A bad verdict
+    is an INFO board line to @all, not an ERROR, so the next beat does not
+    email it. Left: use the saved verdicts (a lane-health line in the digest,
+    a trend of attention/degraded beats)
   - H4. Shared model-lane runner pulled out of `run-checkin`. The condition
     is met: `run-supplier` is a second model lane with its own copy of the
     model-call setup. Do it with `task eval:checkin` and `task eval:supplier`

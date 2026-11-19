@@ -767,6 +767,50 @@ if [ -n "$anomaly" ]; then
   fi
 fi
 
+# ── the verdict (HARNESS H3) ────────────────────────────────────────────────
+# Every beat ends its final message with one cti-checkin/1 JSON object: each
+# lane's state, the alerts it sent, what it wrote. cti-checkin-verdict checks it
+# against the schema and against the counts checkin-bash-guard kept, which the
+# model cannot touch, and saves it under state/verdicts for the evals and later
+# tools. Only after a beat that exited 0: a beat cut short by a rate limit has
+# no last word to check, and cti-budget records that below.
+#
+# A problem is a board line and a journal line, never mail. The line is INFO to
+# @all on purpose: the next beat emails any line addressed to @operator and
+# treats an ERROR as an incident, and a reporting fault is neither. At most one
+# board line per day for each kind (MISSING, INVALID, MISMATCH), so a model that
+# keeps getting it wrong cannot fill the board; every beat's result is still in
+# the journal and in its saved file.
+VERDICT_TOOL="$FLEET_CODE/bin/cti-checkin-verdict"
+if [ "$rc" -eq 0 ] && [ -x "$VERDICT_TOOL" ]; then
+  vdir="$FLEET_HOME/state/verdicts"
+  mkdir -p "$vdir" 2>/dev/null && chmod 0700 "$vdir" 2>/dev/null || true
+  vsrc=(--text "$beat_log")
+  [ -n "$TRACE" ] && [ -s "$TRACE" ] && vsrc=(--trace "$TRACE")
+  vcounts=()
+  [ -f "$counts_file" ] && vcounts=(--counts "$counts_file")
+  vrc=0
+  vmsg="$("$VERDICT_TOOL" ${vsrc[@]+"${vsrc[@]}"} ${vcounts[@]+"${vcounts[@]}"} --beat "$CHECKIN_BEAT_ID" \
+           --out "$vdir/checkin-$CHECKIN_BEAT_ID.json" 2>&1)" || vrc=$?
+  echo "[run-checkin $(date '+%F %H:%M:%S')] ${vmsg:-verdict: no output from cti-checkin-verdict}"
+  if [ "$vrc" -ne 0 ]; then
+    vkind="$(printf '%s' "$vmsg" | sed -n 's/^verdict: \([A-Z,]*\) - .*/\1/p' | head -1)"
+    vkind="${vkind:-UNREADABLE}"
+    vmarker="$FLEET_HOME/state/checkin-verdict-posted"
+    today="$(date +%F)"
+    if ! grep -qx "$today $vkind" "$vmarker" 2>/dev/null; then
+      echo "$today $vkind" >> "$vmarker" 2>/dev/null || true
+      tail -n 50 "$vmarker" > "$vmarker.tmp" 2>/dev/null && mv "$vmarker.tmp" "$vmarker" 2>/dev/null || true
+      "$FLEET_CODE/bin/fleet-board" post @you @all INFO \
+        "beat $CHECKIN_BEAT_ID: its cti-checkin/1 verdict did not check out ($(printf '%s' "$vmsg" | cut -c10-300)). Reporting fault, not an incident; detail in state/verdicts." \
+        2>/dev/null || true
+    fi
+  fi
+  find "$vdir" -name 'checkin-*.json' -mtime +"${CHECKIN_TRACE_DAYS:-14}" -delete 2>/dev/null || true
+elif [ "$rc" -eq 0 ]; then
+  echo "[run-checkin $(date '+%F %H:%M:%S')] verdict: not checked - $VERDICT_TOOL is not installed"
+fi
+
 if [ -x "$BUDGET" ]; then
   # Only beats that actually reached the model count against the ceilings.
   # tail -c bounds what a runaway transcript can push through argv.

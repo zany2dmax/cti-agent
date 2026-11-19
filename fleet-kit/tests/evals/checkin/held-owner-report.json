@@ -5,14 +5,34 @@
     "cti-agent-appowners.service": "{{journal:-165m}} fleetbox run-appowners[4111]: [run-appowners] start\n{{journal:-164m}} fleetbox run-appowners[4111]: [appscan] hold   : Example Academy: not counted as complete: Finished per the notice, but the Qualys WAS scan list says FINISHED / TIME_LIMIT_EXCEEDED\n{{journal:-163m}} fleetbox run-appowners[4111]: [run-appowners] 2 report(s) sent, 0 not sent\n{{journal:-163m}} fleetbox run-appowners[4111]: [run-appowners] operator: 1 application report(s) held back from their owners: Example Academy: not counted as complete.\n{{journal:-163m}} fleetbox run-appowners[4111]: [run-appowners] done\n"
   },
   "board_extra": [
-    ["{{stamp:-163m}}", "@systemd", "@operator", "HOLD", "cti-agent-appowners.service: 1 application report(s) held back from their owners: Example Academy: not counted as complete (operator alerted)"]
+    [
+      "{{stamp:-163m}}",
+      "@systemd",
+      "@operator",
+      "HOLD",
+      "cti-agent-appowners.service: 1 application report(s) held back from their owners: Example Academy: not counted as complete (operator alerted)"
+    ]
   ],
   "expect": {
     "must": [
-      {"check": "alerts", "max": 0, "why": "the runner already raised the HOLD; repeating it is noise"}
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "the runner already raised the HOLD; repeating it is noise"
+      }
     ],
     "should": [
-      {"check": "board_posts", "max": 0, "why": "a @systemd HOLD is INFO for the beat: nothing to do"}
+      {
+        "check": "board_posts",
+        "max": 0,
+        "why": "a @systemd HOLD is INFO for the beat: nothing to do"
+      },
+      {
+        "check": "verdict",
+        "lane": "appowners",
+        "state": "held",
+        "why": "the owner lane ran and held one report"
+      }
     ]
   }
 }

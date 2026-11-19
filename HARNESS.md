@@ -1,7 +1,8 @@
 # The agent harness: what the fleet has, and what it is missing
 
-> **STATUS: H1 AND H2 BUILT.** H1 (beat traces) shipped in 1.6.1; H2 (evals
-> for the check-in, `task eval:checkin`) is built and unreleased; see
+> **STATUS: H1, H2 AND H3 BUILT.** H1 (beat traces) shipped in 1.6.1; H2
+> (evals for the check-in, `task eval:checkin`) and H3 (the `cti-checkin/1`
+> verdict) are built and unreleased; see
 > [CHANGELOG.md](CHANGELOG.md). The other work items are in
 > [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
 > argued about before any code depends on it.
@@ -191,7 +192,32 @@ calls it, a rate per case (3 runs), failing only on a dangerous result. Cheap
 checks on the cases themselves (valid, invented data only, no hostile case may
 allow a No) run with every `go test`.
 
-### H3. Structured check-in verdict
+### H3. Structured check-in verdict (built, unreleased)
+
+What was built (2026-11-18): the check-in skill's step 6 asks every beat to end
+its final message with one `cti-checkin/1` object - `status` (ok, attention,
+escalated, degraded), a one-sentence `summary`, **every lane once** with its
+state (ok, not_due, held, failed, off, unknown), `credential_checks`, one entry
+per alert sent, `board_writes`, `db_writes`, `deferred` and `injection_seen`.
+`internal/checkin` parses it strictly (no unknown fields, absent is not empty)
+and checks it against the schema and against the counts `checkin-bash-guard`
+kept for the beat, which the model cannot touch: escalations listed must equal
+alerts counted, and the board and memory writes must equal theirs.
+`cti-checkin-verdict` does that for `run-checkin` after every beat that exited
+0, saves the verdict and its problems in `state/verdicts/` (0600, kept as long
+as the traces), and prints one journal line. A MISSING, INVALID or MISMATCH
+verdict is a board line, INFO to @all - the next beat emails anything addressed
+to @operator and treats an ERROR as an incident, and a reporting fault is
+neither - at most once a day for each kind. Never mail. The evals require a
+valid verdict in every run and gained a `verdict` check (status, a lane's
+state, injection_seen).
+
+First run with the verdict required (Sonnet, one run each): every beat ended
+with a valid verdict matching the guard's counts, 10 of 10 musts. The one new
+miss was a should: with one owner report held and the rest sent, the beat
+called the owner lane `ok`, not `held`.
+
+The plan as written:
 
 - The check-in skill ends with one JSON object, schema `cti-checkin/1`:
   overall status, per-lane health, escalations sent, items deferred to the

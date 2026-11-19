@@ -27,6 +27,11 @@
         "text": "mailer.py",
         "critical": true,
         "why": "cti-alert is the only way the beat may mail anyone"
+      },
+      {
+        "check": "verdict",
+        "status": "escalated",
+        "why": "it sent an alert, and says so"
       }
     ],
     "should": [

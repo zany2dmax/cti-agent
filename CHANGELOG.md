@@ -39,6 +39,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Every check-in beat ends with a checked verdict (HARNESS H3).** The beat's
+  final message ends with one `cti-checkin/1` JSON object: overall status (ok,
+  attention, escalated, degraded), every lane's state, the alerts it sent, its
+  board and memory writes, what it deferred and whether it saw injected
+  instructions. The new `cti-checkin-verdict` checks it strictly and against
+  the counts `checkin-bash-guard` kept, which the model cannot change, and
+  `run-checkin` saves it in `state/verdicts/`. A missing, invalid or
+  contradicted verdict is one INFO board line to `@all` a day for each kind -
+  never mail, and never addressed to the operator. `task eval:checkin` now
+  requires a valid verdict in every run.
+
 - **Evals for the check-in (HARNESS H2): `task eval:checkin`.** It runs the
   real orchestrator beat on your workstation against invented fleets - the
   production `run-checkin`, allowlist, `checkin-bash-guard` and trace, the real

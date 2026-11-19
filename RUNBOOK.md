@@ -786,6 +786,19 @@ orchestrator's `CLAUDE.md`, its skill, its grants or `CHECKIN_MODEL`, never in
 1`. `--check` builds every scenario's fleet and runs no beat. A real trace that
 surprises you (`fleet-trace show`) is a new scenario.
 
+**The beat's verdict.** Every beat ends with a `cti-checkin/1` JSON object -
+overall status, every lane's state, the alerts it sent, its board and memory
+writes - and `run-checkin` checks it with `cti-checkin-verdict` against the
+counts the guard kept. The journal carries one `verdict:` line per beat; the
+verdict itself is in `/var/lib/cti-agent/state/verdicts/checkin-<beat>.json`.
+A problem posts one board line a day for each kind, INFO to `@all` (never to
+`@operator`, which the next beat would email): **MISSING** (no verdict),
+**INVALID** (it breaks the schema) or **MISMATCH** (it claims alerts or writes
+the guard did not count - read the saved file's `problems` and `counted`). It
+is a reporting fault, not an incident: the beat still ran. A run of them after
+a change to the skill or `CHECKIN_MODEL` means the model is not following the
+format; `task eval:checkin` reproduces it on your workstation.
+
 ## 11b. Switching the mailer
 
 `mailer.py` was ported to `cmd/cti-mailer`, and **since 1.6.6 every runner

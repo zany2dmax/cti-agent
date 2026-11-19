@@ -2710,7 +2710,7 @@ class TestFileShape(unittest.TestCase):
 
     def _checkin_box(self, overrides=None, plant=(), claude_json=None,
                      guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None, extra_env=None,
-                     trace=False, stream=None, claude_rc=0):
+                     trace=False, stream=None, claude_rc=0, verdict=None, home_files=None):
         """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
         install-fedora.sh lays it out, read-only to this test's user, and a
         fake stat(1) that reports root ownership unless told otherwise.
@@ -2720,7 +2720,8 @@ class TestFileShape(unittest.TestCase):
         plant lists paths relative to HOME to create before the run.
         trace installs the real fleet-trace and a cti-budget stub; stream is
         the stream-json the fake claude prints when asked for it, and
-        claude_rc its exit status.
+        claude_rc its exit status. verdict, when given, is the body of a fake
+        cti-checkin-verdict; home_files maps paths under HOME to their content.
         Returns (CompletedProcess, what the fake claude and fleet-board saw).
         """
         root = pathlib.Path(__file__).resolve().parents[2]
@@ -2743,6 +2744,12 @@ class TestFileShape(unittest.TestCase):
         if trace:
             shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
                         code / "bin" / "fleet-trace")
+        if verdict is not None:
+            (code / "bin" / "cti-checkin-verdict").write_text(
+                f'#!/bin/sh\necho "cti-checkin-verdict $*" >> "{ran}"\n{verdict}')
+        for rel, body in (home_files or {}).items():
+            (home / rel).parent.mkdir(parents=True, exist_ok=True)
+            (home / rel).write_text(body)
         stream_file = d / "stream.jsonl"
         stream_file.write_text("".join(json.dumps(e) + "\n" if isinstance(e, dict) else e + "\n"
                                        for e in (stream or [])))
@@ -2989,6 +2996,49 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertIn("some stderr line", record)
         self.assertIn("[trace] API ERROR (billing_error)", r.stdout)
         self.assertIn("[trace] end: ERROR (api_error)", r.stdout)
+
+    # ─── the verdict (HARNESS H3) ───────────────────────────────────────────
+
+    def test_a_bad_verdict_is_one_info_line_to_all_never_the_operator(self):
+        """A beat whose cti-checkin/1 verdict does not check out gets a board
+        line - INFO to @all, because the next beat emails anything addressed
+        to @operator and treats an ERROR as an incident - and no alert."""
+        bad = 'echo "verdict: MISSING - the beat\'s final message has no cti-checkin/1 object"\nexit 1\n'
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT, verdict=bad)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        call = [l for l in ran.splitlines() if l.startswith("cti-checkin-verdict ")]
+        self.assertEqual(len(call), 1, ran)
+        self.assertIn("--trace ", call[0])
+        self.assertIn("--out ", call[0])
+        self.assertIn("verdict: MISSING", r.stdout)
+        post = [l for l in ran.splitlines() if l.startswith("fleet-board post") and "cti-checkin/1" in l]
+        self.assertEqual(len(post), 1, ran)
+        self.assertTrue(post[0].startswith("fleet-board post @you @all INFO "), post[0])
+        self.assertNotIn("@operator", post[0])
+        self.assertFalse([l for l in ran.splitlines() if l.startswith("cti-alert ")], ran)
+
+    def test_the_same_verdict_problem_posts_once_a_day(self):
+        bad = 'echo "verdict: MISMATCH - board_writes is 1; the guard counted 0"\nexit 1\n'
+        today = time.strftime("%Y-%m-%d")
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT, verdict=bad,
+                                   home_files={"state/checkin-verdict-posted": f"{today} MISMATCH\n"})
+        self.assertIn("verdict: MISMATCH", r.stdout)  # still in the journal
+        self.assertNotIn("cti-checkin/1 verdict did not check out", ran)
+        # A different kind the same day still gets its one line.
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT, verdict=bad.replace("MISMATCH", "INVALID"),
+                                   home_files={"state/checkin-verdict-posted": f"{today} MISMATCH\n"})
+        self.assertIn("cti-checkin/1 verdict did not check out", ran)
+
+    def test_a_valid_verdict_is_a_journal_line_only(self):
+        ok = 'echo "verdict: valid - status ok, 10 lanes, 0 escalation(s)"\nexit 0\n'
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT, verdict=ok)
+        self.assertIn("verdict: valid", r.stdout)
+        self.assertNotIn("cti-checkin/1 verdict did not check out", ran)
+
+    def test_a_failed_beat_has_no_verdict_to_check(self):
+        r, ran = self._checkin_box(trace=True, stream=self.BEAT, claude_rc=1,
+                                   verdict='echo "verdict: valid"\n')
+        self.assertNotIn("cti-checkin-verdict ", ran)
 
     def test_traces_off_runs_the_beat_as_before(self):
         """CHECKIN_TRACE_DAYS=0, or no fleet-trace on the box, is text mode;

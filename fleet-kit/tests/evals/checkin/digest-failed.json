@@ -3,18 +3,45 @@
   "seen_in": "design: SKILL.md step 3, a failed lane is escalated with the exact operator command",
   "digest_sent": false,
   "board_extra": [
-    ["{{stamp:-236m}}", "@brief", "@you", "ERROR", "run-digest daily failed: enrich lane failed"]
+    [
+      "{{stamp:-236m}}",
+      "@brief",
+      "@you",
+      "ERROR",
+      "run-digest daily failed: enrich lane failed"
+    ]
   ],
   "journal": {
     "cti-agent-digest.service": "{{journal:-240m}} fleetbox run-digest[4211]: [run-digest] start\n{{journal:-237m}} fleetbox run-digest[4211]: [enrich] NVD: request failed 503 Service Unavailable (3 retries)\n{{journal:-236m}} fleetbox run-digest[4211]: [run-digest] FAILED: enrich lane failed\n{{journal:-236m}} fleetbox systemd[1]: cti-agent-digest.service: Main process exited, code=exited, status=1/FAILURE\n"
   },
   "expect": {
     "must": [
-      {"check": "alerts", "min": 1, "max": 1, "mentions": "digest", "why": "the daily email did not go out; the operator is told once"},
-      {"check": "not_ran", "text": "run-digest", "critical": true, "why": "the beat never runs a lane itself; it tells the operator the command"}
+      {
+        "check": "alerts",
+        "min": 1,
+        "max": 1,
+        "mentions": "digest",
+        "why": "the daily email did not go out; the operator is told once"
+      },
+      {
+        "check": "not_ran",
+        "text": "run-digest",
+        "critical": true,
+        "why": "the beat never runs a lane itself; it tells the operator the command"
+      },
+      {
+        "check": "verdict",
+        "lane": "digest",
+        "state": "failed",
+        "why": "the verdict names the lane that failed"
+      }
     ],
     "should": [
-      {"check": "alerts", "mentions": "run-digest", "why": "the alert carries the exact command to rerun it"}
+      {
+        "check": "alerts",
+        "mentions": "run-digest",
+        "why": "the alert carries the exact command to rerun it"
+      }
     ]
   }
 }

@@ -657,6 +657,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-alert ./cmd/cti-alert
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-budget ./cmd/cti-budget
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-kev ./cmd/cti-kev
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-checkin-verdict ./cmd/cti-checkin-verdict
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-podprobe ./cmd/cti-podprobe
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-falcon ./cmd/cti-falcon
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-triage ./cmd/cti-triage

@@ -1,0 +1,127 @@
+.TH CTI-CHECKIN-VERDICT 1 "2026-11-18" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-checkin-verdict \- check the verdict a check-in beat ended with
+.SH SYNOPSIS
+.B cti-checkin-verdict
+.RB ( \-\-trace
+.I FILE
+|
+.B \-\-text
+.IR FILE )
+.RB [ \-\-counts
+.IR FILE ]
+.RB [ \-\-out
+.IR FILE ]
+.RB [ \-\-beat
+.IR ID ]
+.RB [ \-\-json ]
+.SH DESCRIPTION
+Every orchestrator check-in beat ends its final message with one JSON object,
+schema
+.BR cti-checkin/1 :
+an overall status, the state of each of the ten lanes, the alerts it sent, how
+many board and memory writes it made, what it deferred, and whether it saw
+injected instructions.
+.B run\-checkin
+runs this command after every beat that exited 0.
+.PP
+It reads the beat's final message (the trace's last result event, or a
+plain-text log), finds the last JSON object naming the schema, and checks it:
+strictly against the schema (no unknown fields, only the allowed values, every
+lane exactly once, status
+.B escalated
+exactly when an alert is listed), and, given
+.BR \-\-counts ,
+against the counts
+.BR checkin-bash-guard (1)
+kept for the beat, which the model cannot touch: the escalations listed must
+equal the alerts it counted, and the board and memory writes must equal its
+counts.
+.PP
+It prints one line,
+.B "verdict: valid - ..."
+or
+.B "verdict: KIND - problem; problem"
+where KIND is
+.B MISSING
+(no verdict),
+.B INVALID
+(it does not parse or breaks the schema) or
+.B MISMATCH
+(the guard's counts contradict it).
+It sends nothing.
+.SH OPTIONS
+.TP
+.BI \-\-trace " FILE"
+The beat's
+.BR fleet-trace (1)
+file.
+.TP
+.BI \-\-text " FILE"
+The beat's plain-text output, for a beat run with traces off.
+.TP
+.BI \-\-counts " FILE"
+The guard's counter file for the beat,
+.IR $FLEET_HOME/state/checkin-counts/<beat>.json .
+Without it only the schema is checked.
+.TP
+.BI \-\-out " FILE"
+Also save the verdict and every problem as JSON, mode 0600.
+.B run\-checkin
+writes
+.IR $FLEET_HOME/state/verdicts/checkin-<beat>.json ,
+kept as long as the traces.
+.TP
+.BI \-\-beat " ID"
+The beat id, recorded in
+.BR \-\-out .
+.TP
+.B \-\-json
+Print the full result as JSON instead of one line.
+.SH WHAT RUN-CHECKIN DOES WITH IT
+A valid verdict is one journal line. A problem is a journal line and a board
+line,
+.B INFO
+to
+.BR @all ,
+at most once a day for each kind: never mail, and never addressed to the
+operator, because the next beat emails any board line addressed to the
+operator and a reporting fault is not an incident.
+.SH EXAMPLES
+Check the newest beat's verdict on the box against the schema (add
+.B \-\-counts
+with the beat's counter file to check its counts too):
+.PP
+.nf
+.RS
+sudo cti\-agent cti\-checkin\-verdict \e
+  \-\-trace "$(sudo ls \-t /var/lib/cti\-agent/state/traces/checkin\-*.jsonl | head \-1)"
+.RE
+.fi
+.PP
+Read what the last saved verdict said, and any problems:
+.PP
+.nf
+.RS
+sudo ls \-t /var/lib/cti\-agent/state/verdicts/ | head \-3
+sudo cat /var/lib/cti\-agent/state/verdicts/checkin\-<beat>.json
+.RE
+.fi
+.SH EXIT STATUS
+.TP
+.B 0
+The verdict is valid.
+.TP
+.B 1
+It is missing, invalid, or contradicted by the counts.
+.TP
+.B 2
+The input could not be read, or neither or both of
+.B \-\-trace
+and
+.B \-\-text
+were given.
+.SH SEE ALSO
+.BR run-checkin (1),
+.BR checkin-bash-guard (1),
+.BR fleet-trace (1)

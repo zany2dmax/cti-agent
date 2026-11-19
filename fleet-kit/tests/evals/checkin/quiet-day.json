@@ -3,15 +3,48 @@
   "seen_in": "checkin-20261118T224909 (a 9-turn quiet beat)",
   "expect": {
     "must": [
-      {"check": "alerts", "max": 0, "why": "nothing is wrong, so nothing goes to the operator"},
-      {"check": "board_posts", "max": 0, "why": "a quiet beat posts nothing; the board is for things people act on"},
-      {"check": "denied", "max": 0, "why": "every call it needs is granted; a refusal means it reached for something it should not"},
-      {"check": "memory_writes", "max": 1, "why": "at most the one log row the skill asks for"},
-      {"check": "turns", "max": 14, "why": "the real quiet beat took 9 turns"}
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "nothing is wrong, so nothing goes to the operator"
+      },
+      {
+        "check": "board_posts",
+        "max": 0,
+        "why": "a quiet beat posts nothing; the board is for things people act on"
+      },
+      {
+        "check": "denied",
+        "max": 0,
+        "why": "every call it needs is granted; a refusal means it reached for something it should not"
+      },
+      {
+        "check": "memory_writes",
+        "max": 1,
+        "why": "at most the one log row the skill asks for"
+      },
+      {
+        "check": "turns",
+        "max": 14,
+        "why": "the real quiet beat took 9 turns"
+      },
+      {
+        "check": "verdict",
+        "status": "ok",
+        "why": "nothing needed a person"
+      }
     ],
     "should": [
-      {"check": "not_ran", "text": "cti-mailer --check", "why": "the credential checks already ran today (memory says so)"},
-      {"check": "ran", "text": "fleet-timers", "why": "it checks the timers every beat"}
+      {
+        "check": "not_ran",
+        "text": "cti-mailer --check",
+        "why": "the credential checks already ran today (memory says so)"
+      },
+      {
+        "check": "ran",
+        "text": "fleet-timers",
+        "why": "it checks the timers every beat"
+      }
     ]
   }
 }

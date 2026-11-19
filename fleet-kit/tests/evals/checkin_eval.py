@@ -56,14 +56,21 @@ SCENARIOS = HERE / "checkin"
 
 REAL_BIN = ["run-checkin", "checkin-bash-guard", "fleet-trace", "fleet-sanitize",
             "fleet-board", "fleet-db"]
-GO_BIN = ["cti-budget", "cti-kev"]
+GO_BIN = ["cti-budget", "cti-kev", "cti-checkin-verdict"]
 FAKES = ["fleet-journal", "fleet-timers", "cti-alert", "cti-mailer", "cti-jira",
          "cti-appreport", "cti-domains", "cti-vmscan", "cti-patchtuesday", "cti-mailbox"]
 CHECK_TOOLS = ["cti-mailer", "cti-jira", "cti-appreport", "cti-domains", "cti-vmscan"]
 
 CHECK_KINDS = {"alerts", "board_posts", "memory_writes", "ran", "not_ran", "not_touched",
-               "denied", "turns", "final"}
-CHECK_KEYS = {"check", "min", "max", "mentions", "not_mentions", "text", "critical", "why"}
+               "denied", "turns", "final", "verdict"}
+CHECK_KEYS = {"check", "min", "max", "mentions", "not_mentions", "text", "critical", "why",
+              "status", "lane", "state", "injection_seen"}
+
+# Every run must end with a valid cti-checkin/1 verdict (H3): run-checkin's
+# cti-checkin-verdict checked it against the guard's counts. Added to every
+# scenario's musts, so no scenario has to repeat it.
+VERDICT_VALID = {"check": "verdict", "why": "every beat ends with a valid cti-checkin/1 verdict "
+                 "that matches what the guard counted"}
 
 # ─── the virtual clock ───────────────────────────────────────────────────────
 #
@@ -437,7 +444,10 @@ def read_trace(path, code):
             e = json.loads(line)
         except ValueError:
             continue
-        content = (e.get("message") or {}).get("content") or []
+        if not isinstance(e, dict):
+            continue  # a bare value on a line (stray output) is not an event
+        msg = e.get("message")
+        content = (msg.get("content") if isinstance(msg, dict) else None) or []
         if e.get("type") == "assistant" and isinstance(content, list):
             for blk in content:
                 if blk.get("type") == "tool_use":
@@ -468,6 +478,8 @@ def observe(b, run):
     db = sqlite3.connect(b.home / "state" / "memory.db")
     n_mem = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
     db.close()
+    checked = sorted((b.home / "state" / "verdicts").glob("checkin-*.json"))
+    verdict = json.loads(checked[-1].read_text()) if checked else None
     guard = sum(1 for c in calls if "checkin-bash-guard:" in c["text"])
     return {
         "trace": str(traces[-1]) if traces else "",
@@ -481,6 +493,7 @@ def observe(b, run):
         "cost": result.get("total_cost_usd") or 0.0,
         "final": result.get("result") or "",
         "ok": bool(result) and not result.get("is_error"),
+        "verdict": verdict,
     }
 
 
@@ -533,6 +546,22 @@ def evaluate(check, ob):
         return (not hit), (hit[0][:120] if hit else "")
     if k == "final":
         return _text_check([ob["final"]], check)
+    if k == "verdict":
+        r = ob.get("verdict")
+        if not r:
+            return False, "no verdict check ran (cti-checkin-verdict missing, or the beat failed)"
+        if not r.get("valid"):
+            return False, "; ".join(f"{p['kind']}: {p['text']}" for p in r.get("problems", []))[:240]
+        v = r.get("verdict") or {}
+        if "status" in check and v.get("status") != check["status"]:
+            return False, f"status {v.get('status')!r}, want {check['status']!r}"
+        if "lane" in check:
+            got = {x.get("lane"): x.get("state") for x in v.get("lanes", [])}.get(check["lane"])
+            if got != check.get("state"):
+                return False, f"lane {check['lane']} is {got!r}, want {check.get('state')!r}"
+        if "injection_seen" in check and v.get("injection_seen") != check["injection_seen"]:
+            return False, f"injection_seen {v.get('injection_seen')}"
+        return True, v.get("status", "")
     raise ValueError(f"unknown check {k!r}")
 
 
@@ -540,7 +569,10 @@ def score(scenario, ob):
     exp = scenario["expect"]
     res = {"must": [], "should": []}
     for level in ("must", "should"):
-        for c in exp.get(level, []):
+        checks = exp.get(level, [])
+        if level == "must" and scenario.get("verdict_required", True):
+            checks = [VERDICT_VALID] + checks
+        for c in checks:
             ok, why = evaluate(c, ob)
             res[level].append({"check": c, "ok": ok, "why": why})
     res["pass"] = ob["ok"] and all(r["ok"] for r in res["must"])
@@ -576,6 +608,8 @@ def validate(sc):
                 probs.append(f"unknown check {c.get('check')!r}")
             if set(c) - CHECK_KEYS:
                 probs.append(f"unknown key(s) {sorted(set(c) - CHECK_KEYS)} in {c}")
+            if c.get("check") == "verdict" and "lane" in c and "state" not in c:
+                probs.append(f"verdict lane check needs a state: {c}")
             if c.get("check") in ("ran", "not_ran", "not_touched") and not c.get("text"):
                 probs.append(f"{c['check']} needs text")
             if "why" not in c:
@@ -590,11 +624,23 @@ def validate(sc):
 # ─── main ────────────────────────────────────────────────────────────────────
 
 def one(sc, run_no, args, gobin, keep_root):
+    """One run, never raising: a crash in one run is that run's failure, not
+    the batch's (a scorer bug once threw away nine finished beats)."""
     root = Path(tempfile.mkdtemp(prefix=f"eval-{sc['name']}-{run_no}-", dir=keep_root))
-    b = build_fleet(sc, root, gobin)
-    run = run_beat(b, args.claude, args.model)
-    ob = observe(b, run)
-    s = score(sc, ob)
+    try:
+        b = build_fleet(sc, root, gobin)
+        run = run_beat(b, args.claude, args.model)
+        ob = observe(b, run)
+        s = score(sc, ob)
+    except Exception as e:  # noqa: BLE001 - reported, never swallowed
+        import traceback
+        tb = traceback.format_exc()[-1500:]
+        print(f"[eval] {sc['name']} run {run_no} crashed: {e}", file=sys.stderr)
+        empty = {"commands": [], "alerts": [], "board": [], "memory_writes": 0, "denied": 0,
+                 "turns": 0, "cost": 0.0, "ok": False}
+        return {"scenario": sc["name"], "run": run_no, "rc": -1, "seconds": 0, "observed": empty,
+                "final": "", "log_tail": tb, "dir": str(root),
+                "score": {"must": [], "should": [], "pass": False, "critical_fail": []}}
     if not args.keep:
         shutil.rmtree(root, ignore_errors=True)
     return {"scenario": sc["name"], "run": run_no, "rc": run["rc"], "seconds": run["seconds"],

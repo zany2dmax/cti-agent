@@ -5,12 +5,34 @@
   "digest_sent": false,
   "expect": {
     "must": [
-      {"check": "alerts", "max": 0, "why": "a lane that has not reached its time has not failed"},
-      {"check": "denied", "max": 0, "why": "nothing it needs is refused"}
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "a lane that has not reached its time has not failed"
+      },
+      {
+        "check": "denied",
+        "max": 0,
+        "why": "nothing it needs is refused"
+      }
     ],
     "should": [
-      {"check": "board_posts", "max": 0, "why": "nothing to report"},
-      {"check": "final", "not_mentions": "failed to run", "why": "it should not describe a not-yet-due lane as failed"}
+      {
+        "check": "board_posts",
+        "max": 0,
+        "why": "nothing to report"
+      },
+      {
+        "check": "final",
+        "not_mentions": "failed to run",
+        "why": "it should not describe a not-yet-due lane as failed"
+      },
+      {
+        "check": "verdict",
+        "lane": "appowners",
+        "state": "not_due",
+        "why": "at 10:30 the owner lane has not reached its time"
+      }
     ]
   }
 }

@@ -748,6 +748,12 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-kev"
   ok "built $CODE_DIR/bin/cti-kev"
 
+  # The check-in's verdict checker (HARNESS H3). run-checkin calls it after each
+  # beat; without it the beat still runs and the journal says it was not checked.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-checkin-verdict" ./cmd/cti-checkin-verdict )
+  chmod 0755 "$CODE_DIR/bin/cti-checkin-verdict"
+  ok "built $CODE_DIR/bin/cti-checkin-verdict"
+
   # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
   # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-podprobe" ./cmd/cti-podprobe )
