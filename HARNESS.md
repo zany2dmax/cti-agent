@@ -148,7 +148,19 @@ raised, a `--check` line that contradicts the lane (the bug trace
 First full pass (Sonnet, one run each, after two rounds of fixing the
 fixtures, not the model): 10 of 10 musts, no critical failure, 9 to 16
 turns, about $0.13 a beat; the one miss was a should (a quiet beat skipped
-`fleet-timers`). Not yet: 3-run baselines, and Haiku or Opus.
+`fleet-timers`).
+
+**Baseline (2026-11-18, Sonnet, 3 runs each, 30 beats, $3.93):** 30 of 30
+musts, no critical failure; 8 to 16 turns, $0.12 to $0.15 a beat. Shoulds:
+quiet-day 5/6 (one beat skipped `fleet-timers`), resolved-escalation 2/3 (the
+fix was on the board but not in the final summary), and
+**check-contradicts-lane 1/3**: given the old `--check` line ("unset means it
+will not send") beside a journal showing the owner lane sent three reports,
+two of three beats repeated the line on the board, one as a question asking
+whether owners were meant to get no email. It never alerted, but it trusts a
+tool's settings line over the lane's own evidence - which is why `127d431`
+fixed the line rather than the beat. Compare any change to the check-in's
+instructions, grants or model against these numbers. Not yet: Haiku, Opus.
 
 The plan as written:
 
