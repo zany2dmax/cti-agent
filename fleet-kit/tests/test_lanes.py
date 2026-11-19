@@ -2523,11 +2523,16 @@ class TestFileShape(unittest.TestCase):
         """
         root = pathlib.Path(__file__).resolve().parents[2]
         installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
-        promise = installer.find("checked after config")
-        section = installer.find('bold "Outbound connectivity (from fleet.env)"')
+        # One connectivity section, after config (2026-11-19: it used to be
+        # split, the fixed hosts long before the ones fleet.env names).
+        self.assertEqual(installer.count('bold "Outbound connectivity'), 1,
+                         "every connectivity check belongs in the one section")
+        section = installer.find('bold "Outbound connectivity"')
         config = installer.find('if [ -f "$CONF_DIR/fleet.env" ]; then')
-        self.assertGreater(promise, 0)
-        self.assertGreater(section, config, "the fleet.env hosts must be checked after config")
+        self.assertGreater(section, config, "connectivity is checked after config")
+        self.assertGreater(installer.find("graph.microsoft.com", section), section,
+                           "the fixed hosts are checked in that section too")
+        self.assertGreater(installer.find('reach_cfg "Qualys pod"', section), section)
         self.assertNotIn('bash -c "</dev/tcp/$', installer,
                          "pass the host to bash as an argument, never inside the -c string")
         helpers = ""

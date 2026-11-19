@@ -278,27 +278,6 @@ case "$SEMODE" in
   *)          info "SELinux: $SEMODE" ;;
 esac
 
-# Outbound reachability. firewalld does not filter egress by default, so a
-# failure here is almost always an Azure NSG or a proxy.
-#
-# reach HOST [PORT] - one TCP connect, 6 seconds. The host is passed to bash as
-# an argument, never spliced into the -c string: the second set of hosts comes
-# from fleet.env, and this script runs as root.
-reach() {
-  if timeout 6 bash -c '</dev/tcp/$1/$2' _ "$1" "${2:-443}" 2>/dev/null; then
-    ok "$1:${2:-443}"
-  else
-    warn "$1:${2:-443} unreachable - check the Azure NSG or proxy"
-  fi
-}
-bold "Outbound connectivity"
-for host in login.microsoftonline.com graph.microsoft.com \
-            services.nvd.nist.gov api.first.org www.cisa.gov \
-            api.msrc.microsoft.com www.bleepingcomputer.com blog.qualys.com; do
-  reach "$host"
-done
-info "the hosts your fleet.env names (Qualys, Jira, ...) are checked after config"
-
 # ───────────────────────────────────────────────────── service account ───────
 bold "Service account: $FLEET_USER"
 if id "$FLEET_USER" >/dev/null 2>&1; then
@@ -635,12 +614,33 @@ else
 fi
 info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
 
-# ─────────────────────────────────── outbound, to the hosts fleet.env names ───
-# The fixed hosts were checked before config. These depend on settings: the
-# Qualys pod, Jira, and the optional services, each only when its setting is
-# filled in. A value that is not a plain host name (an edit gone wrong, or a
-# template placeholder) is reported and never dialled.
-bold "Outbound connectivity (from fleet.env)"
+# ────────────────────────────────────────────────────── outbound connectivity ───
+# Every connectivity check in one place, after config so the hosts fleet.env
+# names can be checked beside the fixed ones. firewalld does not filter egress
+# by default, so a failure here is almost always an Azure NSG or a proxy.
+#
+# reach HOST [PORT] - one TCP connect, 6 seconds. The host is passed to bash as
+# an argument, never spliced into the -c string: the second set of hosts comes
+# from fleet.env, and this script runs as root.
+reach() {
+  if timeout 6 bash -c '</dev/tcp/$1/$2' _ "$1" "${2:-443}" 2>/dev/null; then
+    ok "$1:${2:-443}"
+  else
+    warn "$1:${2:-443} unreachable - check the Azure NSG or proxy"
+  fi
+}
+bold "Outbound connectivity"
+# The fixed hosts every install needs: Microsoft (mail), NVD, FIRST (EPSS),
+# CISA (KEV), MSRC and the two Patch Tuesday write-ups.
+for host in login.microsoftonline.com graph.microsoft.com \
+            services.nvd.nist.gov api.first.org www.cisa.gov \
+            api.msrc.microsoft.com www.bleepingcomputer.com blog.qualys.com; do
+  reach "$host"
+done
+# Then the hosts that depend on settings: the Qualys pod, Jira, and the
+# optional services, each only when its setting is filled in. A value that is
+# not a plain host name (an edit gone wrong, or a template placeholder) is
+# reported and never dialled.
 # urlhost URL - the host part of https://host[:port]/path, or empty.
 urlhost() {
   local h="${1#*://}"
@@ -680,13 +680,13 @@ if [ -r "$CONF_DIR/fleet.env" ]; then
   if [ -n "$(cfgval POD_CLUSTER_ID)" ]; then
     reach_cfg "Proofpoint on Demand log" logstream.proofpoint.com; checked=1
   fi
-  if [ -n "$(cfgval ANTHROPIC_API_KEY)$(cfgval CLAUDE_CODE_OAUTH_TOKEN)" ]; then
+  if [ -n "$(cfgval ANTHROPIC_API_KEY)$(cfgval ANTHROPIC_AUTH_TOKEN)$(cfgval CLAUDE_CODE_OAUTH_TOKEN)" ]; then
     reach_cfg "Claude (check-in)" api.anthropic.com; checked=1
   fi
-  [ "$checked" = 1 ] || info "nothing in fleet.env names a host to check yet"
+  [ "$checked" = 1 ] || info "nothing in fleet.env names a further host to check yet"
   info "port 25 for the domains lane's SMTP probe: RUNBOOK section 4b"
 else
-  info "no readable $CONF_DIR/fleet.env - skipped"
+  info "no readable $CONF_DIR/fleet.env - the hosts it names were not checked"
 fi
 
 # ────────────────────────────────────────────────────────── the Go agent ─────
@@ -779,8 +779,8 @@ if [ "$MODE" != dryrun ]; then
   ok "built $CODE_DIR/bin/cti-triage"
 
   # Monthly Patch Tuesday synopsis. Reads two public wrap-ups and correlates
-  # against Qualys, so it needs outbound 443 to two more hosts - checked in
-  # the preflight above.
+  # against Qualys, so it needs outbound 443 to two more hosts - checked under
+  # Outbound connectivity above.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-patchtuesday" ./cmd/cti-patchtuesday )
   chmod 0755 "$CODE_DIR/bin/cti-patchtuesday"
   ok "built $CODE_DIR/bin/cti-patchtuesday"

@@ -171,6 +171,13 @@ journal says why.
 
 ### Changed
 
+- **The installer checks connectivity in one place.** `cti-agent-update` (and
+  `install-fedora.sh`) used to test the fixed hosts right after the preflight
+  and the hosts `fleet.env` names much later, after config. Both are now one
+  "Outbound connectivity" section after config: the fixed hosts first, then
+  Qualys, Jira and the optional services. The Claude check also counts
+  `ANTHROPIC_AUTH_TOKEN` as a credential.
+
 - **One copy of the model-call rules for every lane (HARNESS H4).**
   `share/model-lane.sh` holds what `run-checkin` and `run-supplier` both need
   around a `claude` call - finding and vetting the binary, the model name, the
