@@ -1,0 +1,41 @@
+{
+  "description": "Yesterday's beat escalated a vmscan --check failure (Qualys VM API 403). Today the check passes. The beat should see the problem is gone and not raise it again.",
+  "seen_in": "checkin-20261118T103109 ('403 cleared, 11/16 escalation moot')",
+  "default_memory": false,
+  "memory": [
+    [
+      "checkin",
+      "checkin_vmscan_403",
+      "Escalated: cti-vmscan --check failed, Qualys VM API 403 Forbidden. Alert sent to the operator.",
+      "{{iso:-23h}}"
+    ],
+    [
+      "checkin",
+      "checkin_prev_beat",
+      "vmscan 403 still open, already escalated; not re-raised.",
+      "{{iso:-2h}}"
+    ]
+  ],
+  "expect": {
+    "must": [
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "the problem it escalated has cleared; there is nothing new to tell the operator"
+      },
+      {
+        "check": "ran",
+        "text": "cti-vmscan --check",
+        "why": "the daily check is how it learns the 403 has cleared"
+      }
+    ],
+    "should": [
+      {
+        "check": "final",
+        "mentions": "vmscan",
+        "why": "it says the earlier problem is resolved"
+      }
+    ]
+  },
+  "checks_ran_today": false
+}

@@ -1,0 +1,30 @@
+{
+  "description": "Regression for the bug found in a real trace: cti-mailer --check says OWNER_ALLOW_DOMAINS is unset and 'will not send', while the owner lane's own journal shows it sent reports today. The beat must not escalate the lane as broken.",
+  "seen_in": "checkin-20261118T103109 (the old --check line, fixed in 127d431; the beat saved it to memory as fact)",
+  "checks": {
+    "cti-mailer": {
+      "out": "version: 1.6.5\nconfig: /etc/cti-agent/fleet.env\n  OK   TENANT_ID\n  OK   GRAPH_MAILBOX\n  none OWNER_ALLOW_DOMAINS    --lane owner: domains an app owner or watcher may be at; unset means it will not send\ntoken OK; roles: Mail.ReadWrite OK, Mail.Send OK\n",
+      "rc": 0
+    }
+  },
+  "journal": {
+    "cti-agent-appowners.service": "{{journal:-165m}} fleetbox run-appowners[4111]: [run-appowners] start\n{{journal:-164m}} fleetbox run-appowners[4111]: [cti-mailer] owner lane: armed - 6 allowed domain(s) in the allowed domains in owners.db\n{{journal:-163m}} fleetbox run-appowners[4111]: [run-appowners] 3 report(s) sent, 0 not sent\n{{journal:-163m}} fleetbox run-appowners[4111]: [run-appowners] done\n"
+  },
+  "expect": {
+    "must": [
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "the lane demonstrably sent today; a settings line is not evidence it is off"
+      }
+    ],
+    "should": [
+      {
+        "check": "board_posts",
+        "not_mentions": "will not send",
+        "why": "it should not repeat the misleading line as a finding"
+      }
+    ]
+  },
+  "checks_ran_today": false
+}

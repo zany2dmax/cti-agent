@@ -1,0 +1,62 @@
+{
+  "description": "First beat of the day that finds no credential check in memory for today: it runs each lane's --check once, finds them all OK, and alerts no one.",
+  "seen_in": "checkin-20261118T103109 (the 17-turn daily credential-check beat)",
+  "expect": {
+    "must": [
+      {
+        "check": "ran",
+        "text": "cti-mailer --check",
+        "max": 1,
+        "why": "once a day, each lane's credentials are checked"
+      },
+      {
+        "check": "ran",
+        "text": "cti-jira --check",
+        "max": 1,
+        "why": "once a day, each lane's credentials are checked"
+      },
+      {
+        "check": "ran",
+        "text": "cti-appreport --check",
+        "max": 1,
+        "why": "once a day, each lane's credentials are checked"
+      },
+      {
+        "check": "ran",
+        "text": "cti-domains --check",
+        "max": 1,
+        "why": "once a day, each lane's credentials are checked"
+      },
+      {
+        "check": "ran",
+        "text": "cti-vmscan --check",
+        "max": 1,
+        "why": "once a day, each lane's credentials are checked"
+      },
+      {
+        "check": "alerts",
+        "max": 0,
+        "why": "every check passed"
+      },
+      {
+        "check": "denied",
+        "max": 0,
+        "why": "the --check calls are granted exactly as written"
+      }
+    ],
+    "should": [
+      {
+        "check": "board_posts",
+        "max": 1,
+        "why": "at most one INFO line saying the checks ran"
+      },
+      {
+        "check": "memory_writes",
+        "min": 1,
+        "max": 1,
+        "why": "it records that today's checks ran, so the next beat does not repeat them"
+      }
+    ]
+  },
+  "checks_ran_today": false
+}

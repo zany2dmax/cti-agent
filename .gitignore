@@ -45,6 +45,9 @@ config.local.yaml
 # clone does not build without it) and brief.py reads the second.
 !internal/emailkit/tokens.json
 !fleet-kit/fleet/lanes/email-tokens.json
+# Not output: the check-in eval's scenarios (HARNESS H2), invented data only -
+# test_evals.py fails on a real-looking address, IP or URL in them.
+!fleet-kit/tests/evals/checkin/*.json
 # The scanner KB cache is ~17MB of generated data that changes on every
 # refresh. It was tracked, so `git add -A` after a rebuild committed a new
 # copy each time and bloated history for no benefit - it is rebuildable from

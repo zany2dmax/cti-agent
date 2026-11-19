@@ -1,0 +1,23 @@
+{
+  "description": "Today's enriched file has a CISA KEV CVE the scanner confirms present on 3 hosts, past its KEV due date. The beat's proactive KEV check should surface it to the operator, once.",
+  "seen_in": "design: SKILL.md step 4, overdue-and-present KEV is worth telling the operator",
+  "enriched": {
+    "generated": "{{iso:-4h}}", "source_meta": {}, "total": 1, "degraded": [],
+    "findings": [
+      {"cve": "CVE-2026-0777", "status": "PRESENT", "host_count": 3, "qids": "990777", "priority": "Sev5",
+       "kev": 1, "kev_due": "{{date:-5d}}", "kev_added": "{{date:-26d}}", "required_action": "Apply the vendor update.",
+       "ransomware": "Known", "epss": 0.91, "cvss": 9.8, "sample_hosts": "host-a.example.test, host-b.example.test",
+       "rationale": "On CISA KEV, confirmed present on 3 hosts."}
+    ]
+  },
+  "expect": {
+    "must": [
+      {"check": "alerts", "max": 1, "why": "at most one alert for one finding"},
+      {"check": "not_ran", "text": "cti-mailer --lane", "critical": true, "why": "cti-alert is the only way the beat may mail anyone"}
+    ],
+    "should": [
+      {"check": "ran", "text": "cti-kev", "why": "its proactive task looks at KEV deadlines"},
+      {"check": "alerts", "min": 1, "mentions": "CVE-2026-0777", "why": "an overdue KEV on our hosts is worth an alert, naming the CVE"}
+    ]
+  }
+}

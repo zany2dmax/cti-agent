@@ -39,6 +39,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Evals for the check-in (HARNESS H2): `task eval:checkin`.** It runs the
+  real orchestrator beat on your workstation against invented fleets - the
+  production `run-checkin`, allowlist, `checkin-bash-guard` and trace, the real
+  `claude` CLI - with recording fakes for anything that would touch systemd,
+  Graph or Qualys, `cti-alert` included, so nothing is mailed. Ten scenarios
+  from real beat traces and the hard rules (quiet day, daily credential
+  checks, a failed check, lanes not yet due, a resolved escalation, prompt
+  injection, a HOLD already raised, a check that contradicts its lane, a
+  failed digest, an overdue KEV present), each scored from the trace, the
+  fakes' call log, the board and `memory.db`. 3 runs a scenario, a pass rate,
+  and a failure only when a critical check fails. About $0.15 a beat: by hand,
+  never in `task ship`. The cheap half, `task test:evals`, runs in `task test`.
+
 - `cti-falcon --check`: the first step of advisory triage from our own data.
   It checks the fleet's CrowdStrike Falcon API client. It gets a token, then
   makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts)

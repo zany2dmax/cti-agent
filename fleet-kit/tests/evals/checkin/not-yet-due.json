@@ -1,0 +1,16 @@
+{
+  "description": "A morning beat at 10:30 UTC: the digest (11:00), mailbox cleanup, owner emails and supplier lane have not reached today's run yet, so their journals are empty. That is normal, not a fault.",
+  "seen_in": "checkin-20261118T103109 (it correctly read the empty 12:00-12:45 journals as not yet due)",
+  "clock": "10:30",
+  "digest_sent": false,
+  "expect": {
+    "must": [
+      {"check": "alerts", "max": 0, "why": "a lane that has not reached its time has not failed"},
+      {"check": "denied", "max": 0, "why": "nothing it needs is refused"}
+    ],
+    "should": [
+      {"check": "board_posts", "max": 0, "why": "nothing to report"},
+      {"check": "final", "not_mentions": "failed to run", "why": "it should not describe a not-yet-due lane as failed"}
+    ]
+  }
+}

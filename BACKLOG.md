@@ -67,16 +67,17 @@ is real, not before. Finished work moves out of this file into
     Qualys-only today
 - **Agent harness** (the reasoning, what already exists and the order, is in
   [HARNESS.md](HARNESS.md); each item ships on its own and feeds the next):
-  - H2. Eval harness: 5 to 10 check-in scenarios with fake `$FLEET_HOME`
-    fixtures (quiet day, silent lane, Sev5/KEV, prompt injection in an
-    advisory, existing HOLD), behavior checked from the trace, run by hand
-    with `task eval` (3 runs each, pass rate), never in `task ship`. Scores
-    from the beat traces (H1, built: `fleet-trace`)
+  - H2. Eval harness: **built** (`task eval:checkin`, 10 scenarios from
+    real traces and the hard rules; see HARNESS.md). Left: a 3-run baseline
+    on Sonnet, a Haiku comparison before any move to a cheaper model, and a
+    scenario per PrimeSec vector that touched the orchestrator
   - H3. Structured check-in verdict: the skill ends in one `cti-checkin/1`
     JSON object, verified in Go the way `internal/triage` verifies
     `cti-triage/1`; invalid or missing is a board ERROR
-  - H4. Shared model-lane runner pulled out of `run-checkin`, only when a
-    second model lane (triage agent, supplier-request triage) is real
+  - H4. Shared model-lane runner pulled out of `run-checkin`. The condition
+    is met: `run-supplier` is a second model lane with its own copy of the
+    model-call setup. Do it with `task eval:checkin` and `task eval:supplier`
+    as the before-and-after check
   - H5. Optional learning exercise: reproduce one beat with the Claude Agent
     SDK outside production. Not a migration
 - AppSec remediation is tracked by email, not Jira (decided 2026-11-07). The

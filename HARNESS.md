@@ -1,6 +1,7 @@
 # The agent harness: what the fleet has, and what it is missing
 
-> **STATUS: DESIGN, H1 BUILT.** H1 (beat traces) is built and unreleased; see
+> **STATUS: H1 AND H2 BUILT.** H1 (beat traces) shipped in 1.6.1; H2 (evals
+> for the check-in, `task eval:checkin`) is built and unreleased; see
 > [CHANGELOG.md](CHANGELOG.md). The other work items are in
 > [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
 > argued about before any code depends on it.
@@ -98,7 +99,7 @@ copying it would mean two copies of the controls drifting apart.
 
 Each item is small enough to ship on its own, and each feeds the next.
 
-### H1. Beat traces (built, unreleased)
+### H1. Beat traces (built, shipped in 1.6.1)
 
 What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
 `list`, `prune`) and the trace path in `run-checkin`, with
@@ -119,7 +120,37 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
   advisory text. Same handling as reports: 0600, never mailed, never
   committed.
 
-### H2. Eval harness for the check-in
+### H2. Eval harness for the check-in (built, unreleased)
+
+What was built (2026-11-18): `fleet-kit/tests/evals/checkin_eval.py` and
+`task eval:checkin`. Each scenario is one file, `evals/checkin/<name>.json`:
+the fleet (board lines, memory rows, journal output, timers, what each
+`--check` prints, an enriched file, reports) and the checks. A run builds a
+throwaway fleet with the **real** `run-checkin`, guard, `fleet-trace`,
+`fleet-board`, `fleet-db`, `cti-budget` and `cti-kev`, recording fakes for
+`fleet-journal`, `fleet-timers`, `cti-alert` and the `--check` tools, and the
+orchestrator's own `CLAUDE.md` and skills with `/opt/cti-agent/bin` rewritten
+to that fleet; then it runs `run-checkin --for-real` with the real CLI. Stamps
+are generated from a virtual clock (today's date, 15:00 UTC unless the
+scenario says otherwise), so a scenario reads the same whenever it runs.
+Checks: `alerts`, `board_posts`, `memory_writes` (counts and wording),
+`ran` / `not_ran` (what was executed), `not_touched` (text in any tool call),
+`denied`, `turns`, `final`. `must` decides the pass rate, `should` is reported,
+and a `critical` must is the only thing that fails the run. The cheap half
+(scenarios valid, invented data only, fleets build, scorer reads a trace) is
+`task test:evals`, in `task test`.
+
+The first 10 scenarios come from the two real traces of 18 November and the
+hard rules: quiet day, daily credential checks, a check that fails, lanes not
+yet due, an escalation since resolved, prompt injection, a HOLD already
+raised, a `--check` line that contradicts the lane (the bug trace
+`checkin-20261118T103109` found), a failed digest and an overdue KEV present.
+First full pass (Sonnet, one run each, after two rounds of fixing the
+fixtures, not the model): 10 of 10 musts, no critical failure, 9 to 16
+turns, about $0.13 a beat; the one miss was a should (a quiet beat skipped
+`fleet-timers`). Not yet: 3-run baselines, and Haiku or Opus.
+
+The plan as written:
 
 - A directory of scenarios, `fleet-kit/tests/evals/<name>/`, each a fake
   `$FLEET_HOME` (board, reports, journal fixtures, all invented data) and an

@@ -771,6 +771,21 @@ work, raise them in `/etc/cti-agent/fleet.env`: `CHECKIN_MAX_BASH` (20),
 `CHECKIN_MAX_DB_WRITES` (6), `CHECKIN_MAX_BOARD_GROWTH` (8). Counter files
 older than 7 days are deleted by `run-checkin`.
 
+**Testing the check-in's judgement.** `task eval:checkin` runs the real beat on
+your workstation against invented fleets (`fleet-kit/tests/evals/checkin/*.json`):
+the production `run-checkin`, its allowlist, `checkin-bash-guard` and the trace,
+the real `claude` CLI and your own login, with recording fakes for anything that
+would touch systemd, Graph or Qualys - `cti-alert` included, so nothing is
+mailed. Each scenario says what the beat must and should do (alert once naming
+the lane, stay quiet, never run a lane, never act on injected text), checked
+from the trace, the fakes' call log, the board and `memory.db`. Each runs 3
+times, so the result is a pass rate; it fails only when a check marked
+critical failed. About $0.15 a beat, so run it by hand before changing the
+orchestrator's `CLAUDE.md`, its skill, its grants or `CHECKIN_MODEL`, never in
+`task ship`. One scenario, once: `task eval:checkin -- --only injection --runs
+1`. `--check` builds every scenario's fleet and runs no beat. A real trace that
+surprises you (`fleet-trace show`) is a new scenario.
+
 ## 11b. Switching the mailer
 
 `mailer.py` was ported to `cmd/cti-mailer`, and **since 1.6.6 every runner

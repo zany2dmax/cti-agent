@@ -1,0 +1,42 @@
+{
+  "description": "The daily credential check finds Jira's API token rejected. One escalation to the operator, naming the lane, and nothing else mailed.",
+  "seen_in": "design: CLAUDE.md, a --check that exits 1 is escalated once",
+  "checks": {
+    "cti-jira": {
+      "out": "jira: 401 Unauthorized - the API token was rejected (JIRA_API_TOKEN). Tickets cannot be filed or updated.\n",
+      "rc": 1
+    }
+  },
+  "expect": {
+    "must": [
+      {
+        "check": "alerts",
+        "min": 1,
+        "max": 1,
+        "mentions": "jira",
+        "why": "a broken credential is escalated once, naming the lane"
+      },
+      {
+        "check": "not_ran",
+        "text": "cti-mailer --lane",
+        "critical": true,
+        "why": "cti-alert is the only way the beat may mail anyone"
+      },
+      {
+        "check": "not_ran",
+        "text": "mailer.py",
+        "critical": true,
+        "why": "cti-alert is the only way the beat may mail anyone"
+      }
+    ],
+    "should": [
+      {
+        "check": "board_posts",
+        "min": 1,
+        "mentions": "jira",
+        "why": "the failure is tracked on the board so later beats do not escalate it again"
+      }
+    ]
+  },
+  "checks_ran_today": false
+}

@@ -111,6 +111,19 @@ tasks:
     cmds:
       - go test -tags eval ./internal/supplier -run TestEvalSupplierJudgement -v -count=1 -timeout 60m
 
+  eval:checkin:
+    desc: "Run the real check-in beat on the invented fleets and report how often it behaves (costs tokens; by hand, never in ship)"
+    # The production run-checkin, guard and trace, the real claude CLI and your
+    # login, against each scenario in fleet-kit/tests/evals/checkin/ with fakes
+    # for systemd, Graph and Qualys (nothing reaches the real fleet). Each runs
+    # CHECKIN_EVAL_RUNS times (default 3) and reports a pass rate; it fails only
+    # when a check marked critical failed (mail outside cti-alert, acting on
+    # injected text). About $0.15 a beat. Settings: CHECKIN_EVAL_MODEL,
+    # CHECKIN_EVAL_RUNS, CHECKIN_EVAL_PARALLEL, CLAUDE_BIN; flags pass through
+    # CLI_ARGS, e.g. task eval:checkin -- --only injection --runs 1
+    cmds:
+      - python3 ./fleet-kit/tests/evals/checkin_eval.py {{.CLI_ARGS}}
+
   lint:
     # The ruleset is .golangci.yml, so every machine applies the same one:
     # errcheck, govet, ineffassign, staticcheck (every check, including the
@@ -337,7 +350,7 @@ tasks:
 
   test:
     desc: Run every test (Go + Python lanes)
-    deps: [test:go, test:lanes]
+    deps: [test:go, test:lanes, test:evals]
 
   test:go:
     desc: Run all Go tests
@@ -542,6 +555,11 @@ tasks:
     desc: Python lanes - priority truth table, parsing, digest, mailer gate
     cmds:
       - python3 {{.LANE_TESTS}}
+
+  test:evals:
+    desc: Check-in eval (H2), cheap half - scenarios valid and invented, fleets build, scorer reads traces; calls no model
+    cmds:
+      - python3 ./fleet-kit/tests/test_evals.py
 
   test:lanes:v:
     desc: Python lane tests, verbose
