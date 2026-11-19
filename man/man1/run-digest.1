@@ -111,9 +111,11 @@ on a real run, the same without
 on a dry run. Any failure, including the binary being absent, costs tickets
 and nothing else. The weekly never runs it.
 .TP
-.B 2c. Advisory triage (daily, TRIAGE_ENABLED, non-fatal)
-With
+.B 2c. Advisory triage (daily, TRIAGE_ENABLED=1, non-fatal)
+Only with
 .B TRIAGE_ENABLED=1
+(0 or 1; anything but 1 is off, and the log says
+.BR "triage: off" )
 ingest is run with
 .B \-\-advisories\-out
 and saves every message with no CVE (auto-replies aside) as
@@ -291,6 +293,13 @@ Default:\~\fI$FLEET_HOME/fleet.env\fR; the units set
 Preserved across the source of
 .I fleet.env
 for the lanes; not read by the runner itself.
+.TP
+.B TRIAGE_ENABLED
+0 or 1. 1 runs advisory triage (step 2c) in the daily; 0 or unset does not.
+Any other value is off, and the log says it is not 0 or 1.
+.TP
+.B TRIAGE_MAX_PER_RUN
+How many advisories step 2c triages. Default 10, at most 50.
 .TP
 .B GRAPH_MAILBOX
 The CTI mailbox (section 1). The daily names it in its log, and stops with an

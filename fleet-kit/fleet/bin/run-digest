@@ -153,7 +153,7 @@ if [ -n "$DRY" ]; then
 fi
 
 # ── ADVISORY TRIAGE (TRIAGE_ENABLED) ────────────────────────────────────────
-# Daily only, and off unless TRIAGE_ENABLED is 1/yes/true/on. Ingest saves
+# Daily only. TRIAGE_ENABLED is 0 or 1; only 1 turns it on. Ingest saves
 # every message with no CVE beside the enriched file; step 2c triages them
 # and leaves the report there too, which is where brief.py looks. Both names
 # follow ENRICHED, so a dry run's land in its own directory. Today's old
@@ -161,7 +161,7 @@ fi
 # digest that went out keeps its record): a rerun must never render a
 # report from an earlier read.
 TRIAGE_ON=""
-case "${TRIAGE_ENABLED:-}" in 1|yes|true|on) [ "$KIND" = daily ] && TRIAGE_ON=1 ;; esac
+[ "${TRIAGE_ENABLED:-}" = 1 ] && [ "$KIND" = daily ] && TRIAGE_ON=1
 ADV_IN="${ENRICHED%.json}-advisory-input.json"
 ADV_OUT="${ENRICHED%.json}-advisories.json"
 
@@ -340,6 +340,13 @@ fi
 # costs the FLEET ADVISORIES section, never the CVE digest. cti-triage
 # stops starting advisories after --batch-timeout and still writes its
 # report; `timeout` is the backstop, inside the unit's hour.
+# Said either way, so a dry run shows whether triage was on.
+if [ "$KIND" = daily ] && [ -z "$TRIAGE_ON" ]; then
+  case "${TRIAGE_ENABLED:-0}" in
+    0) say "triage: off (TRIAGE_ENABLED=0 or unset) - FLEET ADVISORIES is not in this digest" ;;
+    *) say "triage: off - TRIAGE_ENABLED='${TRIAGE_ENABLED}' is not 0 or 1; set it to 1 to turn triage on" ;;
+  esac
+fi
 if [ -n "$TRIAGE_ON" ]; then
   if [ ! -x "$TRIAGE" ]; then
     say "triage: $TRIAGE not installed - skipped"

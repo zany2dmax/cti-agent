@@ -729,7 +729,7 @@ ADV_NOTE = ("Judged from what our own tools hold. Never a statement that we are 
 
 
 def triage_enabled():
-    return (os.environ.get("TRIAGE_ENABLED") or "").strip().lower() in ("1", "yes", "true", "on")
+    return (os.environ.get("TRIAGE_ENABLED") or "").strip() == "1"
 
 
 def load_advisories(enriched_path):

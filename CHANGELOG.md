@@ -58,7 +58,9 @@ journal says why. Advisory triage in the digest stays off until you set
   possible with reason, facts and checks, one line for the rest, and any not
   triaged with why, then the day's model cost. Nothing in it is a link. Any
   failure costs the section, never the digest; the weekly never triages. A
-  dry run triages too, in its own directory, and pays for the same calls.
+  dry run triages too, in its own directory, and pays for the same calls. `TRIAGE_ENABLED`
+  is 0 or 1 (only 1 turns it on), and the daily's log always says
+  `triage: off` or what triage did.
 
 - **Advisory triage phase 4: the judge (`cti-triage --judge`).** After the
   reader and the Falcon lookups, a second no-tools model sees the fact sheet

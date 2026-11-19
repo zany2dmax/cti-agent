@@ -133,6 +133,8 @@ None of these send mail, file tickets or advance a baseline.
 
 ```bash
 sudo cti-agent run-digest daily --dry-run
+#   advisory triage (FLEET ADVISORIES): TRIAGE_ENABLED=1 in fleet.env turns it on, 0 turns it off;
+#   the log says "triage: off" or "triage: reader, Falcon and judge ...". Two model calls per advisory, dry run too.
 sudo cti-agent run-digest weekly --dry-run
 sudo cti-agent run-appscan --dry-run
 sudo cti-agent run-domains --dry-run
@@ -323,6 +325,8 @@ sudo cti-agent cti-falcon --new-apps 1         # apps first seen today that the 
 sudo cti-agent cti-falcon --fields             # field names of one Discover record, no values
 sudo cti-agent cti-triage --show-input --message adv.txt   # what the reader would see; no model call
 sudo cti-agent cti-triage --facts --message adv.txt        # reader + Falcon fact sheet; prints the model's cost
+sudo cti-agent cti-triage --judge --message adv.txt        # reader, Falcon, then the judge: checked verdicts, sightings first
+sudo cti-agent cti-triage --batch /var/lib/cti-agent/state/enriched-$(date +%F)-advisory-input.json --out /tmp/adv.json   # rerun the digest's triage
 sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500   # PoD Log API counts, read only
 ```
 

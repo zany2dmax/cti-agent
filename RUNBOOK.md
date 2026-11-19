@@ -2869,6 +2869,10 @@ TRIAGE_ENABLED=1
 TRIAGE_MAX_PER_RUN=10
 ```
 
+`TRIAGE_ENABLED` is `0` or `1`. Only `1` turns it on. `0` or unset is off,
+and the digest's log says `triage: off`. Any other value is also off, and the
+log says it isn't 0 or 1.
+
 Then preview before the timer sends it:
 
 ```bash
@@ -2901,7 +2905,7 @@ is kept. To rerun triage alone on it:
 sudo cti-agent cti-triage --batch /var/lib/cti-agent/state/enriched-$(date +%F)-advisory-input.json --out /tmp/adv.json
 ```
 
-To turn it off, remove `TRIAGE_ENABLED` (or set it to 0). Nothing else
+To turn it off, remove `TRIAGE_ENABLED` or set it to `0`. Nothing else
 changes.
 
 ---

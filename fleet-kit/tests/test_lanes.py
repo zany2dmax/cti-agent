@@ -4940,6 +4940,9 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertFalse([c for c in calls if c.startswith("cti-triage")], calls)
         self.assertFalse([c for c in calls if "--advisories-out" in c], calls)
+        self.assertIn("triage: off", r.stdout)
+        r, _ = self.run_lane("run-digest", "daily", "--for-real", env="TRIAGE_ENABLED=yes\n")
+        self.assertIn("is not 0 or 1", r.stdout)
 
     def test_digest_triage_runs_beside_the_enriched_file(self):
         day = datetime.date.today().isoformat()
@@ -4965,7 +4968,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
     def test_digest_survives_a_failed_triage(self):
         self.triage_stubs(triage_exit=1)
         day = datetime.date.today().isoformat()
-        r, calls = self.run_lane("run-digest", "daily", "--for-real", env="TRIAGE_ENABLED=yes\n")
+        r, calls = self.run_lane("run-digest", "daily", "--for-real", env="TRIAGE_ENABLED=1\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("cti-triage failed", r.stdout)
         self.assertTrue([c for c in calls if c.startswith("cti-mailer")], "the digest was not sent")
