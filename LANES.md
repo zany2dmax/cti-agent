@@ -5,9 +5,10 @@ read the threat-intelligence mail, chase the tickets, write up Patch Tuesday,
 check the web applications and the domains, confirm the vulnerability scans ran
 and that they cover every network we have, keep the mailbox tidy. Each checks
 what it finds against our own systems and sends each team only the email it
-needs to act on. **Two parts use AI, and no report's delivery depends on it** —
+needs to act on. **Three parts use AI, and no report's delivery depends on it** —
 if the AI is down, every report still goes out on time (the supplier digest then
-marks every request Unsure).
+marks every request Unsure, and the Daily Brief goes out without its advisory
+triage section).
 
 | Lane | What it does | When | AI? | Who gets it |
 |---|---|---|:---:|---|
@@ -24,7 +25,7 @@ marks every request Unsure).
 | **Mailbox cleanup** | Files processed advisories, the scan results the reports used (two days after the report went out) and the supplier requests the supplier lane has dealt with (judged not critical, or given a Kanban item), including on days with no new CVEs. Moves auto-replies and Qualys's companion notices ("scheduled to start", "Scan Completed") to Deleted Items. Deletes the mail filter's quarantine digest too, unless it lists held mail from a sender the fleet reads: then it keeps the digest seven days and alerts the operator, and never follows its Release links. Leaves everything else — reported phishing, people writing to the team, scan notices nothing uses — for a human | Daily, 07:00 | N | — |
 | **Failure alert** | Any job that fails emails the operator, so a quiet inbox means a quiet day rather than a broken job | Whenever a job fails | N | Operator |
 | **Analyst on duty** | Wakes up, reads what every job did, and chases what nobody resolved: a critical finding still open after a week, a vulnerability the scanner can't check, a schedule that was switched off. Asks the operator when it needs a decision. The operator picks its model (`CHECKIN_MODEL`), it hands anything needing judgement or a person back to the operator, and each run is recorded in a trace the operator can read (`fleet-trace`) | Every 2 hours | **Y** | Operator only |
-| *Advisory triage* *(not live yet)* | Reads advisories that name no CVE and judges whether they concern us, against a profile of what we run. Every claim it makes is checked against the source before anyone sees it | — | Y | Would feed the brief |
+| **Advisory triage** *(part of the daily)* | Reads the day's threat-intel mail, whoever sent it (a colleague's forward counts), and answers "does this affect us?" for the advisories the CVE report can't: items with no CVE. A reader model lists each advisory's vendors, products, versions and attack techniques, and code removes every claim the advisory doesn't support. The rest are looked up in CrowdStrike Falcon: installed software and roughly how many hosts are below the fixed version, hosts that saw the advisory's indicators, and alerts naming its techniques in the last 30 days. A second model sees only those facts, never the advisory, and says likely, possible, unlikely or unknown, citing the facts it used; code checks every verdict against those facts and corrects one they don't support (a "likely" with no affected host becomes "possible"; software installed and not known to be fixed is never below "possible"). Any host that saw an indicator is listed first, from code, whatever the model says. Results are the Daily Brief's FLEET ADVISORIES section, with the day's model cost. Supplier requests, W-9 and bank threads and auto-replies never reach a model; a failure costs the section, never the brief. On with `TRIAGE_ENABLED=1` | Daily, 06:00 | **Y** | Security, Infrastructure and M&A teams, in the Daily Brief |
 
 Times are the server's local time.
 
@@ -45,6 +46,13 @@ object. Code then checks every quote against the request and can only move an
 answer toward Unsure; a missing, failed or unusable answer is Unsure too. So a
 model that is down or fooled makes more work for a person, never a supplier
 waved through.
+
+Advisory triage uses two more sessions set up the same way, with no tools. The
+reader sees only the advisory; the judge sees only the numbered facts the
+Falcon lookups returned, never the advisory, so text planted in an advisory
+cannot steer the verdict. Code removes anything the reader made up, drops any
+fact the judge invented, and reports hosts that saw an indicator itself, so a
+model that is down or fooled can cost the section but cannot hide a sighting.
 
 ## What it never does
 
