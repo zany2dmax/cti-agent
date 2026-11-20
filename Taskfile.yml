@@ -349,8 +349,8 @@ tasks:
 # ── tests ────────────────────────────────────────────────────────────────────
 
   test:
-    desc: Run every test (Go + Python lanes)
-    deps: [test:go, test:lanes, test:evals]
+    desc: Run every test (Go + every Python test file)
+    deps: [test:go, test:py]
 
   test:go:
     desc: Run all Go tests
@@ -563,6 +563,16 @@ tasks:
     cmds:
       - go run ./cmd/cti-budget status
 
+  test:py:
+    desc: Every Python test file in fleet-kit/tests (lanes, evals, owners, manifest, SBOM, docs, hygiene)
+    # Discovered, not listed. `test` used to name test_lanes.py and
+    # test_evals.py, so test_owners, test_manifest, test_sbom, test_update and
+    # test_repo_hygiene ran in no task at all, and a new test file would have
+    # joined them. The same lesson as test:syntax: a list that must be edited
+    # by hand whenever a file is added will be wrong eventually.
+    cmds:
+      - python3 -m unittest discover -s fleet-kit/tests
+
   test:lanes:
     desc: Python lanes - priority truth table, parsing, digest, mailer gate
     cmds:
@@ -632,7 +642,7 @@ tasks:
       - task: fmt:check
       - task: vet
       - task: test:go
-      - task: test:lanes
+      - task: test:py
       - task: test:syntax
       - task: lint
       - task: scan

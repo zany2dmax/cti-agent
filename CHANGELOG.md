@@ -79,6 +79,22 @@ scanner's own address).
   Scans that never produce a results notice (Cancos' come from the team
   mailbox and are not read; some scans have no notification set) are unchanged.
 
+- **A test keeps ARCHITECTURE.md in step with the code (`test_doc_drift.py`).**
+  The page said "the eleven binaries" over a table of thirteen, with eighteen in
+  `cmd/`, and its layout was missing a dozen packages and four fleet scripts.
+  The test reads `cmd/`, `internal/` and `fleet-kit/fleet/bin` and fails when a
+  binary, package or script is missing from the page, when the page names one
+  that no longer exists, or when a spelled-out binary count is wrong.
+  ARCHITECTURE.md is brought up to date for 1.7 in the same change.
+
+- **`task test` runs every Python test file.** It named two
+  (`test_lanes.py`, `test_evals.py`), so `test_owners`, `test_manifest`,
+  `test_sbom`, `test_update` and `test_repo_hygiene` ran in no task, and neither
+  `task ship` nor `task check` would have caught one failing. A new `task test:py`
+  discovers every file in `fleet-kit/tests`, and `test` and `check` use it. All
+  passed when wired in (489 tests, about four minutes on the Mac).
+  **Upgrade:** nothing; build tooling only.
+
 ## 1.7 — 2026-11-20
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs

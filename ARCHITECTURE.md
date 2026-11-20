@@ -496,6 +496,7 @@ internal/domains/              inventory, probes, findings by role, week-over-we
 internal/vmscan/               Qualys VM scans, schedules and result notices; the weekly report
 internal/netmap/               network spreadsheet (.xlsx) against Qualys Asset Groups, by address; operator rules
 internal/xlsx/                 reads an .xlsx workbook with the standard library only
+internal/xlsx/xlsxtest/        builds small .xlsx workbooks for tests
 internal/supplier/             supplier request form reader, attachment policy, judgement checks, Jira item, digest
 internal/domains/godaddy/      GoDaddy domain list (read-only PAT, never auth codes)
 internal/domains/podgw/        Proofpoint on Demand as the domains lane's mail gateway
