@@ -65,9 +65,10 @@ don't stay out of their way.
 That is a filtering and correlation problem with a daily rhythm. It has a clear
 deliverable (a brief), a clear rhythm (mornings), and a clear failure mode
 (something important got buried). All three suit a fleet. So do the other
-chores the fleet now carries — Patch Tuesday monthly, the application scans and
-the domain portfolio weekly, the ticket follow-up every morning: each has a
-deliverable, a rhythm, and a way of quietly going wrong when nobody does it.
+chores the fleet now carries — Patch Tuesday monthly; the application scans,
+the domain portfolio and the scan coverage weekly; the ticket follow-up, the
+owner reports and the supplier requests every morning: each has a deliverable,
+a rhythm, and a way of quietly going wrong when nobody does it.
 
 ---
 
@@ -169,7 +170,7 @@ This lane does no analysis. It exists because analysis nobody reads is
 indistinguishable from analysis nobody did. The digest is written for someone
 reading on a phone before they're fully awake.
 
-### Axis 8 — the vendor's clock: *what did this release land on us?*
+### Axis 7 — the vendor's clock: *what did this release land on us?*
 
 `cti-patchtuesday` — once a month, on the morning after Microsoft's Patch
 Tuesday, reads Microsoft's own release data (the Security Update Guide API),
@@ -215,7 +216,7 @@ not yet measurable" in one paragraph while printing fifteen perfectly usable
 QIDs in the next. The source was telling us the answer in a format we were
 treating as decoration.
 
-### Axis 9 — the other estate: *are the applications we write exposed?*
+### Axis 8 — the other estate: *are the applications we write exposed?*
 
 `cti-appscan` — weekly, from the web application scanner's own scan-completion
 mail plus its API. Every other axis is about software somebody else wrote and
@@ -254,7 +255,7 @@ application with nobody on file is a hold, not a guess. Who may receive it is
 decided in the mailer from the owners list and an allowed-domain list, so
 nothing the runner passes can add a recipient.
 
-### Axis 10 — the name itself: *can somebody be us?*
+### Axis 9 — the name itself: *can somebody be us?*
 
 `cti-domains` — weekly, no model. Every other axis asks about software; this
 one asks about the names that software answers to. A domain that lapses, loses
@@ -276,17 +277,25 @@ about a domain that is fine. And the week-over-week diff skips what churns
 (address records behind a CDN) so the section that reports a nameserver swap
 is still being read when one happens.
 
-### Axis 11 — the scanner's own reach: *are the scans looking everywhere?*
+### Axis 10 — the scanner's own reach: *are the scans looking everywhere?*
 
 `cti-vmscan` — weekly, no model. Every other lane takes the scanner's coverage
 as given: a CVE the scanner does not report is read as "not here". That is only
 true for the networks the scanner is told to scan. This lane asks the question
-the others assume away. It combines the week's scheduled vulnerability scans
-into one notice that they ran and what each covered, then compares the network
-team's spreadsheet of subnets with the Qualys Asset Groups the scans cover and
-lists the networks no scan reaches.
+the others assume away. It asks Qualys which scans ran in the week and which
+should have, from every active scan schedule, so a schedule that quietly stopped
+launching is named by the report rather than noticed by nobody. Then it compares
+the network team's spreadsheet of subnets with the Qualys Asset Groups the scans
+targeted and lists the networks no scan reaches.
 
-Four decisions are worth copying.
+Five decisions are worth copying.
+
+- **Ask the system what should have happened, not a list you keep.** The first
+  version expected the scans named in a setting. When the scans were renamed in
+  Qualys, the real scan was filed as "other" and the coverage check compared 65
+  locations against nothing: "0 covered, 65 gaps". Expectations now come from
+  Qualys's own schedules, and which scans ran from its own scan list, so a scan
+  whose results email was lost in an outage is still reported and still counts.
 
 - **Compare by address, not by name.** The scans call a place "North Site 5
   (Building 2)" and the spreadsheet calls it "North Springfield - ST". Names were
@@ -299,22 +308,95 @@ Four decisions are worth copying.
   would only make the list quieter, not truer.
 - **Be a consumer of someone else's data, out loud.** The spreadsheet belongs to
   the network team. Where it is wrong or unclear (a blank network, one that is
-  not a valid CIDR, one outside its location's own block, an overlap, no
-  corporate-network row) the report lists it for them by sheet row and does not
-  check that location until they fix it. The lane never guesses which row is a
-  location's corporate network, and nothing is escalated to the operator, who is
-  not the one to fix it.
+  not a valid CIDR, one outside its location's own block, an overlap, a
+  misspelled DECOMMISSIONED) the lane lists it by sheet row, in the report and
+  in one help-desk ticket for the network team that is updated only when the
+  list changes, and does not check that location until they fix it. Which row is
+  a location's corporate network follows a written rule (its 10.X.30 network
+  inside its own block, whatever the row is labelled) and an operator's rules
+  file, never a guess, and nothing is escalated to the operator, who is not the
+  one to fix it.
 - **A check that did not run says so.** If the spreadsheet or the Asset Groups
   cannot be read, the report states that, and a truncated list of groups is
   refused rather than used, because a partial list would report locations as
   missing that merely were not returned.
 
 It also carries no vulnerability counts. Its audience does not act on severities
-from this email, and the two scans overlap, so summing them would mislead.
+from this email, and the scans overlap, so summing them would mislead.
 
-### Axis 7 — self-knowledge: *is the fleet itself healthy and affordable?*
+### Axis 11 — the advisory with no CVE: *does this concern us at all?*
 
-Two lanes that watch the fleet rather than the estate:
+`cti-triage` — inside the daily digest, behind `TRIAGE_ENABLED`. Axis 2 can
+only answer for a CVE: the scanner is keyed on them. A great deal of threat
+intelligence has none — a campaign against a product, a set of indicators, a
+technique being used against our industry — and until this lane those
+advisories reached the brief as text, with no answer to the only question
+anyone asks of them.
+
+The lane answers with a second witness, CrowdStrike Falcon, and keeps the model
+on a short leash at both ends:
+
+- **A reader that sees only the advisory.** A model with no tools lists the
+  vendors, products, versions and ATT&CK techniques the advisory names. Code
+  then removes every claim the advisory does not support, so a hallucinated
+  product never reaches a lookup.
+- **Lookups that are code, not model.** Falcon is asked which of those products
+  are installed and roughly how many hosts are below the fixed version, which
+  hosts saw the advisory's indicators, and which alerts named its techniques in
+  the last 30 days. Each input is re-checked for its exact shape before it goes
+  into a query, because it came from an advisory.
+- **A judge that never sees the advisory.** A second no-tools model gets the
+  lookups as numbered facts and says likely, possible, unlikely or unknown for
+  each subject, citing the facts it used. Text planted in an advisory cannot
+  steer a verdict on a page the judge never reads. Code then drops any fact the
+  judge invented, turns a "likely" with no affected host into "possible", never
+  lets installed software that is not known to be fixed fall below "possible",
+  and turns "unlikely" into "unknown" when the lookup failed.
+- **Sightings come from code.** A host that saw one of the advisory's
+  indicators is listed first, by code, whatever the judge said and even when it
+  failed. A model that is down or fooled can cost the FLEET ADVISORIES section;
+  it cannot hide a sighting.
+
+This does not break the rule that presence is never inferred. Triage never
+marks anything `PRESENT`, and an advisory that names a CVE is left to the
+scanner and the CVE report. What it adds is a different kind of fact, from a
+different system, labelled as what it is: *likely*, with the evidence, is a
+reason for a person to look, not a finding.
+
+### Axis 12 — the front door: *who are we about to let in?*
+
+`cti-supplier` — daily. Every other axis looks at the estate we already have.
+This one looks at what is about to join it. A request to set up a new supplier
+is a third-party risk decision disguised as accounts-payable paperwork: a
+supplier that will touch company data, systems or networks, or provide
+technology, needs a third-party risk review before it is set up, and the
+request is the last cheap moment to notice.
+
+This is the first lane where the model's judgement *is* the deliverable, so it
+is built so that the model can only make more work for a person, never less:
+
+- **It reads the form, never the money.** The supplier request form and the
+  message text are read; the W-9 and bank attachments are never opened, and
+  what reaches the model has the bank, tax and card numbers redacted and the
+  sender reduced to a domain.
+- **Unsure is a verdict, and it is treated as Yes.** Yes and Unsure each get an
+  item on the security team's board; only No is digest-only. A missing, failed
+  or unusable answer, and an answer whose quotes are not in the request, are
+  Unsure.
+- **Code can only move an answer toward Unsure.** Rules that use the sender and
+  the form's structure run in code, and nothing the model says can turn a code
+  Unsure into a No.
+- **It never talks to the requester.** Each item says what is still needed; when
+  the requester answers in the same thread, the request is judged again and the
+  item gets a comment. The lane never closes or reopens one.
+
+So a model that is down sends every request to a person, and a model that is
+fooled sends one to a person it did not need to. Neither waves a supplier
+through.
+
+### Axis 13 — self-knowledge: *is the fleet itself healthy, honest and affordable?*
+
+The lanes and tools that watch the fleet rather than the estate:
 
 - `cti-alert` — systemd fires it on any unit failure. Makes a broken pipeline
   loud on two channels (the board, and email), and always exits 0 so it never
@@ -322,9 +404,22 @@ Two lanes that watch the fleet rather than the estate:
 - `cti-budget` — rations the orchestrator's share of a shared Claude
   subscription: a ceiling per rolling window, a ceiling per day, exponential
   backoff after a rate limit.
+- `cti-checkin-verdict` — every heartbeat ends with a structured verdict (its
+  status, every lane's state, the alerts it sent, whether it saw injected
+  instructions), checked against counts the command guard kept, which the model
+  cannot touch. If the heartbeat says it sent one escalation, the guard must
+  have seen exactly one.
+- `fleet-trace` and `task eval:checkin` — a trace of what each beat did (its
+  decisions, not a copy of what it read), and evals that run the real heartbeat
+  against invented fleets, prompt injection included, before a change to its
+  instructions, grants or model ships. [HARNESS.md](HARNESS.md) is the detail.
+- `cti-audit` — every mail sent or moved, every Jira write and every owners
+  change as one RFC 5424 syslog line, kept 120 days, forwardable to a SIEM. The
+  heartbeat cannot write to or delete the trail it is accountable to.
 
 These feel like plumbing. They're the difference between a demo and something
-you leave running.
+you leave running: a fleet that can say what it did, prove the AI part told
+the truth about it, and show it to an auditor.
 
 ---
 
@@ -345,6 +440,15 @@ still lands at 06:00.**
 The orchestrator's heartbeat does the work that actually needs judgment:
 chasing an `UNKNOWN` nobody resolved, noticing a Sev5 that's been open eleven
 days, correlating scout backlog, spotting that a timer got disabled.
+
+Two lanes now ask a model for a judgement inside their report: the supplier
+lane (is this supplier critical?) and advisory triage (does this advisory
+concern us?). Neither breaks the rule, because in both the model's absence has
+a defined, safe result and the report goes out without it. A supplier digest
+with the model down marks every request Unsure and sends them all to a person;
+a Daily Brief with triage down says FLEET ADVISORIES did not run and carries
+everything else. The model can add to a report. It can never be the reason one
+does not arrive.
 
 This split is the single most important thing in the architecture, and it is a
 general principle: **put the model where being wrong is recoverable, and keep it
@@ -420,7 +524,9 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | Write up Patch Tuesday for the patching team each month | `cti-patchtuesday`, from Microsoft's own release data, with our own exposure and the scanner query (run by hand for now) |
 | Report web application scan results to the developers who own the code | `cti-appscan`, weekly, on its own recipient list, with a broken scanner login escalated to us rather than to them |
 | Send each application's owner their own scan results | `run-appowners`, daily, by email because most owners have no Jira login, with the scan account's session removed and a failed scan held back |
-| Confirm the vulnerability scans actually cover every network we have | `cti-vmscan`, weekly: the scheduled scans combined, and the network team's subnet spreadsheet checked against the Qualys Asset Groups by address, so a location nobody scans shows up |
+| Confirm the vulnerability scans actually cover every network we have | `cti-vmscan`, weekly: every scheduled scan that ran or should have, from Qualys's own schedules, and the network team's subnet spreadsheet checked against the Qualys Asset Groups by address, so a location nobody scans shows up |
+| Read the advisories that name no CVE and say whether they concern us | `cti-triage`, in the daily: products and techniques checked against CrowdStrike Falcon, a likely/possible verdict with its evidence, and any host that saw an indicator listed first |
+| Screen new suppliers for third-party risk | `cti-supplier`, daily: each request judged, and every Yes or Unsure on the board for a person, never a supplier waved through by a failure |
 | Keep the domain portfolio registered, un-hijackable and un-spoofable | `cti-domains`, weekly: registrar state, websites, DNS, certificates and mail records by role, with changes since last week and one Jira ticket of DNS changes for IT |
 | Cross-reference advisories against our asset inventory | The scanner presence check, never inferred |
 | Prioritize findings for the patching team | The Sev5–Sev1 matrix: exploitability × presence, host count as tiebreak |
@@ -432,8 +538,9 @@ a hiring manager would use. Against each, the part of the fleet that does it:
 | Flag gaps in scan coverage | `UNKNOWN` never sinks to Sev1; `coverage UNVERIFIED` is reported as its own count |
 | Keep notes so context isn't lost between shifts | `memory.db` — findings, decisions, what was sent, what was deferred and why |
 | Say when you're stuck instead of guessing | It has. Its first-ever beat found no config and escalated: *"I am not fabricating these without a real source."* |
+| Be able to show what you did, and when | `cti-audit`: every mail, ticket and owners change as a syslog line a SIEM can read |
 
-Read that table again and notice what it isn't: it isn't eleven scripts. It's
+Read that table again and notice what it isn't: it isn't a pile of scripts. It's
 one set of behaviours with a rhythm, a memory, and a sense of what it's
 responsible for.
 
@@ -517,10 +624,11 @@ any other single chore.
 
 **The pattern is not about AI. It's about where you put the AI.**
 
-This fleet is mostly deterministic shell and Python. The language model is
-invoked in exactly one place — a heartbeat that does judgment work — and
-everything with a guaranteed deliverable is written so it works when the model
-doesn't. Around that, five boring primitives do the structural work: something
+This fleet is mostly deterministic Go, shell and Python. The language model is
+invoked in three places — a heartbeat that does judgment work, the supplier
+judgement, and advisory triage's reader and judge — the last two with no tools
+at all, and code checking every answer. Everything with a guaranteed
+deliverable is written so it works when the model doesn't. Around that, five boring primitives do the structural work: something
 to wake it up, something to remember, something to pass messages, something to
 do the work, and something to shout when the work fails.
 
@@ -541,6 +649,8 @@ parts and route the deliverable through the clever part, and you get a demo.
 - [FIRST EPSS](https://www.first.org/epss/) — exploitation probability.
 - [NVD 2.0 API](https://nvd.nist.gov/developers/vulnerabilities) — CVSS and the
   `cisaExploitAdd` KEV flag.
+- [CrowdStrike Falcon APIs](https://developer.crowdstrike.com/) — Discover,
+  Hosts, IOC Management and Alerts, read-only, for advisory triage (axis 11).
 - [Microsoft Graph application
   permissions](https://learn.microsoft.com/en-us/graph/permissions-reference) —
   `Mail.Read` and `Mail.Send` as application permissions, plus an Exchange
