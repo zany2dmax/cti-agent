@@ -2,7 +2,8 @@
 
 > **STATUS: H1 TO H4 BUILT.** H1 (beat traces) shipped in 1.6.1; H2 (evals
 > for the check-in, `task eval:checkin`), H3 (the `cti-checkin/1` verdict) and
-> H4 (the shared model-lane library) are built and unreleased; see
+> H4 (the shared model-lane library) are built for 1.7; the 1.7 security work
+> (audit trail, minimized model input, validated writes) is in section 1; see
 > [CHANGELOG.md](CHANGELOG.md). The other work items are in
 > [BACKLOG.md](BACKLOG.md). This page exists so the shape can be
 > argued about before any code depends on it.
@@ -54,6 +55,20 @@ other lane is deterministic Go or Python. The triage agent
 | Schema-checked model output (designed) | `internal/triage/result.go` (`cti-triage/1`) |
 
 This is the part most projects skip, and the fleet has it.
+
+### 1.1 Controls added around the model for 1.7
+
+These came from the Prime guardrail findings and all sit outside the model, so
+they hold whatever the model does:
+
+| Control | What it does | Where |
+|---|---|---|
+| Less in, less kept | The supplier model sees the sender's domain (not address), a few form fields and text with tax ids and bank or card numbers redacted. Heartbeat traces keep decisions and cost, not what the beat read (`CHECKIN_TRACE_KEEP`). | `internal/supplier/redact.go`, `fleet-trace` |
+| Validated writes | `fleet-db` refuses out-of-range arguments (limits mirror `checkin-bash-guard`, a test keeps them equal); `finding upsert` skips bad rows and exits 3. State files are checked on write and repaired on read. | `fleet-db`, `internal/statefile` |
+| Senders are not trusted by default | Feed mail counts only when its From domain passes authentication or is listed in `FLEET_UNAUTHENTICATED_SENDERS`; `FLEET_SENDER_AUTH=off` no longer exists. | digest lane |
+| Audit trail | Every mail move, send, ticket write and owner change is an RFC 5424 line in `/var/log/cti-agent`, kept 120 days, optionally forwarded to a collector. The model has no way to write or erase it. | `internal/audit`, `cti-audit` |
+| One HTTP path | Every Go client comes from `internal/httpx` (https only, TLS 1.2 floor), enforced by a test. | `internal/httpx` |
+| SBOM | Each release carries a CycloneDX SBOM that also proves the no-dependency rule. | `scripts/sbom.py` |
 
 ---
 
@@ -123,7 +138,7 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
   default trace keeps the beat's decisions and cost and replaces the content it
   read with a size and a short hash; `full` restores it for an investigation.
 
-### H2. Eval harness for the check-in (built, unreleased)
+### H2. Eval harness for the check-in (built, 1.7)
 
 What was built (2026-11-18): `fleet-kit/tests/evals/checkin_eval.py` and
 `task eval:checkin`. Each scenario is one file, `evals/checkin/<name>.json`:
@@ -194,7 +209,7 @@ calls it, a rate per case (3 runs), failing only on a dangerous result. Cheap
 checks on the cases themselves (valid, invented data only, no hostile case may
 allow a No) run with every `go test`.
 
-### H3. Structured check-in verdict (built, unreleased)
+### H3. Structured check-in verdict (built, 1.7)
 
 What was built (2026-11-18): the check-in skill's step 6 asks every beat to end
 its final message with one `cti-checkin/1` object - `status` (ok, attention,
@@ -229,7 +244,7 @@ The plan as written:
 - An invalid or missing verdict is a board ERROR, not a silent pass.
 - Evals (H2) then score the verdict directly.
 
-### H4. Shared model-lane runner (built, unreleased)
+### H4. Shared model-lane runner (built, 1.7)
 
 What was built (2026-11-19): `fleet-kit/fleet/share/model-lane.sh`, sourced
 by `run-checkin` and `run-supplier`, with the controls every model lane needs:
