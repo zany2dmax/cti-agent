@@ -186,8 +186,8 @@ func doCheck(l *audit.Logger, stdout io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "%s"+format+"\n", append([]any{tag}, a...)...)
 	}
 	dir := dirOf(l)
-	switch {
-	case dir == "off":
+	switch dir {
+	case "off":
 		say(false, "AUDIT_DIR=off: audit events are being discarded")
 	default:
 		fi, err := os.Stat(dir)

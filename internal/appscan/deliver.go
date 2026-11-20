@@ -237,7 +237,7 @@ func ValidateEntry(key string, e DeliveredEntry) error {
 		return fmt.Errorf("key must be 1 to %d printable characters", maxDeliveredKey)
 	case e.Ref == "" || len(e.Ref) > maxDeliveredRef || !plainText(e.Ref):
 		return fmt.Errorf("ref must be 1 to %d printable characters", maxDeliveredRef)
-	case !(e.Status == "sent" || strings.HasPrefix(e.Status, "held: ")):
+	case e.Status != "sent" && !strings.HasPrefix(e.Status, "held: "):
 		return errors.New(`status must be "sent" or "held: <why>"`)
 	case len(e.Status) > maxStatus || !plainText(e.Status):
 		return fmt.Errorf("status must be at most %d printable characters", maxStatus)
