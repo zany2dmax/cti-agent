@@ -11,13 +11,13 @@ never says "all clear" about something it did not check.
 **What lands in your inbox**
 
 - A ranked daily digest of what is really exposed, with CISA KEV deadlines.
-- A weekly web-application report, with one Jira ticket per application,
-  assigned to its owner and carrying the scanner's fix text (and, if you turn
-  it on, the scanner's own report).
 - A daily report to each web application's owner: the scanner's own report of
-  what is open on it, by email, for owners with no Jira login.
-- A weekly vulnerability-scan report: that the two scheduled scans ran, what
-  they covered, and which of the network team's subnets no scan reaches.
+  what is open on it, by email. Most owners are outside the company or have no
+  Jira login, so the results go to them directly, not into a ticket.
+- A weekly web-application report for the developers: open findings per
+  application, what is new, and whether each scan logged in.
+- A weekly vulnerability-scan report: that every scheduled scan ran, what
+  each covered, and which of the network team's subnets no scan reaches.
 - The exact DNS changes IT needs to make, filed as a single ticket.
 - A monthly Patch Tuesday synopsis, built from Microsoft's own data.
 
@@ -111,10 +111,13 @@ in code. Built from the DAST scanner's own scan-completion mail (Qualys WAS
 today, any scanner behind `internal/appscan`) plus its API for per-finding
 detail. Open counts per application, what is new since the last scan, and a
 label on every count saying whether that scan logged in. A scanner credential
-that stops working alerts the operator rather than the developers. Each
-application's Jira ticket can also carry the scanner's own report as an
-attachment (off by default, `WAS_ATTACH_REPORT=1`), and lists the scanner's
-unconfirmed Critical and Urgent findings in a separate "please verify" section.
+that stops working alerts the operator rather than the developers. It files
+no Jira tickets: the owners get their results by email (below). Per-application
+tickets still exist for a site that wants them (`WAS_TICKETS=1`, off by
+default): one per application, assigned to its owner, with the scanner's fix
+text, the scanner's unconfirmed Critical and Urgent findings in a "please
+verify" section, and optionally the scanner's own report attached
+(`WAS_ATTACH_REPORT=1`).
 
 **Daily application-owner reports.** Each morning, for every web-application scan
 that finished since the last run, the application's owner (and watchers) get the
