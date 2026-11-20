@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.7 — 2026-11-20
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs
 you to look at `fleet.env` before the update.**
