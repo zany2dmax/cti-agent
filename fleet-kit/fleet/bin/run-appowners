@@ -26,10 +26,12 @@
 #
 # THE NOTICES, FOR THE MAILBOX CLEANUP
 #
-#   After a real send, the scan notices of each SENT scan are recorded for
-#   cti-mailbox (cti-appscan --commit-seen --only-sent), so they are archived
-#   after its 48-hour grace instead of waiting for the weekly report. A held
-#   scan's notices wait for the weekly, which reports on every scan.
+#   After a real send, the COMPANION notices of each SENT scan (the scheduled-
+#   scan notice, which no report uses) are recorded for cti-mailbox
+#   (cti-appscan --commit-seen --only-sent) and deleted after its 48-hour grace.
+#   The scan's RESULTS notice is not: it is the weekly's only source of counts,
+#   so it stays in the inbox until the weekly has read it (2026-11-20: archiving
+#   it here left the weekly with counts for 1 application of 13).
 #
 # USAGE (one of the three is required; with none it prints usage and exits 2)
 #   run-appowners --for-real   fetch, redact and send
@@ -134,9 +136,9 @@ PLAN="$OUTDIR/appowners-plan-$STAMP.json"
 WORK="$OUTDIR/appowners-$STAMP"
 SENT="$WORK/sent.tsv"
 # The scan notices this run read, for the mailbox cleanup. Recorded after a
-# real send, and only for the scans that were sent (--only-sent), so a notice
-# is archived once its application's owners have the report - not at the end
-# of the week. Held scans' notices wait for the weekly AppSec report.
+# real send, and only for the scans that were sent (--only-sent), and only the
+# companion notices of those: results notices wait for the weekly AppSec report,
+# which reads them for its counts.
 SEEN="$OUTDIR/appowners-seen-$STAMP.json"
 trap 'rm -rf "$PLAN" "$WORK" "$SEEN"' EXIT
 # Leftovers of a real run that was killed. Real runs only: a rehearsal deletes
@@ -199,7 +201,7 @@ else
   fi
   if [ "$sent" -gt 0 ] && [ -s "$SEEN" ]; then
     "$APPSCAN" --commit-seen "$SEEN" --only-sent "$SENT" \
-      || log "warn: could not record the notices for the mailbox cleanup; the weekly AppSec report will"
+      || log "warn: could not record the companion notices for the mailbox cleanup; the weekly AppSec report will"
   fi
 fi
 

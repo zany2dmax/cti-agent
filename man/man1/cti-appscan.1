@@ -199,10 +199,10 @@ record only the notices of the scans that
 .B key<TAB>ref<TAB>status
 list) marks
 .BR sent ,
-matched on the scanner's own scan reference. A held scan's notices, and a
-notice with no scan reference, are left for the weekly report to record. So a
-notice is archived once that application's owners have its report, not at the
-end of the week. An unreadable
+matched on the scanner's own scan reference, and only the companion notices
+of those scans are recorded. Results notices, a held scan's notices, and a
+notice with no scan reference are left for the weekly report to record, because
+the weekly counts come from the results notices. An unreadable
 .I FILE
 fails the commit rather than recording everything. Given without
 .B \-\-commit\-seen

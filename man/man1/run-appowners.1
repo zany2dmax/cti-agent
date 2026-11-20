@@ -55,11 +55,13 @@ records each sent scan, and each held one, in
 .IR $FLEET_HOME/state/appowners\-sent.json ,
 so each is dealt with once. Then, when anything was sent,
 .B cti\-appscan \-\-commit\-seen \-\-only\-sent
-records the notices of the scans that were sent (not the held ones) for
+records the companion notices (the scheduled\-scan notice) of the scans that
+were sent (not the held ones) for
 .BR cti\-mailbox (1),
-which archives them after its usual grace: about two days after the owners
-get the report, instead of after the weekly report. A failure here is a
-warning; the weekly report records them anyway.
+which deletes them after its usual grace. A scan's results notice is not
+recorded here: it is the weekly report's only source of counts, so it waits in
+the inbox for the weekly. A failure here is a warning; the weekly report
+records them anyway.
 .TP
 .B 5. Operator
 Held scans and watchers refused for their domain go to

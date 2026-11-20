@@ -585,10 +585,13 @@ every day and to you by `cti-alert` once a week: the digest reads every message
 within a day, so that means it has stopped reading the mailbox, or the mail
 arrived outside its window.
 
-**Qualys WAS notices clear in about two days now.** `run-appowners` records the
-notices of each scan whose report it mailed to the owners (not held ones), so
-the cleanup archives them after its 48-hour grace instead of waiting for
-Friday's weekly. A held scan's notices still wait for the weekly report.
+**Qualys WAS results notices wait for the weekly.** `run-appowners` records only
+the companion notices (the scheduled-scan notice) of each scan it mailed to the
+owners, and the cleanup deletes those after its 48-hour grace. A scan's results
+notice is the AppSec weekly's only source of counts, so it stays in the inbox
+until the weekly has read it, then goes after the usual grace. (For a few days
+the owners lane released them early, and the weekly had counts for 1 of 13
+applications.)
 
 On a day the digest read no mail (out-of-office replies do not count) nothing
 is archived, but auto-replies still go, and the sweep still runs. For a one-off sweep of old auto-replies:

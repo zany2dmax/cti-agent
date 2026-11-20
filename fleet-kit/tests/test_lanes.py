@@ -5179,9 +5179,9 @@ class RunnersToDev(unittest.TestCase):
             self.assertFalse(c.startswith("cti-alert "), c)
 
     def test_appowners_records_the_sent_scans_notices_for_the_cleanup(self):
-        # The mailbox cleanup archives a WAS notice once its owners have the
-        # report - so after a real send, and only for the scans that were
-        # sent (--only-sent), never on a rehearsal or a test send.
+        # The cleanup deletes a sent scan's companion notices (the results
+        # notice waits for the weekly) - so after a real send, and only for the
+        # scans that were sent (--only-sent), never on a rehearsal or test send.
         for args, want in ((["--to-dev"], False), (["--dry-run"], False), (["--for-real"], True)):
             with self.subTest(args=args):
                 self.log.write_text("")

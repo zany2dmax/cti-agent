@@ -8,10 +8,12 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 )
 
-// The owners lane records a scan's notices for the mailbox cleanup only once
-// that scan's report went to its owners: a held scan's notices, and any
-// notice without the scanner's own reference, wait for the weekly report.
-func TestCommitSeenOnlySentKeepsTheNoticesOfScansThatWereSent(t *testing.T) {
+// The owners lane records only a sent scan's COMPANION notices (the scheduled-
+// scan notice, which no report uses) for the mailbox cleanup. A scan's results
+// notice is the weekly's only source of counts, so it is never recorded here:
+// it waits for the weekly, whatever happened to the scan's owner report. A held
+// scan's notices, and any notice without the scanner's reference, wait too.
+func TestCommitSeenOnlySentRecordsOnlyTheCompanionNoticesOfSentScans(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("FLEET_HOME", home)
 	t.Setenv("FLEET_PROCESSED_LOG", "")
@@ -41,11 +43,14 @@ func TestCommitSeenOnlySentKeepsTheNoticesOfScansThatWereSent(t *testing.T) {
 	for _, e := range l.Entries {
 		got[e.ID] = e
 	}
-	if len(got) != 2 {
-		t.Fatalf("recorded %v, want only the two notices of the sent scan", got)
+	if len(got) != 1 {
+		t.Fatalf("recorded %v, want only the companion notice of the sent scan", got)
 	}
-	if !got["sent-scheduled"].Delete || got["sent-result"].Owner != mailbox.OwnerAppScan {
-		t.Errorf("entries lost their flags: %+v", got)
+	if e, ok := got["sent-scheduled"]; !ok || !e.Delete || e.Owner != mailbox.OwnerAppScan {
+		t.Errorf("the companion notice lost its flags: %+v", got)
+	}
+	if _, ok := got["sent-result"]; ok {
+		t.Error("a results notice was recorded for the cleanup before the weekly read it")
 	}
 }
 

@@ -661,7 +661,8 @@ func sentRefs(path string) (map[string]bool, error) {
 }
 
 // doCommitSeen merges a --seen-out file into this lane's processed log. With
-// onlySent, only the notices whose Ref is a scan that file marks sent.
+// onlySent, only the companion notices (Delete) whose Ref is a scan that file
+// marks sent; results notices wait for the weekly report.
 func doCommitSeen(path, onlySent string) int {
 	dest := mailbox.OwnerLogPath(mailbox.OwnerAppScan)
 	if dest == "" {
@@ -688,7 +689,12 @@ func doCommitSeen(path, onlySent string) int {
 		}
 		kept := pending.Entries[:0]
 		for _, e := range pending.Entries {
-			if e.Ref != "" && refs[e.Ref] {
+			// Only the companion notices (Delete), which no report uses. A
+			// scan's RESULTS notice is the weekly's only source of counts, so
+			// it stays in the inbox until the weekly has read and recorded it:
+			// claiming it here had the cleanup archive it two days later, and
+			// the Friday weekly then had no counts for 12 of 13 applications.
+			if e.Ref != "" && refs[e.Ref] && e.Delete {
 				kept = append(kept, e)
 			}
 		}

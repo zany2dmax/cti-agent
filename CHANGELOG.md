@@ -35,6 +35,24 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The next
+AppSec weekly counts every scan whose notice arrived; scans whose notice never
+reached the mailbox are still listed as "scanned, no notification" (set a
+notification on those scans in Qualys, and make sure their notices come from the
+scanner's own address).
+
+- **The AppSec weekly had counts for 1 application of 13.** The daily owners
+  lane recorded each sent scan's results notice for the mailbox cleanup, which
+  archived it 48 hours later; the weekly reads only the inbox, so by Friday most
+  of the week's notices were gone (20 November: 9 archived, 1 left). The owners
+  lane now records only the companion notices (the scheduled-scan notice, which
+  no report uses). A results notice stays in the inbox until the weekly has read
+  and recorded it, then the cleanup archives it after the usual 48 hours.
+  Scans that never produce a results notice (Cancos' come from the team
+  mailbox and are not read; some scans have no notification set) are unchanged.
+
 ## 1.7 — 2026-11-20
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs
