@@ -37,15 +37,53 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
-**Upgrade:** `sudo cti-agent-update --for-real`. The supplier lane now checks
-its model setup the way the heartbeat does (H4): on Linux its `claude` must be
+**Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs
+you to look at `fleet.env` before the update.**
+
+1. **ACTION REQUIRED if `fleet.env` sets `FLEET_SENDER_AUTH`.** Check:
+   `grep FLEET_SENDER_AUTH /etc/cti-agent/fleet.env`. Nothing printed, or a
+   blank value: nothing to do. `off`: it is no longer honoured, because it made
+   the code believe every sender. Before the update, add
+   `FLEET_UNAUTHENTICATED_SENDERS=<exact From domains>` (the scanner's domain,
+   and the feeds' if advisory triage is on) and remove the old line. Until you do,
+   the Qualys weekly and the scan reports list every notice as unauthenticated,
+   and the digest logs, once per sender, that feed mail is no longer trusted.
+2. **A new directory, and a check.** The update builds `cti-audit`, creates
+   `/var/log/cti-agent` (the service account, mode 0750) and reloads the units.
+   Then run `sudo cti-agent cti-audit --check`. The audit trail needs no setting.
+   `AUDIT_RETAIN_DAYS` (default 120) and shipping to a collector
+   (`AUDIT_SYSLOG_ADDR`, `AUDIT_SYSLOG_PROTO`) are optional. The files are 0600,
+   so a collector running as root reads them as they are; one running as another
+   user needs an ACL.
+3. **What behaves differently, and where to look if something does.**
+   - Heartbeat traces keep what the beat did, not the tool results it read
+     (`CHECKIN_TRACE_KEEP=full` restores everything for an investigation).
+   - `fleet-db` write commands refuse bad arguments with `fleet-db: <reason>` and
+     exit 2. `finding upsert` skips and names a bad row, writes the rest, and exits
+     3; the nightly enrich says so.
+   - The budget ledger, the processed-message log and the delivered log are
+     repaired when read (a `repaired` line in the journal says what changed) and
+     fail closed only if they do not parse.
+   - The supplier model sees less: the sender's domain and not their address, a
+     few form fields, and text with tax ids and bank or card numbers redacted. Its
+     verdicts may shift with less context; `task eval:supplier` checks them
+     against the real model (by hand, it costs tokens).
+   - Every outbound request is https-only with a TLS 1.2 floor: an `http://` base
+     URL in `fleet.env` now fails naming the host, and a `feeds.txt` line that
+     starts `http://` is refused.
+   - The daily mailbox cleanup now also deletes audit files older than 120 days.
+4. **Nothing on the box for the release itself:** every GitHub Release now
+   carries its SBOM.
+
+Carried over from the entries below, unchanged: the supplier lane now checks its
+model setup the way the heartbeat does (H4): on Linux its `claude` must be
 root-owned in `/usr/bin` or `/usr/local/bin` (or named by `CLAUDE_BIN`),
-`SUPPLIER_MODEL` must be a model name, and exactly one Claude credential must
-be set in `fleet.env` (the model gets an empty HOME, so a login stored in
-`~/.claude` never reached it). A box where the heartbeat runs needs nothing;
-if one fails, the supplier judges nothing (every request Unsure) and the
-journal says why. Advisory triage in the digest stays off until you set
-`TRIAGE_ENABLED=1` (RUNBOOK 11k, "In the daily digest").
+`SUPPLIER_MODEL` must be a model name, and exactly one Claude credential must be
+set in `fleet.env` (the model gets an empty HOME, so a login stored in
+`~/.claude` never reached it). A box where the heartbeat runs needs nothing; if
+one fails, the supplier judges nothing (every request Unsure) and the journal
+says why. Advisory triage in the digest stays off until you set `TRIAGE_ENABLED=1`
+(RUNBOOK 11k, "In the daily digest").
 
 ### Added
 
