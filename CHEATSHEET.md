@@ -437,7 +437,8 @@ git push origin 1.6.7                      # 4. the tag; its GitHub Release foll
 
 Pushing the tag makes the **GitHub Release** on the personal repo
 (`.github/workflows/release.yml`): titled with the tag, notes from that
-version's CHANGELOG section, Latest only for the highest version. A tag is
+version's CHANGELOG section, the version's SBOM attached
+(`cti-agent-1.6.7.cdx.json`), Latest only for the highest version. A tag is
 git's, a release is GitHub's page on top of it; the push alone never made one.
 If the run fails (Actions, Release) it is almost always a heading that does not
 match the tag: fix it, push `main`, then make it by hand. Backfill or retry:
@@ -446,6 +447,7 @@ match the tag: fix it, push `main`, then make it by hand. Backfill or retry:
 gh workflow run release.yml --repo zany2dmax/cti-agent -f tag=1.6.7
 ```
 
+The same command on a release that has no SBOM adds the SBOM (and nothing else).
 Full steps and failures: RUNBOOK 11i.
 
 For the company copy, wait for the next window, or run it now: company repo, Actions, "Sync

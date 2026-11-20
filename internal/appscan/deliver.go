@@ -183,13 +183,19 @@ func (f DeliveriesFile) JSON() []byte {
 
 // LoadDeliveredLog reads the log; a missing file is an empty log.
 func LoadDeliveredLog(p string) (DeliveredLog, error) {
+	return loadDelivered(p, time.Now())
+}
+
+// loadDelivered is LoadDeliveredLog against a given clock, so that
+// CommitDelivered repairs and validates against the one `now` it was handed.
+func loadDelivered(p string, now time.Time) (DeliveredLog, error) {
 	l := DeliveredLog{}
 	// Parsing only. A log that parses is REPAIRED entry by entry, not rejected:
 	// one bad old entry must not make every later commit and report fail.
 	err := statefile.Read(p, &l, statefile.Options{MaxBytes: maxDeliveredBytes})
 	switch {
 	case err == nil:
-		if notes := l.Normalize(time.Now()); len(notes) > 0 {
+		if notes := l.Normalize(now); len(notes) > 0 {
 			fmt.Fprintf(os.Stderr, "appscan: repaired %s: %s\n", p, strings.Join(notes, "; "))
 		}
 		return l, nil
@@ -308,7 +314,7 @@ func (l DeliveredLog) Normalize(now time.Time) []string {
 // replacing it atomically. A line it cannot read, or that fails validation, is
 // reported and skipped; the rest are recorded.
 func CommitDelivered(logPath string, lines io.Reader, now time.Time) (int, []string, error) {
-	l, err := LoadDeliveredLog(logPath)
+	l, err := loadDelivered(logPath, now)
 	if err != nil {
 		return 0, nil, err
 	}

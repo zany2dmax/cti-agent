@@ -1439,6 +1439,158 @@ class ReleaseNotesAndWorkflow(unittest.TestCase):
         self.assertIn("--verify-tag", run)
         self.assertIn("already exists - left as it is", run)
         self.assertIn('release-notes.sh" "$tag"', run)
+        # The SBOM: made from the tag's tree, attached to the Release, run with a
+        # scrubbed environment so the token is not in its reach.
+        self.assertIn("scripts/sbom.py", run)
+        self.assertIn(".cdx.json", run)
+        self.assertIn("gh release upload", run)
+        self.assertRegex(run, r'env -i PATH="\$PATH" HOME="\$RUNNER_TEMP" python3 "\$src/scripts/sbom\.py"')
+
+
+class ReleaseWorkflowMakesTheSbom(unittest.TestCase):
+    """The Release workflow's own script, run against a stubbed gh and a local
+    git repo: a tag gets a Release WITH its SBOM; a manual run adds a missing
+    SBOM to an existing Release and touches nothing else; a tag that broke the
+    no-dependency rule gets no Release."""
+
+    ROOT = KIT.parent
+    TAG = "9.9.9"
+    REPO = "zany2dmax/cti-agent"
+
+    def setUp(self):
+        wf = (self.ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        body = wf[wf.index("run: |\n") + len("run: |\n"):]
+        self.script = "\n".join(l[10:] if l.startswith(" " * 10) else l for l in body.splitlines()) + "\n"
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.log = self.tmp / "gh.log"
+        self.runner = self.tmp / "runner"
+        self.runner.mkdir()
+        # what `gh api .../contents/F` returns: the real files
+        self.contents = self.tmp / "contents"
+        self.contents.mkdir()
+        shutil.copy(self.ROOT / "scripts" / "release-notes.sh", self.contents / "release-notes.sh")
+        shutil.copy(self.ROOT / "scripts" / "sbom.py", self.contents / "sbom.py")
+        (self.contents / "CHANGELOG.md").write_text(f"# Changelog\n\n## {self.TAG} \u2014 2026-12-01\n\nthe notes\n\n---\n")
+        gh = self.bin / "gh"
+        gh.write_text(f"""#!/bin/bash
+echo "gh $*" >> "{self.log}"
+case "$1 $2" in
+  "api repos/{self.REPO}/git/ref/tags/{self.TAG}") exit 0 ;;
+  "release view")
+      if [ "$GH_EXISTS" != 1 ]; then exit 1; fi
+      case "$*" in *--json*) printf '%s\\n' $GH_ASSETS ;; esac
+      exit 0 ;;
+  "release create"|"release upload") exit 0 ;;
+esac
+case "$*" in
+  *"/tags --paginate"*) echo "{self.TAG}"; exit 0 ;;
+  *"contents/"*) all="$*"; f="${{all##*contents/}}"; f="${{f%%\\?*}}"; cat "{self.contents}/${{f##*/}}"; exit 0 ;;
+esac
+echo "gh stub: unhandled: $*" >&2; exit 9
+""")
+        gh.chmod(0o755)
+
+    def repo(self, gomod="module x\n\ngo 1.26\n", with_script=True):
+        """A local repo with one tag: the tree the workflow clones."""
+        r = self.tmp / "origin"
+        (r / "cmd" / "one").mkdir(parents=True)
+        (r / "cmd" / "one" / "main.go").write_text("package main\n")
+        (r / "go.mod").write_text(gomod)
+        (r / "fleet-kit" / "fleet" / "lanes").mkdir(parents=True)
+        (r / "fleet-kit" / "fleet" / "lanes" / "a.py").write_text("import json\n")
+        if with_script:
+            (r / "scripts").mkdir()
+            shutil.copy(self.ROOT / "scripts" / "sbom.py", r / "scripts" / "sbom.py")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q", "-b", "main"], ["git", "add", "-A"],
+                    ["git", "commit", "-q", "-m", "x"], ["git", "tag", "-a", self.TAG, "-m", "x"]):
+            subprocess.run(cmd, cwd=r, env=env, check=True, capture_output=True)
+        return r
+
+    def run_workflow(self, origin, event="push", exists="0", assets=""):
+        env = {
+            # the same python3 the rest of the suite uses (the system one can be too old)
+            "PATH": f"{self.bin}:{os.path.dirname(sys.executable)}:/usr/bin:/bin:" + os.path.dirname(shutil.which("go") or "/usr/bin/go"),
+            "HOME": str(self.tmp), "GH_TOKEN": "SECRET-TOKEN", "REPO": self.REPO, "EVENT": event,
+            "PUSHED_TAG": self.TAG, "INPUT_TAG": self.TAG, "SHA": "abc123", "RUNNER_TEMP": str(self.runner),
+            "GH_EXISTS": exists, "GH_ASSETS": assets,
+            # the workflow clones https://github.com/<repo>.git: point that at the local repo
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.file://{origin}.insteadOf",
+            "GIT_CONFIG_VALUE_0": f"https://github.com/{self.REPO}.git",
+        }
+        return subprocess.run(["bash", "-c", self.script], env=env, capture_output=True, text=True,
+                              timeout=120, check=False)
+
+    def calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_the_script_parses_as_bash(self):
+        r = subprocess.run(["bash", "-n", "-c", self.script], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_new_tag_gets_a_release_with_its_sbom_attached(self):
+        r = self.run_workflow(self.repo())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        create = [c for c in self.calls() if c.startswith("gh release create")]
+        self.assertEqual(len(create), 1, self.calls())
+        self.assertIn(f"cti-agent-{self.TAG}.cdx.json", create[0], "the SBOM must be the release's asset")
+        sbom = self.runner / f"cti-agent-{self.TAG}.cdx.json"
+        bom = json.loads(sbom.read_text())
+        self.assertEqual((bom["bomFormat"], bom["specVersion"]), ("CycloneDX", "1.5"))
+        self.assertEqual(bom["metadata"]["component"]["version"], self.TAG)
+        self.assertIn("one", {c["name"] for c in bom["components"]})
+        notes = (self.runner / "notes.md").read_text()
+        self.assertIn("the notes", notes)
+        self.assertIn(f"cti-agent-{self.TAG}.cdx.json", notes)
+        self.assertFalse([c for c in self.calls() if c.startswith("gh release upload")])
+
+    def test_the_token_is_not_in_the_sbom_scripts_environment(self):
+        origin = self.repo()
+        # a tagged script that would leak the token if it could see it
+        (origin / "scripts" / "sbom.py").write_text(
+            "import os, sys\nopen(os.path.join(os.environ.get('RUNNER_TEMP','/tmp'),'leak'),'w').write(os.environ.get('GH_TOKEN','absent'))\n"
+            "sys.argv=sys.argv\nimport runpy\n")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "add", "-A"], ["git", "commit", "-q", "-m", "y"], ["git", "tag", "-f", "-a", self.TAG, "-m", "y"]):
+            subprocess.run(cmd, cwd=origin, env=env, check=True, capture_output=True)
+        self.run_workflow(origin)
+        self.assertEqual((self.runner / "leak").read_text() if (self.runner / "leak").exists() else "absent", "absent",
+                         "the SBOM script could see the workflow's token")
+
+    def test_a_manual_run_adds_a_missing_sbom_to_an_existing_release_and_touches_nothing_else(self):
+        r = self.run_workflow(self.repo(), event="workflow_dispatch", exists="1", assets="")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = self.calls()
+        self.assertTrue([c for c in calls if c.startswith("gh release upload")], calls)
+        self.assertIn(f"cti-agent-{self.TAG}.cdx.json", [c for c in calls if c.startswith("gh release upload")][0])
+        self.assertFalse([c for c in calls if c.startswith("gh release create")], "an existing Release must not be recreated")
+        self.assertFalse((self.runner / "notes.md").exists(), "an existing Release's notes must not be touched")
+
+    def test_an_existing_release_that_has_its_sbom_or_a_push_is_left_alone(self):
+        origin = self.repo()
+        for event, assets in (("workflow_dispatch", f"cti-agent-{self.TAG}.cdx.json"), ("push", "")):
+            self.log.unlink(missing_ok=True)
+            r = self.run_workflow(origin, event=event, exists="1", assets=assets)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("already exists - left as it is", r.stdout)
+            self.assertFalse([c for c in self.calls() if c.startswith(("gh release create", "gh release upload"))], event)
+
+    def test_a_tag_older_than_the_script_is_read_with_the_script_from_the_run_commit(self):
+        r = self.run_workflow(self.repo(with_script=False))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.runner / f"cti-agent-{self.TAG}.cdx.json").exists())
+        self.assertTrue([c for c in self.calls() if "contents/scripts/sbom.py" in c], self.calls())
+
+    def test_a_tag_that_broke_the_no_dependency_rule_gets_no_release(self):
+        r = self.run_workflow(self.repo(gomod="module x\n\ngo 1.26\n\nrequire github.com/some/dep v1.2.3\n"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no-dependency rule", r.stdout + r.stderr)
+        self.assertFalse([c for c in self.calls() if c.startswith(("gh release create", "gh release upload"))], self.calls())
 
 
 class DigestTicketLinks(unittest.TestCase):

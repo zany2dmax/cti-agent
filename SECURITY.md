@@ -1155,7 +1155,17 @@ committed) and is the same for a commit apart from its timestamp; a dirty tree
 adds a hash of its changes to the serial number. It is made on the maintainer's
 machine, so its Go version is that machine's, and the binaries the installer
 builds on the host use the host's Go: it describes what the code is made of, and
-it is not yet attached to a release or written on the host.
+it is attached to each GitHub Release (see below) and is not written on the
+host.
+
+**The SBOM is attached to every release.** The Release workflow
+(`.github/workflows/release.yml`) clones the tag's tree, runs `scripts/sbom.py`
+on it with a scrubbed environment (the workflow's token is not visible to it),
+and uploads `cti-agent-<version>.cdx.json` as the release's asset. A tag that
+breaks the no-dependency rule fails the run and gets no Release. A manual run
+adds the SBOM to a Release that has none, and changes nothing else about it. The
+company copy of the release is made by the company repository's own sync
+workflow, which does not carry assets unless it is changed to.
 
 The cost is more code written here. The benefit is that `govulncheck` has a
 small and comprehensible surface — which matters, because this system parses

@@ -8,8 +8,16 @@
 #   push of a tag like 1.6.7 or v1.7   -> Release for that tag
 #   Actions > Release > Run workflow   -> Release for the tag you type (backfill)
 #
+# The Release carries the tag's SBOM (cti-agent-<version>.cdx.json, CycloneDX
+# 1.5) as a downloadable asset. The tag's tree is cloned (the repo is public: no
+# login) and scripts/sbom.py runs on it, which first proves the no-dependency
+# rule, so a tag that broke it fails the run instead of getting a Release. A tag
+# from before the script existed is read with the script from this run's commit.
+# A backfill run for a Release that exists but has no SBOM adds only the SBOM.
+#
 # What it will not do:
-#   - replace a Release that already exists (yours to edit or delete by hand);
+#   - replace a Release that already exists (yours to edit or delete by hand;
+#     a backfill adds a missing SBOM and touches nothing else);
 #   - make a Release with no notes: a tag whose version has no "## X.Y.Z"
 #     heading in CHANGELOG.md fails the run, visibly. Fix the CHANGELOG, push
 #     main, then Actions > Release > Run workflow with the tag. NOT "Re-run
@@ -18,8 +26,10 @@
 #     into its main, workflows included, and its own sync-upstream.yml already
 #     makes its Releases; a second maker there would race it.
 #
-# No third-party actions and no checkout: it reads two files at the run's
-# commit through the API and uses the gh CLI the runner already has.
+# No third-party actions and no checkout action: it reads two files at the run's
+# commit through the API, clones the public repo with git for the SBOM, and uses
+# the gh CLI, git, python3 and go the runner already has. The SBOM script runs
+# with a scrubbed environment, so the token is not visible to it.
 # RUNBOOK.md section 11i has the release steps; CHEATSHEET.md 11a the commands.
 
 name: Release
@@ -48,7 +58,7 @@ jobs:
   release:
     if: github.repository == 'zany2dmax/cti-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Make the Release
         env:
@@ -72,15 +82,46 @@ jobs:
             echo "::error::tag $tag is not on GitHub - push it first: git push origin $tag"
             exit 1
           fi
+          sbom_name="cti-agent-${tag#v}.cdx.json"
+          existing=false
           if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
-            echo "Release $tag already exists - left as it is"
+            # A manual run may add the SBOM to a Release that has none (a
+            # backfill). Anything else about an existing Release is left alone.
+            if [ "$EVENT" = workflow_dispatch ] && ! gh release view "$tag" --repo "$REPO" \
+                 --json assets -q '.assets[].name' | grep -qx "$sbom_name"; then
+              existing=true
+            else
+              echo "Release $tag already exists - left as it is"
+              exit 0
+            fi
+          fi
+
+          raw() { gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$1?ref=$SHA"; }
+
+          # The SBOM for this tag. The script comes from the tag itself, or, for
+          # a tag older than the script, from this run's commit, and runs on the
+          # tag's tree with a scrubbed environment: no token in reach. It exits 1
+          # if the tag breaks the no-dependency rule, and then there is no Release.
+          src="$RUNNER_TEMP/src"
+          git clone --quiet --depth 1 --branch "$tag" "https://github.com/$REPO.git" "$src"
+          if [ ! -f "$src/scripts/sbom.py" ]; then
+            mkdir -p "$src/scripts"
+            raw scripts/sbom.py > "$src/scripts/sbom.py"
+          fi
+          sbom="$RUNNER_TEMP/$sbom_name"
+          if ! env -i PATH="$PATH" HOME="$RUNNER_TEMP" python3 "$src/scripts/sbom.py" --version "$tag" --out "$sbom"; then
+            echo "::error::the SBOM for $tag could not be made (scripts/sbom.py, above); the tag breaks the no-dependency rule or the tree cannot be read - no Release made"
+            exit 1
+          fi
+          if [ "$existing" = true ]; then
+            gh release upload "$tag" "$sbom" --repo "$REPO"
+            echo "SBOM $sbom_name added to the existing Release $tag"
             exit 0
           fi
 
           # Notes from CHANGELOG.md at this run's commit: the tag's own commit
           # on a push, the default branch on a backfill (which has every
           # section). The extractor comes from the same commit.
-          raw() { gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$1?ref=$SHA"; }
           for f in CHANGELOG.md scripts/release-notes.sh; do
             if ! raw "$f" > "$RUNNER_TEMP/${f##*/}"; then
               echo "::error::could not read $f at $SHA - start this from main: Actions > Release > Run workflow, tag=$tag"
@@ -93,6 +134,8 @@ jobs:
           fi
           printf '\n---\nFull history: [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md)\n' \
             "$REPO" "$tag" >> "$RUNNER_TEMP/notes.md"
+          printf 'Software bill of materials: `%s` (CycloneDX 1.5), attached below.\n' \
+            "$sbom_name" >> "$RUNNER_TEMP/notes.md"
 
           # "Latest" only for the highest version: a backfill of an old tag
           # must not take the badge from the current one.
@@ -102,5 +145,5 @@ jobs:
           [ "${tag#v}" = "$newest" ] && latest=true
 
           gh release create "$tag" --repo "$REPO" --verify-tag \
-            --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest"
-          echo "Release $tag made (latest: $latest)"
+            --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest" "$sbom"
+          echo "Release $tag made with $sbom_name (latest: $latest)"

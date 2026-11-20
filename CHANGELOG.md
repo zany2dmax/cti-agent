@@ -346,7 +346,7 @@ journal says why. Advisory triage in the digest stays off until you set
   `task ship` and `task check` run it, so a dependency added by accident turns the
   ship red, and the SBOM is rewritten on every ship. The same for a commit apart
   from its timestamp (a dirty tree adds a hash of its changes to the serial);
-  `dist/` is not committed; it is not yet attached to a release.
+  `dist/` is not committed here; it is attached to each GitHub Release (below).
   SECURITY.md "Supply chain" says so, and "Known gaps and accepted risks" now
   records the four findings the owner has decided: the Go source on the
   production host (accepted until the RPM), test sends using real data
@@ -414,6 +414,24 @@ journal says why. Advisory triage in the digest stays off until you set
     still the company's data-terms decision. "Permission-Controlled Reporting
     Exports" (10785633) and "AI Read-Only Scoped Access" (11583433) are
     decisions, not code, and are dismissed in Prime with their reasons.
+
+- **Every GitHub Release now carries its SBOM.** `release.yml` clones the tag's
+  tree, runs `scripts/sbom.py` on it (a scrubbed environment: the workflow's
+  token is not visible to it) and uploads `cti-agent-<version>.cdx.json`
+  (CycloneDX 1.5) as the release's asset, naming it in the notes. A tag that
+  breaks the no-dependency rule fails the run and gets no Release, the same way a
+  tag with no CHANGELOG section does. For a tag from before the script existed,
+  the script from the run's commit is used on the tag's tree. A manual run
+  (`gh workflow run release.yml -f tag=1.6.7`) on a Release that exists without an
+  SBOM adds the SBOM and nothing else, so earlier releases can be backfilled; a
+  Release that has one, or any push-triggered run for an existing Release, is left
+  as it is. The script now says "needs Python 3.10 or newer" instead of crashing
+  on an older one. The workflow's script is tested end to end against a stubbed
+  `gh` and a local repository (a new tag, a backfill, an existing release, an old
+  tag, a broken tag, the token not visible). The company copy of a release is made
+  by the company repository's own sync workflow, which does not carry assets
+  unless it is changed; the personal release has it. **Upgrade:** nothing on the
+  box; the next tag pushed gets its SBOM.
 
 ### Fixed
 

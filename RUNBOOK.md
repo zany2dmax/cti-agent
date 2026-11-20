@@ -2545,7 +2545,9 @@ on top of a tag, with a title and notes, and pushing a tag never makes one. Unti
 `.github/workflows/release.yml` makes them now. When a release tag (`1.6.7`,
 `v1.7`) reaches GitHub, it creates the release for it, titled with the tag, and
 the notes are that version's section of `CHANGELOG.md` with a link to the
-whole file. Only the highest version is marked **Latest**.
+whole file, and the release carries the version's **SBOM**
+(`cti-agent-1.6.7.cdx.json`, CycloneDX 1.5) as a downloadable file. Only the
+highest version is marked **Latest**.
 
 ### The steps
 
@@ -2569,8 +2571,8 @@ On the Mac, in `~/code/cti-agent`, clean and on `main`:
    `task ship` runs every check and pushes `main`; it does not push tags, so
    the second push is not optional. `cheatsheet:check` (inside `task ship`)
    fails if the tag and the stamp line disagree.
-4. About a minute later the release is on the Releases page. If not, look at
-   **Actions → Release**.
+4. About a minute later the release is on the Releases page, with its SBOM under
+   Assets. If not, look at **Actions → Release**.
 5. Update the box: `sudo cti-agent-update --for-real`.
 
 ### When it fails
@@ -2583,9 +2585,12 @@ The run fails, visibly, and makes nothing, when:
 | `could not read CHANGELOG.md at ...` | the run started from a commit older than this workflow's notes script | make it by hand (below), which reads `main` |
 | `tag 1.6.7 is not on GitHub` | a backfill was asked for before the tag was pushed | `git push origin 1.6.7` |
 | `'x' is not a release tag` | a backfill typed something other than `1.6.7` or `v1.7` | type the tag |
+| `the SBOM for 1.6.7 could not be made` | the tag breaks the no-dependency rule (a Go module or a third-party Python import), or its tree cannot be read; the message above it says which | `task sbom` on that commit shows the same message; fix it, tag again |
 
 A release that already exists is left as it is, so running it again is safe,
-and notes edited by hand on GitHub are never overwritten. **Do not use "Re-run
+and notes edited by hand on GitHub are never overwritten. The one exception is
+a manual run for a release that has no SBOM: it adds the SBOM and touches
+nothing else (see below). **Do not use "Re-run
 jobs"** on a failed run: it reuses the tag's commit, so it reads the same
 CHANGELOG and fails the same way.
 
@@ -2600,6 +2605,11 @@ release. Or from the Mac:
 gh workflow run release.yml --repo zany2dmax/cti-agent -f tag=1.6.5
 ```
 
+The same run adds the SBOM to a release that exists without one, so the
+releases made before this existed can be given theirs one at a time. It reads
+the tag's own tree; for a tag from before `scripts/sbom.py` existed it uses the
+script from `main` on that tree. It changes nothing else about the release.
+
 One tag per run. Push release tags one at a time too, never with
 `git push --tags`: GitHub sends no push event at all when more than three
 tags arrive in one push, so none of them would get a release.
@@ -2612,10 +2622,17 @@ tags arrive in one push, so none of them would get a release.
   `zany2dmax/cti-agent`.
 - **Create or move a tag.** It refuses a tag that is not already on GitHub.
 - **Attach binaries.** The box builds from source (`cti-agent-update`), so a
-  release is notes only.
+  release is notes and the SBOM only. The SBOM is made on GitHub's runner, so its
+  Go version is the runner's, not the box's; it lists what the code is made of.
+- **Put the SBOM on the company copy.** That release is made by the company
+  repo's `sync-upstream.yml`, which this repository does not control. Download
+  `cti-agent-1.6.7.cdx.json` from the personal release if the company copy needs
+  it, or ask for that workflow to copy the release's assets.
 - **Use third-party actions.** It reads two files through the GitHub API at the
-  run's commit and uses the `gh` CLI the runner already has, with the
-  workflow's own token, limited to `contents: write`.
+  run's commit, clones the public repository with `git` for the SBOM, and uses
+  the `gh` CLI the runner already has, with the workflow's own token, limited to
+  `contents: write`. The SBOM script runs with a scrubbed environment, so the
+  token is not visible to it.
 
 ---
 

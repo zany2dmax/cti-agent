@@ -322,6 +322,10 @@ def main(argv):
     ap.add_argument("--version")
     ap.add_argument("--check", action="store_true", help="verify the no-dependency rule and write nothing")
     a = ap.parse_args(argv)
+    if not hasattr(sys, "stdlib_module_names"):
+        # The import scan needs to know the standard library's module names.
+        print(f"sbom: needs Python 3.10 or newer (this is {sys.version.split()[0]})", file=sys.stderr)
+        return 1
     try:
         check()
     except Rule as e:
