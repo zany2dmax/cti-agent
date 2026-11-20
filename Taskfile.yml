@@ -465,20 +465,29 @@ tasks:
     # Tests run before the analysers: they are the fastest and the most
     # informative, so a broken change should fail on behaviour rather than on
     # a lint rule.
+    #
+    # Quiet: each step prints one "ok" line (dots while it runs), and only a
+    # failing step prints its output - all of it (scripts/quiet-step.sh). A
+    # passing run used to be thousands of lines, with tests' deliberate
+    # warnings in among them, so a real failure had to be read for. `task
+    # check` and the individual tasks still print everything.
+    silent: true
     cmds:
-      - task: fmt:check
-      - go build ./...
-      - task: test
-      - task: lint
-      - task: scan
-      - task: gosec
-      - task: govulncheck
-      - task: lint:py
-      - task: bandit
-      - task: lint:shell
-      - task: sbom
-      - task: cheatsheet:check
-      - git push
+      - 'echo "task ship:"'
+      - scripts/quiet-step.sh fmt:check task fmt:check
+      - scripts/quiet-step.sh build go build ./...
+      - scripts/quiet-step.sh test task test
+      - scripts/quiet-step.sh lint task lint
+      - scripts/quiet-step.sh scan task scan
+      - scripts/quiet-step.sh gosec task gosec
+      - scripts/quiet-step.sh govulncheck task govulncheck
+      - scripts/quiet-step.sh lint:py task lint:py
+      - scripts/quiet-step.sh bandit task bandit
+      - scripts/quiet-step.sh lint:shell task lint:shell
+      - scripts/quiet-step.sh sbom task sbom
+      - scripts/quiet-step.sh cheatsheet:check task cheatsheet:check
+      - scripts/quiet-step.sh push git push
+      - 'echo "task ship: every step passed, and the push went out."'
 
   sbom:
     desc: Write the CycloneDX SBOM to dist/sbom and prove the no-dependency rule

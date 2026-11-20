@@ -95,6 +95,15 @@ scanner's own address).
   passed when wired in (489 tests, about four minutes on the Mac).
   **Upgrade:** nothing; build tooling only.
 
+- **`task ship` is quiet unless something fails.** Each step prints one line,
+  `ok` and how long it took, with a dot every five seconds while it runs; a
+  passing step's output (test names and dots, the warnings tests trigger on
+  purpose, Task's echo of each command) is thrown away. A failing step prints
+  `FAIL` and then everything it printed, unfiltered, and the ship stops there
+  as before, before the push. New `scripts/quiet-step.sh` does it; `task check`
+  and every individual task still print everything. **Upgrade:** nothing;
+  build tooling only.
+
 ## 1.7 — 2026-11-20
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs
