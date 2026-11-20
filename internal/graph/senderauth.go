@@ -61,6 +61,7 @@ var (
 func (m Message) VouchedFor() (bool, string) {
 	ok, why := m.SenderAuthenticated()
 	if ok {
+		auditVerdict(fromDomain(m.From), audit.Success, "the receiving server authenticated the sender")
 		return true, ""
 	}
 	listed, bad := ParseUnauthenticatedSenders(os.Getenv(UnauthenticatedSendersEnv))
@@ -78,11 +79,32 @@ func (m Message) VouchedFor() (bool, string) {
 			}
 		}
 	}
+	auditVerdict(fromDomain(m.From), audit.Refused, why)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv(legacySenderAuthEnv)), "off") {
 		why += "; " + legacySenderAuthEnv + "=off is no longer honoured: list the sender's domain in " +
 			UnauthenticatedSendersEnv + " instead"
 	}
 	return false, why
+}
+
+// auditVerdict records an authentication verdict that decided whether a
+// message was believed, once per sender domain and outcome per run (a mailbox
+// of three hundred notices is one line, not three hundred). Success and
+// refusal are both written: "who did we trust, and who did we turn away" is
+// the audit question. Never the address, subject or body of the message.
+func auditVerdict(domain, outcome, why string) {
+	if domain == "" {
+		domain = "(no domain)"
+	}
+	acceptedM.Lock()
+	key := outcome + " " + domain
+	seen := accepted[key]
+	accepted[key] = true
+	acceptedM.Unlock()
+	if seen {
+		return
+	}
+	audit.Emit(audit.Event{Action: "sender.authentication", Target: domain, Outcome: outcome, Detail: why})
 }
 
 func auditAccepted(domain, why string) {

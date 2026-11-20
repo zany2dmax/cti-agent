@@ -1202,7 +1202,7 @@ and `man cti-audit`.
 | `AUDIT_DIR` | Where the trail is written (default `/var/log/cti-agent`). `off` discards it; tests and development only |
 | `AUDIT_RETAIN_DAYS` | The daily mailbox cleanup deletes audit files older than this (default 120). A non-numeric or zero value falls back to 120 with a board WARN |
 | `AUDIT_SYSLOG_ADDR` | `host:port` of a collector to forward each line to, in addition to the file. Unset: no forwarding |
-| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name, TLS 1.2 or later), `tcp` or `udp`. `tcp` and `udp` are unencrypted and must be asked for by name |
+| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name, TLS 1.2 or later), `tcp` or `udp`. `tcp` and `udp` are unencrypted, must be asked for by name, and are allowed only to a collector on this host |
 
 ```bash
 sudo cti-agent cti-audit --check     # directory writable? collector reachable?

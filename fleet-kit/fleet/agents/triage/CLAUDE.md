@@ -78,7 +78,7 @@ A single UTF-8 file:
 ```
 MESSAGE-ID: <opaque id>
 RECEIVED:   2026-09-23T14:58:54Z
-SENDER:     CTI@example.com
+SENDER:     example.com
 SUBJECT:    Daily Cyber Threat Intelligence Roundup - September 23, 2026
 
 DETERMINISTIC EXTRACTION (found by code, before you read anything):

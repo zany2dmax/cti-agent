@@ -18,7 +18,7 @@ func TestAdvisoryInputCapsAndRoundTrips(t *testing.T) {
 		msgs = append(msgs, NewAdvisory("id", time.Unix(int64(i), 0), "s", "subj", false, "b"))
 	}
 	p := filepath.Join(t.TempDir(), "in.json")
-	if err := WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+	if _, err := WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
@@ -48,5 +48,63 @@ func TestOrderPutsAuthenticatedFeedsFirstThenOldest(t *testing.T) {
 	}
 	if strings.Join(ids, ",") != "feed,old,new" {
 		t.Fatalf("order = %v", ids)
+	}
+}
+
+// A message the writer cannot match to a report line is left out and named;
+// header fields are cleaned; the rest are written.
+func TestAdvisoryInputRefusesWhatItCannotUse(t *testing.T) {
+	good := NewAdvisory("good-id", time.Now(), "a@vendor.example", "ok\x00\x07 subject", false, "CVE-2026-1 body\x00")
+	msgs := []Advisory{
+		good,
+		{ID: "", Received: time.Now(), Subject: "no id"},
+		{ID: "line\nbreak", Received: time.Now(), Subject: "bad id"},
+		{ID: "future", Received: time.Now().Add(72 * time.Hour), Subject: "from the future"},
+		{ID: "zero-time", Subject: "no time"},
+	}
+	p := filepath.Join(t.TempDir(), "in.json")
+	refused, err := WriteAdvisoryInput(p, msgs, time.Now())
+	if err != nil || len(refused) != 4 {
+		t.Fatalf("err %v, refused %d: %v", err, len(refused), refused)
+	}
+	in, err := ReadAdvisoryInput(p)
+	if err != nil || len(in.Messages) != 1 || in.Refused != 0 {
+		t.Fatalf("read back: %v %+v", err, in)
+	}
+	if strings.ContainsAny(in.Messages[0].Subject, "\x00\x07") || strings.Contains(in.Messages[0].Body, "\x00") {
+		t.Errorf("control characters survived: %q %q", in.Messages[0].Subject, in.Messages[0].Body)
+	}
+	// A tampered file is checked again on the way in.
+	bad := `{"schema":"cti-advisory-input/1","messages":[{"id":"","received":"2026-01-01T00:00:00Z"},{"id":"ok","received":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(p, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err = ReadAdvisoryInput(p)
+	if err != nil || len(in.Messages) != 1 || in.Refused != 1 {
+		t.Fatalf("tampered file: %v %+v", err, in)
+	}
+}
+
+func TestAdvisoryReportIsCheckedBeforeItIsWritten(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "rep.json")
+	ok := AdvisoryReport{Schema: AdvisoryReportSchema, Generated: time.Now(), Read: 2, Triaged: 1,
+		Results: []AdvisoryResult{{MessageID: "", Subject: "s\x01", Sender: "Jane <jane@vendor.example>"}}}
+	if err := WriteAdvisoryReport(p, ok); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), `"(no id)"`) || strings.Contains(string(b), "jane@") || strings.Contains(string(b), `\u0001`) {
+		t.Errorf("report not repaired:\n%s", b)
+	}
+	for name, r := range map[string]AdvisoryReport{
+		"wrong schema":     {Schema: "x", Read: 1},
+		"triaged > read":   {Schema: AdvisoryReportSchema, Read: 1, Triaged: 2},
+		"negative cost":    {Schema: AdvisoryReportSchema, CostUSD: -1},
+		"negative tokens":  {Schema: AdvisoryReportSchema, Tokens: -5},
+		"negative dropped": {Schema: AdvisoryReportSchema, Dropped: -1},
+	} {
+		if err := WriteAdvisoryReport(filepath.Join(t.TempDir(), "r.json"), r); err == nil {
+			t.Errorf("%s was written", name)
+		}
 	}
 }

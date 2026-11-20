@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/redact"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
@@ -69,6 +70,11 @@ func (m ModelCall) Run(ctx context.Context, input string) (string, Usage, error)
 	if strings.TrimSpace(m.Instructions) == "" {
 		return "", u, errors.New("the instructions are empty")
 	}
+	// The one place anything leaves for the model, so the one place redaction
+	// is applied: tax ids, bank and card numbers never reach it, whichever
+	// caller (reader, judge, a future one) built the input. Code has already
+	// extracted indicators from the raw text; this only changes what is shown.
+	input = redact.Sensitive(input)
 	max := m.MaxInput
 	if max <= 0 {
 		max = 64 << 10

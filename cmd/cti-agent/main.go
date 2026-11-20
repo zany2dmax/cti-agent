@@ -175,7 +175,12 @@ func main() {
 		// the cleanup lane may archive it.
 		if *advisoriesOut != "" && !msg.IsAutoReply() && !mailbox.AutoReplySubject(msg.Subject) {
 			listed := intelSource(msg, intel)
-			if listed || len(triage.IntelMarkers(text)) > 0 {
+			// Content decides, but only for a sender the receiving server
+			// vouched for (or internal mail): a forged From with a CVE in it
+			// must not reach a third-party model on the strength of markers
+			// alone. SenderAuthenticated, not VouchedFor, for the same reason
+			// teamSource uses it: the bypass list is for feeds behind a gateway.
+			if listed || (senderVouched(msg) && len(triage.IntelMarkers(text)) > 0) {
 				advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
 					msg.From, msg.Subject, listed, msg.BodyText))
 			}
@@ -347,11 +352,15 @@ func main() {
 	// Not fatal: a failure costs today's advisory triage, never the CVE
 	// digest. run-digest sees no file and says triage had nothing to read.
 	if *advisoriesOut != "" {
-		if err := triage.WriteAdvisoryInput(*advisoriesOut, advisories, time.Now()); err != nil {
+		refused, err := triage.WriteAdvisoryInput(*advisoriesOut, advisories, time.Now())
+		for _, r := range refused {
+			log.Printf("WARNING: advisory not saved for triage: %s", safelog.Line(r))
+		}
+		if err != nil {
 			log.Printf("WARNING: could not write the advisories for triage (%s); "+
 				"today's advisories without a CVE will not be triaged", safelog.Line(err.Error()))
 		} else {
-			log.Printf("advisories: %d threat-intel message(s) saved for triage", len(advisories))
+			log.Printf("advisories: %d threat-intel message(s) saved for triage", len(advisories)-len(refused))
 		}
 	}
 
@@ -502,6 +511,16 @@ func intelSource(msg graph.Message, list []string) bool {
 	if !ok {
 		warnUnvouched(msg, why)
 	}
+	return ok
+}
+
+// senderVouched reports mail the receiving server authenticated: internal mail,
+// or a From domain that passed DMARC or composite authentication.
+func senderVouched(msg graph.Message) bool {
+	if msg.Internal() {
+		return true
+	}
+	ok, _ := msg.SenderAuthenticated()
 	return ok
 }
 

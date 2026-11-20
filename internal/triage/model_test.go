@@ -99,3 +99,24 @@ func TestHugeOutputIsCapped(t *testing.T) {
 		t.Fatalf("n %d err %v buf %q", n, err, b.String())
 	}
 }
+
+// Whatever builds the input, what reaches the model has had tax ids, bank
+// numbers and card numbers removed: the one egress point is the one place
+// redaction is applied.
+func TestTheModelNeverReceivesTaxIdsOrBankNumbers(t *testing.T) {
+	bin, _, stdinFile := fakeClaude(t, `{"is_error":false,"result":"ok","total_cost_usd":0,"usage":{}}`, "")
+	m := ModelCall{Bin: bin, Model: "test-model", Instructions: "SYSTEM"}
+	in := "CVE-2026-1234 is exploited.\nOur EIN 12-3456789; card 4111 1111 1111 1111; IBAN GB82 WEST 1234 5698 7654 32.\n"
+	if _, _, err := m.Run(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(stdinFile)
+	for _, leak := range []string{"12-3456789", "4111 1111 1111 1111", "GB82 WEST"} {
+		if strings.Contains(string(got), leak) {
+			t.Errorf("%q reached the model:\n%s", leak, got)
+		}
+	}
+	if !strings.Contains(string(got), "CVE-2026-1234") {
+		t.Errorf("redaction removed the advisory's own content:\n%s", got)
+	}
+}

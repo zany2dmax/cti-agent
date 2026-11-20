@@ -106,7 +106,7 @@ type Event struct {
 
 // Logger writes events. Use FromEnv, or build one in a test.
 type Logger struct {
-	Dir   string // "" means DefaultDir; "off" discards the file and the stderr fallback
+	Dir   string // "" means DefaultDir; "off" discards events, but only outside a systemd unit (see Emit)
 	Lane  string
 	Actor string
 	Run   string
@@ -121,10 +121,15 @@ type Logger struct {
 
 	mu     sync.Mutex
 	warned map[string]bool
-	// fwdDown is set after the first failed forward and stays set for the
-	// rest of the process: see Emit.
-	fwdDown bool
+	// fwdRetryAt is when forwarding is tried again after a failed forward;
+	// zero means it is not backing off. See Emit.
+	fwdRetryAt time.Time
+	fwdMissed  int
 }
+
+// ForwardRetryAfter is how long forwarding stays quiet after a failed send
+// before the next event tries the collector again.
+const ForwardRetryAfter = 30 * time.Second
 
 // FromEnv builds the logger a command uses: AUDIT_DIR, AUDIT_SYSLOG_ADDR,
 // AUDIT_SYSLOG_PROTO, FLEET_RUN_ID or systemd's INVOCATION_ID, and the
@@ -213,9 +218,20 @@ func (l *Logger) Emit(e Event) error {
 		l.warn(kind, err)
 	}
 
-	switch dir := l.dir(); dir {
+	dir := l.dir()
+	if dir == "off" && os.Getenv("INVOCATION_ID") != "" {
+		// A fleet unit cannot have its audit trail switched off by an
+		// environment line: the setting is for tests and a developer's
+		// machine, which have no systemd invocation. Inside a unit it is
+		// ignored (the default directory is used) and said so, once.
+		l.warn("off", errors.New("audit: AUDIT_DIR=off is refused inside a systemd unit; using "+DefaultDir))
+		dir = DefaultDir
+	} else if dir == "off" {
+		l.warn("off", errors.New("audit: AUDIT_DIR=off, so this process's audit events are being discarded"))
+	}
+	switch dir {
 	case "off":
-		// Discarded on purpose (tests, a dev machine).
+		// Discarded on purpose (tests, a dev machine), and said so above.
 	default:
 		err := error(nil)
 		if !filepath.IsAbs(dir) {
@@ -231,24 +247,47 @@ func (l *Logger) Emit(e Event) error {
 	// A collector that is down must not tax every event. Each Send dials afresh
 	// with a timeout, so a hung collector would cost its whole timeout per
 	// event: a mailbox run moving a few hundred messages inside one two-minute
-	// context would spend the context on it, and the unit would fail. After the
-	// first failed forward the rest of this process stops trying; the local file
-	// still has every event, and the next run tries again.
-	if l.Forward != nil && l.dir() != "off" && !l.forwardingDown() {
-		if err := l.Forward.Send(line); err != nil {
+	// context would spend the context on it, and the unit would fail. After a
+	// failed forward the next ForwardRetryAfter of events are not sent (the
+	// local file still has every one), and the first event after that tries
+	// the collector again, so a collector that was down for a minute does not
+	// lose the rest of a long run. A recovery is said once.
+	if l.Forward != nil && dir != "off" {
+		if retry, skipped := l.forwardBackoff(t); skipped {
+			// quiet: counted for the recovery line
+		} else if err := l.Forward.Send(line); err != nil {
 			l.mu.Lock()
-			l.fwdDown = true
+			l.fwdRetryAt = t.Add(ForwardRetryAfter)
+			l.fwdMissed++
 			l.mu.Unlock()
-			note("forward", fmt.Errorf("audit: cannot forward to %s (%v); forwarding is off for the rest of this run, and the local file still has every event", l.Forward.Addr, err))
+			note("forward", fmt.Errorf("audit: cannot forward to %s (%v); the local file still has every event, and forwarding is tried again in %s", l.Forward.Addr, err, ForwardRetryAfter))
+		} else if retry {
+			l.mu.Lock()
+			missed := l.fwdMissed
+			l.fwdMissed = 0
+			delete(l.warned, "forward")
+			l.mu.Unlock()
+			_, _ = fmt.Fprintf(l.warnOut(), "audit: forwarding to %s resumed; %d earlier event(s) are in the local file only\n", l.Forward.Addr, missed)
 		}
 	}
 	return firstErr
 }
 
-func (l *Logger) forwardingDown() bool {
+// forwardBackoff says whether the logger is backing off after a failed
+// forward (skipped: do not send this event) and whether this send is the
+// first retry after one (retry).
+func (l *Logger) forwardBackoff(t time.Time) (retry, skipped bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.fwdDown
+	if l.fwdRetryAt.IsZero() {
+		return false, false
+	}
+	if t.Before(l.fwdRetryAt) {
+		l.fwdMissed++
+		return false, true
+	}
+	l.fwdRetryAt = time.Time{}
+	return true, false
 }
 
 func (l *Logger) dir() string {
@@ -467,6 +506,12 @@ func (f *Forwarder) dial() (net.Conn, string, time.Duration, error) {
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("AUDIT_SYSLOG_ADDR must be host:port: %w", err)
 	}
+	// Audit lines name recipients, tickets and mailboxes. Unencrypted
+	// forwarding is for a collector on this host (a local rsyslog that then
+	// ships onward over TLS); a remote collector gets tls or nothing.
+	if (proto == "tcp" || proto == "udp") && !loopbackHost(host) {
+		return nil, "", 0, fmt.Errorf("AUDIT_SYSLOG_PROTO %s is refused for %q: a plaintext protocol is allowed only to a collector on this host (127.0.0.1, ::1 or localhost); use tls for a remote one", proto, host)
+	}
 	d := &net.Dialer{Timeout: timeout}
 	var conn net.Conn
 	switch proto {
@@ -526,4 +571,15 @@ func Prune(dir string, keepDays int, now time.Time, dry bool) ([]string, error) 
 		gone = append(gone, e.Name())
 	}
 	return gone, nil
+}
+
+// loopbackHost reports whether host is this machine: localhost, or a literal
+// loopback address. A name that merely resolves to one is not accepted, so a
+// DNS answer cannot turn a remote collector into a "local" one.
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

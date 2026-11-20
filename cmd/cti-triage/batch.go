@@ -40,8 +40,12 @@ func runBatch(inPath, outPath string, perItem, whole time.Duration, logf func(st
 		logf("error  : --batch: %v", err)
 		return exitErr
 	}
+	if in.Refused > 0 {
+		logf("warn   : --batch: %d message(s) in the input failed the checks (no usable id or time) and were not triaged", in.Refused)
+	}
 	rep := triage.AdvisoryReport{Schema: triage.AdvisoryReportSchema, Generated: now().UTC(),
-		Read: len(in.Messages) + in.Dropped, Dropped: in.Dropped}
+		Read: len(in.Messages) + in.Dropped, Dropped: in.Dropped,
+		Gaps: refusedGap(in.Refused)}
 	msgs := triage.Order(in.Messages)
 	result := func(a triage.Advisory) triage.AdvisoryResult {
 		return triage.AdvisoryResult{MessageID: a.ID, Subject: a.Subject, Sender: a.Sender, Received: a.Received, Trusted: a.Trusted, Why: a.Why}
@@ -178,4 +182,13 @@ func triageOne(ctx context.Context, src triage.FactSource, a triage.Advisory, re
 		problems = append(problems, s(down))
 	}
 	return triage.VerifyJudgement(j, in, sheet, a.ID, down), problems, cveItems, false, total
+}
+
+// refusedGap is the report line that says some of the day's input was not
+// used, so a section that lists fewer than were saved says why.
+func refusedGap(n int) []string {
+	if n == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("%d saved advisory message(s) failed the input checks and were not triaged", n)}
 }

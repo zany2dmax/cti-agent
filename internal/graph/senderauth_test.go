@@ -174,3 +174,37 @@ func TestAcceptingAListedDomainLeavesAnAuditEventOncePerDomain(t *testing.T) {
 		t.Errorf("event should name the domain:\n%s", got.String())
 	}
 }
+
+// Both verdicts are audited, once per domain and outcome per run, and never
+// with the sender's address.
+func TestAuthenticationVerdictsAreAuditedOncePerDomain(t *testing.T) {
+	clearSenderEnv(t)
+	dir := t.TempDir()
+	restore := audit.SetDefault(&audit.Logger{Dir: dir, Lane: "cti-appscan", Actor: "tester", Run: "r", Host: "h", Pid: 1})
+	t.Cleanup(restore)
+	acceptedM.Lock()
+	accepted = map[string]bool{}
+	acceptedM.Unlock()
+	good := Message{From: "Q <noreply@qualys.com>", AuthenticationResults: "compauth=pass reason=100"}
+	bad := Message{From: "evil@forged.example", AuthenticationResults: "dmarc=fail"}
+	for i := 0; i < 3; i++ {
+		good.VouchedFor()
+		bad.VouchedFor()
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "audit-*.log"))
+	var got strings.Builder
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		got.Write(b)
+	}
+	out := got.String()
+	if n := strings.Count(out, "sender.authentication"); n != 2 {
+		t.Fatalf("want one success and one refusal for six messages, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, `target="qualys.com"`) || !strings.Contains(out, `target="forged.example"`) {
+		t.Errorf("events should name the domains:\n%s", out)
+	}
+	if strings.Contains(out, "evil@") || strings.Contains(out, "noreply@") {
+		t.Errorf("a sender address reached the audit trail:\n%s", out)
+	}
+}

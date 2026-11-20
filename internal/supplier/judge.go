@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/zany2dmax/cti-agent/internal/redact"
 )
 
 // This file is the judgement half of the supplier-request lane: what the model
@@ -183,7 +185,7 @@ func defuse(s string) string {
 // the question, all are business or personal data, and the lane's own code (not
 // the model) enforces the rules that use the sender and the form's structure.
 // The full form still goes to the people who file and review the request.
-// Every value is run through RedactSensitive as well, because free text is
+// Every value is run through redact.Sensitive as well, because free text is
 // where a tax id or an account number gets pasted.
 func formLines(f Form) string {
 	rows := []struct{ label, val string }{
@@ -194,7 +196,7 @@ func formLines(f Form) string {
 	}
 	var b strings.Builder
 	for _, r := range rows {
-		v := strings.TrimSpace(RedactSensitive(r.val))
+		v := strings.TrimSpace(redact.Sensitive(r.val))
 		if v == "" {
 			v = "(blank)"
 		}
@@ -221,12 +223,12 @@ func senderDomain(from string) string {
 // are checked against this, so it is built once and used for both.
 func (in Input) Source() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "SENDER DOMAIN: %s\nSUBJECT: %s\n", defuse(senderDomain(in.Sender)), defuse(RedactSensitive(in.Subject)))
+	fmt.Fprintf(&b, "SENDER DOMAIN: %s\nSUBJECT: %s\n", defuse(senderDomain(in.Sender)), defuse(redact.Sensitive(in.Subject)))
 	if in.State == StateRead && in.Form != nil {
 		b.WriteString("FORM FIELDS:\n")
 		b.WriteString(defuse(formLines(*in.Form)))
 	}
-	body := RedactSensitive(in.Body)
+	body := redact.Sensitive(in.Body)
 	truncated := false
 	if len(body) > maxBody {
 		body, truncated = body[:maxBody], true

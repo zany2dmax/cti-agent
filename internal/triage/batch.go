@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,6 +60,9 @@ type AdvisoryInput struct {
 	Written  time.Time  `json:"written"`
 	Messages []Advisory `json:"messages"`
 	Dropped  int        `json:"over_ingest_cap,omitempty"`
+	// Refused is how many messages failed the checks when the file was read
+	// (never serialised: the writer leaves them out).
+	Refused int `json:"-"`
 }
 
 // CVEItemLines are the set-aside items, one line each.
@@ -75,7 +79,9 @@ func CVEItemLines(s *Subjects) []string {
 
 // NewAdvisory caps the body. why says what made it threat intel.
 func NewAdvisory(id string, received time.Time, sender, subject string, trusted bool, body string) Advisory {
-	a := Advisory{ID: id, Received: received, Sender: sender, Subject: subject, Trusted: trusted, Body: body}
+	// The sender is kept as a domain: the address is a person's contact
+	// detail, and neither the model, the judgement nor the report needs it.
+	a := Advisory{ID: id, Received: received, Sender: SenderDomain(sender), Subject: subject, Trusted: trusted, Body: body}
 	if trusted {
 		a.Why = "a threat-intel sender (TRIAGE_SENDERS)"
 	} else {
@@ -87,9 +93,71 @@ func NewAdvisory(id string, received time.Time, sender, subject string, trusted 
 	return a
 }
 
+// Limits the writers enforce (and the reader re-checks): a message that breaks
+// them is skipped and named, never written.
+const (
+	maxAdvisoryIDLen      = 512
+	maxAdvisorySubjectLen = 1000
+	maxAdvisorySenderLen  = 255
+	maxAdvisoryWhyLen     = 500
+	maxResultFieldLen     = 2000
+)
+
+// cleanLine drops control characters and caps a header-like field.
+func cleanLine(s string, max int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\t' || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max])
+	}
+	return s
+}
+
+// checkAdvisory repairs what can be repaired (control characters, over-long
+// header fields) and refuses what cannot: a message with no usable id or time
+// cannot be matched to a report line, so it is not saved.
+func checkAdvisory(a Advisory, now time.Time) (Advisory, error) {
+	if a.ID == "" || len(a.ID) > maxAdvisoryIDLen || cleanLine(a.ID, maxAdvisoryIDLen) != a.ID {
+		return a, errors.New("no usable message id")
+	}
+	if a.Received.IsZero() || a.Received.After(now.Add(24*time.Hour)) {
+		return a, errors.New("no usable received time")
+	}
+	a.Subject = cleanLine(a.Subject, maxAdvisorySubjectLen)
+	a.Sender = cleanLine(a.Sender, maxAdvisorySenderLen)
+	a.Why = cleanLine(a.Why, maxAdvisoryWhyLen)
+	if strings.ContainsRune(a.Body, 0) {
+		a.Body = strings.ReplaceAll(a.Body, "\x00", "")
+	}
+	if len(a.Body) > MaxAdvisoryBody {
+		a.Body, a.Truncated = a.Body[:MaxAdvisoryBody], true
+	}
+	return a, nil
+}
+
+// CheckAdvisories runs checkAdvisory over a batch and returns the usable
+// messages and one line for each one it refused.
+func CheckAdvisories(msgs []Advisory, now time.Time) (ok []Advisory, refused []string) {
+	for _, a := range msgs {
+		c, err := checkAdvisory(a, now)
+		if err != nil {
+			refused = append(refused, fmt.Sprintf("%q: %v", cleanLine(a.Subject, 60), err))
+			continue
+		}
+		ok = append(ok, c)
+	}
+	return ok, refused
+}
+
 // WriteAdvisoryInput writes the input file, 0600, atomically. More than
-// MaxAdvisoriesPerRun messages are counted, not written.
-func WriteAdvisoryInput(path string, msgs []Advisory, now time.Time) error {
+// MaxAdvisoriesPerRun messages are counted, not written. A message that fails
+// the checks is left out and returned in refused; the rest are written.
+func WriteAdvisoryInput(path string, msgs []Advisory, now time.Time) (refused []string, err error) {
+	msgs, refused = CheckAdvisories(msgs, time.Now())
 	in := AdvisoryInput{Schema: AdvisoryInputSchema, Written: now.UTC(), Messages: msgs}
 	if len(in.Messages) > MaxAdvisoriesPerRun {
 		in.Dropped = len(in.Messages) - MaxAdvisoriesPerRun
@@ -98,7 +166,7 @@ func WriteAdvisoryInput(path string, msgs []Advisory, now time.Time) error {
 	if in.Messages == nil {
 		in.Messages = []Advisory{}
 	}
-	return writeFileAtomic(path, in)
+	return refused, writeFileAtomic(path, in)
 }
 
 // ReadAdvisoryInput reads and checks the input file.
@@ -114,6 +182,10 @@ func ReadAdvisoryInput(path string) (*AdvisoryInput, error) {
 	if in.Schema != AdvisoryInputSchema {
 		return nil, fmt.Errorf("schema %q, want %q", oneLine(in.Schema), AdvisoryInputSchema)
 	}
+	// The file is checked again on the way in: it sits on disk between two
+	// processes, and what is read is what a model is shown next.
+	ok, refused := CheckAdvisories(in.Messages, time.Now())
+	in.Messages, in.Refused = ok, len(refused)
 	return &in, nil
 }
 
@@ -163,10 +235,43 @@ type AdvisoryReport struct {
 	Gaps      []string         `json:"gaps,omitempty"`
 }
 
-// WriteAdvisoryReport writes the report, 0600, atomically.
+// WriteAdvisoryReport writes the report, 0600, atomically, after checking it:
+// the totals must make sense, and every field a reader prints is capped and
+// free of control characters. A result without a message id is kept (every
+// advisory read must appear) under a placeholder id.
 func WriteAdvisoryReport(path string, r AdvisoryReport) error {
 	if r.Results == nil {
 		r.Results = []AdvisoryResult{}
+	}
+	if r.Schema != AdvisoryReportSchema {
+		return fmt.Errorf("report schema %q, want %q", oneLine(r.Schema), AdvisoryReportSchema)
+	}
+	if r.Read < 0 || r.Triaged < 0 || r.Triaged > r.Read || r.Dropped < 0 || r.Tokens < 0 ||
+		math.IsNaN(r.CostUSD) || math.IsInf(r.CostUSD, 0) || r.CostUSD < 0 {
+		return fmt.Errorf("report totals are not plausible (read %d, triaged %d, dropped %d, tokens %d, cost %v)",
+			r.Read, r.Triaged, r.Dropped, r.Tokens, r.CostUSD)
+	}
+	out := make([]AdvisoryResult, len(r.Results))
+	for i, res := range r.Results {
+		res.MessageID = cleanLine(res.MessageID, maxAdvisoryIDLen)
+		if res.MessageID == "" {
+			res.MessageID = "(no id)"
+		}
+		res.Subject = cleanLine(res.Subject, maxAdvisorySubjectLen)
+		res.Sender = cleanLine(SenderDomain(res.Sender), maxAdvisorySenderLen)
+		res.Why = cleanLine(res.Why, maxAdvisoryWhyLen)
+		res.Skipped = cleanLine(res.Skipped, maxResultFieldLen)
+		for j := range res.Problems {
+			res.Problems[j] = cleanLine(res.Problems[j], maxResultFieldLen)
+		}
+		for j := range res.CVEItems {
+			res.CVEItems[j] = cleanLine(res.CVEItems[j], maxResultFieldLen)
+		}
+		out[i] = res
+	}
+	r.Results = out
+	for j := range r.Gaps {
+		r.Gaps[j] = cleanLine(r.Gaps[j], maxResultFieldLen)
 	}
 	return writeFileAtomic(path, r)
 }
@@ -197,4 +302,21 @@ func writeFileAtomic(path string, v any) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+// SenderDomain is the lowercased domain of "Name <user@domain>" or a bare
+// address, a bare domain unchanged, or "" when there is nothing usable.
+func SenderDomain(from string) string {
+	s := strings.TrimSpace(from)
+	if i := strings.LastIndex(s, "<"); i >= 0 {
+		s = strings.TrimSuffix(strings.TrimSpace(s[i+1:]), ">")
+	}
+	if at := strings.LastIndex(s, "@"); at >= 0 {
+		s = s[at+1:]
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" || strings.ContainsAny(s, " <>\"'\t\r\n,;") || !strings.Contains(s, ".") {
+		return ""
+	}
+	return s
 }

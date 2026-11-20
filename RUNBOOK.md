@@ -233,7 +233,7 @@ regression test.
 | `AUDIT_DIR` | Where the audit trail is written. Default `/var/log/cti-agent`; `off` discards it (tests and development only). See [11l](#11l-the-audit-trail) |
 | `AUDIT_RETAIN_DAYS` | Audit files older than this many days are deleted by the daily mailbox cleanup. Default 120 |
 | `AUDIT_SYSLOG_ADDR` | `host:port` of a syslog collector to forward each audit line to, as well as the file. Unset: no forwarding |
-| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name), `tcp` or `udp`. The last two are unencrypted |
+| `AUDIT_SYSLOG_PROTO` | `tls` (default; verifies certificate and host name), `tcp` or `udp`. The last two are unencrypted and allowed only to a collector on this host |
 | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Only for the orchestrator heartbeat |
 | `FLEET_BUDGET_*` | Quota ceilings for the heartbeat. See [fleet-kit/README.md → Quota ceilings](fleet-kit/README.md#8-quota-ceilings) |
 
@@ -2916,7 +2916,9 @@ What the daily does with it:
 1. **Ingest** saves every threat-intel message to
    `state/enriched-DATE-advisory-input.json`, whoever sent it. A message
    counts if it holds a CVE, an ATT&CK ID, a defanged indicator or link, a
-   public IP or a file hash, so a colleague's forward counts. So does
+   public IP or a file hash, so a colleague's forward counts, provided the
+   receiving server authenticated its sender (a forged From with a CVE in it is
+   not sent to the model). So does
    anything from an authenticated sender on `TRIAGE_SENDERS` (default:
    `MAILBOX_FEED_SENDERS`), even prose with none of those. Supplier
    requests, W9 and ACH threads and auto-replies hold none and never reach
@@ -2997,10 +2999,12 @@ AUDIT_SYSLOG_PROTO=tls
 ```
 
 then `sudo cti-agent cti-audit --check`. `tls` is the default and verifies the
-certificate and host name. `tcp` and `udp` are unencrypted and have to be named.
+certificate and host name. `tcp` and `udp` are unencrypted: they have to be named and are refused unless
+the collector is on this host (a local rsyslog that forwards onward over TLS).
 Forwarding is in addition to the file. A dead or hung collector costs one
-2-second timeout and one warning per run, then forwarding is off for the rest of
-that run, so it cannot slow every event; the file still has every event. Without any setting, you can instead point a collector's file reader at
+2-second timeout and one warning, then forwarding stays quiet for 30 seconds
+(the file still has every event) and the next event tries again; the recovery
+is reported once. `AUDIT_DIR=off` is refused inside a systemd unit. Without any setting, you can instead point a collector's file reader at
 `/var/log/cti-agent/audit-*.log`.
 
 **Retention.** The daily mailbox cleanup lane prunes first, before it touches

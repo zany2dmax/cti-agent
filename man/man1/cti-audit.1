@@ -87,10 +87,11 @@ is
 .BR tcp ,
 or
 .BR udp ;
-a plaintext protocol has to be asked for by name. TLS and TCP use RFC 6587
+a plaintext protocol has to be asked for by name, and is allowed only to a collector on this host (127.0.0.1, ::1 or localhost). TLS and TCP use RFC 6587
 octet counting. A collector that is down or hung costs one 2-second timeout
-and one warning per run, after which forwarding is off for the rest of that
-run (so it cannot slow every event); the local file still has every event. The other way to ship the
+and one warning, then forwarding stays quiet for 30 seconds (so it cannot slow
+every event; the local file still has every event) and the next event tries
+again; a recovery is reported once. The other way to ship the
 trail needs no setting here: point the collector's file reader at
 .BR audit\-*.log .
 .SH OPTIONS
@@ -225,7 +226,8 @@ on the directory, or the forwarding setting instead.
 .B AUDIT_DIR
 must be an absolute path.
 .B AUDIT_DIR=off
-discards events and also turns forwarding off. The Python mailer kept as a
+discards events and also turns forwarding off, and says so on stderr; inside a
+systemd unit it is refused and the default directory is used. The Python mailer kept as a
 rollback fallback
 .RB ( mailer.py )
 does not write audit events; the live path,

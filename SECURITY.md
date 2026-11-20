@@ -573,10 +573,14 @@ answer that does not depend on reading a journal.
 - **Forwarding.** Optional. `AUDIT_SYSLOG_ADDR` (`host:port`) sends the same
   line to a collector as it is written, in addition to the file. The protocol
   is `AUDIT_SYSLOG_PROTO`: `tls` (the default; certificate and host name
-  verified, TLS 1.2 or later), or `tcp` or `udp`, which are unencrypted and
-  have to be asked for by name. A dead or hung collector costs one 2-second timeout and
-  one warning per run, after which forwarding is off for the rest of that run
-  (so it cannot slow every event); the file still has every event. No SIEM is built or bundled; forwarding is
+  verified, TLS 1.2 or later), or `tcp` or `udp`, which are unencrypted: they
+  have to be asked for by name and are refused unless the collector is on this
+  host (a local rsyslog that ships onward over TLS). A dead or hung collector
+  costs one 2-second timeout and one warning, then forwarding stays quiet for 30
+  seconds and the next event tries again (so it cannot slow every event, and a
+  collector that was down for a minute does not lose the rest of a run); the
+  file still has every event. `AUDIT_DIR=off` is refused inside a systemd unit,
+  so a unit's trail cannot be switched off by an environment line. No SIEM is built or bundled; forwarding is
   only the option to ship to one. The other way needs no setting: point the
   collector's file reader at `/var/log/cti-agent/audit-*.log`.
 - **Retention.** The daily mailbox cleanup lane runs `cti-audit --prune

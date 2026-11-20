@@ -171,10 +171,92 @@ func TestUnwritableDirFallsBackToStderrOnce(t *testing.T) {
 	}
 }
 
-func TestOffDiscardsEverything(t *testing.T) {
+func TestOffDiscardsEverythingAndSaysSo(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "")
 	l, warn := logger("off")
-	if err := l.Emit(Event{Action: "a", Outcome: Success}); err != nil || warn.Len() != 0 {
-		t.Fatalf("off should be silent: %v %q", err, warn.String())
+	if err := l.Emit(Event{Action: "a", Outcome: Success}); err != nil || !strings.Contains(warn.String(), "being discarded") {
+		t.Fatalf("off should discard, once, loudly: %v %q", err, warn.String())
+	}
+}
+
+// A fleet unit cannot have its audit trail switched off by an environment
+// line: inside a systemd invocation AUDIT_DIR=off is refused and the default
+// directory (unwritable here) is used, with the event kept on stderr.
+func TestOffIsRefusedInsideASystemdUnit(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "unit-1")
+	l, warn := logger("off")
+	_ = l.Emit(Event{Action: "mail.send", Outcome: Success})
+	if !strings.Contains(warn.String(), "refused inside a systemd unit") {
+		t.Fatalf("off was honoured inside a unit: %q", warn.String())
+	}
+	if !strings.Contains(warn.String(), "mail.send") {
+		t.Errorf("the event must not be dropped when off is refused: %q", warn.String())
+	}
+}
+
+// Forwarding is retried after a failure instead of staying off for the rest
+// of the process, and the recovery is said once.
+func TestForwardingResumesAfterTheCollectorReturns(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	now := fixed
+	dir := t.TempDir()
+	l, warn := logger(dir)
+	l.Now = func() time.Time { return now }
+	l.Forward = &Forwarder{Addr: addr, Proto: "tcp", Timeout: 300 * time.Millisecond}
+	_ = l.Emit(Event{Action: "a", Outcome: Success}) // fails, backs off
+	_ = l.Emit(Event{Action: "b", Outcome: Success}) // inside the back-off: not sent
+	if strings.Count(warn.String(), "cannot forward") != 1 {
+		t.Fatalf("want one failure warning: %q", warn.String())
+	}
+	back, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Skip("could not rebind the collector port")
+	}
+	defer func() { _ = back.Close() }()
+	got := make(chan string, 1)
+	go func() {
+		c, err := back.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		buf := make([]byte, 4096)
+		n, _ := c.Read(buf)
+		got <- string(buf[:n])
+	}()
+	now = now.Add(ForwardRetryAfter + time.Second)
+	_ = l.Emit(Event{Action: "c", Outcome: Success})
+	select {
+	case line := <-got:
+		if !strings.Contains(line, "c ") && !strings.Contains(line, " c ") {
+			t.Errorf("the collector got the wrong line: %q", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwarding never resumed")
+	}
+	if !strings.Contains(warn.String(), "resumed; 2 earlier event(s)") {
+		t.Errorf("recovery not reported: %q", warn.String())
+	}
+}
+
+// Unencrypted forwarding is for a collector on this host only: audit lines
+// name recipients, tickets and mailboxes.
+func TestPlaintextForwardingToARemoteCollectorIsRefused(t *testing.T) {
+	for _, proto := range []string{"tcp", "udp"} {
+		err := (&Forwarder{Addr: "collector.example.com:514", Proto: proto}).Send("x")
+		if err == nil || !strings.Contains(err.Error(), "only to a collector on this host") {
+			t.Errorf("%s to a remote host: %v", proto, err)
+		}
+	}
+	for _, host := range []string{"localhost", "127.0.0.1", "[::1]"} {
+		if !loopbackHost(strings.Trim(host, "[]")) {
+			t.Errorf("%s should count as this host", host)
+		}
+	}
+	if loopbackHost("127.0.0.1.example.com") || loopbackHost("0.0.0.0") {
+		t.Error("a name that merely looks local was accepted")
 	}
 }
 
@@ -445,8 +527,8 @@ func TestAHungCollectorCostsOneTimeoutNotOnePerEvent(t *testing.T) {
 	if took := time.Since(start); took > 1500*time.Millisecond {
 		t.Fatalf("10 events took %v: the dead collector was dialled for each", took)
 	}
-	if strings.Count(warn.String(), "forwarding is off for the rest of this run") != 1 {
-		t.Errorf("want one warning saying forwarding is off, got %q", warn.String())
+	if strings.Count(warn.String(), "cannot forward") != 1 {
+		t.Errorf("want one warning about the dead collector, got %q", warn.String())
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "audit-2026-11-19.log"))
 	if strings.Count(string(b), "\n") != 10 {

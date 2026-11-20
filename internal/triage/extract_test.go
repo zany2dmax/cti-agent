@@ -325,7 +325,7 @@ func TestTheRenderedShapeMatchesTheAgentContract(t *testing.T) {
 	for _, want := range []string{
 		"MESSAGE-ID: AAMkADk0",
 		"RECEIVED:   2026-09-23T14:58:54Z",
-		"SENDER:     CTI@example.com",
+		"SENDER:     example.com",
 		"SUBJECT:    Daily Cyber Threat Intelligence Roundup",
 		"DETERMINISTIC EXTRACTION (found by code, before you read anything):",
 		"  cves:",
@@ -407,5 +407,30 @@ func TestOnlyAFilledProfileIsUsable(t *testing.T) {
 	}
 	if ProfileTemplate.Usable() || ProfileMissing.Usable() {
 		t.Error("an unfilled or absent profile must not be usable")
+	}
+}
+
+// The model, the saved input and the report get the sender's domain, never the
+// address: a person's mailbox is contact data nothing downstream needs.
+func TestOnlyTheSenderDomainIsKept(t *testing.T) {
+	for in, want := range map[string]string{
+		"CTI@Example.com":                "example.com",
+		"Daily Feed <news@feed.example>": "feed.example",
+		"feed.example":                   "feed.example",
+		"":                               "",
+		"not an address":                 "",
+		"user@host":                      "",
+	} {
+		if got := SenderDomain(in); got != want {
+			t.Errorf("SenderDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
+	a := NewAdvisory("id", time.Now(), "Jane Doe <jane.doe@vendor.example>", "s", false, "CVE-2026-1 body")
+	if a.Sender != "vendor.example" {
+		t.Errorf("the advisory kept %q", a.Sender)
+	}
+	in := RenderInput(Message{ID: "i", Received: time.Now(), Sender: "jane.doe@vendor.example", Subject: "s", Body: "b"}, Extraction{})
+	if strings.Contains(in, "jane.doe") {
+		t.Errorf("the model was shown the address:\n%s", in)
 	}
 }

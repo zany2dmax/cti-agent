@@ -1,4 +1,6 @@
-package supplier
+// Package redact removes what a model must not receive from text bound for it.
+// Both model lanes use it: the supplier lane and advisory triage.
+package redact
 
 import (
 	"regexp"
@@ -6,7 +8,7 @@ import (
 	"unicode"
 )
 
-// RedactSensitive replaces what a request must not carry to a model: tax ids,
+// Sensitive replaces what a request must not carry to a model: tax ids,
 // bank account and routing numbers, IBANs and card numbers, each with a marker
 // that says what was there.
 //
@@ -30,7 +32,7 @@ import (
 // The model reads the redacted text and the evidence quotes are checked against
 // that same text (Input.Source), so a redaction never makes a real quote look
 // fabricated.
-func RedactSensitive(s string) string {
+func Sensitive(s string) string {
 	s = canonical(s)
 	// Tax ids written the common way: EIN 12-3456789, SSN 123-45-6789, and an
 	// SSN with spaces or dots.

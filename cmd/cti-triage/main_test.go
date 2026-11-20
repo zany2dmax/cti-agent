@@ -247,7 +247,7 @@ func batchInput(t *testing.T, n int) string {
 			fmt.Sprintf("Advisory %d", i), i == n-1, "Chrome before 131.0 is exploited via evil[.]example (T1566)."))
 	}
 	p := filepath.Join(t.TempDir(), "in.json")
-	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+	if _, err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -348,7 +348,7 @@ func TestBatchLeavesCVEItemsToTheCVEDigest(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "in.json")
 	msgs := []triage.Advisory{triage.NewAdvisory("id", time.Unix(0, 0), "feed@example.com", "Weekly CVE roundup", true,
 		"CVE-2026-1234 affects Chrome before 131.0.")}
-	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+	if _, err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	judged := false
@@ -384,7 +384,7 @@ func TestBatchMarksMailWithNoThreatAsNotIntel(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "in.json")
 	msgs := []triage.Advisory{triage.NewAdvisory("id", time.Unix(0, 0), "news@intel.example", "This week in security", true,
 		"Welcome to our newsletter. Our webinar is on Tuesday.")}
-	if err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
+	if _, err := triage.WriteAdvisoryInput(p, msgs, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	judged := false

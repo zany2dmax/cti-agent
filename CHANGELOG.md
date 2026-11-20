@@ -37,11 +37,37 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
-**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure. The next
-AppSec weekly counts every scan whose notice arrived; scans whose notice never
+**Upgrade:** `sudo cti-agent-update --for-real`. **Check one thing first:** if
+`fleet.env` sets `AUDIT_SYSLOG_PROTO=tcp` or `udp` with an `AUDIT_SYSLOG_ADDR` that
+is not on this host, forwarding is now refused (the line is still written to the
+file, and `cti-audit --check` says why); switch it to `tls`, or point it at a
+local rsyslog (`127.0.0.1`) that ships onward over TLS. Nothing else to
+configure. The next AppSec weekly counts every scan whose notice arrived; scans whose notice never
 reached the mailbox are still listed as "scanned, no notification" (set a
 notification on those scans in Qualys, and make sure their notices come from the
 scanner's own address).
+
+- **Fixed issues found by PrimeSec AI in the 1.7 audit and triage code.**
+  - `AUDIT_DIR=off` is refused inside a systemd unit (the default directory is
+    used, and the process says so), so a unit's audit trail cannot be switched
+    off by an environment line. Outside a unit it still discards events, now
+    with a warning.
+  - A failed audit forward no longer disables forwarding for the rest of the
+    process: events inside the next 30 seconds are not sent (the file has them),
+    then the collector is tried again, and a recovery is reported once.
+  - `AUDIT_SYSLOG_PROTO=tcp` and `udp` are allowed only to a collector on this
+    host (`127.0.0.1`, `::1`, `localhost`); a remote collector needs `tls`.
+  - Sender authentication verdicts are audited (`sender.authentication`, once per
+    sender domain and outcome per run, domain only, never the address): both who
+    was believed and who was turned away.
+  - Advisory triage: everything sent to the model passes `internal/redact` (tax
+    ids, bank and card numbers; the supplier lane's redaction, moved to a shared
+    package); the model, the saved input and the report get the sender's
+    domain, not the address; mail reaches the model on its content only when the
+    receiving server authenticated its sender; and the input and report files
+    are checked as they are written and read (usable id and time, cleaned and
+    capped fields, plausible totals), with refused messages named in the log and
+    the report's gaps.
 
 - **The AppSec weekly had counts for 1 application of 13.** The daily owners
   lane recorded each sent scan's results notice for the mailbox cleanup, which

@@ -332,7 +332,9 @@ func RenderInput(m Message, e Extraction) string {
 
 	fmt.Fprintf(&b, "MESSAGE-ID: %s\n", oneLine(m.ID))
 	fmt.Fprintf(&b, "RECEIVED:   %s\n", m.Received.UTC().Format(time.RFC3339))
-	fmt.Fprintf(&b, "SENDER:     %s\n", oneLine(m.Sender))
+	// The sender's domain, not the address: the model needs to know who the
+	// mail is from at the organisation level, not a person's mailbox.
+	fmt.Fprintf(&b, "SENDER:     %s\n", oneLine(SenderDomain(m.Sender)))
 	fmt.Fprintf(&b, "SUBJECT:    %s\n\n", oneLine(m.Subject))
 
 	b.WriteString("DETERMINISTIC EXTRACTION (found by code, before you read anything):\n")
