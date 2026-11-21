@@ -35,14 +35,18 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.7.1 — 2026-11-21
 
-**Upgrade:** `sudo cti-agent-update --for-real`. **Check one thing first:** if
-`fleet.env` sets `AUDIT_SYSLOG_PROTO=tcp` or `udp` with an `AUDIT_SYSLOG_ADDR` that
-is not on this host, forwarding is now refused (the line is still written to the
-file, and `cti-audit --check` says why); switch it to `tls`, or point it at a
-local rsyslog (`127.0.0.1`) that ships onward over TLS. Nothing else to
-configure. From the next AppSec weekly, results notices stay in the inbox until
+**Upgrade:** `sudo cti-agent-update --for-real`. **Check two things first.**
+(1) If `fleet.env` sets `AUDIT_SYSLOG_PROTO=tcp` or `udp` with an
+`AUDIT_SYSLOG_ADDR` that is not on this host, forwarding is now refused (the line
+is still written to the file, and `cti-audit --check` says why); switch it to
+`tls`, or point it at a local rsyslog (`127.0.0.1`) that ships onward over TLS.
+(2) The fleet now adopts only Jira tickets its own account filed: if a person
+filed a ticket by hand that it should keep updating (the INF lock-down ticket),
+put that person's Jira account id in `JIRA_TRUSTED_REPORTERS`, or the next run
+files a new one. Optional: `DOMAINS_ALLOW_PRIVATE=1` if your inventory has
+internal names you want probed. Nothing else to configure. From the next AppSec weekly, results notices stay in the inbox until
 the weekly has read them (notices the daily lane had already recorded before the
 upgrade are still archived on the old timetable, so the first weekly may still
 miss those); scans whose notice never reached the mailbox are still listed as
