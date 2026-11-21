@@ -183,3 +183,89 @@ func TestRedactShapesFoundInReReview(t *testing.T) {
 		t.Errorf("prose changed: %q", Redact(in))
 	}
 }
+
+// Credentials in shapes a fixed list of names missed: the name is matched by
+// what it contains, with any value type, in the path, the fragment and the
+// userinfo too.
+func TestRedactURLCatchesCredentialsByWhatTheNameContains(t *testing.T) {
+	for _, in := range []string{
+		"https://x.example/cb?refresh_token=LIVE1",
+		"https://x.example/cb?oauth_token=LIVE2&q=a",
+		"https://x.example/cb?auth_token=LIVE3",
+		"https://x.example/cb?session_token=LIVE4",
+		"https://x.example/cb?api-key=LIVE5",
+		"https://x.example/cb?X-Amz-Signature=LIVE6",
+		"https://x.example/cb#access_token=LIVE7&state=s",
+		"https://scan:LIVE8@x.example/cb",
+		"https://x.example/cb?%74oken=LIVE9",
+		"https://x.example/reset/LIVE0aaaaaaaaaaaaaaaaaaaa",
+		"https://x.example/verify-email/LIVEBaaaaaaaaaaaaaaaaaaaa?next=/",
+	} {
+		out := RedactURL(in)
+		if strings.Contains(out, "LIVE") {
+			t.Errorf("RedactURL(%q) = %q: the credential survived", in, out)
+		}
+	}
+	// What is not a credential stays, so the finding still reads.
+	for _, in := range []string{
+		"https://x.example/search?q=shoes&keyword=boots&country_code=US&page=2",
+		"https://x.example/p?author=jane&authenticated=true#section-2",
+		"https://x.example/reset/short",
+		"https://x.example/docs/reset-guide/overview",
+	} {
+		if out := RedactURL(in); out != in {
+			t.Errorf("RedactURL(%q) changed an ordinary URL: %q", in, out)
+		}
+	}
+	// A finding's own weak parameter (key, code) is its payload and is kept; a
+	// credential never is, whatever the finding names.
+	if out := RedactURLKeeping("https://x.example/p?key=1'+OR+'1'='1&refresh_token=LIVE", "key"); !strings.Contains(out, "key=1'") || strings.Contains(out, "LIVE") {
+		t.Errorf("keeping: %q", out)
+	}
+	if out := RedactURLKeeping("https://x.example/p?refresh_token=LIVE", "refresh_token"); strings.Contains(out, "LIVE") {
+		t.Errorf("a credential was spared because the finding names it: %q", out)
+	}
+}
+
+func TestRedactJSONKeysByWhatTheyContainWithAnyValueType(t *testing.T) {
+	for _, in := range []string{
+		`{"token":"LIVE1","user":"a"}`,
+		`{"sessionToken":"LIVE2"}`,
+		`{"x-session":"LIVE3"}`,
+		`{"auth_code":12345678LIVE}`,
+		`{"api_key":["LIVE4","b"]}`,
+		`{"session":{"id":"LIVE5"}}`,
+		`{"Credentials":"LIVE6"}`,
+		`{"jwt":null,"private_key":"LIVE7"}`,
+	} {
+		if out := Redact(in); strings.Contains(out, "LIVE") {
+			t.Errorf("Redact(%q) = %q: the credential survived", in, out)
+		}
+	}
+	for _, in := range []string{
+		`{"author":"Jane","authenticated":true,"title":"Hello"}`,
+		`{"user":"a","count":3,"items":["x","y"]}`,
+	} {
+		if out := Redact(in); out != in {
+			t.Errorf("Redact(%q) changed ordinary JSON: %q", in, out)
+		}
+	}
+}
+
+// A cookie value can be quoted. The inline-header match used to stop at the
+// first quote, which left the value in the clear.
+func TestRedactQuotedCookieValuesMidLine(t *testing.T) {
+	for _, in := range []string{
+		`<td>Set-Cookie: sid="SCANSESSION"; Path=/</td>`,
+		`<td>Cookie: a="x"; b=SCANSESSION</td>`,
+		`HTTP/1.1 200 OK Set-Cookie: sid="SCAN SESSION"; HttpOnly`,
+	} {
+		out := Redact(in)
+		if strings.Contains(out, "SCANSESSION") || strings.Contains(out, "SCAN SESSION") || strings.Contains(out, `"x"`) {
+			t.Errorf("Redact(%q) = %q: the quoted value survived", in, out)
+		}
+	}
+	if out := Redact(`<td>Cookie: a=1</td><td>other</td>`); !strings.Contains(out, "<td>other</td>") {
+		t.Errorf("the redaction ran past the tag: %q", out)
+	}
+}

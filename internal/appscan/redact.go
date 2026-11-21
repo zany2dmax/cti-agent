@@ -2,6 +2,7 @@ package appscan
 
 import (
 	"encoding/base64"
+	neturl "net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -105,50 +106,105 @@ var (
 		`(?i)((?:\$_(?:SERVER|COOKIE)\[['"]?)?\b(?:HTTP_COOKIE|HTTP_AUTHORIZATION|REDIRECT_HTTP_AUTHORIZATION|PHP_AUTH_(?:USER|PW|DIGEST)|HTTP_X_[A-Z0-9_]*(?:TOKEN|KEY|AUTH)[A-Z0-9_]*)\b['"]?\]?\s*(?:</t[dh]>\s*<t[dh][^>]*>|=>|[=:])?\s*)[^<\r\n]+`)
 	jwtRE = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}`)
 
+	// An inline header runs to the end of the line or the next tag. It does NOT
+	// stop at a quote: a cookie value can be quoted (sid="abc"; Path=/), and a
+	// stop there left the value in the clear. The cost is that a header dumped
+	// inside a JSON string loses the rest of that line; evidence errs toward
+	// removing.
 	inlineHeaderRE = regexp.MustCompile(
-		`(?i)\b(set-cookie|cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*:[^\r\n<"]*`)
+		`(?i)\b(set-cookie|cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*:[^\r\n<]*`)
+	// jsonSecretRE is any JSON member whose KEY names a credential or a session,
+	// with a value of any kind (string, number, boolean, null, a flat array or a
+	// flat object). It matches the key by what it contains, not by a list of
+	// exact names: "token", "sessionToken", "x-session", "auth_code" all go.
 	jsonSecretRE = regexp.MustCompile(
-		`(?i)("(?:access_token|id_token|refresh_token|password|passwd|secret|client_secret|api_?key|session_?id|csrf_?token|cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token)"\s*:\s*)(?:"(?:[^"\\]|\\.)*"|\[[^\]]*\])`)
-	// urlSecretRE is a query or matrix (;jsessionid=) parameter whose name
-	// says it carries a credential or a session.
-	urlSecretRE = regexp.MustCompile(
-		`(?i)((?:^|[?&;])(?:pass|pwd|password|passwd|token|access_token|id_token|session|sess|sid|jsessionid|phpsessid|aspsessionid|auth|key|apikey|api_key|secret|code|signature|sig|csrf|csrf_token|nonce)=)[^&#;?\s"'<>]*`)
+		`(?i)("[^"\\]*(?:token|secret|passw(?:or)?d|pwd|session|sess_?id|credential|cookie|bearer|jwt|csrf|xsrf|signature|api[_-]?key|private[_-]?key|authori[sz]ation|auth(?:entication|[_-]|\b)|sid\b)[^"\\]*"\s*:\s*)` +
+			`(?:"(?:[^"\\]|\\.)*"|\[[^\]]*\]|\{[^{}]*\}|[^\s,}\]"{\[][^,}\]\s]*)`)
+	// urlParamRE is one query, matrix (;jsessionid=) or fragment (#access_token=)
+	// parameter, or the first pair of a form body.
+	urlParamRE = regexp.MustCompile(`((?:^|[?&;#])([^=&#;\s"'<>?]{1,128})=)([^&#;?\s"'<>]*)`)
+	// urlUserinfoRE is user:password@ in front of a host.
+	urlUserinfoRE = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://)[^/\s"'<>@]+@`)
+	// urlPathTokenRE is a token in a URL path after a segment that names its
+	// use: /reset/<token>, /verify-email/<token>, /invite/<token>.
+	urlPathTokenRE = regexp.MustCompile(
+		`(?i)(/(?:reset|verify|confirm|activate|invite|token|magic|unsubscribe|recover|password)[A-Za-z0-9_-]*/)[A-Za-z0-9_-]{16,}`)
+	// strongParamRE is a parameter name that carries a credential or a session
+	// whatever else it is: never spared, even when a finding names it.
+	strongParamRE = regexp.MustCompile(
+		`(?i)token|secret|passw|pwd|session|sess_?id|credential|csrf|xsrf|jwt|bearer|api[_-]?key|private[_-]?key|authori[sz]ation|auth(?:entication|[_-]|$)`)
 )
 
-// RedactURL replaces the value of every URL parameter named like a
-// credential or session id (token=, sid=, ;jsessionid=, ...). The scan
-// account's session in a link is as live as its Cookie header.
-func RedactURL(s string) string {
-	return urlSecretRE.ReplaceAllString(s, "${1}[redacted]")
+// strongParam reports whether a parameter name always carries a credential.
+func strongParam(name string) bool {
+	n := strings.ToLower(name)
+	switch n {
+	case "sid", "sess", "auth", "pass", "ssid":
+		return true
+	}
+	// A bare "signature" is also a payload parameter (see weakParam); a longer
+	// name containing it (X-Amz-Signature, oauth_signature) is a signed-URL credential.
+	if n != "signature" && strings.Contains(n, "signature") {
+		return true
+	}
+	return strongParamRE.MatchString(n) || strings.HasSuffix(n, "_sid") || strings.HasSuffix(n, "-sid")
 }
 
-// sessionParamRE are the parameter names whose value is a session or a
-// credential, never a payload - RedactURLKeeping never spares them.
-var sessionParamRE = regexp.MustCompile(
-	`(?i)^(?:pass|pwd|password|passwd|token|access_token|id_token|session|sess|sid|jsessionid|phpsessid|aspsessionid|auth|apikey|api_key|secret|csrf|csrf_token)$`)
+// weakParam names the parameters that are often secrets and often payloads: a
+// finding's own parameter of one of these names is kept (see RedactURLKeeping).
+func weakParam(name string) bool {
+	switch strings.ToLower(name) {
+	case "key", "code", "sig", "signature", "nonce", "otp", "pin", "ticket":
+		return true
+	}
+	return false
+}
+
+// paramName is the parameter's name with %XX escapes undone, so %74oken is token.
+func paramName(raw string) string {
+	if d, err := neturl.PathUnescape(raw); err == nil {
+		return d
+	}
+	return raw
+}
+
+// RedactURL replaces the value of every URL parameter named like a credential
+// or session id (token=, refresh_token=, api-key=, sid=, ;jsessionid=,
+// #access_token=, a percent-encoded %74oken=), the user:password@ of a URL, and
+// a token in the path after /reset/, /verify/, /invite/ and the like. The scan
+// account's session in a link is as live as its Cookie header.
+func RedactURL(s string) string { return redactURL(s, "") }
+
+func redactURL(s, keep string) string {
+	s = urlUserinfoRE.ReplaceAllString(s, "${1}[redacted]@")
+	s = urlPathTokenRE.ReplaceAllString(s, "${1}[redacted]")
+	return urlParamRE.ReplaceAllStringFunc(s, func(m string) string {
+		sub := urlParamRE.FindStringSubmatch(m)
+		if sub == nil {
+			return m
+		}
+		name := paramName(sub[2])
+		switch {
+		case strongParam(name):
+		case weakParam(name):
+			if keep != "" && strings.EqualFold(name, keep) {
+				return m // the finding's own parameter: its value is the payload
+			}
+		default:
+			return m
+		}
+		return sub[1] + "[redacted]"
+	})
+}
 
 // RedactURLKeeping is RedactURL that leaves one parameter alone: the one a
 // finding names, whose value is the payload that proves it (a parameter
 // called "key" or "code" is as injectable as any other). Its value is the
-// scanner's, not the scan account's.
+// scanner's, not the scan account's. A parameter that is itself a session or a
+// credential is never spared: Qualys files "session ID in URL" findings with the
+// session parameter as the finding's param, and that value is live.
 func RedactURLKeeping(s, param string) string {
-	param = strings.TrimSpace(param)
-	if param == "" {
-		return RedactURL(s)
-	}
-	return urlSecretRE.ReplaceAllStringFunc(s, func(m string) string {
-		name := strings.TrimRight(strings.TrimLeft(m, "?&;"), "=")
-		if i := strings.IndexByte(m, '='); i >= 0 {
-			name = strings.TrimLeft(m[:i], "?&;")
-		}
-		// Spared only when the parameter is not itself a session or a
-		// credential: Qualys files "session ID in URL" findings with the
-		// session parameter as the finding's param, and that value is live.
-		if strings.EqualFold(name, param) && !sessionParamRE.MatchString(name) {
-			return m
-		}
-		return urlSecretRE.ReplaceAllString(m, "${1}[redacted]")
-	})
+	return redactURL(s, strings.TrimSpace(param))
 }
 
 func printable(b []byte) bool {

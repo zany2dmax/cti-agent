@@ -69,6 +69,28 @@ scanner's own address).
     capped fields, plausible totals), with refused messages named in the log and
     the report's gaps.
 
+- **Fixed issues found by PrimeSec AI: the scanner-evidence redactor (10786553,
+  10786554, 10786555, 10786483, 11583473).** The redactor that cleans scanner
+  evidence before it reaches tickets, reports and owner mail matched fixed lists of
+  names. Run against it, these passed through unchanged: `refresh_token=`,
+  `oauth_token=`, `api-key=`, `X-Amz-Signature=`, `#access_token=`,
+  `user:password@host`, `%74oken=`, `/reset/<token>`, JSON members named `token`
+  or `sessionToken` or holding a number, and a quoted cookie value in
+  `Set-Cookie: sid="..."` (the inline match stopped at the quote).
+  - JSON members, URL parameters (query, matrix, fragment, percent-encoded) and
+    the URL userinfo and path tokens are matched by what the name contains
+    (token, secret, session, credential, auth, api key, signature, and so on),
+    with any value type. A finding's own `key` or `code` parameter is still kept,
+    since that is the payload; a credential is never spared.
+  - An inline header runs to the end of the line or the next tag, quotes
+    included. A header dumped inside a JSON string loses the rest of that line.
+  - An unpadded base64 run, however short, is decoded and checked, not passed
+    through; one that cannot be decoded is still removed.
+  - `cti-appreport --probe-findings` output also passes `RedactURL`.
+  The redactor is still pattern-based: a bare secret echoed with no key or header
+  beside it cannot be recognised, which is why the attached raw Qualys report stays
+  off by default (`WAS_ATTACH_REPORT`).
+
 - **Fixed issues found by PrimeSec AI: Tier 3, Jira tickets the fleet adopts.**
   The fleet found its tickets by label, and a label is text anyone who can create
   or edit an issue in the project can write. A project member could plant a

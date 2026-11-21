@@ -515,16 +515,27 @@ func maybeBase64(s string) string {
 	if len(t) < 16 || strings.Trim(t, b64Alphabet) != "" {
 		return longBase64Runs(s)
 	}
+	var dec []byte
+	var err error
 	if len(t)%4 != 0 {
-		// All base64 and long, but cut short: it cannot be decoded, so it
-		// cannot be checked for a cookie. Short runs stay - "deadbeef" in a
-		// page is text.
-		if len(t) >= minEncodedRun {
-			return unreadable
+		// Unpadded base64 (RFC 4648 without the '=' signs, as JWT segments and
+		// many web frameworks write it) decodes as it is. If it does, it is
+		// checked like any other block; the old rule returned a short unpadded
+		// run untouched, so a cookie or a token in one passed straight through.
+		if raw, rerr := base64.RawStdEncoding.DecodeString(t); rerr == nil {
+			dec, err = raw, nil
+		} else {
+			// All base64 and long, but cut short: it cannot be decoded, so it
+			// cannot be checked for a cookie. Short runs stay - "deadbeef" in
+			// a page is text.
+			if len(t) >= minEncodedRun {
+				return unreadable
+			}
+			return s
 		}
-		return s
+	} else {
+		dec, err = base64.StdEncoding.DecodeString(t)
 	}
-	dec, err := base64.StdEncoding.DecodeString(t)
 	if err != nil {
 		return s // not base64 after all: ordinary text, redacted as such
 	}

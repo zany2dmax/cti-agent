@@ -237,7 +237,7 @@ func run() int {
 			return die("%s", safelog.Line(err.Error()))
 		}
 		logf("note   : redacted, but still evidence from our own application - keep the output 0600 and off tickets")
-		fmt.Println(appscan.Redact(string(body)))
+		fmt.Println(appscan.RedactURL(appscan.Redact(string(body))))
 		return exitOK
 
 	case *appID != "":

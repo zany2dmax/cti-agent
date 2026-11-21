@@ -3,6 +3,7 @@ package qualys
 import (
 	"encoding/base64"
 	"encoding/xml"
+	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"strings"
 	"testing"
 )
@@ -49,8 +50,20 @@ func TestTheVerboseRecordsClassificationIsRead(t *testing.T) {
 func TestAnEncodedProofThatCannotBeCheckedIsRemoved(t *testing.T) {
 	enc := base64.StdEncoding.EncodeToString([]byte("HTTP/1.1 200 OK\r\nSet-Cookie: s=LIVE; Path=/\r\n" + strings.Repeat("x", 300)))
 	// Cut short, as a truncated response would be: no longer a multiple of 4.
-	if got := maybeBase64(enc[:len(enc)-1]); got != unreadable {
-		t.Errorf("truncated base64 was passed through: %.60q", got)
+	// Unpadded base64 decodes as it is, so it is checked like any other block:
+	// the cookie in it is redacted, and it is no longer passed through encoded.
+	if got := maybeBase64(enc[:len(enc)-1]); got == unreadable || strings.Contains(got, enc[:40]) ||
+		strings.Contains(appscan.Redact(got), "LIVE") {
+		t.Errorf("truncated base64 was passed through or its cookie survived: %.60q", got)
+	}
+	// Cut so that it cannot be decoded at all (one stray character): removed.
+	if got := maybeBase64(enc[:len(enc)-3]); got != unreadable {
+		t.Errorf("undecodable base64 was passed through: %.60q", got)
+	}
+	// Unpadded and short: a cookie in it used to pass straight through.
+	unpadded := strings.TrimRight(base64.StdEncoding.EncodeToString([]byte("Cookie: s=LIVE")), "=")
+	if got := maybeBase64(unpadded); strings.Contains(appscan.Redact(got), "LIVE") || got == unpadded {
+		t.Errorf("an unpadded encoded cookie was not decoded and redacted: %q", got)
 	}
 	// Text with an encoded block after it: the block is decoded so the
 	// header redaction sees it, never left encoded.
