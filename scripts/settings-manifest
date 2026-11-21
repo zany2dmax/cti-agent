@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""settings-manifest - keep fleet-kit/fleet/settings.manifest in step with the code.
+
+    scripts/settings-manifest --check    exit 1 if the manifest is out of date (task check runs this)
+    scripts/settings-manifest --write    rewrite it, keeping the hand-kept fields
+
+The manifest is the one list of fleet.env settings: for each key, which
+programs read it (generated here, from the code), and what only a person can
+say (kept by hand): whether it is a secret, when it is required, its default.
+`fleet-config check` compares a box's fleet.env against it.
+
+WHO READS A KEY. A key is read by a program when the key appears as a whole
+word in that program's code: a Go command (or any package it imports - so a
+key read in internal/config counts for every command that uses it), a Python
+lane, a runner or fleet tool, the installer (which writes the timers from the
+*_TIME settings), a systemd unit, or fleet-mode.sh (every runner sources it).
+Whole-word matching finds names built in bash and names in lookup tables,
+which a pattern for os.Getenv alone would miss; it can also count a comment
+that names the key, which is acceptable for a map that errs toward "read".
+
+THE KEYS are every KEY=value line of fleet.env.example (commented or not, but
+only a line that is a setting, never prose), plus every key the Go or Python
+code reads by a literal name. Runtime variables that systemd, sudo or the
+runners set themselves are not settings and are listed in RUNTIME below.
+
+The test in fleet-kit/tests/test_lanes.py runs --check, so a key added to the
+code or the example without a manifest entry fails the build, as does a
+manifest key nothing reads any more.
+"""
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+MANIFEST = ROOT / "fleet-kit" / "fleet" / "settings.manifest"
+EXAMPLE = ROOT / "fleet-kit" / "fleet" / "fleet.env.example"
+
+# Set by systemd, sudo or the fleet's own runners at run time; never in fleet.env.
+RUNTIME = {
+    "CHECKIN_BEAT_ID", "FLEET_RUN_ID", "INVOCATION_ID", "SUDO_USER", "HOME", "PATH",
+    "USER", "LOGNAME", "TMPDIR", "CREDENTIALS_DIRECTORY", "RUNTIME_DIRECTORY",
+    "STATE_DIRECTORY", "FLEET_HOME", "FLEET_CODE", "FLEET_ENV", "FLEET_FEEDS",
+}
+# Programs that name secrets without reading them: checkin-bash-guard lists
+# secret names so it can refuse a command that expands one (it does read its
+# own CHECKIN_MAX_* limits). Counting it as a reader of a secret would grant
+# it that secret in step 2 of the split.
+NAMES_SECRETS_ONLY = {"checkin-bash-guard"}
+# A secret by its name, before anyone has marked it: so the first --write for
+# a new secret does not credit the guard with reading it.
+SECRET_NAME = re.compile(r"(SECRET|TOKEN|PASSWORD|_PAT$|API_KEY|SALT)")
+# Hand-kept fields, in the order they are written.
+KEPT = ("secret", "required", "default", "note")
+
+KEY_LINE = re.compile(r'^#?\s?([A-Z][A-Z0-9_]{2,})=("[^"]*"|\'[^\']*\'|\S*)\s*$')
+SECTION = re.compile(r"^# ══ (.+?) ═")
+GO_READ = re.compile(r'(?:Getenv|LookupEnv|\benv|envOr|envInt|envDuration|getenvDefault|Secret)\(\s*"([A-Z][A-Z0-9_]{2,})"')
+PY_READ = re.compile(r'(?:environ(?:\.get)?[\[(]|getenv\()\s*["\']([A-Z][A-Z0-9_]{2,})["\']')
+# Reads that tell "set to nothing" from "unset": Go's LookupEnv with its ok,
+# Python's `"K" in os.environ`. For such a key an empty value is a setting,
+# not a line that can go.
+EMPTY_DIFFERS = [
+    re.compile(r'LookupEnv\(\s*"([A-Z][A-Z0-9_]{2,})"'),
+    re.compile(r'["\']([A-Z][A-Z0-9_]{2,})["\']\s+(?:not\s+)?in\s+os\.environ'),
+]
+# Defaults the code states: bash ${K:-v}, Go envOr("K", "v"), Python environ.get("K", "v").
+DEFAULTS = [
+    re.compile(r'\$\{([A-Z][A-Z0-9_]{2,}):-([^}$`"\'\s]*)\}'),
+    re.compile(r'(?:envOr|getenvDefault)\(\s*"([A-Z][A-Z0-9_]{2,})"\s*,\s*"([^"]*)"\s*\)'),
+    re.compile(r'environ\.get\(\s*["\']([A-Z][A-Z0-9_]{2,})["\']\s*,\s*["\']([^"\']*)["\']\s*\)'),
+]
+
+
+def example_keys():
+    keys, section = {}, ""
+    for line in EXAMPLE.read_text(encoding="utf-8").splitlines():
+        m = SECTION.match(line)
+        if m:
+            section = m.group(1).strip()
+            continue
+        m = KEY_LINE.match(line)
+        if m and m.group(1) not in keys:
+            keys[m.group(1)] = section
+    return keys
+
+
+def go_commands():
+    """{command: set of import paths it builds from}, via go list."""
+    out = subprocess.run(["go", "list", "-f", "{{.ImportPath}} {{join .Deps \" \"}}", "./cmd/..."],
+                         cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    cmds = {}
+    for line in out.splitlines():
+        path, *deps = line.split()
+        cmds[path.rsplit("/", 1)[-1]] = set(deps) | {path}
+    mod = subprocess.run(["go", "list", "-m"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    return cmds, mod
+
+
+def sources():
+    """[(reader name or Go package path, is_go, text)]"""
+    out = []
+    cmds, mod = go_commands()
+    for p in sorted(list(ROOT.glob("cmd/**/*.go")) + list(ROOT.glob("internal/**/*.go"))):
+        if p.name.endswith("_test.go"):
+            continue
+        pkg = mod + "/" + str(p.parent.relative_to(ROOT))
+        out.append((pkg, True, p.read_text(encoding="utf-8", errors="ignore")))
+    kit = ROOT / "fleet-kit"
+    for p in sorted((kit / "fleet" / "lanes").glob("*.py")):
+        out.append((p.name, False, p.read_text(encoding="utf-8", errors="ignore")))
+    for d in (kit / "fleet" / "bin", kit / "bin", kit / "fleet" / "share"):
+        for p in sorted(d.iterdir()):
+            if p.is_file():
+                out.append((p.name, False, p.read_text(encoding="utf-8", errors="ignore")))
+    out.append(("installer", False, (kit / "install-fedora.sh").read_text(encoding="utf-8")))
+    for p in sorted((kit / "fleet" / "systemd-fedora").iterdir()):
+        if p.is_file():
+            out.append((p.name, False, p.read_text(encoding="utf-8", errors="ignore")))
+    return out, cmds
+
+
+def scan(kept=None):
+    """{key: {"section", "readers", "code_default", "default_conflict"}}"""
+    keys = example_keys()
+    srcs, cmds = sources()
+    for _name, is_go, text in srcs:
+        for k in (GO_READ if is_go else PY_READ).findall(text):
+            if k not in RUNTIME:
+                keys.setdefault(k, "not in fleet.env.example")
+    # A default counts only when every source file that reads the key states
+    # the same one: a bash ${K:-v} says nothing about a Go reader of K that
+    # has its own idea, and "can be removed" must never be a guess.
+    defaults, stated_in, differs = {}, {}, set()
+    for i, (_name, _is_go, text) in enumerate(srcs):
+        for rx in DEFAULTS:
+            for k, v in rx.findall(text):
+                if v != "":  # ${K:-} only guards set -u; it states no default
+                    defaults.setdefault(k, set()).add(v)
+                    stated_in.setdefault(k, set()).add(i)
+        for rx in EMPTY_DIFFERS:
+            differs |= set(rx.findall(text))
+    out = {}
+    for k, section in keys.items():
+        word = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(k) + r"(?![A-Za-z0-9_])")
+        readers = set()
+        secret = (kept or {}).get(k, {}).get("secret") == "yes" or bool(SECRET_NAME.search(k))
+        read_rx = re.compile(r'"' + re.escape(k) + r'"|\$\{?' + re.escape(k) + r'(?![A-Za-z0-9_])')
+        reading_files = set()
+        for i, (name, is_go, text) in enumerate(srcs):
+            if (secret and name in NAMES_SECRETS_ONLY) or not word.search(text):
+                continue
+            if read_rx.search(text):
+                reading_files.add(i)
+            if is_go:
+                readers |= {c for c, deps in cmds.items() if name in deps}
+            else:
+                readers.add(name)
+        ds = defaults.get(k, set())
+        everyone = len(ds) == 1 and reading_files <= stated_in.get(k, set())
+        out[k] = {
+            "section": section,
+            "readers": sorted(readers),
+            "code_default": next(iter(ds)) if everyone else None,
+            "default_conflict": sorted(ds) if len(ds) > 1 else None,
+            "empty_differs": k in differs,
+        }
+    return out
+
+
+def parse_manifest(text):
+    entries, cur = {}, None
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        field, _, value = line.partition(":")
+        field, value = field.strip(), value.strip()
+        if field == "key":
+            cur = entries.setdefault(value, {})
+        elif cur is not None:
+            cur[field] = value
+    return entries
+
+
+HEADER = """\
+# The one list of fleet.env settings. `fleet-config check` reads it.
+#
+# GENERATED in part by scripts/settings-manifest --write: `section`, `readers`,
+# `code-default` (only when every reader states the same one),
+# `default-conflict` and `empty-differs` (an empty value means something other
+# than unset, so it is a setting, not a removable line) come from the code
+# and are rewritten.
+# Kept by hand, and preserved on --write:
+#   secret:    yes - a credential; step 2 of the fleet.env split moves these
+#              into systemd credentials, one lane at a time
+#   required:  always | if KEY=VALUE  - fleet-config check reports it missing
+#   default:   VALUE - what the code uses when the key is unset; a setting
+#              equal to it can be removed. Overrides code-default when both
+#              are present, for defaults the scanner cannot see
+#   note:      one line for a person
+# task check fails when this file is out of date with the code: run
+# scripts/settings-manifest --write and review the diff.
+"""
+
+
+def render(scanned, kept):
+    lines = [HEADER]
+    for k in sorted(scanned):
+        s, h = scanned[k], kept.get(k, {})
+        lines.append(f"key: {k}")
+        lines.append(f"section: {s['section']}")
+        lines.append("readers: " + (" ".join(s["readers"]) if s["readers"] else "NONE"))
+        if s["code_default"] is not None:
+            lines.append(f"code-default: {s['code_default']}")
+        if s["default_conflict"]:
+            lines.append("default-conflict: " + " | ".join(repr(v) for v in s["default_conflict"]))
+        if s["empty_differs"]:
+            lines.append("empty-differs: yes")
+        for f in KEPT:
+            if h.get(f):
+                lines.append(f"{f}: {h[f]}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def main(argv):
+    if len(argv) != 1 or argv[0] not in ("--check", "--write", "--json"):
+        print(__doc__.split("\n\n")[1], file=sys.stderr)
+        return 2
+    kept = parse_manifest(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
+    scanned = scan(kept)
+    if argv[0] == "--json":
+        json.dump(scanned, sys.stdout, indent=2, sort_keys=True)
+        return 0
+    want = render(scanned, kept)
+    unread = sorted(k for k, s in scanned.items() if not s["readers"])
+    if argv[0] == "--write":
+        MANIFEST.write_text(want, encoding="utf-8")
+        print(f"wrote {MANIFEST.relative_to(ROOT)}: {len(scanned)} settings")
+        if unread:
+            print("read by nothing (remove from fleet.env.example, or fix the reader): " + " ".join(unread))
+        return 1 if unread else 0
+    have = MANIFEST.read_text(encoding="utf-8") if MANIFEST.exists() else ""
+    problems = []
+    if unread:
+        problems.append("read by nothing: " + " ".join(unread))
+    if have != want:
+        old, new = parse_manifest(have), parse_manifest(want)
+        added = sorted(set(new) - set(old))
+        gone = sorted(set(old) - set(new))
+        changed = sorted(k for k in set(old) & set(new) if old[k] != new[k])
+        problems.append("settings.manifest is out of date with the code"
+                        + (f"; new: {' '.join(added)}" if added else "")
+                        + (f"; gone: {' '.join(gone)}" if gone else "")
+                        + (f"; changed: {' '.join(changed[:15])}" if changed else "")
+                        + " - run scripts/settings-manifest --write and review the diff")
+    for p in problems:
+        print(p, file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

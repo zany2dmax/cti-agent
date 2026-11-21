@@ -2764,7 +2764,7 @@ class TestFileShape(unittest.TestCase):
             try:
                 time.sleep(0.3)
                 r = subprocess.run(["bash", "-c", m.group(0) + '\nprintf "new\\n" | replace_file "$1" 0755',
-                                    "x", str(busy)], capture_output=True, text=True)
+                                    "x", str(busy)], capture_output=True, text=True, check=False)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertEqual(busy.read_text(), "new\n")
                 self.assertEqual(busy.stat().st_mode & 0o777, 0o755)
@@ -6523,6 +6523,132 @@ class TlsFloor(unittest.TestCase):
             handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {},
                                      "http://services.nvd.nist.gov/x")
         cm.exception.close()
+
+
+
+class FleetConfig(unittest.TestCase):
+    """fleet-config check reads fleet.env, which holds secrets, so the one
+    promise that matters is that it never prints a value. The rest: what it
+    flags, and that settings.manifest stays in step with the code."""
+
+    TOOL = KIT / "fleet" / "bin" / "fleet-config"
+    REPO = KIT.parent
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.manifest = self.tmp / "settings.manifest"
+        self.manifest.write_text(
+            "key: CLIENT_SECRET\nreaders: cti-mailer cti-agent\nsecret: yes\nrequired: always\n\n"
+            "key: SUPPLIER_MODEL\nreaders: run-supplier\n\n"
+            "key: GRAPH_FOLDER\nreaders: cti-agent\ncode-default: Inbox\n\n"
+            "key: LOOKUP_PROVIDER\nreaders: cti-agent\ncode-default: qualys\n\n"
+            "key: QUALYS_PASSWORD\nreaders: cti-vmscan\nsecret: yes\nrequired: if LOOKUP_PROVIDER=qualys\n\n"
+            "key: DOM_TO\nreaders: run-domains\n\n")
+
+    def run_tool(self, *args, env_text=None):
+        env = {"PATH": os.environ["PATH"], "FLEET_CODE": str(self.tmp)}
+        if env_text is not None:
+            f = self.tmp / "fleet.env"
+            f.write_text(env_text)
+            args = (*args, "--env", str(f))
+        return subprocess.run([sys.executable, str(self.TOOL), *args], env=env,
+                              capture_output=True, text=True, check=False)
+
+    def test_it_never_prints_a_value(self):
+        r = self.run_tool("check", env_text=(
+            "CLIENT_SECRET=hunter2-secret-value\nSUPLIER_MODEL=typo-value-x\n"
+            "GRAPH_FOLDER=Inbox\nDOM_TO=\nCLIENT_SECRET=second-secret-value\nnot a setting line\n"))
+        for v in ("hunter2", "second-secret", "typo-value-x", "not a setting"):
+            self.assertNotIn(v, r.stdout + r.stderr)
+        r = self.run_tool("check", "--json", env_text="CLIENT_SECRET=hunter2-secret-value\n")
+        self.assertNotIn("hunter2", r.stdout + r.stderr)
+
+    def test_it_flags_typos_duplicates_missing_and_removable(self):
+        r = self.run_tool("check", "--json", env_text=(
+            "CLIENT_SECRET=x\nSUPLIER_MODEL=sonnet\nGRAPH_FOLDER=Inbox\nDOM_TO=\n"
+            "CLIENT_SECRET=y\nexport LOOKUP_PROVIDER=qualys\nbad line\n"))
+        self.assertEqual(r.returncode, 1, r.stderr)
+        j = json.loads(r.stdout)
+        self.assertEqual(j["unknown"], [{"key": "SUPLIER_MODEL", "did_you_mean": "SUPPLIER_MODEL"}])
+        self.assertEqual(j["duplicates"], {"CLIENT_SECRET": [1, 5]})
+        self.assertEqual(j["unparsed_lines"], [7])
+        self.assertEqual([m["key"] for m in j["missing"]], ["QUALYS_PASSWORD"])
+        self.assertIn("LOOKUP_PROVIDER=qualys", j["missing"][0]["why"])
+        self.assertEqual(j["at_default"], ["GRAPH_FOLDER", "LOOKUP_PROVIDER"])
+        self.assertEqual(j["empty"], ["DOM_TO"])
+        self.assertEqual(j["secrets_set"], [{"key": "CLIENT_SECRET", "readers": ["cti-mailer", "cti-agent"]}])
+
+    def test_a_requirement_follows_its_condition(self):
+        r = self.run_tool("check", "--json", env_text="CLIENT_SECRET=x\nLOOKUP_PROVIDER=none\n")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(json.loads(r.stdout)["missing"], [])
+
+    def test_an_empty_required_setting_is_missing(self):
+        r = self.run_tool("check", "--json", env_text="CLIENT_SECRET=\nLOOKUP_PROVIDER=none\n")
+        j = json.loads(r.stdout)
+        self.assertEqual([m["key"] for m in j["missing"]], ["CLIENT_SECRET"])
+        self.assertNotIn("CLIENT_SECRET", j["empty"])
+
+    def test_list_shows_readers_and_secrets(self):
+        r = self.run_tool("list", "--secrets", "--json")
+        self.assertEqual([x["key"] for x in json.loads(r.stdout)], ["CLIENT_SECRET", "QUALYS_PASSWORD"])
+        r = self.run_tool("list", "--by-reader")
+        self.assertIn("cti-vmscan: 1 setting(s), 1 secret(s)", r.stdout)
+
+    def test_a_value_over_several_lines_is_never_read_as_a_key(self):
+        r = self.run_tool("check", "--json", env_text=(
+            'CLIENT_SECRET="first part\nQ7XK9PSECRETPART=tail"\n'
+            "SUPPLIER_MODEL=a\\\nZZSECRETCONT=more\n"
+            "LOOKUP_PROVIDER=none\n"))
+        self.assertNotIn("Q7XK9P", r.stdout + r.stderr)
+        self.assertNotIn("ZZSECRET", r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout)["unknown"], [])
+
+    def test_bad_utf8_is_not_a_traceback(self):
+        f = self.tmp / "fleet.env"
+        f.write_bytes(b"CLIENT_SECRET=abc\xff\xfedef\nLOOKUP_PROVIDER=none\n")
+        r = subprocess.run([sys.executable, str(self.TOOL), "check", "--env", str(f)],
+                           env={"PATH": os.environ["PATH"], "FLEET_CODE": str(self.tmp)},
+                           capture_output=True, text=True, check=False)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertNotIn("0xff", r.stdout + r.stderr)
+
+    def test_an_empty_value_that_means_something_is_not_removable(self):
+        with self.manifest.open("a") as f:
+            f.write("key: SUPPLIER_TECH_TERMS\nreaders: cti-supplier\nempty-differs: yes\n\n")
+        r = self.run_tool("check", "--json", env_text="CLIENT_SECRET=x\nLOOKUP_PROVIDER=none\nSUPPLIER_TECH_TERMS=\n")
+        self.assertNotIn("SUPPLIER_TECH_TERMS", json.loads(r.stdout)["empty"])
+
+    def test_the_lookupenv_keys_are_marked_in_the_real_manifest(self):
+        text = (KIT / "fleet" / "settings.manifest").read_text()
+        for k in ("SUPPLIER_HOLD_PHRASES", "SUPPLIER_TECH_TERMS", "SUPPLIER_JIRA_STATUS", "DIGEST_SKIP_SUBJECTS"):
+            block = text.split("key: " + k + "\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("empty-differs: yes", block, k)
+
+    def test_an_unreadable_file_is_an_error_not_a_pass(self):
+        r = self.run_tool("check", "--env", str(self.tmp / "missing.env"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot read", r.stderr)
+
+    def test_the_settings_manifest_is_in_step_with_the_code(self):
+        """A key added to the code or fleet.env.example without a manifest
+        entry, or a manifest key nothing reads, fails here. Fix: run
+        scripts/settings-manifest --write and review the diff."""
+        r = subprocess.run([sys.executable, str(self.REPO / "scripts" / "settings-manifest"), "--check"],
+                           cwd=self.REPO, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_real_manifest_marks_the_known_secrets(self):
+        r = subprocess.run([sys.executable, str(self.TOOL), "list", "--secrets", "--json"],
+                           env={"PATH": os.environ["PATH"], "FLEET_CODE": str(KIT / "fleet")},
+                           capture_output=True, text=True, check=False)
+        rows = {x["key"]: x for x in json.loads(r.stdout)}
+        for k in ("CLIENT_SECRET", "QUALYS_PASSWORD", "JIRA_API_TOKEN", "FALCON_CLIENT_SECRET", "CLAUDE_CODE_OAUTH_TOKEN"):
+            self.assertIn(k, rows)
+        for k, row in rows.items():
+            self.assertNotIn("checkin-bash-guard", row["readers"],
+                             f"{k}: the guard names secrets to refuse them; it must not count as reading one")
 
 
 if __name__ == "__main__":

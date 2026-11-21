@@ -269,10 +269,12 @@ is real, not before. Finished work moves out of this file into
   secret. That includes the check-in beat, which reads untrusted text;
   `checkin-bash-guard` refuses `$NAME` expansion largely because of this. In
   order:
-  1. **`fleet-config check`** (cheapest, touches no secrets): reports unknown
-     keys (typos), settings equal to their default, required settings that are
-     missing, and which lane reads each one. Never prints a value. Shows how
-     much of the file can simply go. Goes in `commands.manifest`
+  1. **`fleet-config check`**: done (Unreleased, RUNBOOK §11m).
+     `settings.manifest` lists every key, its readers and the 11 secrets.
+     `fleet-config list --by-reader` is the grant map for step 2. Still to
+     decide before step 2: how manual `sudo cti-agent` runs get credentials
+     (a transient unit via `systemd-run`, recommended, or a decrypt into a
+     private temp folder)
   2. **Secrets as systemd credentials**: the ~10 secrets (`CLIENT_SECRET`,
      `QUALYS_PASSWORD`, `GODADDY_PAT`, `POD_API_TOKEN`, `JIRA_API_TOKEN`,
      `NVD_API_KEY`, the Claude token, `REPORT_REDACTION_SALT`) encrypted with

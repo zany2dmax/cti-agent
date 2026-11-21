@@ -344,6 +344,12 @@ sub: expire | archive lines older than N days
 sub: prune | archive lines matching a pattern (operator only)
 sub: tail | last N lines (tail N or tail -n N)
 
+command: fleet-config
+about: fleet.env checked against the settings the code reads; never prints a value
+runs: read
+sub: check | report unknown, missing, duplicated and removable settings, and which program reads each secret
+sub: list | every setting the code reads and who reads it (--secrets, --by-reader)
+
 command: fleet-db
 about: SQLite memory: findings, tasks, mail, sent digests
 runs: local

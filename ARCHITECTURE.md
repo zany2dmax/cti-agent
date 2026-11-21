@@ -516,7 +516,7 @@ fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-ap
                                run-appowners, run-vmscan, run-supplier, run-domains,
                                run-mailbox-cleanup, fleet-board, fleet-db, fleet-owners,
                                fleet-journal, fleet-timers, fleet-trace, fleet-sanitize,
-                               checkin-bash-guard
+                               fleet-config, checkin-bash-guard
 fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shares),
                                fleet-mode.sh, the CLI's usage and tab completion
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions

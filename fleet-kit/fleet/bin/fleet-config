@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""fleet-config - what is in fleet.env, checked against what the code reads.
+
+    fleet-config check              check /etc/cti-agent/fleet.env (or $FLEET_ENV)
+    fleet-config check --env FILE   check another file
+    fleet-config list               every setting the code reads, and who reads it
+    fleet-config list --secrets     only the secrets
+    fleet-config list --by-reader   for each program, the settings it reads
+    add --json to any of them
+
+STEP 1 OF SPLITTING fleet.env (BACKLOG). The file holds about 165 settings and
+every unit loads all of it, so every lane carries every secret. Before moving
+anything, this shows what the file holds: settings no code reads (a typo, or
+left over), settings equal to their default (they can simply go), required
+settings that are missing, keys set twice, and - for step 2 - which program
+reads each secret.
+
+IT NEVER PRINTS A VALUE. Only key names, counts and line numbers: the output
+is safe to paste into a ticket or a chat. It reads fleet.env, which holds
+secrets, so it is run as the fleet: `sudo cti-agent fleet-config check`.
+
+What the code reads comes from settings.manifest, installed beside the
+commands; scripts/settings-manifest keeps it in step with the code.
+"""
+import argparse
+import difflib
+import json
+import os
+import pathlib
+import re
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def manifest_path():
+    code = os.environ.get("FLEET_CODE", "").strip()
+    for p in ([pathlib.Path(code) / "settings.manifest"] if code else []) + [HERE.parent / "settings.manifest"]:
+        if p.is_file():
+            return p
+    return None
+
+
+def load_manifest(path):
+    entries, cur = {}, None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        field, _, value = line.partition(":")
+        field, value = field.strip(), value.strip()
+        if field == "key":
+            cur = entries.setdefault(value, {})
+        elif cur is not None:
+            cur[field] = value
+    for e in entries.values():
+        r = e.get("readers", "")
+        e["readers"] = [] if r in ("", "NONE") else r.split()
+        e["secret"] = e.get("secret", "") == "yes"
+        e["default"] = e.get("default", e.get("code-default"))
+        e["empty_differs"] = e.get("empty-differs", "") == "yes"
+    return entries
+
+
+def unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        return v[1:-1]
+    return v
+
+
+def parse_env(text):
+    """{key: value} with the later duplicate winning, plus duplicates and
+    line numbers of lines that are not a setting. Values stay in memory only.
+
+    The file is sourced by bash, so a quoted value can run over several lines
+    and a trailing backslash continues one. Those continuation lines are part
+    of a value - possibly a secret - and are skipped, never read as a key: a
+    line of a secret that happened to look like KEY=x would otherwise be
+    printed as an unknown setting."""
+    values, lines_of, bad = {}, {}, []
+    open_quote, cont = None, False
+    for n, raw in enumerate(text.splitlines(), 1):
+        if open_quote:
+            if raw.count(open_quote) % 2 == 1:
+                open_quote = None
+            continue
+        if cont:
+            cont = raw.endswith("\\")
+            continue
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep or not KEY_RE.match(key):
+            bad.append(n)
+            continue
+        v = value.strip()
+        if v[:1] in ("'", '"') and v.count(v[0]) % 2 == 1:
+            open_quote = v[0]  # runs on to a later line
+        elif v.endswith("\\"):
+            cont = True
+        values[key] = unquote(value)
+        lines_of.setdefault(key, []).append(n)
+    dups = {k: ns for k, ns in lines_of.items() if len(ns) > 1}
+    return values, dups, bad
+
+
+def required_now(rule, values, manifest):
+    """Is a key with this `required:` rule required, given the file?"""
+    if rule == "always":
+        return True, "required"
+    m = re.match(r"^if ([A-Z][A-Z0-9_]*)=(.+)$", rule or "")
+    if not m:
+        return False, ""
+    k, want = m.group(1), m.group(2).strip()
+    have = values.get(k) or (manifest.get(k, {}).get("default") or "")
+    return have.lower() == want.lower(), f"required because {k}={want}"
+
+
+def check(env_path, manifest):
+    try:
+        # errors="replace": a byte that is not UTF-8 must not end in a
+        # traceback that quotes it and its position inside a secret.
+        text = pathlib.Path(env_path).read_bytes().decode("utf-8", errors="replace")
+    except OSError as e:
+        return {"error": f"cannot read {env_path}: {e.strerror}"}
+    values, dups, bad = parse_env(text)
+    known = set(manifest)
+    unknown = []
+    for k in sorted(set(values) - known):
+        near = difflib.get_close_matches(k, known, n=1, cutoff=0.8)
+        unknown.append({"key": k, "did_you_mean": near[0] if near else None})
+    at_default, empty, missing = [], [], []
+    for k, e in sorted(manifest.items()):
+        need, why = required_now(e.get("required", ""), values, manifest)
+        if k not in values:
+            if need:
+                missing.append({"key": k, "why": why})
+            continue
+        v = values[k]
+        if v == "":
+            if need:
+                missing.append({"key": k, "why": why + "; set, but empty"})
+            elif not e["empty_differs"]:
+                empty.append(k)
+        elif e.get("default") is not None and v == e["default"]:
+            at_default.append(k)
+    secrets = [{"key": k, "readers": manifest[k]["readers"]}
+               for k in sorted(values) if k in manifest and manifest[k]["secret"] and values[k] != ""]
+    return {
+        "file": str(env_path),
+        "settings": len(values),
+        "unknown": unknown,
+        "missing": missing,
+        "duplicates": {k: ns for k, ns in sorted(dups.items())},
+        "unparsed_lines": bad,
+        "at_default": at_default,
+        "empty": empty,
+        "secrets_set": secrets,
+        "secrets_known": sum(1 for e in manifest.values() if e["secret"]),
+    }
+
+
+def print_check(r, out):
+    p = lambda s="": print(s, file=out)  # noqa: E731
+    p(f"{r['file']}: {r['settings']} settings")
+    problems = len(r["unknown"]) + len(r["missing"]) + len(r["duplicates"]) + len(r["unparsed_lines"])
+    if r["missing"]:
+        p(f"\nMISSING - required, not set: {len(r['missing'])}")
+        for m in r["missing"]:
+            p(f"  {m['key']}  ({m['why']})")
+    if r["unknown"]:
+        p(f"\nNOT READ BY ANY CODE - a typo, or left over: {len(r['unknown'])}")
+        for u in r["unknown"]:
+            hint = f"  did you mean {u['did_you_mean']}?" if u["did_you_mean"] else ""
+            p(f"  {u['key']}{hint}")
+    if r["duplicates"]:
+        p(f"\nSET MORE THAN ONCE - the last one wins: {len(r['duplicates'])}")
+        for k, ns in r["duplicates"].items():
+            p(f"  {k}  (lines {', '.join(map(str, ns))})")
+    if r["unparsed_lines"]:
+        p(f"\nNOT A SETTING - lines that are not KEY=value: {', '.join(map(str, r['unparsed_lines']))}")
+    removable = len(r["at_default"]) + len(r["empty"])
+    if r["at_default"]:
+        p(f"\nEQUAL TO THE DEFAULT - can be removed: {len(r['at_default'])}")
+        p("  " + " ".join(r["at_default"]))
+    if r["empty"]:
+        p(f"\nSET TO NOTHING - for these the code treats empty as unset, so they can be removed: {len(r['empty'])}")
+        p("  " + " ".join(r["empty"]))
+    p(f"\nSECRETS SET: {len(r['secrets_set'])} of the {r['secrets_known']} the fleet knows."
+      " Today every lane's environment holds all of them; each is read by:")
+    for s in r["secrets_set"]:
+        p(f"  {s['key']:<26} {', '.join(s['readers']) or 'nothing'}")
+    p(f"\nresult: {problems} problem(s); {removable} setting(s) can be removed"
+      f" ({r['settings'] - removable} would remain)")
+
+
+def main(argv=None, out=sys.stdout, err=sys.stderr):
+    ap = argparse.ArgumentParser(prog="fleet-config", description="fleet.env, checked against what the code reads. Never prints a value.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("check", help="check fleet.env against the settings the code reads")
+    c.add_argument("--env", help="the file to check (default: $FLEET_ENV or /etc/cti-agent/fleet.env)")
+    c.add_argument("--json", action="store_true", help="print the result as JSON")
+    ls = sub.add_parser("list", help="every setting the code reads, and which programs read it")
+    ls.add_argument("--secrets", action="store_true", help="only the secrets")
+    ls.add_argument("--by-reader", action="store_true", help="for each program, the settings it reads")
+    ls.add_argument("--json", action="store_true", help="print the result as JSON")
+    a = ap.parse_args(argv)
+
+    mp = manifest_path()
+    if mp is None:
+        print("fleet-config: settings.manifest not found (expected beside the commands, in $FLEET_CODE)", file=err)
+        return 1
+    manifest = load_manifest(mp)
+
+    if a.cmd == "list":
+        keys = sorted(k for k, e in manifest.items() if e["secret"] or not a.secrets)
+        if a.by_reader:
+            by = {}
+            for k in keys:
+                for r in manifest[k]["readers"]:
+                    by.setdefault(r, []).append(k)
+            if a.json:
+                json.dump(by, out, indent=2, sort_keys=True)
+                print(file=out)
+                return 0
+            for r in sorted(by):
+                secret = [k for k in by[r] if manifest[k]["secret"]]
+                print(f"{r}: {len(by[r])} setting(s), {len(secret)} secret(s)", file=out)
+                if secret:
+                    print("  secrets: " + " ".join(secret), file=out)
+            return 0
+        rows = [{"key": k, "secret": manifest[k]["secret"], "required": manifest[k].get("required", ""),
+                 "readers": manifest[k]["readers"]} for k in keys]
+        if a.json:
+            json.dump(rows, out, indent=2)
+            print(file=out)
+            return 0
+        for r in rows:
+            flags = ("secret " if r["secret"] else "") + (f"required {r['required']}" if r["required"] else "")
+            print(f"{r['key']:<34} {flags:<36} {', '.join(r['readers'])}", file=out)
+        return 0
+
+    env = a.env or os.environ.get("FLEET_ENV", "").strip() or "/etc/cti-agent/fleet.env"
+    r = check(env, manifest)
+    if "error" in r:
+        print("fleet-config: " + r["error"], file=err)
+        return 1
+    if a.json:
+        json.dump(r, out, indent=2)
+        print(file=out)
+    else:
+        print_check(r, out)
+    return 1 if (r["unknown"] or r["missing"] or r["duplicates"] or r["unparsed_lines"]) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

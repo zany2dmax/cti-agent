@@ -1,0 +1,84 @@
+.TH FLEET-CONFIG 1 "2026-11-21" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+fleet-config \- fleet.env checked against the settings the code reads
+.SH SYNOPSIS
+.B fleet\-config check
+.RB [ \-\-env
+.IR FILE ]
+.RB [ \-\-json ]
+.br
+.B fleet\-config list
+.RB [ \-\-secrets ]
+.RB [ \-\-by\-reader ]
+.RB [ \-\-json ]
+.PP
+.B sudo cti\-agent fleet\-config check
+.SH DESCRIPTION
+Step 1 of splitting
+.I fleet.env
+(BACKLOG). The file holds about 165 settings, and every unit loads all of
+it, so every lane carries every secret.
+.B fleet\-config
+shows what the file holds before anything is moved.
+.PP
+.B It never prints a value.
+Only key names, counts and line numbers, so its output is safe to paste
+into a ticket.
+.PP
+What the code reads comes from
+.IR settings.manifest ,
+installed beside the commands. For each setting it lists the programs that
+read it, and whether it is a secret, when it is required, and its default.
+.SH COMMANDS
+.TP
+.B check
+Read
+.I fleet.env
+and report, in this order:
+settings that are required and not set (or set to nothing);
+settings no code reads, with the nearest known name, as for a typo;
+keys set more than once (the last one wins);
+lines that are not
+.BR KEY=value ;
+settings equal to their default, and settings set to nothing, which can be
+removed; and each secret that is set, with the programs that read it.
+.TP
+.B list
+Every setting the code reads, with its flags and readers.
+.B \-\-secrets
+lists only the secrets.
+.B \-\-by\-reader
+lists, for each program, how many settings and which secrets it reads: the
+map step 2 of the split grants credentials from.
+.SH OPTIONS
+.TP
+.BI \-\-env " FILE"
+The file to check. Default:
+.BR $FLEET_ENV ,
+else
+.IR /etc/cti\-agent/fleet.env .
+.TP
+.B \-\-json
+Print JSON.
+.SH EXIT STATUS
+.TP
+.B 0
+No problems: nothing missing, unknown, duplicated or unreadable. Settings
+that could be removed are not problems.
+.TP
+.B 1
+At least one problem, the file could not be read, or the manifest was not
+found.
+.TP
+.B 2
+Bad usage.
+.SH EXAMPLES
+.RS
+.B sudo cti\-agent fleet\-config check
+.br
+.B sudo cti\-agent fleet\-config list \-\-by\-reader
+.RE
+.SH SEE ALSO
+.BR cti\-agent (1),
+RUNBOOK.md section 11m,
+.IR scripts/settings\-manifest .

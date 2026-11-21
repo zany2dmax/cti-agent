@@ -35,6 +35,33 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Added
+
+- `fleet-config check` and `fleet-config list`: step 1 of splitting
+  `fleet.env`. `check` reads the file and reports:
+  - required settings that are missing;
+  - keys no code reads, with the nearest name for a typo;
+  - keys set twice, and lines that aren't settings;
+  - settings equal to their default or set to nothing, which can go;
+  - each secret, with the programs that actually read it.
+
+  It never prints a value. `list --by-reader` is the map step 2 will grant
+  credentials from. Its knowledge is `settings.manifest`, generated from the
+  code by `scripts/settings-manifest` and kept in step by a test. It holds
+  167 settings and marks 11 as secrets. RUNBOOK §11m. **Upgrade:** nothing;
+  run `sudo cti-agent fleet-config check` to see what can go.
+
+### Removed
+
+- `FLEET_OPERATOR` from `fleet.env.example` and the README. The README said
+  the orchestrator's prompt used it, but nothing has read it. The scan that
+  builds `settings.manifest` found it. A box that still sets it gets `NOT
+  READ BY ANY CODE` from `fleet-config check`.
+
+---
+
 ## 1.7.2 — 2026-11-21
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.

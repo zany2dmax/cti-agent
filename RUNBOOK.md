@@ -31,6 +31,7 @@ document assumes you have decided to run it.
 - [11j. The CrowdStrike API client](#11j-the-crowdstrike-api-client)
 - [11k. Advisory triage by hand](#11k-advisory-triage-by-hand)
 - [11l. The audit trail](#11l-the-audit-trail)
+- [11m. What is in fleet.env](#11m-what-is-in-fleetenv)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -3041,6 +3042,46 @@ fall back to the journal:
 
 ```bash
 sudo journalctl -u cti-agent-checkin --since today | grep audit@32473
+```
+
+---
+
+## 11m. What is in fleet.env
+
+`fleet.env` holds about 165 settings, and every unit loads all of it, so
+every lane carries every secret. `fleet-config` is step 1 of splitting it
+(BACKLOG). It shows what the file holds, and never prints a value:
+
+```bash
+sudo cti-agent fleet-config check
+sudo cti-agent fleet-config list --by-reader
+```
+
+`check` reports:
+
+| Heading | What to do |
+|---|---|
+| `MISSING` | A required setting that's unset or empty. Set it. |
+| `NOT READ BY ANY CODE` | A typo (it suggests the nearest name) or a leftover. Fix or remove it. |
+| `SET MORE THAN ONCE` | The last line wins. Keep one. |
+| `NOT A SETTING` | Line numbers that aren't `KEY=value`. |
+| `EQUAL TO THE DEFAULT` / `SET TO NOTHING` | Can be removed: the code does the same without them. |
+| `SECRETS SET` | Each secret, and the programs that actually read it. Step 2 grants each secret only to those. |
+
+It exits 1 only for the first four, so it can gate an install. Removable
+settings aren't problems.
+
+**Where its knowledge comes from.** `/opt/cti-agent/settings.manifest`, built
+from the code by `scripts/settings-manifest`. Every key in the code and in
+`fleet.env.example` is listed, with the programs that read it. For Go, that
+includes every command that imports the package reading it. A test fails the
+build if the manifest drifts from the code. Kept by hand in that file: which
+keys are secrets, when a key is required, and a default the scanner can't
+see. After changing what the code reads:
+
+```bash
+scripts/settings-manifest --write
+git diff fleet-kit/fleet/settings.manifest
 ```
 
 ---

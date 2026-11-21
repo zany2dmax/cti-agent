@@ -328,6 +328,7 @@ sudo cti-agent fleet-board read @you           # lines addressed to the operator
 sudo cti-agent fleet-db recent 20              # recent memories, open tasks, counts
 sudo cti-agent fleet-db findings --priority Sev5
 sudo cti-agent cti-kev --horizon 30            # KEV deadlines due in 30 days
+sudo cti-agent fleet-config check              # fleet.env: typos, missing, removable; never prints a value
 sudo cti-agent cti-falcon --check              # CrowdStrike API client: token and the four Read scopes, counts only
 sudo cti-agent cti-falcon --find-app chrome    # do we run it? hosts, versions, platforms (no host names)
 sudo cti-agent cti-falcon --new-apps 1         # apps first seen today that the estate never had before
