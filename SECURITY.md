@@ -193,12 +193,10 @@ instructions are written and reviewable at
 and
 [`fleet-kit/fleet/agents/triage-judge/CLAUDE.md`](fleet-kit/fleet/agents/triage-judge/CLAUDE.md),
 installed root-owned. The earlier design, one agent judging relevance against a
-hand-written organisation profile
-([`agents/triage/`](fleet-kit/fleet/agents/triage/CLAUDE.md) and
-`ORG-PROFILE-TEMPLATE.md`, with the `cti-triage/1` verifier in
-`internal/triage/result.go`), is superseded: nothing invokes it. The rest of
-this section was written for that design; what it requires holds for the two
-agents that replaced it, and each point below says where it is now enforced.
+hand-written organisation profile with a `cti-triage/1` verifier, was removed
+in 1.7. The rest of this section was written for that design; what it requires
+holds for the two agents that replaced it, and each point below says where it
+is now enforced.
 
 ### The problem
 
@@ -412,7 +410,7 @@ still filed.
 repository.** The report names every domain we own and which of them can be
 spoofed or taken over; the inventory says which ones send mail. So the
 inventory is an operator file (`/etc/cti-agent/domains.txt`, `root:ctiagent`
-0640, the same rule as `ORG-PROFILE.md`), `domains.txt` is gitignored and a test
+0640), `domains.txt` is gitignored and a test
 fails if one appears in the tree, the report and `domains-state.json` are
 written `0600`, it goes only to `DOM_TO` through its own fail-closed allowlist,
 and every fixture is a reserved example name.

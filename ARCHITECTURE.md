@@ -522,7 +522,7 @@ fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shar
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
                                (installed to /opt/cti-agent/orchestrator)
 fleet-kit/fleet/checkin-settings.json  root-owned settings for the beat
-fleet-kit/fleet/agents/        the triage agent definition
+fleet-kit/fleet/agents/        triage-reader, triage-judge (advisory triage), supplier: no-tools agents' instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
 fleet-kit/fleet/systemd-fedora/ service + timer pairs, FHS layout for Fedora/RHEL
 fleet-kit/install-fedora.sh    the installer: code in /opt (root-owned), config

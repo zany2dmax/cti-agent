@@ -10,7 +10,7 @@
 // # THE INVENTORY IS A FILE, AND IT IS NOT IN THIS REPOSITORY
 //
 // The list of domains is an operator file - /etc/cti-agent/domains.txt by
-// default - for the same reason ORG-PROFILE.md lives there: this repository is
+// default - because this repository is
 // public, and a list of every domain an organisation owns, with which of them
 // send mail, is a map for anybody planning to impersonate it.
 package domains

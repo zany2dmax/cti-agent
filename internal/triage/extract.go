@@ -20,8 +20,8 @@
 //
 // It is deterministic extraction only: regular expressions over text, no model
 // call, no judgement. It answers "what identifiers are in this document",
-// never "does this matter to us". Relevance is the agent's job, against
-// ORG-PROFILE.md, and keeping the two apart is what makes this half testable
+// never "does this matter to us". Relevance is the judge's job, against facts
+// from Falcon (judge.go), and keeping the two apart is what makes this half testable
 // and cheap enough to run on every message.
 //
 // Per the agent's standing instructions, this extraction is "a cross-check,
@@ -323,10 +323,10 @@ func stripMarkers(s string) string {
 
 // RenderInput builds the file the triage agent reads.
 //
-// The shape is fixed by the agent's standing instructions: header block,
+// The shape is fixed by the reader's standing instructions: header block,
 // deterministic extraction, then the body inside the fences. Changing it here
-// without changing agents/triage/CLAUDE.md breaks the contract silently - the
-// agent would still answer, just about the wrong thing.
+// without changing agents/triage-reader/CLAUDE.md breaks the contract silently -
+// the reader would still answer, just about the wrong thing.
 func RenderInput(m Message, e Extraction) string {
 	var b strings.Builder
 
@@ -368,68 +368,4 @@ func writeField(b *strings.Builder, name string, vals []string) {
 // whitespace in a mail subject.
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
-}
-
-// ─── the organisation profile ───────────────────────────────────────────────
-
-// ProfileSentinel marks a profile that has not been filled in.
-//
-// The installer copies the template to /etc/cti-agent/ORG-PROFILE.md so the
-// operator has a file to edit rather than an install command to find. That
-// convenience needs a safety net: an unfilled profile reads perfectly well to
-// an agent, which then concludes "we do not appear to run anything like that"
-// and returns a confident "unlikely" for a campaign aimed straight at the
-// organisation.
-//
-// Placeholder CREDENTIALS fail loudly - they cannot authenticate, so the lane
-// stops. Placeholder PROSE fails silently and confidently, which is worse. The
-// sentinel is what makes the silent case detectable.
-const ProfileSentinel = "PROFILE-STATUS: TEMPLATE"
-
-// ProfileState is how usable the deployed profile is.
-type ProfileState int
-
-const (
-	// ProfileMissing means no file. Relevance must be "unknown".
-	ProfileMissing ProfileState = iota
-	// ProfileTemplate means the file exists but is the unfilled template.
-	// Treated exactly like missing - never as an empty description of a real
-	// organisation.
-	ProfileTemplate
-	// ProfileFilled means somebody wrote it and removed the sentinel.
-	ProfileFilled
-)
-
-func (p ProfileState) String() string {
-	switch p {
-	case ProfileFilled:
-		return "filled"
-	case ProfileTemplate:
-		return "template (unfilled)"
-	default:
-		return "missing"
-	}
-}
-
-// Usable reports whether the agent may reason about relevance at all.
-func (p ProfileState) Usable() bool { return p == ProfileFilled }
-
-// ClassifyProfile inspects profile text.
-//
-// Takes the CONTENT rather than a path, so the decision is testable without a
-// filesystem and the caller decides how to handle a read error - which for
-// this lane is the same as missing.
-func ClassifyProfile(content string, readErr error) ProfileState {
-	if readErr != nil {
-		return ProfileMissing
-	}
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), ProfileSentinel) {
-			return ProfileTemplate
-		}
-	}
-	if strings.TrimSpace(content) == "" {
-		return ProfileMissing
-	}
-	return ProfileFilled
 }

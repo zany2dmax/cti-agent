@@ -43,8 +43,7 @@ judge (`run-supplier`, through the shared `share/model-lane.sh`, H4) and
 advisory triage's reader and judge (`cti-triage`, from the daily digest when
 `TRIAGE_ENABLED=1`; agents `triage-reader` and `triage-judge`). Every other
 lane is deterministic Go or Python. The single triage agent this page first
-anticipated (`fleet-kit/fleet/agents/triage`) was superseded by those two and
-is not invoked.
+anticipated was superseded by those two and removed in 1.7.
 
 | Harness piece | Where it lives |
 |---|---|
@@ -57,7 +56,7 @@ is not invoked.
 | Output channel that cannot be redirected | `cti-alert` (no `--to`; recipient fixed by configuration) |
 | Shared memory | `fleet-board`, `state/memory.db` through `fleet-db` |
 | Cost and quota control | `cti-budget` (gate before the beat, `record` after; rate limit vs. out of credit, see `internal/budget/classify.go`) |
-| Schema-checked model output (designed) | `internal/triage/result.go` (`cti-triage/1`) |
+| Schema-checked model output | `internal/triage` (`cti-subjects/2`, `cti-judgement/1`), `internal/supplier`, `internal/checkin` (`cti-checkin/1`) |
 
 This is the part most projects skip, and the fleet has it.
 

@@ -95,10 +95,10 @@ __pycache__/
 # being wrong once is a real recipient list in a public repo.
 .logs/
 
-# The FILLED-IN organisation profile. The template is committed; the real one
+# The FILLED-IN organisation profile of the first triage design (removed in
+# 1.7; nothing reads it now). Still ignored because copies of it exist, and it
 # describes what this organisation runs, which is reconnaissance somebody
-# would otherwise have to do themselves. It lives at
-# /etc/cti-agent/ORG-PROFILE.md, 0640 root:ctiagent.
+# would otherwise have to do themselves.
 #
 # Committing one is not recoverable by deleting it afterwards: a push
 # publishes it, and it stays in the history. Matched in any directory, since

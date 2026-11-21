@@ -104,6 +104,19 @@ scanner's own address).
   and every individual task still print everything. **Upgrade:** nothing;
   build tooling only.
 
+- **The first advisory-triage design is removed.** Before 1.7's reader and
+  judge, triage was one agent judging relevance against a hand-written
+  organisation profile. Nothing has run it since 1.7, but its files stayed:
+  `fleet-kit/fleet/agents/triage/` (its instructions and
+  `ORG-PROFILE-TEMPLATE.md`), the `cti-triage/1` result format and its
+  verifier, its digest renderer, and the profile checks in
+  `internal/triage`. All removed. The four relevance values the judge uses
+  move to `internal/triage/relevance.go`; the reader's input format
+  (`RenderInput`) stays, now documented against `agents/triage-reader`. The
+  installer no longer creates `/etc/cti-agent/ORG-PROFILE.md` and says the
+  file is unused if one exists. **Upgrade:** nothing; if you never filled the
+  profile in, `sudo rm /etc/cti-agent/ORG-PROFILE.md` after the update.
+
 ## 1.7 — 2026-11-20
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Read item 1 first: it needs

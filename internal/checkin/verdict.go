@@ -3,8 +3,8 @@
 //
 // Every beat ends its final message with one JSON object, schema
 // cti-checkin/1: what it found lane by lane, what it emailed, what it wrote.
-// That is the model's own account, so - as internal/triage does for
-// cti-triage/1 - code checks every claim it can against evidence the model
+// That is the model's own account, so - as internal/triage does for the
+// triage judge's cti-judgement/1 - code checks every claim it can against evidence the model
 // cannot touch: the counts checkin-bash-guard kept for the beat. A verdict
 // that is missing, does not parse, or says something the guard did not see is
 // a finding about the beat, reported by run-checkin.

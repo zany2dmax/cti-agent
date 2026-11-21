@@ -591,30 +591,14 @@ else
   warn "created $CONF_DIR/fleet.env with PLACEHOLDER secrets - edit it now"
 fi
 
-# The organisation profile is NOT installed from the repo, and not created
-# here either. It describes what this organisation runs, so the filled-in copy
-# is gitignored and lives only in $CONF_DIR.
-#
-# Reported rather than created, because an empty profile is worse than an
-# absent one: the triage agent would read it, find nothing, and return
-# "unlikely" for everything instead of the honest "unknown". A file that makes
-# an agent confidently wrong is not a safe default.
+# The organisation profile belonged to the first advisory-triage design (one
+# agent judging relevance against a hand-written description of the estate).
+# 1.7's triage judges against facts from Falcon instead, and the profile and
+# its template were removed. Nothing reads the file any more; it is left in
+# place, because it is the operator's and may still be wanted for reference.
 if [ -f "$CONF_DIR/ORG-PROFILE.md" ]; then
-  if grep -q '^PROFILE-STATUS: TEMPLATE' "$CONF_DIR/ORG-PROFILE.md" 2>/dev/null; then
-    warn "$CONF_DIR/ORG-PROFILE.md is still the unfilled template"
-    info "  The triage lane will answer 'unknown' for everything until the"
-    info "  PROFILE-STATUS line is removed. Edit it: sudo \$EDITOR $CONF_DIR/ORG-PROFILE.md"
-  else
-    ok "$CONF_DIR/ORG-PROFILE.md exists, not overwriting your edits"
-  fi
-else
-  run install -m 0640 -o root -g "$FLEET_GROUP" \
-      "$SRC/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md" "$CONF_DIR/ORG-PROFILE.md"
-  warn "created $CONF_DIR/ORG-PROFILE.md from the template - fill it in"
-  info "  It carries a PROFILE-STATUS: TEMPLATE line. While that line is there"
-  info "  the triage lane treats the profile as absent and says 'unknown'"
-  info "  rather than reasoning from empty headings - placeholder prose fails"
-  info "  silently in a way placeholder credentials do not."
+  info "$CONF_DIR/ORG-PROFILE.md is no longer used (advisory triage reads Falcon);"
+  info "  delete it when you no longer need it: sudo rm $CONF_DIR/ORG-PROFILE.md"
 fi
 
 # The domain inventory, same rule as the profile: it is a list of everything
