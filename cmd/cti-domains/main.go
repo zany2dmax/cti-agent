@@ -225,9 +225,16 @@ func run() int {
 	if resolver != nil {
 		res = resolver
 	}
+	// Off unless DOMAINS_ALLOW_PRIVATE is 1, true or yes: a name that resolves
+	// to a private or reserved address is listed, not fetched.
+	allowPrivate := false
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DOMAINS_ALLOW_PRIVATE"))) {
+	case "1", "true", "yes", "on":
+		allowPrivate = true
+	}
 	web := webProber
 	if web == nil {
-		web = domains.NetWebProber(*timeout, *retries, netRes)
+		web = domains.NetWebProber(*timeout, *retries, netRes, allowPrivate)
 	}
 	// SMTP greeting on the first answering MX: on unless DOMAINS_SMTP=off.
 	smtpMode := ""
@@ -243,7 +250,7 @@ func run() int {
 			}
 			port = n
 		}
-		sp = domains.NetSMTPProber(port, *timeout, netRes)
+		sp = domains.NetSMTPProber(port, *timeout, netRes, allowPrivate)
 	}
 	// Started only after every setting is validated, so a configuration error
 	// above never opens the (one-session) token for nothing.
@@ -272,7 +279,7 @@ func run() int {
 		logf("gateway: Proofpoint on Demand log, last %d day(s), reading in the background", gwDays)
 	}
 	p := domains.Prober{Resolver: res, Web: web, Selectors: selectors,
-		Concurrency: *concurrency, PerDomain: 6 * *timeout, SMTP: sp}
+		Concurrency: *concurrency, PerDomain: 6 * *timeout, SMTP: sp, AllowPrivate: allowPrivate}
 	results := p.Run(ctx, entries, orgOf)
 	if smtpMode == "" && domains.SMTPBlocked(results) {
 		smtpMode = "blocked"

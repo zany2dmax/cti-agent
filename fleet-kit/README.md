@@ -940,6 +940,7 @@ play.
 | `DOMAINS_DNS_SERVERS` | DNS the domains lane asks. Empty = public resolvers, so internal split-horizon DNS cannot hide a domain's public records; `system` = this host's; or a list of IPs |
 | `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
 | `DOMAINS_SMTP_PORT` | port for that probe, default 25 |
+| `DOMAINS_ALLOW_PRIVATE` | `1` lets the probes connect to a name that resolves to a private or reserved address. Default: such a name is listed ("web not probed"), not fetched |
 | `DOMAINS_DMARC_RUA` | when set, every sending domain's DMARC `rua=` must include it; empty only requires that some `rua=` exists |
 | `DOMAINS_MAIL_GATEWAY` | `pod` turns on the domains lane's Proofpoint on Demand log read (needs `POD_CLUSTER_ID` and `POD_API_TOKEN`): a domain with outbound mail is never asked to be locked down. A failed read holds the lock-down tickets for the run. Off when unset |
 | `DOMAINS_GATEWAY_DAYS` | whole days of the gateway log to read, 1 to 28. Default 7 |

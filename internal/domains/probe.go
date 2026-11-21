@@ -2,6 +2,7 @@ package domains
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ type Result struct {
 	// domain on PoD). Filled by AssignRoutes after probing.
 	Route        Route
 	RouteChecked bool
+	// Fault is set when probing this entry crashed (a bug, or a page built to
+	// trigger one). The entry was not checked, and Evaluate says so; the other
+	// entries are unaffected.
+	Fault string
 }
 
 // Live reports whether any probed host answered.
@@ -47,6 +52,9 @@ type Prober struct {
 	// one (the original checker's -smtp). nil: not checked, and the report
 	// says so.
 	SMTP SMTPProber
+	// AllowPrivate lets the web probe fetch a host that resolves to a private
+	// or reserved address (DOMAINS_ALLOW_PRIVATE=1). Off by default: see probeWeb.
+	AllowPrivate bool
 
 	smtp *smtpCache
 }
@@ -76,6 +84,14 @@ func (p Prober) Run(ctx context.Context, entries []Entry, orgOf map[string]Regis
 		go func(i int, e Entry) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// One domain's crash must not take the run down with it: the
+			// weekly would send nothing at all.
+			defer func() {
+				if rec := recover(); rec != nil {
+					out[i] = Result{Entry: e, Org: orgOf[e.Name].Domain,
+						Fault: fmt.Sprintf("probing crashed: %v", rec)}
+				}
+			}()
 			dctx, cancel := context.WithTimeout(ctx, per)
 			defer cancel()
 			out[i] = p.one(dctx, e, orgOf[e.Name].Domain)
@@ -88,12 +104,12 @@ func (p Prober) Run(ctx context.Context, entries []Entry, orgOf map[string]Regis
 func (p Prober) one(ctx context.Context, e Entry, org string) Result {
 	r := Result{Entry: e, Org: org}
 	r.NS = lookupNS(ctx, p.Resolver, e.Name)
-	r.Web = append(r.Web, ProbeWeb(ctx, p.Resolver, p.Web, e.Name))
+	r.Web = append(r.Web, probeWeb(ctx, p.Resolver, p.Web, e.Name, p.AllowPrivate))
 	// www for a registered domain. Without the registrar, a two-label name is
 	// the best guess at "apex" this standard-library-only project can make.
 	apex := org == e.Name || (org == "" && strings.Count(e.Name, ".") == 1)
 	if apex && !strings.HasPrefix(e.Name, "www.") {
-		r.Web = append(r.Web, ProbeWeb(ctx, p.Resolver, p.Web, "www."+e.Name))
+		r.Web = append(r.Web, probeWeb(ctx, p.Resolver, p.Web, "www."+e.Name, p.AllowPrivate))
 	}
 	r.Mail = ProbeMail(ctx, p.Resolver, e.Name, org, p.Selectors)
 	if p.smtp != nil && r.Mail.MX.Present() {

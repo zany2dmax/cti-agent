@@ -112,6 +112,10 @@ func Evaluate(results []Result, cmp *Comparison, opt Options) []Finding {
 
 	for _, res := range results {
 		d := res.Entry.Name
+		if res.Fault != "" {
+			add(d, Medium, "probe", "%s - this entry was not checked this run (the other entries were)", res.Fault)
+			continue
+		}
 		if cmp != nil {
 			if reg, ok := cmp.Covered[d]; ok && reg.Domain == d {
 				evalDelegation(d, reg, res.NS, cmp.Registrar, add)
@@ -199,6 +203,12 @@ func evalWeb(d string, w Web, now time.Time, ours func(string) bool, add adder) 
 	}
 	if !w.Addrs.Present() {
 		return // not live is a state, shown in the inventory table, not a finding
+	}
+	if len(w.Private) > 0 {
+		add(d, Info, "web", "%sresolves to %s, which is not a public address - web not probed (an internal "+
+			"record under a public name is worth a look; if it is expected and you want it probed, "+
+			"set DOMAINS_ALLOW_PRIVATE=1)", where, strings.Join(w.Private, ", "))
+		return
 	}
 	if !w.Answered() {
 		add(d, Info, "web", "%sresolves but nothing answered on 80 or 443", where)

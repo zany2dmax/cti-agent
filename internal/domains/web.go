@@ -1,6 +1,7 @@
 package domains
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zany2dmax/cti-agent/internal/useragent"
@@ -26,6 +28,11 @@ type Web struct {
 	// claim that target - a deleted cloud app, a lapsed bucket name - serves
 	// content as our domain. The classic subdomain takeover.
 	Dangling bool
+
+	// Private lists the addresses Host resolves to that are not public
+	// (loopback, private, link-local, carrier-grade NAT, reserved). When it is
+	// not empty the host was NOT fetched: see ProbeWeb.
+	Private []string
 
 	HTTPS Fetch
 	HTTP  Fetch
@@ -157,8 +164,23 @@ var indicatorHeaders = []string{"Content-Security-Policy", "Link", "Set-Cookie",
 // WebProber fetches a host. A field so tests can replace the network.
 type WebProber func(ctx context.Context, host string) (https, plain Fetch, cert Cert)
 
-// ProbeWeb resolves host and, if it resolves, fetches it.
+// ProbeWeb resolves host and, if it resolves, fetches it. A host that resolves
+// to any non-public address is not fetched (see probeWeb).
 func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web {
+	return probeWeb(ctx, r, fetch, host, false)
+}
+
+// probeWeb is ProbeWeb with the private-address policy given.
+//
+// WHY A HOST THAT RESOLVES PRIVATE IS NOT FETCHED. The names come from the
+// inventory, but whoever controls a name's DNS chooses what it resolves to, so
+// a fetch is a request this host makes at an address someone else picked: to
+// loopback, to the network next door, to the cloud metadata address. The page
+// title and Server header then land in a report. A name that points at a
+// private address is also worth knowing about in itself (an internal record
+// under a public name), so it is listed, not hidden. DOMAINS_ALLOW_PRIVATE=1
+// restores fetching for an inventory that really has internal names.
+func probeWeb(ctx context.Context, r Resolver, fetch WebProber, host string, allowPrivate bool) Web {
 	w := Web{Host: host, Addrs: lookupHost(ctx, r, host)}
 	for _, a := range w.Addrs.Values {
 		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
@@ -178,9 +200,89 @@ func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web
 	if !w.Addrs.Present() {
 		return w
 	}
+	if !allowPrivate {
+		if priv := nonPublic(w.Addrs.Values); len(priv) > 0 {
+			w.Private = priv
+			return w
+		}
+	}
 	w.HTTPS, w.HTTP, w.TLS = fetch(ctx, host)
 	return w
 }
+
+// cgnat, benchmark, ietf and reserved are the ranges net.IP does not call
+// private but that are not the public internet either.
+var nonPublicNets = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{
+		"0.0.0.0/8",      // "this" network
+		"100.64.0.0/10",  // carrier-grade NAT
+		"192.0.0.0/24",   // IETF protocol assignments
+		"198.18.0.0/15",  // benchmarking
+		"240.0.0.0/4",    // reserved
+		"64:ff9b:1::/48", // local-use NAT64
+	} {
+		_, n, _ := net.ParseCIDR(c)
+		out = append(out, n)
+	}
+	return out
+}()
+
+// publicIP reports whether ip is an address on the public internet: not
+// loopback, private, link-local (which includes the cloud metadata address),
+// multicast, unspecified, or in one of the reserved ranges above.
+func publicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	for _, n := range nonPublicNets {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// nonPublic returns the entries of addrs that are not public addresses.
+func nonPublic(addrs []string) []string {
+	var out []string
+	for _, a := range addrs {
+		if !publicIP(net.ParseIP(a)) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// dialer builds the dialer every probe uses. Unless allowPrivate is set its
+// Control hook runs on the address actually being connected to - after DNS,
+// for every connection including a redirect's and a rebinding answer's - and
+// refuses a non-public one, so the check above cannot be raced.
+func dialer(timeout time.Duration, res *net.Resolver, allowPrivate bool) *net.Dialer {
+	d := &net.Dialer{Timeout: timeout, Resolver: res}
+	if !allowPrivate {
+		d.Control = func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if !publicIP(net.ParseIP(host)) {
+				return errPrivateAddr
+			}
+			return nil
+		}
+	}
+	return d
+}
+
+var errPrivateAddr = errors.New("refused: address is not on the public internet")
 
 // NetWebProber is the real network.
 //
@@ -190,23 +292,23 @@ func ProbeWeb(ctx context.Context, r Resolver, fetch WebProber, host string) Web
 // res resolves the names it connects to - the same resolver the DNS checks
 // use, so a site is fetched at the address the internet sees, not the one an
 // internal DNS view hands this host. nil means the system resolver.
-func NetWebProber(timeout time.Duration, retries int, res *net.Resolver) WebProber {
+func NetWebProber(timeout time.Duration, retries int, res *net.Resolver, allowPrivate bool) WebProber {
 	return func(ctx context.Context, host string) (Fetch, Fetch, Cert) {
-		return getRetry(ctx, "https://"+host+"/", timeout, retries, res),
-			getRetry(ctx, "http://"+host+"/", timeout, retries, res),
-			certOf(ctx, host, timeout, res)
+		return getRetry(ctx, "https://"+host+"/", timeout, retries, res, allowPrivate),
+			getRetry(ctx, "http://"+host+"/", timeout, retries, res, allowPrivate),
+			certOf(ctx, host, timeout, res, allowPrivate)
 	}
 }
 
-func getRetry(ctx context.Context, url string, timeout time.Duration, retries int, res *net.Resolver) Fetch {
-	f := get(ctx, url, timeout, res)
+func getRetry(ctx context.Context, url string, timeout time.Duration, retries int, res *net.Resolver, allowPrivate bool) Fetch {
+	f := get(ctx, url, timeout, res, allowPrivate)
 	for i := 0; i < retries && !f.OK() && ctx.Err() == nil; i++ {
-		f = get(ctx, url, timeout, res)
+		f = get(ctx, url, timeout, res, allowPrivate)
 	}
 	return f
 }
 
-func get(ctx context.Context, url string, timeout time.Duration, res *net.Resolver) Fetch {
+func get(ctx context.Context, url string, timeout time.Duration, res *net.Resolver, allowPrivate bool) Fetch {
 	f := Fetch{Tried: true}
 	start := time.Now()
 	client := &http.Client{
@@ -217,12 +319,18 @@ func get(ctx context.Context, url string, timeout time.Duration, res *net.Resolv
 			// checked separately in certOf, with verification on.
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12},
 			Proxy:                 nil,
-			DialContext:           (&net.Dialer{Timeout: timeout, Resolver: res}).DialContext,
+			DialContext:           dialer(timeout, res, allowPrivate).DialContext,
 			DisableKeepAlives:     true,
 			ResponseHeaderTimeout: timeout,
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
+				return http.ErrUseLastResponse
+			}
+			// A redirect is the site's choice, so where it points is not ours
+			// to follow anywhere: only the web's own ports. The last response
+			// (the redirect itself) is what gets reported.
+			if p := req.URL.Port(); p != "" && p != "80" && p != "443" {
 				return http.ErrUseLastResponse
 			}
 			return nil
@@ -279,23 +387,35 @@ func parked(finalURL string, body []byte) string {
 	return ""
 }
 
+// title is the page's <title>, whitespace-collapsed and cut to 80 characters.
+//
+// Offsets are found on an ASCII-only lower-cased copy of the bytes, which is
+// the same length as the original. strings.ToLower is not: some characters
+// change length when lower-cased, so offsets taken from its result and applied
+// to the original sliced out of range, and one such page crashed the whole
+// weekly run.
 func title(body []byte) string {
-	s := string(body)
-	lo := strings.ToLower(s)
-	i := strings.Index(lo, "<title")
+	lo := make([]byte, len(body))
+	for i, b := range body {
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		lo[i] = b
+	}
+	i := bytes.Index(lo, []byte("<title"))
 	if i < 0 {
 		return ""
 	}
-	j := strings.Index(lo[i:], ">")
+	j := bytes.IndexByte(lo[i:], '>')
 	if j < 0 {
 		return ""
 	}
 	start := i + j + 1
-	end := strings.Index(lo[start:], "</title")
+	end := bytes.Index(lo[start:], []byte("</title"))
 	if end < 0 {
 		return ""
 	}
-	t := strings.Join(strings.Fields(s[start:start+end]), " ")
+	t := strings.Join(strings.Fields(strings.ToValidUTF8(string(body[start:start+end]), "")), " ")
 	if r := []rune(t); len(r) > 80 {
 		t = string(r[:80]) + "..." // by rune: a title cut mid-character is invalid UTF-8
 	}
@@ -303,10 +423,10 @@ func title(body []byte) string {
 }
 
 // certOf dials 443 and verifies the chain against the system roots for host.
-func certOf(ctx context.Context, host string, timeout time.Duration, res *net.Resolver) Cert {
+func certOf(ctx context.Context, host string, timeout time.Duration, res *net.Resolver, allowPrivate bool) Cert {
 	c := Cert{Checked: true}
 	d := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: timeout, Resolver: res},
+		NetDialer: dialer(timeout, res, allowPrivate),
 		// #nosec G402 -- the handshake must complete so the certificate can be
 		// read; it is then verified explicitly below, with the result recorded.
 		Config: &tls.Config{InsecureSkipVerify: true, ServerName: host, MinVersion: tls.VersionTLS12},

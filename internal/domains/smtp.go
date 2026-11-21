@@ -2,6 +2,7 @@ package domains
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/textproto"
 	"strconv"
@@ -28,10 +29,10 @@ type SMTPProber func(ctx context.Context, host string) SMTPResult
 // NetSMTPProber connects, reads the 220 greeting, sends EHLO, reads the
 // extensions, and QUITs. It never sends MAIL FROM: this is a greeting, not a
 // delivery attempt, and it is what any MTA would see before deciding.
-func NetSMTPProber(port int, timeout time.Duration, resolver *net.Resolver) SMTPProber {
+func NetSMTPProber(port int, timeout time.Duration, resolver *net.Resolver, allowPrivate bool) SMTPProber {
 	return func(ctx context.Context, host string) SMTPResult {
 		res := SMTPResult{Checked: true, Host: host, Port: port}
-		d := net.Dialer{Timeout: timeout, Resolver: resolver}
+		d := dialer(timeout, resolver, allowPrivate)
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		conn, err := d.DialContext(cctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
@@ -41,7 +42,10 @@ func NetSMTPProber(port int, timeout time.Duration, resolver *net.Resolver) SMTP
 		}
 		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(2 * timeout))
-		tp := textproto.NewConn(conn)
+		// A real greeting and EHLO reply are a few hundred bytes. A hostile MX
+		// can send forever, so the connection is cut off after a generous cap
+		// (the deadline alone bounds time, not bytes).
+		tp := textproto.NewConn(&capConn{Conn: conn, left: maxSMTPBytes})
 		_, msg, err := tp.ReadResponse(220)
 		if err != nil {
 			res.Err = "no SMTP greeting: " + shortNetErr(err)
@@ -131,6 +135,32 @@ func (c *smtpCache) get(ctx context.Context, host string) SMTPResult {
 	return e.res
 }
 
+// maxSMTPBytes is the most read from one MX host's SMTP session.
+const maxSMTPBytes = 64 << 10
+
+// maxMXProbed is the most MX hosts tried for one domain. Real domains publish
+// two to five; a name whose DNS lists hundreds is one built to keep the run
+// busy, and the run's deadline is the whole lane's.
+const maxMXProbed = 8
+
+// capConn reads at most left bytes and then reports EOF.
+type capConn struct {
+	net.Conn
+	left int64
+}
+
+func (c *capConn) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.Conn.Read(p)
+	c.left -= int64(n)
+	return n, err
+}
+
 // first probes MX hosts in preference order and returns the first that
 // greeted, or the last failure. Unresolvable hosts are skipped.
 func (c *smtpCache) first(ctx context.Context, hosts, unresolved []string) SMTPResult {
@@ -139,10 +169,19 @@ func (c *smtpCache) first(ctx context.Context, hosts, unresolved []string) SMTPR
 		skip[h] = true
 	}
 	var last SMTPResult
+	tried := 0
 	for _, h := range hosts {
 		if h == "." || skip[h] {
 			continue
 		}
+		// The first caller's budget for this domain, not the shared cache's:
+		// c.get runs without the caller's cancellation (a timeout there would
+		// be cached for every domain on that MX), so the walk itself has to
+		// stop when the domain's time is spent.
+		if tried >= maxMXProbed || ctx.Err() != nil {
+			break
+		}
+		tried++
 		r := c.get(ctx, h)
 		if r.Err == "" {
 			return r

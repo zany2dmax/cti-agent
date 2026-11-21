@@ -69,6 +69,27 @@ scanner's own address).
     capped fields, plausible totals), with refused messages named in the log and
     the report's gaps.
 
+- **Fixed issues found by PrimeSec AI: Tier 2, the domains lane.**
+  - **One odd page no longer crashes the weekly run (11583476).** `title()` took
+    offsets on a lower-cased copy and applied them to the original; a page with a
+    character that changes length when lower-cased ("İ") sliced out of range and
+    the run died before any report. It now works on bytes, and a crash in any one
+    domain's probe becomes that domain's "probing crashed ... not checked this run"
+    finding while the others report.
+  - **The probes no longer fetch whatever DNS points them at (10786551,
+    10786550).** A name that resolves to a private or reserved address (10.x,
+    172.16-31.x, 192.168.x, 100.64.x, loopback, link-local including the cloud
+    metadata address) is listed, "resolves to ..., web not probed", and not
+    fetched; every connection is also refused at connect time, so a redirect or a
+    changed DNS answer cannot reach one. Redirects are followed only to ports 80
+    and 443. The same guard covers the SMTP probe. **Upgrade:** nothing for public
+    sites. If your inventory has internal names you want probed, set
+    `DOMAINS_ALLOW_PRIVATE=1`. The lane asks public resolvers by default, so few
+    private answers are expected.
+  - **A hostile MX list or SMTP server can no longer stall the run (11583477,
+    10786549, 10786552).** At most 8 MX hosts are tried per domain, the walk stops
+    when the domain's time is spent, and an SMTP session is read for at most 64 KiB.
+
 - **Fixed issues found by PrimeSec AI: Tier 1 attack vectors (mail anyone can send).**
   - **A crafted workbook can no longer kill the supplier run (11583469, 11583468).**
     A cell reference such as `ZZZZZZZZZZ1` made the xlsx reader grow a slice to

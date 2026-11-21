@@ -423,6 +423,17 @@ satisfies the check.
 disables the SMTP greeting and STARTTLS probe. When every probe fails to
 connect, the report says once that outbound port 25 appears blocked.
 .TP
+.B DOMAINS_ALLOW_PRIVATE
+Set to
+.B 1
+to let the web and SMTP probes connect to a name that resolves to a private or
+reserved address. By default such a name is listed in the report ("resolves to
+..., web not probed") and not fetched, because whoever controls a name's DNS
+chooses the address; every connection is also refused at connect time, so a
+redirect or a changed answer cannot reach one either. Redirects are followed
+only to ports 80 and 443, at most 8 MX hosts are tried per domain, and an SMTP
+session is read for at most 64 KiB.
+.TP
 .B DOMAINS_SMTP_PORT
 Port for the SMTP probe. Default:\~\fB25\fR.
 .TP
