@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"os"
 	"sort"
 	"strconv"
@@ -371,7 +372,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 	cfg := Config{
 		TenantID:     os.Getenv("TENANT_ID"),
 		ClientID:     os.Getenv("CLIENT_ID"),
-		ClientSecret: os.Getenv("CLIENT_SECRET"),
+		ClientSecret: fleetenv.Secret("CLIENT_SECRET"),
 		// No default. A hardcoded address here shipped one organisation's
 		// internal distribution list as the fallback for everyone else's
 		// deployment, and an unconfigured install read that mailbox instead
@@ -384,7 +385,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		LookupProvider:       getenvDefault("LOOKUP_PROVIDER", "qualys"),
 		QualysBaseURL:        os.Getenv("QUALYS_BASE_URL"),
 		QualysUsername:       os.Getenv("QUALYS_USERNAME"),
-		QualysPassword:       os.Getenv("QUALYS_PASSWORD"),
+		QualysPassword:       fleetenv.Secret("QUALYS_PASSWORD"),
 		QualysKBCachePath:    getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
 		QualysKBMaxAge:       time.Duration(kbMaxAgeHours) * time.Hour,
 		ReportPath:           getenvDefault("REPORT_PATH", "./cti-agent-report.md"),
@@ -401,7 +402,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),
-		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
+		JiraAPIToken: fleetenv.Secret("JIRA_API_TOKEN"),
 		// No defaults, on purpose. "Task" would have been the obvious one and
 		// it is WRONG here: the CR project is a Service Management desk whose
 		// issue types are IT Support, Off-Boarding, New-Hire IT Request and so

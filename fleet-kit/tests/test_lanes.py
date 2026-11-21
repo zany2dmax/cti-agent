@@ -4289,6 +4289,54 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                     self.assertEqual(r.stdout, "", "sudo must not have been reached")
 
+    def test_a_hand_run_gets_its_timers_credentials_through_systemd_run(self):
+        """Step 2 of splitting fleet.env: once a secret a command needs is
+        stored as a credential, the wrapper runs the command as a transient
+        unit with that command's ImportCredential= grants; until then it uses
+        sudo, as before. No secret value ever reaches a command line."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        start = "replace_file /usr/local/bin/cti-agent 0755 <<WRAP\n"
+        body = inst[inst.index(start) + len(start):]
+        body = body[:body.index("\nWRAP\n") + 1]
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            code, state, fake, store = d / "code", d / "state", d / "fakebin", d / "store"
+            for p in (code / "bin", code / "share", state, fake, store):
+                p.mkdir(parents=True)
+            (code / "bin" / "cti-jira").write_text("#!/bin/sh\n")
+            (code / "bin" / "fleet-db").write_text("#!/bin/sh\n")
+            (code / "share" / "credentials.map").write_text("# comment\ncti-jira CLIENT_SECRET JIRA_API_TOKEN\n")
+            for tool in ("sudo", "systemd-run"):
+                (fake / tool).write_text(f'#!/bin/sh\necho "{tool}"\nfor a; do echo "$a"; done\n')
+                (fake / tool).chmod(0o755)
+            render = subprocess.run(
+                ["bash", "-c", f'CODE_DIR="{code}" STATE_DIR="{state}" CONF_DIR="{d}" CREDSTORE_DIR="{store}" '
+                 f'FLEET_USER=ctiagent FLEET_GROUP=ctiagent; cat <<WRAP\n{body}WRAP\n'],
+                capture_output=True, text=True, check=True)
+            wrapper = d / "cti-agent"
+            wrapper.write_text(render.stdout)
+            env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(d), "SUDO_USER": "operator",
+                   "JIRA_API_TOKEN": "secret-value-x"}
+
+            def run(*args):
+                return subprocess.run(["bash", str(wrapper), *args], env=env,
+                                      capture_output=True, text=True, check=False)
+
+            r = run("cti-jira", "--check")
+            self.assertEqual(r.stdout.splitlines()[0], "sudo", "nothing stored yet: the old path")
+            (store / "JIRA_API_TOKEN").write_text("ciphertext")
+            r = run("cti-jira", "--check")
+            lines = r.stdout.splitlines()
+            self.assertEqual(lines[0], "systemd-run", r.stdout + r.stderr)
+            for want in ("ImportCredential=CLIENT_SECRET", "ImportCredential=JIRA_API_TOKEN", "User=ctiagent",
+                         "--pipe", "--wait", "--expand-environment=no", f"{code}/bin/cti-jira", "--check"):
+                self.assertIn(want, lines, want)
+            self.assertTrue(any(l.startswith("--description=manual: cti-jira (by operator)") for l in lines))
+            self.assertNotIn("secret-value-x", r.stdout)
+            r = run("fleet-db", "recent")
+            self.assertEqual(r.stdout.splitlines()[0], "sudo", "a command that needs no secret keeps the old path")
+
     def test_the_generic_installer_stays_retired(self):
         """install.sh left the fleet's code owned by the service account.
 
@@ -6547,7 +6595,8 @@ class FleetConfig(unittest.TestCase):
             "key: DOM_TO\nreaders: run-domains\n\n")
 
     def run_tool(self, *args, env_text=None):
-        env = {"PATH": os.environ["PATH"], "FLEET_CODE": str(self.tmp)}
+        env = {"PATH": os.environ["PATH"], "FLEET_CODE": str(self.tmp),
+               "CTI_CREDSTORE_LIST": str(self.tmp / "credentials.stored")}
         if env_text is not None:
             f = self.tmp / "fleet.env"
             f.write_text(env_text)
@@ -6647,6 +6696,16 @@ class FleetConfig(unittest.TestCase):
         self.assertIn("below", late["TEAM_LIST"]["why"])
         self.assertIn("not set", late["NOWHERE"]["why"])
 
+    def test_a_secret_moved_to_a_credential_is_not_missing(self):
+        (self.tmp / "credentials.stored").write_text("# names only\nCLIENT_SECRET\n")
+        r = self.run_tool("check", "--json", env_text="LOOKUP_PROVIDER=none\n")
+        j = json.loads(r.stdout)
+        self.assertEqual(j["missing"], [])
+        self.assertEqual(j["stored"], ["CLIENT_SECRET"])
+        r = self.run_tool("check", "--json", env_text="LOOKUP_PROVIDER=none\nCLIENT_SECRET=still-here\n")
+        self.assertEqual(json.loads(r.stdout)["stored_and_in_env"], ["CLIENT_SECRET"])
+        self.assertNotIn("still-here", r.stdout)
+
     def test_an_unreadable_file_is_an_error_not_a_pass(self):
         r = self.run_tool("check", "--env", str(self.tmp / "missing.env"))
         self.assertEqual(r.returncode, 1)
@@ -6670,6 +6729,116 @@ class FleetConfig(unittest.TestCase):
         for k, row in rows.items():
             self.assertNotIn("checkin-bash-guard", row["readers"],
                              f"{k}: the guard names secrets to refuse them; it must not count as reading one")
+
+
+
+class SecretsAsCredentials(unittest.TestCase):
+    """cti-agent-secrets moves secrets out of fleet.env into systemd
+    credentials; the shell helpers read them. The promises: no value is ever
+    printed or put on a command line, only known secrets are stored, and a
+    runner drops the environment copy of a secret it has as a file."""
+
+    TOOL = KIT / "bin" / "cti-agent-secrets"
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "code").mkdir()
+        (self.tmp / "code" / "settings.manifest").write_text(
+            "key: CLIENT_SECRET\nsecret: yes\n\nkey: JIRA_API_TOKEN\nsecret: yes\n\n"
+            "key: NVD_API_KEY\nsecret: yes\n\nkey: GRAPH_FOLDER\n\n")
+        self.store = self.tmp / "store"
+        self.argv_log = self.tmp / "argv.log"
+        fake = self.tmp / "systemd-creds"
+        fake.write_text("#!/bin/sh\n" f'echo "$@" >> {shlex.quote(str(self.argv_log))}\n'
+                        'out="$4"; { printf "ENC:"; cat; } > "$out"\n')
+        fake.chmod(0o755)
+        self.env = {"PATH": os.environ["PATH"], "CTI_CREDSTORE": str(self.store),
+                    "CTI_CREDSTORE_LIST": str(self.tmp / "credentials.stored"),
+                    "FLEET_CODE": str(self.tmp / "code"), "FLEET_ENV": str(self.tmp / "fleet.env"),
+                    "SYSTEMD_CREDS": str(fake)}
+
+    def run_tool(self, *args, stdin=""):
+        return subprocess.run([sys.executable, str(self.TOOL), *args], env=self.env, input=stdin,
+                              capture_output=True, text=True, check=False)
+
+    def test_import_stores_known_secrets_and_never_shows_a_value(self):
+        (self.tmp / "fleet.env").write_text(
+            "CLIENT_SECRET=client-value-1  # a note bash ignores\nJIRA_API_TOKEN='jira-value-2'\n"
+            "HELPER=nvd-part\nNVD_API_KEY=$HELPER-x\nGRAPH_FOLDER=Inbox\nUNKNOWN_SECRET=x\n")
+        r = self.run_tool("import", "--dry-run")
+        self.assertIn("would store CLIENT_SECRET", r.stdout)
+        self.assertFalse(self.store.exists() and any(self.store.iterdir()), "a dry run stored something")
+        r = self.run_tool("import")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(p.name for p in self.store.iterdir()), ["CLIENT_SECRET", "JIRA_API_TOKEN", "NVD_API_KEY"])
+        self.assertEqual((self.store / "JIRA_API_TOKEN").read_text(), "ENC:jira-value-2")
+        self.assertEqual((self.store / "CLIENT_SECRET").read_text(), "ENC:client-value-1", "bash drops the comment")
+        self.assertEqual((self.store / "NVD_API_KEY").read_text(), "ENC:nvd-part-x", "bash expands the helper")
+        self.assertEqual(oct((self.store / "CLIENT_SECRET").stat().st_mode & 0o777), "0o600")
+        listed = (self.tmp / "credentials.stored").read_text()
+        self.assertIn("CLIENT_SECRET\n", listed)
+        everything = r.stdout + r.stderr + self.argv_log.read_text() + listed
+        for v in ("client-value-1", "jira-value-2", "nvd-part"):
+            self.assertNotIn(v, everything, "a value was printed or put on a command line")
+        self.assertIn("--name=CLIENT_SECRET", self.argv_log.read_text())
+        r = self.run_tool("status")
+        self.assertIn("3 of 3 secrets stored", r.stdout)
+        self.assertNotIn("client-value-1", r.stdout)
+        r = self.run_tool("import")
+        self.assertIn("nothing to import", r.stdout)
+
+    def test_set_reads_stdin_and_refuses_unknown_names(self):
+        r = self.run_tool("set", "NVD_API_KEY", stdin="nvd-value\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.store / "NVD_API_KEY").read_text(), "ENC:nvd-value")
+        for bad in ("GRAPH_FOLDER", "../etc/x", "lower"):
+            r = self.run_tool("set", bad, stdin="x")
+            self.assertEqual(r.returncode, 2, bad)
+        r = self.run_tool("remove", "NVD_API_KEY")
+        self.assertFalse((self.store / "NVD_API_KEY").exists())
+
+    def test_a_runner_drops_the_environment_copy_of_a_credential_secret(self):
+        creds = self.tmp / "creds"
+        creds.mkdir()
+        (creds / "CLIENT_SECRET").write_text("from-file\n")
+        script = (f". {shlex.quote(str(KIT / 'fleet' / 'share' / 'fleet-mode.sh'))}\n"
+                  "fleet_secrets_from_credentials\n"
+                  'echo "env=${CLIENT_SECRET:-unset} jira=${JIRA_API_TOKEN:-unset}"\n'
+                  'echo "read=$(fleet_secret CLIENT_SECRET) jira=$(fleet_secret JIRA_API_TOKEN)"\n')
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False,
+                           env={"PATH": os.environ["PATH"], "CREDENTIALS_DIRECTORY": str(creds),
+                                "CLIENT_SECRET": "from-env", "JIRA_API_TOKEN": "jira-env"})
+        self.assertIn("env=unset jira=jira-env", r.stdout, r.stderr)
+        self.assertIn("read=from-file jira=jira-env", r.stdout)
+
+    def test_every_runner_drops_credential_secrets_once_both_files_are_loaded(self):
+        """The call must come after fleet.env is sourced (or the copy comes
+        back) and after fleet-mode.sh defines it (or, under set -e, the lane
+        dies with "command not found" - which it did, in three runners, until
+        a test ran them)."""
+        for f in sorted((KIT / "fleet" / "bin").glob("run-*")):
+            with self.subTest(runner=f.name):
+                lines = f.read_text().splitlines()
+                call = lines.index("fleet_secrets_from_credentials")
+                env = lines.index("set +a")
+                mode = next(i for i, l in enumerate(lines) if re.match(r'^\. ".*share/fleet-mode\.sh"$', l))
+                self.assertGreater(call, env)
+                self.assertGreater(call, mode)
+
+    def test_the_model_token_reaches_only_the_claude_subshell(self):
+        creds = self.tmp / "creds"
+        creds.mkdir()
+        (creds / "CLAUDE_CODE_OAUTH_TOKEN").write_text("tok\n")
+        script = (f"ML_OS=linux; . {shlex.quote(str(KIT / 'fleet' / 'share' / 'model-lane.sh'))}\n"
+                  "ml_auth_check t >/dev/null && echo auth-ok\n"
+                  'ml_with_model_token sh -c \'echo "child=$CLAUDE_CODE_OAUTH_TOKEN"\'\n'
+                  'echo "runner=${CLAUDE_CODE_OAUTH_TOKEN:-unset}"\n')
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False,
+                           env={"PATH": os.environ["PATH"], "CREDENTIALS_DIRECTORY": str(creds)})
+        self.assertIn("auth-ok", r.stdout, r.stderr)
+        self.assertIn("child=tok", r.stdout)
+        self.assertIn("runner=unset", r.stdout)
 
 
 if __name__ == "__main__":

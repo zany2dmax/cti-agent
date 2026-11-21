@@ -169,7 +169,7 @@ func run() int {
 	orgOf := map[string]domains.Registration{}
 	if *noRegistrar {
 		logf("note   : --no-registrar - registration, expiry and account checks skipped")
-	} else if tok := strings.TrimSpace(os.Getenv("GODADDY_PAT")); tok == "" {
+	} else if tok := strings.TrimSpace(fleetenv.Secret("GODADDY_PAT")); tok == "" {
 		opt.RegistrarErr = "GODADDY_PAT is not set in fleet.env"
 		logf("warn   : %s - registrar checks skipped", opt.RegistrarErr)
 	} else {
@@ -260,7 +260,7 @@ func run() int {
 		go func() {
 			defer close(gwDone)
 			cluster := strings.TrimSpace(os.Getenv("POD_CLUSTER_ID"))
-			token := strings.TrimSpace(os.Getenv("POD_API_TOKEN"))
+			token := strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN"))
 			if cluster == "" || token == "" {
 				gwStatus.Err = "POD_CLUSTER_ID and POD_API_TOKEN are not both set in fleet.env"
 				return
@@ -458,7 +458,7 @@ func doCheck(inventory string) int {
 		}
 	}
 
-	if tok := strings.TrimSpace(os.Getenv("GODADDY_PAT")); tok == "" {
+	if tok := strings.TrimSpace(fleetenv.Secret("GODADDY_PAT")); tok == "" {
 		logf("FAIL   : GODADDY_PAT is not set, so the registrar would not be checked")
 		failed++
 	} else {
@@ -478,7 +478,7 @@ func doCheck(inventory string) int {
 	case "", "off":
 		logf("note   : mail gateway check is off (DOMAINS_MAIL_GATEWAY)")
 	case "pod":
-		if strings.TrimSpace(os.Getenv("POD_CLUSTER_ID")) == "" || strings.TrimSpace(os.Getenv("POD_API_TOKEN")) == "" {
+		if strings.TrimSpace(os.Getenv("POD_CLUSTER_ID")) == "" || strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN")) == "" {
 			logf("FAIL   : DOMAINS_MAIL_GATEWAY=pod but POD_CLUSTER_ID and POD_API_TOKEN are not both set")
 			failed++
 		} else {

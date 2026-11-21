@@ -46,6 +46,8 @@ log()  { echo "[run-domains] $*" >&2; }
 
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+# Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
+fleet_secrets_from_credentials
 DRY=""
 SEND_DRY=""
 REAL=""

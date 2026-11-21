@@ -17,6 +17,7 @@ A threat model that claims controls it does not have is worse than none.
 - [What this system handles](#what-this-system-handles)
 - [Trust boundaries](#trust-boundaries)
 - [The supplier-request lane: untrusted mail reaching a model with no tools](#the-supplier-request-lane-untrusted-mail-reaching-a-model-with-no-tools)
+- [Secrets: systemd credentials, not the environment](#secrets-systemd-credentials-not-the-environment)
 - [AI triage: untrusted input reaching a model with tools](#ai-triage-untrusted-input-reaching-a-model-with-tools)
 - [Data sensitivity: the report is a targeting list](#data-sensitivity-the-report-is-a-targeting-list)
 - [Credentials and secrets](#credentials-and-secrets)
@@ -153,6 +154,46 @@ the inbox, and so does a request whose item could not be filed.
 The `claude` flags above were exercised against the real CLI in a dry run on the
 box (20 requests judged, none failed), and the model evaluation (`task
 eval:supplier`) runs the same arguments.
+
+## Secrets: systemd credentials, not the environment
+
+Every unit used to load all of `fleet.env` through `EnvironmentFile=`, and
+the runners re-export it, so every process held every secret: the check-in
+beat (a model with tools, reading untrusted text), the supplier model, and
+anything either started. Step 2 of the split (RUNBOOK §11n) changes how a
+secret reaches a program:
+
+- **At rest.** `/etc/credstore.encrypted/NAME`, encrypted by `systemd-creds`
+  to this machine's TPM where it has one, else its host key. Files are 0600
+  root, in a root-only folder. `cti-agent-secrets` keeps a names-only list in
+  `/etc/cti-agent/credentials.stored`, so `fleet-config` knows which secrets
+  have moved.
+- **Per run.** A unit's generated `ImportCredential=` lines name only the
+  secrets its programs read. systemd decrypts them into
+  `$CREDENTIALS_DIRECTORY`, a private in-memory folder for that run, and
+  removes it when the run ends, however it ends.
+- **In the program.** `fleetenv.Secret` (Go), `secret()` (Python) and
+  `fleet_secret` (bash) read the file first. A runner unsets the environment
+  copy of every secret it has as a file, and `fleetenv.Load` won't copy one
+  back from `fleet.env`, so children don't inherit it. The model token is
+  exported only in the subshell that starts `claude`. The check-in beat's
+  model still holds `CREDENTIALS_DIRECTORY` (a path), because the commands
+  it is granted read their secrets there. `checkin-bash-guard` refuses
+  `$NAME` expansion and anything not on the grant, so the beat can't `cat`
+  a credential.
+- **By hand.** `sudo cti-agent CMD` runs as a transient unit through
+  `systemd-run`, with the command's grants from the generated
+  `credentials.map`. The values never appear on a command line. Not copied
+  from the timer: `PrivateTmp`, `ProtectHome` and `ProtectSystem`, so a file
+  the operator passes stays readable.
+
+**Limits.** The grants are generated as "could read", so wider than needed:
+a runner gets the secrets of every program it calls. Until a secret's line is
+deleted from `fleet.env`, the unit's own starting environment still holds it
+(the runner drops it before starting anything). `cti-agent-secrets` runs as
+root, encrypts values passed on stdin, and never prints one.
+
+---
 
 ## AI triage: untrusted input reaching a model with tools
 

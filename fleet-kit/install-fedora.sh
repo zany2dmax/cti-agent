@@ -82,6 +82,8 @@ LOG_DIR=/var/log/cti-agent   # the audit trail (cti-audit(1)); systemd units als
 UNIT_DIR=/etc/systemd/system
 FLEET_USER=ctiagent
 FLEET_GROUP=ctiagent
+# Where secrets live as systemd credentials (RUNBOOK 11n); ImportCredential= reads it.
+CREDSTORE_DIR=/etc/credstore.encrypted
 AGENT_REPO=https://github.com/zany2dmax/cti-agent
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -215,7 +217,9 @@ if [ "$ACTION" != install ]; then
   rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
-  rm -f /usr/local/sbin/cti-agent-update
+  rm -f /usr/local/sbin/cti-agent-update /usr/local/sbin/cti-agent-secrets
+  # /etc/credstore.encrypted is left alone: it holds the fleet's secrets,
+  # encrypted to this machine, and removing them is a decision, not cleanup.
   bold "Removing tab completion"
   rm -f /usr/share/bash-completion/completions/cti-agent /usr/share/zsh/site-functions/_cti-agent \
         /usr/share/bash-completion/completions/cti-agent-update /usr/share/zsh/site-functions/_cti-agent-update
@@ -377,6 +381,30 @@ info "agents/triage-judge/CLAUDE.md"
 run install -m 0644 -o root -g root "$SRC/fleet/commands.manifest" "$CODE_DIR/commands.manifest"
 # Every fleet.env setting and which program reads it: fleet-config reads it.
 run install -m 0644 -o root -g root "$SRC/fleet/settings.manifest" "$CODE_DIR/settings.manifest"
+# Which secrets each command needs: the wrapper gives a hand run its timer's
+# grants from it. Generated with the units' ImportCredential= lines.
+run install -m 0644 -o root -g root "$SRC/fleet/credentials.map" "$CODE_DIR/share/credentials.map"
+# Secrets as systemd credentials (RUNBOOK 11n): the store, and the root tool
+# that fills it. The folder is world-listable so fleet-config can see which
+# secrets have moved; each file is root-only, and encrypted to this machine.
+# Created root-only if missing, and otherwise left as systemd's tmpfiles keeps
+# it (it resets the mode at boot). fleet-config learns which secrets moved
+# from the names-only list cti-agent-secrets writes, not by listing here.
+if [ ! -d "$CREDSTORE_DIR" ]; then run install -d -m 0700 -o root -g root "$CREDSTORE_DIR"; fi
+run install -m 0755 -o root -g root "$SRC/bin/cti-agent-secrets" /usr/local/sbin/cti-agent-secrets
+if command -v systemctl >/dev/null 2>&1; then
+  sdv="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
+  case "$sdv" in
+    ''|*[!0-9]*) warn "could not read the systemd version: ImportCredential= needs 254 or later" ;;
+    *) if [ "$sdv" -lt 254 ]; then
+         warn "systemd $sdv: units cannot import credentials (needs 254); secrets stay in fleet.env"
+       elif [ "$MODE" != dryrun ] && ! systemd-run --quiet --wait --collect --expand-environment=no \
+              -p ImportCredential=CTI_AGENT_INSTALL_PROBE /bin/true >/dev/null 2>&1; then
+         # Hand runs use exactly these options once a secret is stored.
+         warn "a transient unit refused ImportCredential= - hand runs could not get credentials; keep secrets in fleet.env"
+       fi ;;
+  esac
+fi
 run install -m 0755 -o root -g root "$SRC/fleet/share/cti-agent-usage" "$CODE_DIR/share/cti-agent-usage"
 # Sourced by every runner that changes something: the "say how to run it" rule.
 # Not executable, and the runners fail at start without it, so it is checked.
@@ -1156,6 +1184,7 @@ fi
 # FLEET_HOME in fleet.env cannot point a hand run at different files.
 LOADENV='_h="\$FLEET_HOME" _c="\$FLEET_CODE" _e="\$FLEET_ENV" _f="\$FLEET_FEEDS"
 set -a; if [ -r "\$FLEET_ENV" ]; then . "\$FLEET_ENV"; fi; set +a
+if [ -n "\${CREDENTIALS_DIRECTORY:-}" ]; then for f in "\$CREDENTIALS_DIRECTORY"/*; do n="\${f##*/}"; case "\$n" in *[!A-Z0-9_]*|[!A-Z]*) continue ;; esac; [ -f "\$f" ] && unset "\$n"; done; fi
 export FLEET_HOME="\$_h" FLEET_CODE="\$_c" FLEET_ENV="\$_e" FLEET_FEEDS="\$_f" HOME="\$_h"
 exec "\$@"'
 # fleet-owners is the one command that runs as ROOT, not as $FLEET_USER: it
@@ -1170,6 +1199,50 @@ if [ "\$cmd" = fleet-owners ]; then
   cd /
   exec env -i PATH=/usr/bin:/bin FLEET_GROUP=$FLEET_GROUP SUDO_USER="\${SUDO_USER:-}" \\
        /usr/bin/python3 -I "\$target" "\$@"
+fi
+# SECRETS AS CREDENTIALS (step 2 of splitting fleet.env, RUNBOOK 11n). Once a
+# secret this command needs is stored in /etc/credstore.encrypted, the hand
+# run becomes a transient systemd unit with the grants its timer has
+# (share/credentials.map, generated with the units' ImportCredential= lines):
+# systemd decrypts only those secrets, for this run only, and removes them
+# when it ends - however it ends. --pipe keeps the terminal; --wait returns
+# the command's exit code; the journal records it as cti-manual-*, with who
+# ran it. Until a needed secret is stored, the plain sudo path below runs, as
+# it always has. Not copied from the unit: PrivateTmp, ProtectHome and
+# ProtectSystem, so a file you pass a hand run (an advisory in /tmp, say)
+# stays readable.
+CREDMAP=$CODE_DIR/share/credentials.map
+CREDSTORE=$CREDSTORE_DIR
+secrets=""
+if [ -r "\$CREDMAP" ]; then
+  secrets="\$(awk -v c="\$cmd" '\$1 == c { \$1 = ""; print; exit }' "\$CREDMAP")"
+fi
+use_creds=0
+for s in \$secrets; do
+  if [ -f "\$CREDSTORE/\$s" ]; then use_creds=1; fi
+done
+if [ "\$use_creds" = 1 ] && command -v systemd-run >/dev/null 2>&1; then
+  run=(/bin/bash -c "\$LOADENV" cti-agent)
+  case "\$cmd" in *.py) run+=(/usr/bin/python3) ;; esac
+  props=(-p User=$FLEET_USER -p Group=$FLEET_GROUP -p SupplementaryGroups=systemd-journal
+         -p WorkingDirectory=$STATE_DIR -p UMask=0077 -p NoNewPrivileges=yes
+         -p ProtectKernelTunables=yes -p ProtectKernelModules=yes -p ProtectControlGroups=yes
+         -p RestrictSUIDSGID=yes -p LockPersonality=yes)
+  for s in \$secrets; do props+=(-p "ImportCredential=\$s"); done
+  # --expand-environment=no: systemd-run would otherwise expand \${...} in
+  # the arguments - LOADENV's own loop, and anything the operator typed.
+  # Not exec'd: on Ctrl-C (or a kill) the unit is stopped too, so a --for-real
+  # run cannot carry on after the operator has cancelled it.
+  unit="cti-manual-\${cmd//./-}-\$\$"
+  trap 'systemctl stop "\$unit" 2>/dev/null; exit 130' INT
+  trap 'systemctl stop "\$unit" 2>/dev/null; exit 143' TERM HUP
+  rc=0
+  systemd-run --quiet --wait --pipe --collect --expand-environment=no \\
+       --unit="\$unit" --description="manual: \$cmd (by \${SUDO_USER:-root})" \\
+       --setenv=FLEET_HOME=$STATE_DIR --setenv=FLEET_CODE=$CODE_DIR --setenv=FLEET_ENV=$CONF_DIR/fleet.env \\
+       --setenv=FLEET_FEEDS=$CONF_DIR/feeds.txt --setenv=HOME=$STATE_DIR --setenv=SUDO_USER="\${SUDO_USER:-}" \\
+       "\${props[@]}" "\${run[@]}" "\$target" "\$@" || rc=\$?
+  exit "\$rc"
 fi
 case "\$cmd" in
   *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\

@@ -80,7 +80,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	logf := func(format string, a ...any) { _, _ = fmt.Fprintf(stderr, "[podprobe] "+format+"\n", a...) }
 
 	cluster := strings.TrimSpace(os.Getenv("POD_CLUSTER_ID"))
-	token := strings.TrimSpace(os.Getenv("POD_API_TOKEN"))
+	token := strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN"))
 	if cluster == "" || token == "" {
 		logf("error  : POD_CLUSTER_ID and POD_API_TOKEN must be set (environment or fleet.env)")
 		return exitErr

@@ -101,7 +101,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	logf := func(format string, a ...any) { _, _ = fmt.Fprintf(stderr, "[falcon] "+format+"\n", a...) }
 
-	c, err := newClient(os.Getenv("FALCON_BASE_URL"), os.Getenv("FALCON_CLIENT_ID"), os.Getenv("FALCON_CLIENT_SECRET"))
+	c, err := newClient(os.Getenv("FALCON_BASE_URL"), os.Getenv("FALCON_CLIENT_ID"), fleetenv.Secret("FALCON_CLIENT_SECRET"))
 	if err != nil {
 		logf("error  : %v", err)
 		logf("set FALCON_BASE_URL, FALCON_CLIENT_ID and FALCON_CLIENT_SECRET in fleet.env (RUNBOOK: the CrowdStrike API client)")

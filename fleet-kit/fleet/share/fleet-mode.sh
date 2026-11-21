@@ -129,3 +129,37 @@ fleet_dryrun_dir() {
   fi
   printf '%s\n' "$d"
 }
+
+
+# ── secrets as systemd credentials (step 2 of splitting fleet.env) ───────────
+# A unit imports only the secrets its programs read (ImportCredential=), and
+# systemd decrypts them into $CREDENTIALS_DIRECTORY, one file per secret, gone
+# when the run ends. Go, Python and these helpers read the file first and the
+# environment second, so the move is one secret at a time.
+#
+# fleet_secrets_from_credentials - call right after sourcing fleet.env. For
+# every secret systemd provided as a file, unset the environment copy that
+# fleet.env (still) holds, so no child of this runner inherits it: the child
+# reads the file instead. Secrets with no credential yet are left alone.
+fleet_secrets_from_credentials() {
+  local d="${CREDENTIALS_DIRECTORY:-}" f n
+  [ -n "$d" ] && [ -d "$d" ] || return 0
+  for f in "$d"/*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    n="${f##*/}"
+    case "$n" in *[!A-Z0-9_]*|[!A-Z]*|'') continue ;; esac
+    unset "$n" 2>/dev/null || true
+  done
+}
+
+# fleet_secret NAME - print a secret: its credential when systemd provided
+# one, else the environment. $( ) drops the trailing newline either way.
+fleet_secret() {
+  local n="$1" d="${CREDENTIALS_DIRECTORY:-}"
+  case "$n" in *[!A-Z0-9_]*|[!A-Z]*|'') return 1 ;; esac
+  if [ -n "$d" ] && [ -f "$d/$n" ] && [ ! -L "$d/$n" ]; then
+    head -c 65536 "$d/$n"
+  else
+    printf '%s' "${!n:-}"
+  fi
+}

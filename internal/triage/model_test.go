@@ -129,3 +129,18 @@ func TestTheModelNeverReceivesTaxIdsOrBankNumbers(t *testing.T) {
 		t.Errorf("technical text was rewritten before reaching the model:\n%s", got2)
 	}
 }
+
+func TestAModelTokenCredentialReachesOnlyTheCLI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/CLAUDE_CODE_OAUTH_TOKEN", []byte("cred-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+	env := strings.Join(childEnv([]string{"PATH=/bin", "CLAUDE_CODE_OAUTH_TOKEN=env-token", "CREDENTIALS_DIRECTORY=" + dir}, "/tmp/h"), " ")
+	if !strings.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN=cred-token") || strings.Contains(env, "env-token") {
+		t.Fatalf("env = %s", env)
+	}
+	if strings.Contains(env, "CREDENTIALS_DIRECTORY") {
+		t.Fatalf("the credentials folder reached the CLI: %s", env)
+	}
+}

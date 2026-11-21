@@ -68,6 +68,8 @@ set -a
 # shellcheck source=/dev/null
 [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
 set +a
+# Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
+fleet_secrets_from_credentials
 [ -n "$_inj_home" ]  && FLEET_HOME="$_inj_home"
 [ -n "$_inj_code" ]  && FLEET_CODE="$_inj_code"
 [ -n "$_inj_feeds" ] && FLEET_FEEDS="$_inj_feeds"

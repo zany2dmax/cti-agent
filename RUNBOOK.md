@@ -32,6 +32,7 @@ document assumes you have decided to run it.
 - [11k. Advisory triage by hand](#11k-advisory-triage-by-hand)
 - [11l. The audit trail](#11l-the-audit-trail)
 - [11m. What is in fleet.env](#11m-what-is-in-fleetenv)
+- [11n. Moving secrets into systemd credentials](#11n-moving-secrets-into-systemd-credentials)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -3086,6 +3087,86 @@ see. After changing what the code reads:
 scripts/settings-manifest --write
 git diff fleet-kit/fleet/settings.manifest
 ```
+
+---
+
+## 11n. Moving secrets into systemd credentials
+
+Step 2 of splitting `fleet.env`. Today every unit loads all of `fleet.env`,
+so every lane, and every process it starts, holds every secret in its
+environment. After the move:
+
+- **Encrypted store.** Each secret is encrypted to this machine (its TPM where
+  it has one) in `/etc/credstore.encrypted/NAME`.
+- **Per-unit grants.** Each unit imports only the secrets its programs read.
+  The `ImportCredential=` lines in each unit are generated from
+  `settings.manifest`.
+- **Files, not environment.** systemd decrypts a unit's secrets, for that run
+  only, into a private folder the programs read. Each runner then drops the
+  `fleet.env` copy of any secret it has as a file, so its children stop
+  inheriting it.
+- **Hand runs.** `sudo cti-agent CMD` runs as a temporary systemd unit with
+  the same grants as the command's timer. You see its output as usual, its
+  exit code comes back, and the journal records it as `cti-manual-*`, with who
+  ran it.
+
+**Nothing breaks along the way.** A unit skips a credential that isn't stored
+yet, every program falls back to `fleet.env`, and hand runs keep using `sudo`
+until a secret the command needs is stored. So secrets move one at a time,
+and each step can be checked.
+
+**Needs:** systemd 254 or later. The installer warns if the box is older, or
+if a test transient unit refuses `ImportCredential=`. In either case, keep
+the secrets in `fleet.env`: nothing else changes. The model token must be
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as before.
+
+### The move
+
+1. **See where things stand.** This never prints a value:
+   ```bash
+   sudo cti-agent-secrets status
+   ```
+2. **Encrypt what `fleet.env` holds.** Check with the dry run, then import:
+   ```bash
+   sudo cti-agent-secrets import --dry-run
+   sudo cti-agent-secrets import
+   ```
+   It reads each value the way the runners do, by having bash source
+   `fleet.env`, so comments, quotes and `$HELPER` references mean the same.
+   To store one by hand instead: `sudo cti-agent-secrets set NAME` (typed,
+   not echoed).
+3. **Check every lane.** Each hand run below now goes through systemd with
+   its timer's grants:
+   ```bash
+   sudo cti-agent cti-mailer --check
+   sudo cti-agent cti-jira --check
+   sudo cti-agent run-digest daily --dry-run
+   sudo cti-agent run-vmscan --dry-run
+   sudo cti-agent run-supplier --dry-run
+   sudo cti-agent run-domains --dry-run
+   sudo cti-agent run-checkin --dry-run
+   ```
+   `journalctl -u 'cti-manual-*' -n 50` shows each one.
+4. **Delete the secrets' lines from `fleet.env`.** Do this once the dry runs
+   pass. `sudo cti-agent-secrets status` and `sudo cti-agent fleet-config
+   check` both list the secrets that are stored and still in the file. After
+   that, no environment holds them.
+5. **Let one day of timers run**, then check the Daily Brief and
+   `sudo cti-agent fleet-journal` as usual.
+
+**Rotating a secret** (a new Graph client secret, say):
+`sudo cti-agent-secrets set CLIENT_SECRET`. The next run of every unit uses
+it. No `fleet.env` edit and no restart.
+
+**Going back.** Put the line back in `fleet.env` and run
+`sudo cti-agent-secrets remove NAME`. Programs fall back to `fleet.env` from
+their next run.
+
+**What each unit gets.** The grants are generated, so the lists are wider
+than strictly needed. A program counts as reading a secret if it could, such
+as `cti-mailer`'s `--check` table naming the model token, and a runner gets
+the secrets of every program it calls. Wider is safe: a lane never lacks a
+secret it needs. Narrowing the lists is later work.
 
 ---
 

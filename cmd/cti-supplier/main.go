@@ -112,7 +112,9 @@ func run() int {
 
 // ── settings ────────────────────────────────────────────────────────────────
 
-func env(k string) string { return strings.TrimSpace(os.Getenv(k)) }
+// env reads a setting; a secret (JIRA_API_TOKEN) comes from its systemd
+// credential when there is one (fleetenv.Secret falls back to the environment).
+func env(k string) string { return strings.TrimSpace(fleetenv.Secret(k)) }
 
 func laneConfig() supplier.Config {
 	c := supplier.Config{

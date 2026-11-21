@@ -118,7 +118,7 @@ ml_model_ok() {
 ml_auth_check() {
   local name="$1" mode="${2:-}" set="" n=0 v
   for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
-    if [ -n "${!v:-}" ]; then set="$set $v"; n=$((n + 1)); fi
+    if [ -n "${!v:-}" ] || ml_has_credential "$v"; then set="$set $v"; n=$((n + 1)); fi
   done
   set="${set# }"
   if [ "$n" -gt 1 ]; then
@@ -166,11 +166,39 @@ ml_auth_check() {
 # that starts claude, never in the runner itself.
 ML_ENV_KEEP=" PATH USER LOGNAME LANG LC_ALL TZ ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS "
 ml_scrub_env() {
-  local home="$1" v
+  local home="$1" v creds="${CREDENTIALS_DIRECTORY:-}"
   for v in $(compgen -e); do
     case "$ML_ENV_KEEP" in *" $v "*) ;; *) unset "$v" 2>/dev/null || true ;; esac
   done
   export HOME="$home" TMPDIR="$home"
+  # A model token systemd provided as a credential: the CLI authenticates only
+  # through its environment, so it is exported here, in the subshell that
+  # starts claude, and nowhere else.
+  CREDENTIALS_DIRECTORY="$creds" ml_export_model_token
+}
+
+# ml_has_credential NAME - systemd provided NAME as a credential file.
+ml_has_credential() {
+  local d="${CREDENTIALS_DIRECTORY:-}"
+  [ -n "$d" ] && [ -f "$d/$1" ] && [ ! -L "$d/$1" ]
+}
+
+# ml_export_model_token - export each model token systemd provided as a
+# credential. Call it only in the subshell that starts claude.
+ml_export_model_token() {
+  local v
+  for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
+    if ml_has_credential "$v"; then
+      export "$v=$(head -c 65536 "$CREDENTIALS_DIRECTORY/$v")"
+    fi
+  done
+}
+
+# ml_with_model_token CMD... - run CMD with the model token exported from its
+# credential, in a subshell, so the runner itself and the commands it runs
+# later never hold it in their environment.
+ml_with_model_token() {
+  ( ml_export_model_token; exec "$@" )
 }
 
 # ml_trace_start UNIT - print a new trace file for this lane under

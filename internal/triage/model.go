@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/redact"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
@@ -155,7 +156,7 @@ func (m ModelCall) Run(ctx context.Context, input string) (string, Usage, error)
 func childEnv(parent []string, home string) []string {
 	keep := map[string]bool{
 		"PATH": true, "USER": true, "LOGNAME": true, "LANG": true, "LC_ALL": true, "TZ": true,
-		"ANTHROPIC_API_KEY": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
+		"ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
 		"HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true,
 		"https_proxy": true, "http_proxy": true, "no_proxy": true,
 		"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,
@@ -163,8 +164,18 @@ func childEnv(parent []string, home string) []string {
 	env := []string{"HOME=" + home, "TMPDIR=" + home}
 	for _, kv := range parent {
 		k, _, _ := strings.Cut(kv, "=")
-		if keep[k] {
+		if keep[k] && !fleetenv.HasCredential(k) {
 			env = append(env, kv)
+		}
+	}
+	// The CLI authenticates only through its environment, so a model token
+	// that systemd provided as a credential is handed to this one child, and
+	// to nothing else (fleetenv/secret.go).
+	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if fleetenv.HasCredential(k) {
+			if v := fleetenv.Secret(k); v != "" {
+				env = append(env, k+"="+v)
+			}
 		}
 	}
 	return env

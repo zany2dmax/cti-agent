@@ -89,6 +89,12 @@ func LoadFrom(path string) int {
 		// Existing environment wins: systemd's EnvironmentFile has already
 		// run, and an operator who exported something on the command line
 		// meant it.
+		// A secret that systemd provided as a credential stays out of the
+		// environment: Secret reads the credential, and an environment copy
+		// would be inherited by every child (secret.go).
+		if HasCredential(k) {
+			continue
+		}
 		if _, set := os.LookupEnv(k); !set {
 			if os.Setenv(k, v) == nil {
 				n++

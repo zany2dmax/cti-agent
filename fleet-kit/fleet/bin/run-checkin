@@ -51,6 +51,8 @@ set -a
 # shellcheck source=/dev/null
 [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
 set +a
+# Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
+fleet_secrets_from_credentials
 [ -n "$_inj_home" ]  && FLEET_HOME="$_inj_home"
 [ -n "$_inj_code" ]  && FLEET_CODE="$_inj_code"
 [ -n "$_inj_feeds" ] && FLEET_FEEDS="$_inj_feeds"
@@ -609,7 +611,7 @@ if [ "$CHECKIN_TRACE_DAYS" -gt 0 ]; then
 fi
 
 if [ -n "$TRACE" ]; then
-  "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} --output-format stream-json --verbose \
+  ml_with_model_token "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} --output-format stream-json --verbose \
     < /dev/null 2>&1 \
     | "$TRACE_TOOL" tee --out "$TRACE" --plain "$beat_log" --max-mb "$CHECKIN_TRACE_MAX_MB" --keep "$CHECKIN_TRACE_KEEP"
   # One statement, so both are read from the same pipeline.
@@ -619,7 +621,7 @@ if [ -n "$TRACE" ]; then
   fi
   "$TRACE_TOOL" prune --days "$CHECKIN_TRACE_DAYS" >/dev/null 2>&1 || true
 else
-  "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} < /dev/null 2>&1 | tee "$beat_log"
+  ml_with_model_token "$CLAUDE" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} < /dev/null 2>&1 | tee "$beat_log"
   rc="${PIPESTATUS[0]}"
 fi
 set -e

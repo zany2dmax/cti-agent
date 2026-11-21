@@ -57,6 +57,19 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+
+def secret(name):
+    """A secret from its systemd credential when the unit provided one (step 2
+    of splitting fleet.env), else from the environment. Same rule as Go's
+    fleetenv.Secret."""
+    d = os.environ.get("CREDENTIALS_DIRECTORY", "").strip()
+    if d and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", name):
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and not os.path.islink(p):
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return f.read(65536).rstrip("\r\n")
+    return os.environ.get(name, "")
+
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 GRAPH = "https://graph.microsoft.com/v1.0"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -111,7 +124,11 @@ def load_env():
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                k = k.strip()
+                creds = os.environ.get("CREDENTIALS_DIRECTORY", "")
+                if creds and os.path.isfile(os.path.join(creds, k)):
+                    continue  # a credential stays out of the environment (secret())
+                os.environ.setdefault(k, v.strip().strip('"').strip("'"))
 
 
 SELF_HEADER = "X-CTI-Agent-Sent"
@@ -139,7 +156,7 @@ def token():
     tenant = os.environ.get("TENANT_ID") or die("TENANT_ID not set")
     body = urllib.parse.urlencode({
         "client_id": os.environ.get("CLIENT_ID") or die("CLIENT_ID not set"),
-        "client_secret": os.environ.get("CLIENT_SECRET") or die("CLIENT_SECRET not set"),
+        "client_secret": secret("CLIENT_SECRET") or die("CLIENT_SECRET not set"),
         "scope": "https://graph.microsoft.com/.default",
         "grant_type": "client_credentials",
     }).encode()
@@ -252,11 +269,11 @@ OPTIONAL = [
 def preflight(mailbox):
     """Report everything wrong at once, then test the token if we can."""
     log(f"config: {env_path()}")
-    missing = [(k, why) for k, why in REQUIRED if not (os.environ.get(k) or "").strip()]
+    missing = [(k, why) for k, why in REQUIRED if not (secret(k) or "").strip()]
     for k, why in REQUIRED:
-        log(f"  {'OK  ' if (os.environ.get(k) or '').strip() else 'UNSET'} {k:<22} {why}")
+        log(f"  {'OK  ' if (secret(k) or '').strip() else 'UNSET'} {k:<22} {why}")
     for k, why in OPTIONAL:
-        log(f"  {'OK  ' if (os.environ.get(k) or '').strip() else 'none '} {k:<22} {why}")
+        log(f"  {'OK  ' if (secret(k) or '').strip() else 'none '} {k:<22} {why}")
 
     if missing:
         log("")
@@ -678,7 +695,7 @@ def main():
     }
     message["internetMessageHeaders"] = [{
         "name": SELF_HEADER,
-        "value": sign_self_header(os.environ.get("CLIENT_SECRET", ""),
+        "value": sign_self_header(secret("CLIENT_SECRET"),
                                   args.from_mailbox),
     }]
     if cc:

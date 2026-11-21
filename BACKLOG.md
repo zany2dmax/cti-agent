@@ -275,7 +275,12 @@ is real, not before. Finished work moves out of this file into
      decide before step 2: how manual `sudo cti-agent` runs get credentials
      (a transient unit via `systemd-run`, recommended, or a decrypt into a
      private temp folder)
-  2. **Secrets as systemd credentials**: the ~10 secrets (`CLIENT_SECRET`,
+  2. **Secrets as systemd credentials**: built (Unreleased, RUNBOOK §11n),
+     with `ImportCredential=` from `/etc/credstore.encrypted` (non-fatal
+     when a credential isn't stored yet) and hand runs through
+     `systemd-run`. Left: narrow each unit's generated grants from "could
+     read" to "does read", one lane at a time, testing each with only its
+     grants. The original note: the ~10 secrets (`CLIENT_SECRET`,
      `QUALYS_PASSWORD`, `GODADDY_PAT`, `POD_API_TOKEN`, `JIRA_API_TOKEN`,
      `NVD_API_KEY`, the Claude token, `REPORT_REDACTION_SALT`) encrypted with
      `systemd-creds` (TPM-bound on Fedora) and granted per unit with

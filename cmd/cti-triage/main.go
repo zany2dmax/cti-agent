@@ -75,7 +75,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 var (
 	now        = time.Now
 	factSource = func() (triage.FactSource, func(), error) {
-		c, err := falcon.New(os.Getenv("FALCON_BASE_URL"), os.Getenv("FALCON_CLIENT_ID"), os.Getenv("FALCON_CLIENT_SECRET"))
+		c, err := falcon.New(os.Getenv("FALCON_BASE_URL"), os.Getenv("FALCON_CLIENT_ID"), fleetenv.Secret("FALCON_CLIENT_SECRET"))
 		if err != nil {
 			return nil, nil, err
 		}

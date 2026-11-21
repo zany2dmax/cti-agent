@@ -380,7 +380,7 @@ func run() int {
 	}
 
 	save := strings.EqualFold(strings.TrimSpace(*saveToSent), "true")
-	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), os.Getenv("CLIENT_SECRET"))
+	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -604,7 +604,7 @@ func preflight(mailbox string) int {
 	missing := 0
 	for _, kv := range required {
 		state := "OK  "
-		if strings.TrimSpace(os.Getenv(kv[0])) == "" {
+		if strings.TrimSpace(fleetenv.Secret(kv[0])) == "" {
 			state = "UNSET"
 			missing++
 		}
@@ -612,7 +612,7 @@ func preflight(mailbox string) int {
 	}
 	for _, kv := range optional {
 		state := "OK  "
-		if strings.TrimSpace(os.Getenv(kv[0])) == "" {
+		if strings.TrimSpace(fleetenv.Secret(kv[0])) == "" {
 			state = "none "
 		}
 		logf("  %s %-22s %s", state, kv[0], kv[1])
@@ -644,7 +644,7 @@ func preflight(mailbox string) int {
 		return exitFailure
 	}
 
-	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), os.Getenv("CLIENT_SECRET"))
+	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	tok, err := g.AccessToken(ctx)

@@ -23,7 +23,7 @@ secret: yes
 
 key: ANTHROPIC_AUTH_TOKEN
 section: 7. CLAUDE CODE - the heartbeat lane only
-readers: installer model-lane.sh
+readers: cti-agent cti-triage installer model-lane.sh
 secret: yes
 
 key: APPSCAN_OWNERS_FILE
@@ -249,7 +249,7 @@ readers: cti-budget
 
 key: FLEET_CODE
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan enrich.py fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan enrich.py fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 
 key: FLEET_DEV_EMAIL
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -265,7 +265,8 @@ readers: installer
 
 key: FLEET_ENV
 section: 3. PATHS - re-check these on every box
-readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer mailer.py model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer mailer.py model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+default-conflict: '/etc/cti-agent/fleet.env' | 'fleet.env'
 
 key: FLEET_FEEDS
 section: 3. PATHS - re-check these on every box

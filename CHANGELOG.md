@@ -57,6 +57,34 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   167 settings and marks 11 as secrets. RUNBOOK §11m. **Upgrade:** nothing;
   run `sudo cti-agent fleet-config check` to see what can go.
 
+### Security
+
+- **Secrets can move out of `fleet.env` into systemd credentials** (step 2
+  of the split, RUNBOOK §11n). Today every unit's environment holds every
+  secret.
+  - **`cti-agent-secrets`** (root, in `/usr/local/sbin`) encrypts each secret
+    to the machine (TPM where present) in `/etc/credstore.encrypted`. It
+    imports from `fleet.env`, accepts a typed value, reports status and
+    removes a secret. It never prints a value, and passes values to
+    `systemd-creds` on stdin.
+  - **Units:** each unit gets generated `ImportCredential=` lines for only the
+    secrets its programs read. systemd decrypts them for that run into
+    `$CREDENTIALS_DIRECTORY`.
+  - **Programs:** Go (`fleetenv.Secret`), Python and the runners read the file
+    first and `fleet.env` second. Each runner drops the `fleet.env` copy of a
+    secret it has as a file, so children stop inheriting it. Only `claude`
+    gets the model token, in its own subshell.
+  - **Hand runs:** `sudo cti-agent CMD` becomes a transient unit
+    (`systemd-run`) with its timer's grants once a secret it needs is stored.
+    The journal shows it as `cti-manual-*`, with who ran it.
+  - **Rollout:** nothing changes until a secret is stored, a missing
+    credential is skipped, and every program falls back to `fleet.env`, so
+    secrets move one at a time.
+
+  **Upgrade:** nothing required. To move the secrets, follow RUNBOOK §11n:
+  `sudo cti-agent-secrets import`, run each lane's dry run, then delete the
+  secrets' lines from `fleet.env`. Needs systemd 254 or later.
+
 ### Removed
 
 - `FLEET_OPERATOR` from `fleet.env.example` and the README. The README said

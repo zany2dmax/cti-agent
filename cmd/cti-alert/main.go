@@ -305,7 +305,7 @@ func boardLine(f failure) (level, msg string) {
 func sendEmail(subject, htmlBody string, f failure, to string) (string, error) {
 	tenant := os.Getenv("TENANT_ID")
 	clientID := os.Getenv("CLIENT_ID")
-	secret := os.Getenv("CLIENT_SECRET")
+	secret := fleetenv.Secret("CLIENT_SECRET")
 	from := os.Getenv("GRAPH_MAILBOX")
 	if to == "" {
 		to = firstNonEmptyEnv("FLEET_OPERATOR_EMAIL", "DIGEST_TO")

@@ -32,6 +32,19 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+
+def secret(name):
+    """A secret from its systemd credential when the unit provided one (step 2
+    of splitting fleet.env), else from the environment. Same rule as Go's
+    fleetenv.Secret."""
+    d = os.environ.get("CREDENTIALS_DIRECTORY", "").strip()
+    if d and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", name):
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and not os.path.islink(p):
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return f.read(65536).rstrip("\r\n")
+    return os.environ.get(name, "")
+
 FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/fleet"))
 STATE = os.path.join(FLEET_HOME, "state")
 NVD_CACHE = os.path.join(STATE, "nvd-cache.json")
@@ -98,7 +111,7 @@ def _open(req, timeout):
 UA = user_agent("cti-agent-enrich/1.0")
 
 # NVD allows 5 req/30s anonymous, 50 req/30s with a key. Stay under both.
-NVD_DELAY = 0.7 if os.environ.get("NVD_API_KEY") else 6.5
+NVD_DELAY = 0.7 if secret("NVD_API_KEY") else 6.5
 NVD_TTL_DAYS = 7          # CVSS scores rarely move once assigned
 KEV_TTL_HOURS = 12
 
@@ -309,8 +322,8 @@ def fetch_nvd(cves):
             f"(~{int(len(stale) * NVD_DELAY)}s"
             f"{' - set NVD_API_KEY to go 10x faster' if NVD_DELAY > 1 else ''})")
     headers = {}
-    if os.environ.get("NVD_API_KEY"):
-        headers["apiKey"] = os.environ["NVD_API_KEY"]
+    if secret("NVD_API_KEY"):
+        headers["apiKey"] = secret("NVD_API_KEY")
 
     for i, cve in enumerate(stale):
         if i:

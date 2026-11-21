@@ -32,6 +32,17 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# Which secrets have moved out of fleet.env into systemd credentials (step 2):
+# names only, written by cti-agent-secrets. The store itself is root-only.
+STORED_LIST = pathlib.Path(os.environ.get("CTI_CREDSTORE_LIST", "/etc/cti-agent/credentials.stored"))
+
+
+def stored_names():
+    try:
+        text = STORED_LIST.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return {l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#")}
 # $NAME and ${NAME} inside a value: bash expands them when it sources the file.
 REF_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -156,10 +167,12 @@ def check(env_path, manifest):
         near = difflib.get_close_matches(k, known, n=1, cutoff=0.8)
         unknown.append({"key": k, "did_you_mean": near[0] if near else None})
     at_default, empty, missing = [], [], []
+    listed = stored_names()
+    in_store = {k for k, e in manifest.items() if e["secret"] and k in listed}
     for k, e in sorted(manifest.items()):
         need, why = required_now(e.get("required", ""), values, manifest)
         if k not in values:
-            if need:
+            if need and k not in in_store:
                 missing.append({"key": k, "why": why})
             continue
         v = values[k]
@@ -185,6 +198,10 @@ def check(env_path, manifest):
         "empty": empty,
         "secrets_set": secrets,
         "secrets_known": sum(1 for e in manifest.values() if e["secret"]),
+        # Moved to a credential and still in fleet.env: the line can go once
+        # each lane's dry run has passed (cti-agent-secrets status says the same).
+        "stored_and_in_env": sorted(k for k in in_store if values.get(k)),
+        "stored": sorted(in_store),
     }
 
 
@@ -223,8 +240,14 @@ def print_check(r, out):
     if r["empty"]:
         p(f"\nSET TO NOTHING - for these the code treats empty as unset, so they can be removed: {len(r['empty'])}")
         p("  " + " ".join(r["empty"]))
-    p(f"\nSECRETS SET: {len(r['secrets_set'])} of the {r['secrets_known']} the fleet knows."
-      " Today every lane's environment holds all of them; each is read by:")
+    if r["stored"]:
+        p(f"\nSTORED AS CREDENTIALS: {len(r['stored'])} - each reaches only the units that import it")
+        p("  " + " ".join(r["stored"]))
+    if r["stored_and_in_env"]:
+        p(f"\nSTORED, AND STILL IN fleet.env - delete these lines once each lane's dry run passes: {len(r['stored_and_in_env'])}")
+        p("  " + " ".join(r["stored_and_in_env"]))
+    p(f"\nSECRETS IN fleet.env: {len(r['secrets_set'])} of the {r['secrets_known']} the fleet knows."
+      " Every lane's environment holds these; each is read by:")
     for s in r["secrets_set"]:
         p(f"  {s['key']:<26} {', '.join(s['readers']) or 'nothing'}")
     p(f"\nresult: {problems} problem(s); {removable} setting(s) can be removed"

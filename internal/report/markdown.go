@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"os"
 	"sort"
 	"strings"
@@ -159,7 +160,7 @@ func WriteMarkdown(path string, mailbox string, since time.Time, emailCount int,
 
 func WriteMarkdownScan(path string, mailbox string, since time.Time, scan Scan, provider string, results []vulnlookup.Result) error {
 	mode := hostMode()
-	salt := os.Getenv("REPORT_REDACTION_SALT")
+	salt := fleetenv.Secret("REPORT_REDACTION_SALT")
 
 	var b strings.Builder
 	b.WriteString("# CTI / CVE Daily Report\n\n")
