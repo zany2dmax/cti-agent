@@ -194,10 +194,15 @@ func main() {
 		// because this is the only place that knows a message was read AND
 		// what was found in it; deriving either afterwards would be guessing.
 		seen = append(seen, mailbox.Processed{
-			ID:        msg.ID,
-			Subject:   msg.Subject,
-			Received:  msg.ReceivedDateTime,
-			HasCVE:    len(found) > 0,
+			ID:       msg.ID,
+			Subject:  msg.Subject,
+			Received: msg.ReceivedDateTime,
+			// The cleanup lane archives a message the digest "owns", and the
+			// digest owns one that held a CVE. Anyone can put a CVE ID in a
+			// mail, so only mail from a trusted feed, a colleague, or a sender
+			// the receiving server authenticated counts as CVE mail for that
+			// purpose; the CVE itself is still read and reported above.
+			HasCVE:    ownsCVEMail(len(found), fromFeed, fromTeam, msg),
 			AutoReply: msg.IsAutoReply(),
 		})
 	}
@@ -512,6 +517,13 @@ func intelSource(msg graph.Message, list []string) bool {
 		warnUnvouched(msg, why)
 	}
 	return ok
+}
+
+// ownsCVEMail says whether a message counts as CVE mail the digest owns, which
+// is what lets the cleanup archive it later: it held a CVE and came from a
+// trusted feed, a colleague, or a sender the receiving server authenticated.
+func ownsCVEMail(found int, fromFeed, fromTeam bool, msg graph.Message) bool {
+	return found > 0 && (fromFeed || fromTeam || senderVouched(msg))
 }
 
 // senderVouched reports mail the receiving server authenticated: internal mail,

@@ -162,3 +162,24 @@ func TestAWorkbookThatIsNotTheFormIsAnError(t *testing.T) {
 		t.Error("garbage was accepted as a workbook")
 	}
 }
+
+// A required field's name in "still needed" is the form's own name for it, not
+// the cell's text: the cell is whatever the requester typed, and the name goes
+// into Jira wiki markup and the plain-text digest.
+func TestARequiredLabelCarriesNothingTheRequesterTyped(t *testing.T) {
+	evil := "Supplier Name*\n[click|http://evil.example]!http://evil.example/x.png!\r\nFORGED LINE"
+	f, err := Parse(workbook(t, [][]string{
+		{"", evil, "", "", ""},
+		{"", "Additional Notes", "", "", "gravel"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Missing) != 1 || f.Missing[0] != "Supplier name" {
+		t.Fatalf("missing = %q", f.Missing)
+	}
+	r := Request{State: StateRead, Form: &f}
+	if n := strings.Join(r.Needs(), " "); strings.ContainsAny(n, "[]|!\r\n") || strings.Contains(n, "evil") {
+		t.Errorf("the requester's text reached what the lane writes: %q", n)
+	}
+}

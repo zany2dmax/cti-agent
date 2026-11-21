@@ -1078,7 +1078,10 @@ The rules run in this order and the order is the safety property:
 0. The fleet's own report (signed header) → **archive**.
 1. An automatic reply → **Deleted Items**, read or not. Headers, or a subject
    that starts like an out-of-office. A subject-only match the digest took a
-   CVE from is archived instead: anyone can title a message that way.
+   CVE from is archived instead: anyone can title a message that way. Only for
+   a sender the receiving server authenticated (or internal mail): from an
+   unauthenticated sender the marker is the sender's to write, so the message is
+   **left** for a person (`auto-reply-unverified` in the plan).
 2. No processing record → **leave**.
 3. Read by the lane that **owns** it → **archive** after the grace. The digest
    owns what it took a CVE from; the AppSec lane owns the Qualys WAS notices

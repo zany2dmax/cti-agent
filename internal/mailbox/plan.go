@@ -27,6 +27,15 @@ type Candidate struct {
 	Received  time.Time
 	AutoReply bool // as declared by the sending system's headers
 
+	// SenderUnverified means the receiving server did not authenticate the
+	// sender (and it is not internal mail). The auto-reply markers - the
+	// Auto-Submitted header and an "Automatic reply:" subject - are text any
+	// sender can write, so an unverified message that carries one is NOT
+	// deleted on that basis: it is left for a person. The zero value is
+	// "verified", so a caller that builds candidates MUST set this; cti-mailbox
+	// does, from the message's own Authentication-Results.
+	SenderUnverified bool
+
 	// SelfSent means the fleet sent this message itself - a digest, a weekly,
 	// a Patch Tuesday synopsis - and it came back because the reports are
 	// delivered to the same mailbox they are read from.
@@ -87,6 +96,7 @@ const (
 	LeaveQuarantineHeld   = "quarantine-held"       // a digest holding fleet mail: release it
 	LeaveQuarantineUnread = "quarantine-unreadable" // a digest whose rows did not parse
 	LeaveAutoReplyWait    = "auto-reply-wait"       // an auto-reply waiting for the digest
+	LeaveAutoReplyUnauth  = "auto-reply-unverified" // looks like an auto-reply, sender not authenticated
 	LeaveNeverRead        = "never-read"            // no lane has a record of reading it
 	LeaveNotLaneMail      = "not-lane-mail"         // read, but no lane owns it: a person's
 	LeaveHeld             = "held"                  // archiving held today (digest read nothing)
@@ -267,6 +277,15 @@ func PlanWith(candidates []Candidate, processed map[string]Processed, o Options)
 				Reason: autoReplyWhy(headerAuto) + ", but no lane has read it yet - " +
 					"it waits for the digest in case it is a real advisory",
 				Why: LeaveAutoReplyWait})
+		case (headerAuto || subjectAuto) && c.SenderUnverified && (!ok || !rec.HasCVE):
+			// The markers are the sender's to write: anyone can have their own
+			// mail deleted from the shared inbox by putting "Automatic reply:"
+			// in the subject. A message whose sender the receiving server did
+			// not authenticate is left for a person instead.
+			out = append(out, Decision{Candidate: c, Action: ActionLeave,
+				Reason: autoReplyWhy(headerAuto) + ", but its sender was not authenticated - " +
+					"the marker is the sender's to write, so a person decides",
+				Known: true, Why: LeaveAutoReplyUnauth})
 		case (headerAuto || subjectAuto) && (!ok || !rec.HasCVE):
 			out = append(out, Decision{Candidate: c, Action: ActionDelete,
 				Reason: autoReplyWhy(headerAuto),

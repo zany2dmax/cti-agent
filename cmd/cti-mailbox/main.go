@@ -207,6 +207,7 @@ func run() int {
 			// the strength of "we sent this", so it needs the signature, not
 			// a From address or a header any sender could add.
 			SelfSent:         m.SelfVerified,
+			SenderUnverified: senderUnverified(m),
 			QuarantineDigest: mailbox.QuarantineDigest(m.From, m.Subject, digestSenders),
 			Flagged:          m.Flagged,
 		})
@@ -452,4 +453,16 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// senderUnverified is true when the receiving server did not authenticate the
+// message's sender and it is not internal mail. The auto-reply markers a
+// message carries are only believed from a verified sender (see
+// mailbox.Candidate.SenderUnverified).
+func senderUnverified(m graph.Message) bool {
+	if m.Internal() {
+		return false
+	}
+	ok, _ := m.SenderAuthenticated()
+	return !ok
 }

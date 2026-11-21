@@ -107,3 +107,23 @@ func TestAFileThatIsNotTheFormIsReportedNotDropped(t *testing.T) {
 		t.Errorf("a non-form or a failed download looked like a form: %+v", reads)
 	}
 }
+
+// A message with fifty spreadsheets does not cost fifty downloads and parses.
+func TestOnlyAFewSpreadsheetsAreOpenedPerMessage(t *testing.T) {
+	src := &fakeSource{content: map[string][]byte{}}
+	for i := 0; i < 20; i++ {
+		id := "f" + string(rune('a'+i))
+		src.atts = append(src.atts, file(id, "Form "+id+".xlsx", 1000))
+		src.content[id] = []byte("not a workbook")
+	}
+	reads, skipped, err := ReadForms(context.Background(), src, Policy{}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src.opened) != maxFormsPerMessage || len(reads) != maxFormsPerMessage {
+		t.Fatalf("opened %d, read %d, want %d", len(src.opened), len(reads), maxFormsPerMessage)
+	}
+	if len(skipped) != 20-maxFormsPerMessage || skipped[0].Reason != "too many spreadsheets on one message" {
+		t.Errorf("skipped = %+v", skipped)
+	}
+}

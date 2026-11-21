@@ -17,9 +17,23 @@ import (
 	"strings"
 )
 
-// maxPart bounds one file read from the workbook. A real sheet of this kind is
-// well under a megabyte; the cap is for a zip that lies about its size.
-const maxPart = 32 << 20
+// Limits on what one workbook may make this package do. A real form or subnet
+// sheet is well under a megabyte and a few hundred cells; these are for a file
+// built to hurt: a zip that lies about its size, a cell that names column
+// 'ZZZZZZZZZZ', a million rows that each name the last column.
+const (
+	// maxPart bounds one file read from the workbook.
+	maxPart = 16 << 20
+	// maxTotal bounds everything decompressed for one call, across parts.
+	maxTotal = 24 << 20
+	// maxCols and maxRows are Excel's own limits (column XFD, row 1,048,576).
+	maxCols = 16384
+	maxRows = 1 << 20
+	// maxCellSlots bounds the cells allocated for one sheet, padding included.
+	// A row padded to its last cell costs a slot for every column before it, so
+	// a sheet of one-cell rows in column XFD would otherwise cost 16,384 each.
+	maxCellSlots = 4 << 20
+)
 
 type xmlSheet struct {
 	Name string `xml:"name,attr"`
@@ -60,23 +74,36 @@ type xmlSheetData struct {
 	Rows []xmlRow `xml:"sheetData>row"`
 }
 
-func readPart(zr *zip.Reader, name string) ([]byte, error) {
-	for _, f := range zr.File {
+// parts reads the workbook's XML parts under one shared budget.
+type parts struct {
+	zr   *zip.Reader
+	left int64
+}
+
+func newParts(zr *zip.Reader) *parts { return &parts{zr: zr, left: maxTotal} }
+
+func (p *parts) read(name string) ([]byte, error) {
+	for _, f := range p.zr.File {
 		if f.Name != name {
 			continue
+		}
+		limit := int64(maxPart)
+		if p.left < limit {
+			limit = p.left
 		}
 		rc, err := f.Open()
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = rc.Close() }()
-		b, err := io.ReadAll(io.LimitReader(rc, maxPart+1))
+		b, err := io.ReadAll(io.LimitReader(rc, limit+1))
 		if err != nil {
 			return nil, err
 		}
-		if len(b) > maxPart {
-			return nil, fmt.Errorf("%s is larger than %d bytes", name, maxPart)
+		if int64(len(b)) > limit {
+			return nil, fmt.Errorf("%s is too large to read (the limits are %d bytes a part and %d for the workbook)", name, maxPart, maxTotal)
 		}
+		p.left -= int64(len(b))
 		return b, nil
 	}
 	return nil, fmt.Errorf("no %s in the workbook", name)
@@ -89,7 +116,8 @@ func SheetNames(data []byte) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("not an .xlsx workbook: %w", err)
 	}
-	wbB, err := readPart(zr, "xl/workbook.xml")
+	pr := newParts(zr)
+	wbB, err := pr.read("xl/workbook.xml")
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +161,8 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	if err != nil {
 		return nil, fmt.Errorf("not an .xlsx workbook: %w", err)
 	}
-	wbB, err := readPart(zr, "xl/workbook.xml")
+	pr := newParts(zr)
+	wbB, err := pr.read("xl/workbook.xml")
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +181,7 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	if rid == "" {
 		return nil, fmt.Errorf("no worksheet named %q (the workbook has: %s)", sheetName, strings.Join(names, ", "))
 	}
-	relB, err := readPart(zr, "xl/_rels/workbook.xml.rels")
+	relB, err := pr.read("xl/_rels/workbook.xml.rels")
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +205,7 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	}
 
 	var shared []string
-	if b, err := readPart(zr, "xl/sharedStrings.xml"); err == nil {
+	if b, err := pr.read("xl/sharedStrings.xml"); err == nil {
 		var sst xmlSST
 		if err := xml.Unmarshal(b, &sst); err != nil {
 			return nil, fmt.Errorf("sharedStrings.xml: %w", err)
@@ -190,7 +219,7 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 		}
 	}
 
-	sheetB, err := readPart(zr, target)
+	sheetB, err := pr.read(target)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +227,11 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	if err := xml.Unmarshal(sheetB, &sd); err != nil {
 		return nil, fmt.Errorf("%s: %w", target, err)
 	}
+	if len(sd.Rows) > maxRows {
+		return nil, fmt.Errorf("%s has more than %d rows", target, maxRows)
+	}
 	var out []Row
+	slots := 0
 	for n, row := range sd.Rows {
 		num := row.R
 		if num == 0 {
@@ -207,8 +240,14 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 		var cells []string
 		for _, c := range row.Cells {
 			col := colIndex(c.Ref)
-			for len(cells) <= col {
-				cells = append(cells, "")
+			if col >= maxCols {
+				continue // not a cell Excel could have written: ignored, not allocated
+			}
+			if grow := col + 1 - len(cells); grow > 0 {
+				if slots += grow; slots > maxCellSlots {
+					return nil, fmt.Errorf("%s is too large to read (more than %d cells)", target, maxCellSlots)
+				}
+				cells = append(cells, make([]string, grow)...)
 			}
 			switch c.Type {
 			case "s":
@@ -235,6 +274,9 @@ func colIndex(ref string) int {
 			break
 		}
 		n = n*26 + int(r-'A') + 1
+		if n > maxCols {
+			return maxCols // far past any real column; the caller ignores it, and n cannot overflow
+		}
 	}
 	if n == 0 {
 		return 0

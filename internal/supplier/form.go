@@ -97,6 +97,17 @@ var fields = []field{
 	{"additional notes", func(f *Form, v string) { f.Notes = v }},
 }
 
+// display is a field key as a person reads it: "supplier name" is "Supplier
+// name", and the abbreviations keep their capitals.
+func display(key string) string {
+	for _, abbr := range []string{"erp", "po", "ach"} {
+		if key == abbr || strings.HasPrefix(key, abbr+" ") {
+			return strings.ToUpper(abbr) + key[len(abbr):]
+		}
+	}
+	return strings.ToUpper(key[:1]) + key[1:]
+}
+
 // normalize lowercases a label and drops the required marker and extra spaces.
 func normalize(s string) string {
 	s = strings.ToLower(strings.ReplaceAll(s, "*", ""))
@@ -184,7 +195,10 @@ func Parse(data []byte) (Form, error) {
 		cur, curCol = fl, col
 		vals[fl.key] = join(r.Cells[col+1:])
 		if strings.Contains(label, "*") {
-			required = append(required, req{fl.key, strings.TrimSpace(strings.ReplaceAll(label, "*", ""))})
+			// The field's own name, not the cell's text: the cell is whatever the
+			// requester typed, and this name goes into Jira wiki markup and the
+			// plain-text digest.
+			required = append(required, req{fl.key, display(fl.key)})
 		}
 	}
 	if cur == nil {

@@ -125,6 +125,11 @@ func (p Policy) Readable(a Attachment) (bool, string) {
 	return true, ""
 }
 
+// maxFormsPerMessage is the most spreadsheets opened from one message. A real
+// request carries one form; the limit keeps a message with fifty from costing
+// fifty downloads and parses.
+const maxFormsPerMessage = 4
+
 // Skipped is an attachment that was not opened, and why. Names are kept so the
 // lane can say what it left alone.
 type Skipped struct {
@@ -151,6 +156,7 @@ func ReadForms(ctx context.Context, src Source, p Policy, messageID string) ([]F
 	}
 	var reads []FormRead
 	var skipped []Skipped
+	opened := 0
 	for _, a := range atts {
 		if ok, why := p.Readable(a); !ok {
 			if why != "inline image" { // signature images are noise, not a decision
@@ -158,6 +164,11 @@ func ReadForms(ctx context.Context, src Source, p Policy, messageID string) ([]F
 			}
 			continue
 		}
+		if opened >= maxFormsPerMessage {
+			skipped = append(skipped, Skipped{Name: a.Name, Reason: "too many spreadsheets on one message"})
+			continue
+		}
+		opened++
 		data, err := src.Content(ctx, messageID, a.ID, p.max())
 		if err != nil {
 			reads = append(reads, FormRead{Name: a.Name, Err: err})

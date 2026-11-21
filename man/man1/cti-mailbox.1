@@ -100,6 +100,9 @@ the digest's Release link acts on a plain GET. Needs no processing record and
 is not subject to the archive grace or the hold.
 .TP
 .B 1b. An automatic reply: Deleted Items, read or not
+(only from a sender the receiving server authenticated, or internal mail; from
+an unauthenticated sender the marker is the sender's to write, so the message is
+left for a person with the reason auto\-reply\-unverified.)
 Declared by its headers
 .RB ( "Auto\-Submitted: auto\-replied"
 or

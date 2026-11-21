@@ -69,6 +69,35 @@ scanner's own address).
     capped fields, plausible totals), with refused messages named in the log and
     the report's gaps.
 
+- **Fixed issues found by PrimeSec AI: Tier 1 attack vectors (mail anyone can send).**
+  - **A crafted workbook can no longer kill the supplier run (11583469, 11583468).**
+    A cell reference such as `ZZZZZZZZZZ1` made the xlsx reader grow a slice to
+    that column; one small file mailed to the supplier mailbox crashed the run,
+    every run, until the message aged out. `internal/xlsx` now ignores a cell past
+    Excel's last column (XFD), refuses a sheet that would allocate more than 4
+    million cells or has more than 1,048,576 rows, and stops a part that
+    decompresses past 16 MiB or a workbook past 24 MiB in all; the supplier lane
+    opens at most 4 spreadsheets from one message. The same reader reads the
+    subnet workbook for `cti-vmscan`; a real sheet is far under every limit.
+  - **A workbook can no longer put its own text into Jira or the digest
+    (11583482).** The "fields still needed" list used the text of the form's label
+    cell, which the requester wrote (newlines, wiki-markup links and images); it
+    now uses the form's own field names.
+  - **The cleanup no longer believes an auto-reply marker from an
+    unauthenticated sender (10786519, 10786547).** "Automatic reply:" in a
+    subject, or an `Auto-Submitted` header, is the sender's to write, so anyone
+    could have their mail deleted (to Deleted Items). From a sender the receiving
+    server did not authenticate it now leaves the message in the inbox for a
+    person (`auto-reply-unverified` in the plan; it does not count toward the
+    unread-backlog alarm). Genuine out-of-office replies from authenticated
+    senders and internal mail are deleted as before; any that fail
+    authentication will now stay until someone clears them or the 30-day sweep
+    moves them to Unhandled.
+  - **A CVE ID in a stranger's mail no longer gets it archived (10969079).** The
+    digest owned, and the cleanup archived, any message that held a CVE; now only
+    mail from a trusted feed, a colleague or an authenticated sender counts. The
+    CVE is still read and reported as before.
+
 - **The supplier lane no longer sends credit applications to the model
   (PrimeSec "Prohibit Sensitive Data in AI Tools").** The model used to read a
   customer's credit application (names, addresses, bank and trade references)
