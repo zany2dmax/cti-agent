@@ -35,6 +35,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
+
+- **The installer no longer stops with "Text file busy".** It wrote the
+  `cti-agent` wrapper and the `cti-agent-update` script with `cat >`, which
+  truncates the existing file in place; Linux refuses that while any process is
+  executing the file (a long `sudo cti-agent ...` in another terminal, a lane
+  running under the wrapper), and the update died part-way with the wrapper
+  unwritten and the version record not updated. Both files are now written to a
+  temporary file in the same directory and renamed over the old one, so a running
+  command keeps its old copy and the update can run while the fleet does. An
+  update that already failed this way is safe to run again: the installer is
+  idempotent.
+
 ## 1.7.1 — 2026-11-21
 
 **Upgrade:** `sudo cti-agent-update --for-real`. **Check two things first.**

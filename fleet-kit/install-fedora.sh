@@ -146,6 +146,25 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 run()  { if [ "$MODE" = dryrun ]; then info "would run: $*"; else "$@"; fi; }
 
+# replace_file DEST MODE - write stdin to DEST by writing a temporary file in the
+# same directory and renaming it over DEST.
+#
+# WHY NOT `cat > DEST`. That opens the existing file and truncates it in place,
+# and the kernel refuses ("Text file busy") while any process is executing it. A
+# wrapper that a running command, a timer's lane or another terminal is using
+# made the whole update stop part-way, with the wrapper not rewritten and the
+# version record not written. A rename replaces the directory entry and leaves
+# the running process its old copy, so an update can run while the fleet does.
+replace_file() {
+  local dest="$1" mode="$2" tmp
+  tmp="$(mktemp "$dest.XXXXXX")" || return 1
+  if cat > "$tmp" && chmod "$mode" "$tmp" && mv -f "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # cfgval KEY [FILE] - last value of KEY=... from fleet.env, or empty.
 #
 # WHY A HELPER AND NOT A grep PIPELINE
@@ -1063,7 +1082,7 @@ fi
 # single supported way to run a fleet command by hand on this layout.
 bold "Wrapper: /usr/local/bin/cti-agent"
 if [ "$MODE" != dryrun ]; then
-  cat > /usr/local/bin/cti-agent <<WRAP
+  replace_file /usr/local/bin/cti-agent 0755 <<WRAP
 #!/usr/bin/env bash
 # cti-agent - run a fleet command by hand with the FHS paths already set.
 #
@@ -1163,7 +1182,7 @@ WRAP
   # the kit it was installed from, so `sudo cti-agent-update --for-real` is the
   # whole update. In /usr/local/sbin, which sudo's secure_path includes.
   install -d -m 0755 /usr/local/sbin
-  cat > /usr/local/sbin/cti-agent-update <<UPDATER
+  replace_file /usr/local/sbin/cti-agent-update 0755 <<UPDATER
 #!/usr/bin/env bash
 # cti-agent-update - pull the kit and run the installer from it. Written by
 # install-fedora.sh. Say how: --dry-run (look) or --for-real (update).

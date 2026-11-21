@@ -2724,6 +2724,39 @@ class TestFileShape(unittest.TestCase):
         for bad in ("", "fri", "Friday", "Fri ", "Fri,", "Fri *-*-* 00:00", "Fri;reboot", "Mon,,Fri"):
             self.assertFalse(ok(bad), repr(bad))
 
+    def test_the_wrapper_and_updater_are_replaced_by_rename_not_overwritten(self):
+        """`cat > /usr/local/bin/cti-agent` truncates the file in place, and Linux
+        refuses ("Text file busy") while anything is executing it, which stopped
+        an update part-way. The installer now writes a temporary file beside it and
+        renames it over, so a running command keeps its old copy. replace_file is
+        run here from the installer's own text; the old file is held open for
+        execution (a copy of sleep), which is what makes a plain overwrite fail on
+        Linux; the rename must work either way and leave nothing behind."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        m = re.search(r"replace_file\(\) \{.*?\n\}\n", installer, re.S)
+        self.assertIsNotNone(m, "replace_file is not in the installer")
+        for dest in ("/usr/local/bin/cti-agent <<WRAP", "/usr/local/sbin/cti-agent-update <<UPDATER"):
+            self.assertIn("replace_file " + dest.split()[0] + " 0755 " + dest.split()[1], installer)
+            self.assertNotIn("cat > " + dest.split()[0], installer)
+        with tempfile.TemporaryDirectory() as d:
+            busy = pathlib.Path(d) / "cti-agent"
+            shutil.copy("/bin/sleep", busy)
+            busy.chmod(0o755)
+            proc = subprocess.Popen([str(busy), "30"])
+            try:
+                time.sleep(0.3)
+                r = subprocess.run(["bash", "-c", m.group(0) + '\nprintf "new\\n" | replace_file "$1" 0755',
+                                    "x", str(busy)], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(busy.read_text(), "new\n")
+                self.assertEqual(busy.stat().st_mode & 0o777, 0o755)
+                self.assertEqual(sorted(p.name for p in pathlib.Path(d).iterdir()), ["cti-agent"],
+                                 "a temporary file was left behind")
+            finally:
+                proc.kill()
+                proc.wait()
+
     def test_a_disabled_timer_is_reported_once(self):
         """`systemctl is-enabled` prints its state AND exits non-zero.
 
@@ -4194,7 +4227,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         that is a regular file in bin/ (or lanes/ for .py) and nothing else."""
         root = pathlib.Path(__file__).resolve().parents[2]
         inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
-        body = inst[inst.index("cat > /usr/local/bin/cti-agent <<WRAP\n") + len("cat > /usr/local/bin/cti-agent <<WRAP\n"):]
+        body = inst[inst.index("replace_file /usr/local/bin/cti-agent 0755 <<WRAP\n") + len("replace_file /usr/local/bin/cti-agent 0755 <<WRAP\n"):]
         body = body[:body.index("\nWRAP\n") + 1]
         with tempfile.TemporaryDirectory() as d:
             d = pathlib.Path(d)
