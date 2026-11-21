@@ -16,8 +16,11 @@ package triage
 // vendor or fixed version only if it is in the advisory as a whole word (so
 // "1.0" is not found inside "131.0", nor "SQL" inside "MySQL"), keeps a quote
 // only if it is in the advisory word for word, and marks a technique the
-// advisory does not name as inferred. It checks against the text the reader
-// was shown, fence markers removed, so no quote can carry a marker out. What survives goes into lookups, so it
+// advisory does not name as inferred. It checks against the advisory text with
+// the fence markers removed (the model saw that text after redact.Strict, which
+// changes only a formatted tax id, a valid IBAN or a card number, so a quote
+// that spans one is dropped as "not word for word" - the safe direction), so no
+// quote can carry a marker out. What survives goes into lookups, so it
 // also has to be the right shape for one.
 
 import (

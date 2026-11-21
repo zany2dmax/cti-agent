@@ -215,6 +215,8 @@ func webState(r Result) string {
 			st = "DNS error"
 		case !w.Addrs.Present():
 			st = "no DNS"
+		case len(w.Private) > 0:
+			st = "private address, not probed"
 		case !w.Answered():
 			st = "no answer"
 		case w.ParkedBy() != "":

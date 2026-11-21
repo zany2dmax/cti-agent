@@ -44,7 +44,9 @@ func TestTheLabelIsStablePerConversationNotPerMessage(t *testing.T) {
 	if noConv.Label() == "" {
 		t.Error("a message with no conversation id has no label")
 	}
-	if got := FindJQL("CYBR", a); got != `project = "CYBR" AND labels = "`+a.Label()+`"` {
+	// Bound to the fleet's own account: a label is text anyone who can edit an
+	// issue can write.
+	if got := FindJQL("CYBR", a); got != `project = "CYBR" AND labels = "`+a.Label()+`" AND reporter = currentUser()` {
 		t.Errorf("jql = %s", got)
 	}
 }

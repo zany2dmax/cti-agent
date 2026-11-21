@@ -596,6 +596,21 @@ func (c *Client) Myself(ctx context.Context) (Account, error) {
 	return a, nil
 }
 
+// AccountExists reports whether a Jira account id names a real account. A
+// JIRA_TRUSTED_REPORTERS entry that does not makes Jira reject every search that
+// names it, which stops every lane that looks a ticket up.
+func (c *Client) AccountExists(ctx context.Context, accountID string) (bool, error) {
+	var a Account
+	err := c.do(ctx, http.MethodGet, "/rest/api/3/user?accountId="+url.QueryEscape(accountID), nil, &a)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "400") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // FleetPermissions are the Jira permissions the fleet uses: in the project
 // (find, file, comment, attach, record state, assign, add watchers) and the
 // global one for looking owners up by email.

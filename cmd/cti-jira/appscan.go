@@ -253,8 +253,10 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		}
 	}
 	var prev appscanState
+	var propFound bool
 	if open != nil {
-		if _, err := c.GetProperty(ctx, open.Key, appscanPropKey, &prev); err != nil {
+		var err error
+		if propFound, err = c.GetProperty(ctx, open.Key, appscanPropKey, &prev); err != nil {
 			logf("appscan: %s: could not read what %s was last told (%s) - left alone",
 				name, open.Key, safelog.Line(err.Error()))
 			return refFor("error", open, "could not read what it was last told, so it was left alone")
@@ -265,6 +267,16 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 
 	switch plan {
 	case appNothing:
+		// A ticket filed before the application id was recorded has none until
+		// something rewrites its state, and an application whose findings do not
+		// change never does: record it now, so the retire check (which compares
+		// the label with the recorded id) covers every ticket the fleet filed.
+		if forReal && gateErr == nil && open != nil && propFound && prev.AppID == "" && t.AppID != "" {
+			prev.AppID = t.AppID
+			if err := c.SetProperty(ctx, open.Key, appscanPropKey, prev); err != nil {
+				logf("appscan: %s: could not record the application id on %s: %s", name, open.Key, safelog.Line(err.Error()))
+			}
+		}
 		switch {
 		case open == nil:
 			return refFor("none", nil, "")

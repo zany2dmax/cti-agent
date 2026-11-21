@@ -71,10 +71,13 @@ func (m ModelCall) Run(ctx context.Context, input string) (string, Usage, error)
 		return "", u, errors.New("the instructions are empty")
 	}
 	// The one place anything leaves for the model, so the one place redaction
-	// is applied: tax ids, bank and card numbers never reach it, whichever
-	// caller (reader, judge, a future one) built the input. Code has already
-	// extracted indicators from the raw text; this only changes what is shown.
-	input = redact.Sensitive(input)
+	// is applied, whichever caller (reader, judge, a future one) built the
+	// input. Strict, not Sensitive: only what checks itself (a formatted tax
+	// id, a valid IBAN, a Luhn-valid card number), so the CVE ids, hashes, IP
+	// lists and versions an advisory is made of are never rewritten. Code has
+	// already extracted indicators from the raw text; this only changes what is
+	// shown.
+	input = redact.Strict(input)
 	max := m.MaxInput
 	if max <= 0 {
 		max = 64 << 10

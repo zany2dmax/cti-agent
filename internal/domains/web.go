@@ -237,6 +237,16 @@ func publicIP(ip net.IP) bool {
 	}
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
+	} else if len(ip) == net.IPv6len {
+		// A translation prefix that carries an IPv4 address: judge that address.
+		// 64:ff9b::/96 (NAT64) holds it in the last four bytes, 2002::/16
+		// (6to4) in bytes 2 to 5.
+		switch {
+		case ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b && allZero(ip[4:12]):
+			return publicIP(net.IP(ip[12:16]))
+		case ip[0] == 0x20 && ip[1] == 0x02:
+			return publicIP(net.IP(ip[2:6]))
+		}
 	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
@@ -507,4 +517,13 @@ func shortNetErr(err error) string {
 		s = s[:120] + "..."
 	}
 	return s
+}
+
+func allZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }

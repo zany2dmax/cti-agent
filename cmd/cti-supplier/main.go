@@ -547,6 +547,10 @@ func newTickets(project string, fileJira bool) supplier.Tickets {
 	if !fileJira {
 		return closedTickets{why: "dry run"}
 	}
+	// The lane adopts only items its own account filed (see jira.ReporterClause).
+	if bad := jira.SetTrustedReporters(env("JIRA_TRUSTED_REPORTERS")); len(bad) > 0 {
+		logf("WARNING: JIRA_TRUSTED_REPORTERS: ignoring %s (Jira account ids only)", safelog.Line(strings.Join(bad, ", ")))
+	}
 	if err := jira.CheckAllowed(project, env("JIRA_ALLOW_CREATE")); err != nil {
 		logf("WRITE GATE CLOSED - no Kanban items filed: %s", safelog.Line(err.Error()))
 		return closedTickets{why: "the Jira write gate is closed (JIRA_ALLOW_CREATE)"}

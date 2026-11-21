@@ -134,3 +134,27 @@ func TestAPartThatDecompressesPastTheLimitIsRefused(t *testing.T) {
 		t.Fatalf("an over-limit part was read: %v", err)
 	}
 }
+
+// A shared-strings part that is present but over the size limit is an error,
+// not "there are no shared strings": the latter read every text cell as blank.
+func TestAnOversizedSharedStringsPartIsAnErrorNotBlankCells(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	add := func(name, body string) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(body))
+	}
+	add("xl/workbook.xml", `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>`)
+	add("xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+	add("xl/worksheets/sheet1.xml", sheetHead+`<row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`)
+	add("xl/sharedStrings.xml", `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`+strings.Repeat(" ", maxPart+10)+`</sst>`)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := ReadSheetRows(buf.Bytes(), "S"); err == nil {
+		t.Fatalf("an oversized shared-strings part read as blank cells: %+v", rows)
+	}
+}

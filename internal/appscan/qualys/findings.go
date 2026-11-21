@@ -511,6 +511,12 @@ func longBase64Runs(s string) string {
 // text - Qualys encodes some response bodies and not others. Anything else
 // is returned as it came.
 func maybeBase64(s string) string {
+	// Base64 has no spaces or tabs (a wrapped block has line breaks). A proof
+	// with one is text, whatever its length: "Internal Server Error" is 19
+	// characters of the base64 alphabet and not an encoded blob.
+	if strings.ContainsAny(strings.TrimSpace(s), " \t") {
+		return longBase64Runs(s)
+	}
 	t := strings.Join(strings.Fields(s), "")
 	if len(t) < 16 || strings.Trim(t, b64Alphabet) != "" {
 		return longBase64Runs(s)

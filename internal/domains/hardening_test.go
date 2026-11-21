@@ -216,3 +216,54 @@ func TestSMTPReadsAreCappedAndOnlyAFewMXHostsAreTried(t *testing.T) {
 		t.Errorf("a spent budget still probed %d host(s)", len(probed))
 	}
 }
+
+// A crashed probe is UNKNOWN, not "the records were removed": nothing is saved
+// over last week's snapshot and no change is reported.
+func TestACrashedDomainDoesNotRewriteItsStateOrReportRemovals(t *testing.T) {
+	prev := &State{Version: stateVersion, Taken: now.Add(-7 * 24 * time.Hour), Domains: map[string]Snapshot{
+		"boom.example.com": {NS: "ns1.example.com", MX: "10 mx.example.com", SPF: "v=spf1 -all", DMARC: "v=DMARC1; p=reject",
+			Hosts: map[string]HostSnap{"boom.example.com": {Live: true, Issuer: "Example CA"}}},
+	}}
+	dns := fakeDNS{host: map[string][]string{"boom.example.com": {"93.184.216.34"}}}
+	web := func(context.Context, string) (Fetch, Fetch, Cert) { panic("boom") }
+	res := Prober{Resolver: dns, Web: web, Concurrency: 1}.Run(context.Background(), []Entry{{Name: "boom.example.com"}}, nil)
+	if res[0].Fault == "" || res[0].NS.Known() || res[0].Mail.MX.Known() || res[0].Mail.SPF.Known() || res[0].Mail.DMARC.Known() {
+		t.Fatalf("a crashed result must carry failed lookups, not empty answers: %+v", res[0])
+	}
+	now2 := Snap(now, res, nil, nil, prev)
+	got := now2.Domains["boom.example.com"]
+	want := prev.Domains["boom.example.com"]
+	if got.NS != want.NS || got.MX != want.MX || got.SPF != want.SPF || got.DMARC != want.DMARC || !got.Hosts["boom.example.com"].Live {
+		t.Errorf("a crash overwrote last week's state: %+v", got)
+	}
+	if RouteOf(res[0], "tenant").Known {
+		t.Error("a crashed domain's route was treated as known")
+	}
+}
+
+// sync.Once treats a panicking function as done: the zero result would read as
+// a greeting for every later domain on that MX.
+func TestAPanickingSMTPProbeIsAFailureForEveryDomainOnThatMX(t *testing.T) {
+	c := newSMTPCache(func(context.Context, string) SMTPResult { panic("boom") })
+	for i := 0; i < 2; i++ {
+		r := c.first(context.Background(), []string{"mx.example.com"}, nil)
+		if r.Err == "" || !r.Checked {
+			t.Fatalf("call %d: a panicked probe read as a success: %+v", i, r)
+		}
+	}
+}
+
+func TestTranslationPrefixesAreJudgedByTheAddressTheyCarry(t *testing.T) {
+	for ip, want := range map[string]bool{
+		"64:ff9b::a9fe:a9fe":    false, // NAT64 for 169.254.169.254
+		"64:ff9b::a00:1":        false, // NAT64 for 10.0.0.1
+		"64:ff9b::5db8:d822":    true,  // NAT64 for 93.184.216.34
+		"2002:0a00:0001::":      false, // 6to4 for 10.0.0.1
+		"2002:5db8:d822::1":     true,  // 6to4 for 93.184.216.34
+		"2606:2800:220:1::1946": true,
+	} {
+		if got := publicIP(net.ParseIP(ip)); got != want {
+			t.Errorf("publicIP(%s) = %v, want %v", ip, got, want)
+		}
+	}
+}

@@ -42,16 +42,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 is not on this host, forwarding is now refused (the line is still written to the
 file, and `cti-audit --check` says why); switch it to `tls`, or point it at a
 local rsyslog (`127.0.0.1`) that ships onward over TLS. Nothing else to
-configure. The next AppSec weekly counts every scan whose notice arrived; scans whose notice never
-reached the mailbox are still listed as "scanned, no notification" (set a
-notification on those scans in Qualys, and make sure their notices come from the
-scanner's own address).
+configure. From the next AppSec weekly, results notices stay in the inbox until
+the weekly has read them (notices the daily lane had already recorded before the
+upgrade are still archived on the old timetable, so the first weekly may still
+miss those); scans whose notice never reached the mailbox are still listed as
+"scanned, no notification" (set a notification on those scans in Qualys, and make
+sure their notices come from the scanner's own address). Also run
+`sudo cti-agent cti-jira --check` once before the first real run: it now says
+whether any open ticket the fleet should keep updating was filed by someone else
+(see the Jira entry below).
 
 - **Fixed issues found by PrimeSec AI in the 1.7 audit and triage code.**
   - `AUDIT_DIR=off` is refused inside a systemd unit (the default directory is
     used, and the process says so), so a unit's audit trail cannot be switched
-    off by an environment line. Outside a unit it still discards events, now
-    with a warning.
+    off by an environment line; `cti-audit --prune` and `--check` follow the same
+    rule, so the retention prune still runs. Outside a unit it still discards
+    events, now with a warning.
   - A failed audit forward no longer disables forwarding for the rest of the
     process: events inside the next 30 seconds are not sent (the file has them),
     then the collector is tried again, and a recovery is reported once.
@@ -59,15 +65,23 @@ scanner's own address).
     host (`127.0.0.1`, `::1`, `localhost`); a remote collector needs `tls`.
   - Sender authentication verdicts are audited (`sender.authentication`, once per
     sender domain and outcome per run, domain only, never the address): both who
-    was believed and who was turned away.
-  - Advisory triage: everything sent to the model passes `internal/redact` (tax
-    ids, bank and card numbers; the supplier lane's redaction, moved to a shared
-    package); the model, the saved input and the report get the sender's
-    domain, not the address; mail reaches the model on its content only when the
-    receiving server authenticated its sender; and the input and report files
-    are checked as they are written and read (usable id and time, cleaned and
-    capped fields, plausible totals), with refused messages named in the log and
-    the report's gaps.
+    was believed and who was turned away. This covers the checks that go through
+    `VouchedFor` (the Qualys notices, the feed senders, the triage gate); the
+    colleague (team) check and the auto-reply check read the header directly and
+    are not audited.
+  - Advisory triage: everything sent to the model passes `redact.Strict` (a
+    formatted tax id, an IBAN with valid check digits, a Luhn-valid card number:
+    only what checks itself, so CVE ids, hashes, IP lists and versions are never
+    rewritten; the supplier lane keeps the blunter `redact.Sensitive`, in the same
+    package, because it reads finance paperwork); the sender field the model, the
+    saved input and the report get is the domain, not the address (an address
+    inside the message text is not removed); mail reaches the model on its content
+    only when the sender is authenticated, internal, or listed in
+    `FLEET_UNAUTHENTICATED_SENDERS`, and the daily log says how many messages that
+    look like threat intel were left out for that reason; and the input and report
+    files are checked as they are written and read (usable id and time, cleaned
+    and capped fields, plausible totals), with refused messages named in the log
+    and the report's gaps.
 
 - **Fixed issues found by PrimeSec AI: the scanner-evidence redactor (10786553,
   10786554, 10786555, 10786483, 11583473).** The redactor that cleans scanner
@@ -84,8 +98,10 @@ scanner's own address).
     since that is the payload; a credential is never spared.
   - An inline header runs to the end of the line or the next tag, quotes
     included. A header dumped inside a JSON string loses the rest of that line.
-  - An unpadded base64 run, however short, is decoded and checked, not passed
-    through; one that cannot be decoded is still removed.
+  - A proof that is all base64 and has no spaces, even unpadded and short, is
+    decoded and checked, not passed through; one that cannot be decoded and runs
+    to 200 characters is removed. A short unpadded run inside other text is only
+    decoded from 200 characters up. A proof with a space in it is text.
   - `cti-appreport --probe-findings` output also passes `RedactURL`.
   The redactor is still pattern-based: a bare secret echoed with no key or header
   beside it cannot be recognised, which is why the attached raw Qualys report stays
@@ -98,20 +114,29 @@ scanner's own address).
   it, sent its host lists there and starved the real ticket, or relabel a real
   one so the bot posted a false "no detections remain" (10969087) or closed it
   as a retired application (10786540). Also, an earlier entry says the domains
-  lock-down lookup needed both labels; the code checked only one.
+  lock-down lookup needed both labels; the code checked only one, and now checks
+  both.
   - **Every lookup now requires the fleet's own account as reporter.** CVE
     tickets, the daily follow-up, AppSec tickets (open, prior and the retire
-    check), the domains lock-down ticket and the VM-scan fixes ticket add
-    `reporter = currentUser()`. A ticket a person filed by hand is adopted only
+    check), the domains lock-down ticket, the VM-scan fixes ticket and the
+    supplier lane's Kanban items add `reporter = currentUser()` (`cti-jira
+    --list` still shows every ticket carrying the fleet's label, so a planted one
+    is visible there). A ticket a person filed by hand is adopted only
     if their Jira account id is in the new `JIRA_TRUSTED_REPORTERS`. **Upgrade:**
     if you have a hand-made ticket the fleet should keep using (the INF
     lock-down ticket), put its reporter's account id in `JIRA_TRUSTED_REPORTERS`,
     or the next run files a new ticket. Tickets filed under an earlier Jira
-    account than the one in `JIRA_EMAIL` now are not matched either.
+    account than the one in `JIRA_EMAIL` now are not matched either. Run
+    `sudo cti-agent cti-jira --check` before the first real run: it lists any open
+    `cti-agent` ticket the new rule would not match, and fails if a
+    `JIRA_TRUSTED_REPORTERS` entry is not a real account id (Jira would reject
+    every search that names one).
   - **Stored state is bound to what it was written for.** A ticket's exposure
     state names its CVE and is ignored if the ticket is now being updated for a
     different CVE; an AppSec ticket's state records its application id, and a
-    ticket is retired only if its label still agrees with it.
+    ticket is retired only if its label still agrees with it. A ticket filed
+    before the id was recorded gets it the first run that sees the application
+    unchanged, so every ticket is covered after one weekly run.
   - **A label must be a CVE id to be read as one** (`CVE-YYYY-NNNN+`), so text
     after `cti-cve-` can no longer reach the digest.
 
@@ -128,10 +153,18 @@ scanner's own address).
     metadata address) is listed, "resolves to ..., web not probed", and not
     fetched; every connection is also refused at connect time, so a redirect or a
     changed DNS answer cannot reach one. Redirects are followed only to ports 80
-    and 443. The same guard covers the SMTP probe. **Upgrade:** nothing for public
+    and 443. The same guard covers the SMTP probe (a private MX host shows as
+    "did not answer ... refused: address is not on the public internet", not as
+    "web not probed"); a name that resolves to a private address shows as "private
+    address, not probed" in the inventory table. **Upgrade:** nothing for public
     sites. If your inventory has internal names you want probed, set
     `DOMAINS_ALLOW_PRIVATE=1`. The lane asks public resolvers by default, so few
     private answers are expected.
+  - A crash in one domain's probe is also kept out of the saved state (its
+    lookups count as failed, so last week's values stand and no change is
+    reported), and a crash in a shared SMTP probe fails the check for every
+    domain on that MX instead of reading as a greeting. The domain is missing
+    from that week's AppSec website coverage file.
   - **A hostile MX list or SMTP server can no longer stall the run (11583477,
     10786549, 10786552).** At most 8 MX hosts are tried per domain, the walk stops
     when the domain's time is spent, and an SMTP session is read for at most 64 KiB.
@@ -141,10 +174,13 @@ scanner's own address).
     A cell reference such as `ZZZZZZZZZZ1` made the xlsx reader grow a slice to
     that column; one small file mailed to the supplier mailbox crashed the run,
     every run, until the message aged out. `internal/xlsx` now ignores a cell past
-    Excel's last column (XFD), refuses a sheet that would allocate more than 4
-    million cells or has more than 1,048,576 rows, and stops a part that
-    decompresses past 16 MiB or a workbook past 24 MiB in all; the supplier lane
-    opens at most 4 spreadsheets from one message. The same reader reads the
+    Excel's last column (XFD), refuses a sheet whose cells (padding included)
+    would come to more than 4 million or that has more than 1,048,576 rows, and
+    stops a part that decompresses past 16 MiB or a workbook past 24 MiB in all
+    (a shared-strings part over the limit is now an error, not blank cells); the
+    supplier lane opens at most 4 spreadsheets from one message. The cell and row
+    limits are checked after the sheet has been parsed, so the 16 MiB part limit
+    is what bounds the memory a hostile sheet can use before they apply. The same reader reads the
     subnet workbook for `cti-vmscan`; a real sheet is far under every limit.
   - **A workbook can no longer put its own text into Jira or the digest
     (11583482).** The "fields still needed" list used the text of the form's label

@@ -609,3 +609,36 @@ func TestAttachmentEvidenceIsCappedAndURLsScrubbed(t *testing.T) {
 		t.Error("a token in a URL reached the attachment")
 	}
 }
+
+// An application whose findings never change takes the "unchanged" path, which
+// used to leave the ticket's state without the application id for ever, so the
+// retire check could not tell a relabelled ticket from the real one. The id is
+// now recorded the first time such a ticket is seen.
+func TestAnUnchangedTicketGetsItsApplicationIdRecorded(t *testing.T) {
+	fj, c := newAppJira(t)
+	week1 := appTicket(xss("https://app.example.com/a"))
+	r := runApp(t, c, true, week1)["id:101"]
+	if r.Action != "created" {
+		t.Fatalf("setup: %+v", r)
+	}
+	// Strip the id from the stored state, as a ticket filed before it existed has.
+	var st appscanState
+	for k, v := range fj.props {
+		if err := json.Unmarshal(v, &st); err != nil {
+			t.Fatal(err)
+		}
+		st.AppID = ""
+		b, _ := json.Marshal(st)
+		fj.props[k] = b
+	}
+	if r := runApp(t, c, true, week1)["id:101"]; r.Action != "unchanged" {
+		t.Fatalf("same findings: %+v", r)
+	}
+	for _, v := range fj.props {
+		var got appscanState
+		_ = json.Unmarshal(v, &got)
+		if got.AppID != "101" {
+			t.Errorf("the application id was not recorded on an unchanged ticket: %+v", got)
+		}
+	}
+}

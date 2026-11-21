@@ -79,3 +79,15 @@ func TestAnEncodedProofThatCannotBeCheckedIsRemoved(t *testing.T) {
 		t.Errorf("short text changed: %q", got)
 	}
 }
+
+// A short plain-text proof is text, not an encoded blob: it has spaces, and
+// base64 does not. (The unpadded-base64 decode must not rewrite it into garbage.)
+func TestShortPlainTextProofsAreNotTakenForBase64(t *testing.T) {
+	for _, in := range []string{
+		"Internal Server Error", "Directory listing enabled", "Access denied for user", "Forbidden You dont have permission",
+	} {
+		if got := maybeBase64(in); got != in {
+			t.Errorf("plain text was changed: %q -> %q", in, got)
+		}
+	}
+}

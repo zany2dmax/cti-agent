@@ -131,7 +131,17 @@ func (c *smtpCache) get(ctx context.Context, host string) SMTPResult {
 	// WithoutCancel: the first caller's per-domain budget may be nearly spent on
 	// web probes, and a timeout here is cached for every domain sharing the MX.
 	// The prober applies its own timeout.
-	e.once.Do(func() { e.res = c.probe(context.WithoutCancel(ctx), host) })
+	e.once.Do(func() {
+		// A panic inside the probe must not leave the zero result behind:
+		// sync.Once counts it as done, and an empty SMTPResult (no error) reads
+		// as "greeted", so every later domain on this MX would skip the check.
+		defer func() {
+			if rec := recover(); rec != nil {
+				e.res = SMTPResult{Checked: true, Host: host, Err: "probe crashed"}
+			}
+		}()
+		e.res = c.probe(context.WithoutCancel(ctx), host)
+	})
 	return e.res
 }
 

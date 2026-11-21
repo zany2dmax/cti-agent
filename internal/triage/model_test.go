@@ -119,4 +119,13 @@ func TestTheModelNeverReceivesTaxIdsOrBankNumbers(t *testing.T) {
 	if !strings.Contains(string(got), "CVE-2026-1234") {
 		t.Errorf("redaction removed the advisory's own content:\n%s", got)
 	}
+	// An advisory that happens to say "account" keeps its CVE ids, hashes and versions.
+	bin2, _, stdin2 := fakeClaude(t, `{"is_error":false,"result":"ok","total_cost_usd":0,"usage":{}}`, "")
+	tech := "Account takeover via CVE-2026-21345, build 10.0.22621.2715, sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\n"
+	if _, _, err := (ModelCall{Bin: bin2, Model: "test-model", Instructions: "SYSTEM"}).Run(context.Background(), tech); err != nil {
+		t.Fatal(err)
+	}
+	if got2, _ := os.ReadFile(stdin2); string(got2) != tech {
+		t.Errorf("technical text was rewritten before reaching the model:\n%s", got2)
+	}
 }

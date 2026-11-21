@@ -184,13 +184,26 @@ func TestOffDiscardsEverythingAndSaysSo(t *testing.T) {
 // directory (unwritable here) is used, with the event kept on stderr.
 func TestOffIsRefusedInsideASystemdUnit(t *testing.T) {
 	t.Setenv("INVOCATION_ID", "unit-1")
+	// Not the real /var/log/cti-agent: the refused setting falls back to the
+	// default directory, which a test points at a temporary one.
+	real := defaultDir
+	defaultDir = t.TempDir()
+	t.Cleanup(func() { defaultDir = real })
 	l, warn := logger("off")
 	_ = l.Emit(Event{Action: "mail.send", Outcome: Success})
 	if !strings.Contains(warn.String(), "refused inside a systemd unit") {
 		t.Fatalf("off was honoured inside a unit: %q", warn.String())
 	}
-	if !strings.Contains(warn.String(), "mail.send") {
-		t.Errorf("the event must not be dropped when off is refused: %q", warn.String())
+	b, _ := os.ReadFile(filepath.Join(defaultDir, "audit-2026-11-19.log"))
+	if !strings.Contains(string(b), "mail.send") {
+		t.Errorf("the event must be written to the default directory when off is refused: %q", b)
+	}
+	if dir, refused := l.EffectiveDir(); !refused || dir != defaultDir {
+		t.Errorf("EffectiveDir = %q, %v", dir, refused)
+	}
+	t.Setenv("INVOCATION_ID", "")
+	if dir, refused := l.EffectiveDir(); refused || dir != "off" {
+		t.Errorf("outside a unit off is honoured: %q, %v", dir, refused)
 	}
 }
 
@@ -589,5 +602,18 @@ func TestALongRecipientListSurvivesInTheTarget(t *testing.T) {
 		if !strings.Contains(line, a) {
 			t.Fatalf("recipient %s was cut off: %s", a, line)
 		}
+	}
+}
+
+// When the back-off ends, one emitter probes the collector; the others that
+// arrive while it does are skipped, not each made to wait out the timeout.
+func TestOnlyOneEmitterProbesAfterTheBackOff(t *testing.T) {
+	l, _ := logger(t.TempDir())
+	l.fwdRetryAt = fixed.Add(-time.Second)
+	if retry, skipped := l.forwardBackoff(fixed); !retry || skipped {
+		t.Fatalf("first after back-off: retry=%v skipped=%v", retry, skipped)
+	}
+	if retry, skipped := l.forwardBackoff(fixed); retry || !skipped {
+		t.Errorf("a second emitter was allowed to probe too: retry=%v skipped=%v", retry, skipped)
 	}
 }

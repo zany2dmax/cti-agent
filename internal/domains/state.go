@@ -153,6 +153,12 @@ func Snap(now time.Time, results []Result, cmp *Comparison, regs []Registration,
 			DMARC: joinLookup(r.Mail.DMARC, p.DMARC, had),
 			Hosts: map[string]HostSnap{},
 		}
+		if r.Fault != "" && had {
+			// Probing crashed: nothing was observed, so last week's hosts stand.
+			for k, v := range p.Hosts {
+				sn.Hosts[k] = v
+			}
+		}
 		for _, w := range r.Web {
 			// Unknown, not "down": the address lookup failed, or the name
 			// resolved and nothing answered at all (a timeout or a refused

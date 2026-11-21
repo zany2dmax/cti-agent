@@ -39,7 +39,7 @@ type vmscanFixesState struct {
 }
 
 func vmscanFixesJQL(projectKey string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory != Done ORDER BY created DESC`,
+	return fmt.Sprintf(`project = %q AND labels = "cti-agent" AND labels = %q AND %s AND statusCategory != Done ORDER BY created DESC`,
 		projectKey, vmscanFixesLabel, jira.ReporterClause())
 }
 

@@ -892,3 +892,13 @@ func TestHoldPhrasesMatchWholeWordsAndCanBeChanged(t *testing.T) {
 		t.Errorf("operator phrase not used: %q", got)
 	}
 }
+
+// "cre<zero-width space>dit application" is still a credit application.
+func TestAHoldPhraseSplitByInvisibleCharactersIsStillHeld(t *testing.T) {
+	c := Config{}
+	for _, s := range []string{"cre\u200bdit application", "credit\u200c application", "CREDIT\u2060 APPLICATION"} {
+		if got := c.HoldPhrase(Input{Subject: s}); got != "credit application" {
+			t.Errorf("%q was not held: %q", s, got)
+		}
+	}
+}

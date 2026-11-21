@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/zany2dmax/cti-agent/internal/jira"
 	"strings"
 	"time"
 )
@@ -129,7 +130,7 @@ func (r Request) Labels() []string {
 
 // FindJQL finds the item already filed for a request, in any state.
 func FindJQL(projectKey string, r Request) string {
-	return fmt.Sprintf(`project = "%s" AND labels = "%s"`, strings.ReplaceAll(projectKey, `"`, ""), r.Label())
+	return fmt.Sprintf(`project = "%s" AND labels = "%s" AND %s`, strings.ReplaceAll(projectKey, `"`, ""), r.Label(), jira.ReporterClause())
 }
 
 // TicketSummary is the item's title.

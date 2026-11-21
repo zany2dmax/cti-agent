@@ -428,7 +428,8 @@ Set to
 .B 1
 to let the web and SMTP probes connect to a name that resolves to a private or
 reserved address. By default such a name is listed in the report ("resolves to
-..., web not probed") and not fetched, because whoever controls a name's DNS
+..., web not probed"; a private MX host shows as an MX that did not answer) and
+not fetched, because whoever controls a name's DNS
 chooses the address; every connection is also refused at connect time, so a
 redirect or a changed answer cannot reach one either. Redirects are followed
 only to ports 80 and 443, at most 8 MX hosts are tried per domain, and an SMTP

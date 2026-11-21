@@ -47,9 +47,13 @@ type Processed struct {
 	ID       string    `json:"id"`
 	Subject  string    `json:"subject"`
 	Received time.Time `json:"received"`
-	// HasCVE records whether this message contributed to the findings. It is
-	// the difference between a CTI advisory and everything else that lands in
-	// a shared security mailbox.
+	// HasCVE records whether this message is CVE mail the digest OWNS: it held a
+	// CVE and came from a trusted feed, a colleague, or a sender the receiving
+	// server authenticated. It is the difference between a CTI advisory and
+	// everything else that lands in a shared security mailbox, and it is what
+	// lets the cleanup archive the message. (Records written by 1.7 or earlier
+	// have it for any sender who mentioned a CVE, until the 14-day log expires
+	// them.)
 	HasCVE bool `json:"has_cve"`
 	// AutoReply is what the SENDING system declared, captured at read time
 	// rather than re-derived later, so the cleanup lane and the agent cannot

@@ -88,8 +88,7 @@ func (p Prober) Run(ctx context.Context, entries []Entry, orgOf map[string]Regis
 			// weekly would send nothing at all.
 			defer func() {
 				if rec := recover(); rec != nil {
-					out[i] = Result{Entry: e, Org: orgOf[e.Name].Domain,
-						Fault: fmt.Sprintf("probing crashed: %v", rec)}
+					out[i] = faulted(e, orgOf[e.Name].Domain, fmt.Sprintf("probing crashed: %v", rec))
 				}
 			}()
 			dctx, cancel := context.WithTimeout(ctx, per)
@@ -116,4 +115,14 @@ func (p Prober) one(ctx context.Context, e Entry, org string) Result {
 		r.Mail.SMTP = p.smtp.first(ctx, r.Mail.MX.Values, r.Mail.MXUnresolved)
 	}
 	return r
+}
+
+// faulted is the Result for an entry whose probe crashed. Every lookup in it is
+// a FAILED lookup (Err set), not an empty answer: the state file, the route
+// check and the change report all treat "unknown" as "carry last week's value
+// forward", and an empty answer as "the records were removed".
+func faulted(e Entry, org, why string) Result {
+	failed := Lookup{Err: why}
+	return Result{Entry: e, Org: org, Fault: why, NS: failed,
+		Mail: Mail{MX: failed, SPF: failed, DMARC: failed}}
 }

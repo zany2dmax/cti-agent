@@ -305,6 +305,47 @@ func doCheck(ctx context.Context, c *jira.Client, cfg config.Config) int {
 	}
 	logf("  duplicate search works (%d matches for the test CVE)", len(hits))
 
+	// THE REPORTER BINDING. Every lookup that decides "this ticket is the
+	// fleet's" requires that the fleet's account (or a JIRA_TRUSTED_REPORTERS
+	// account) filed it. A ticket it does not match is invisible to the fleet,
+	// and "not found" means "file a new one", so a ticket the fleet should be
+	// updating (filed by hand, or under an earlier JIRA_EMAIL) would be
+	// duplicated. This lists any such open ticket before that happens.
+	for _, id := range strings.Split(cfg.JiraTrustedReporters, ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if ok, err := c.AccountExists(ctx, id); err != nil {
+			logf("  could not check JIRA_TRUSTED_REPORTERS entry %s: %s", safelog.Line(id), safelog.Line(err.Error()))
+		} else if !ok {
+			logf("  FAIL JIRA_TRUSTED_REPORTERS entry %s is not a Jira account id: Jira rejects every search that names it, which stops every lane", safelog.Line(id))
+			return exitFailure
+		}
+	}
+	all, aerr := c.Search(ctx, fmt.Sprintf(`project = %q AND labels = "cti-agent" AND statusCategory != Done`, cfg.JiraProjectKey), 100)
+	bound, berr := c.Search(ctx, fmt.Sprintf(`project = %q AND labels = "cti-agent" AND %s AND statusCategory != Done`,
+		cfg.JiraProjectKey, jira.ReporterClause()), 100)
+	switch {
+	case aerr != nil || berr != nil:
+		logf("  could not compare the fleet's open tickets with those its account filed")
+	case len(all) > len(bound):
+		in := map[string]bool{}
+		for _, b := range bound {
+			in[b.Key] = true
+		}
+		var out []string
+		for _, a := range all {
+			if !in[a.Key] {
+				out = append(out, a.Key)
+			}
+		}
+		logf("  WARNING %d open ticket(s) carry the cti-agent label but were not filed by this account or a trusted "+
+			"reporter, so the fleet will not find them and will file new ones instead: %s. If they should stay "+
+			"the fleet's, put their reporter's account id in JIRA_TRUSTED_REPORTERS.", len(out), safelog.Line(strings.Join(out, ", ")))
+	default:
+		logf("  every open cti-agent ticket in the project (%d) was filed by a reporter the fleet adopts", len(all))
+	}
+
 	// What the lanes will do, checked without doing it. A token's scopes cap
 	// what it may do, but the account's Jira permissions decide what it can:
 	// a missing one shows up here rather than as a failed run.

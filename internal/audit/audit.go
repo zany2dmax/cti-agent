@@ -218,14 +218,9 @@ func (l *Logger) Emit(e Event) error {
 		l.warn(kind, err)
 	}
 
-	dir := l.dir()
-	if dir == "off" && os.Getenv("INVOCATION_ID") != "" {
-		// A fleet unit cannot have its audit trail switched off by an
-		// environment line: the setting is for tests and a developer's
-		// machine, which have no systemd invocation. Inside a unit it is
-		// ignored (the default directory is used) and said so, once.
-		l.warn("off", errors.New("audit: AUDIT_DIR=off is refused inside a systemd unit; using "+DefaultDir))
-		dir = DefaultDir
+	dir, refused := l.EffectiveDir()
+	if refused {
+		l.warn("off", errors.New("audit: AUDIT_DIR=off is refused inside a systemd unit; using "+dir))
 	} else if dir == "off" {
 		l.warn("off", errors.New("audit: AUDIT_DIR=off, so this process's audit events are being discarded"))
 	}
@@ -263,6 +258,7 @@ func (l *Logger) Emit(e Event) error {
 			note("forward", fmt.Errorf("audit: cannot forward to %s (%v); the local file still has every event, and forwarding is tried again in %s", l.Forward.Addr, err, ForwardRetryAfter))
 		} else if retry {
 			l.mu.Lock()
+			l.fwdRetryAt = time.Time{}
 			missed := l.fwdMissed
 			l.fwdMissed = 0
 			delete(l.warned, "forward")
@@ -286,15 +282,35 @@ func (l *Logger) forwardBackoff(t time.Time) (retry, skipped bool) {
 		l.fwdMissed++
 		return false, true
 	}
-	l.fwdRetryAt = time.Time{}
+	// One prober at a time: the next retry is pushed out before this send is
+	// made, so concurrent emitters do not each pay the collector's timeout. A
+	// success clears it (Emit); a failure sets it again.
+	l.fwdRetryAt = t.Add(ForwardRetryAfter)
 	return true, false
 }
 
 func (l *Logger) dir() string {
 	if l.Dir == "" {
-		return DefaultDir
+		return defaultDir
 	}
 	return l.Dir
+}
+
+// defaultDir is DefaultDir; a variable so a test can point it at a temporary
+// directory instead of the real trail.
+var defaultDir = DefaultDir
+
+// EffectiveDir is the directory this logger really writes to, and whether it
+// got there because AUDIT_DIR=off was refused. "off" is honoured only outside a
+// systemd unit (INVOCATION_ID unset); inside one the default directory is used.
+// Everything that reports on or prunes the trail (cti-audit --check, --prune)
+// asks this, so they and Emit cannot disagree about where the files are.
+func (l *Logger) EffectiveDir() (dir string, refusedOff bool) {
+	dir = l.dir()
+	if dir == "off" && os.Getenv("INVOCATION_ID") != "" {
+		return defaultDir, true
+	}
+	return dir, false
 }
 
 func (l *Logger) warnOut() io.Writer {

@@ -147,7 +147,7 @@ func doPrune(l *audit.Logger, days int, dry bool, stdout, stderr io.Writer) int 
 		_, _ = fmt.Fprintln(stderr, "cti-audit: --prune needs --days N (1 or more)")
 		return 2
 	}
-	dir := dirOf(l)
+	dir, _ := l.EffectiveDir()
 	if dir == "off" {
 		_, _ = fmt.Fprintln(stdout, "cti-audit: AUDIT_DIR=off, nothing to prune")
 		return 0
@@ -168,13 +168,6 @@ func doPrune(l *audit.Logger, days int, dry bool, stdout, stderr io.Writer) int 
 	return 0
 }
 
-func dirOf(l *audit.Logger) string {
-	if l.Dir == "" {
-		return audit.DefaultDir
-	}
-	return l.Dir
-}
-
 func doCheck(l *audit.Logger, stdout io.Writer) int {
 	bad := 0
 	say := func(ok bool, format string, a ...any) {
@@ -185,7 +178,10 @@ func doCheck(l *audit.Logger, stdout io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stdout, "%s"+format+"\n", append([]any{tag}, a...)...)
 	}
-	dir := dirOf(l)
+	dir, refused := l.EffectiveDir()
+	if refused {
+		_, _ = fmt.Fprintf(stdout, "note  AUDIT_DIR=off is refused inside a systemd unit: the lanes write to %s\n", dir)
+	}
 	switch dir {
 	case "off":
 		say(false, "AUDIT_DIR=off: audit events are being discarded")

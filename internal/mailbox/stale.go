@@ -108,7 +108,7 @@ func (s LeftSummary) Line(neverReadAge time.Duration) string {
 		return "LEFT: nothing"
 	}
 	order := []string{LeaveNeverRead, LeaveQuarantineHeld, LeaveQuarantineUnread, LeaveNotLaneMail,
-		LeaveHeld, LeaveOwnedGrace, LeaveOwnReportGrace, LeaveAutoReplyWait, LeaveFlagged}
+		LeaveAutoReplyUnauth, LeaveHeld, LeaveOwnedGrace, LeaveOwnReportGrace, LeaveAutoReplyWait, LeaveFlagged}
 	seen := map[string]bool{}
 	var parts []string
 	add := func(k string) {

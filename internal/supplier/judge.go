@@ -450,6 +450,15 @@ func (c Config) holdPhrases() []string {
 }
 
 func holdWords(s string) []string {
+	// Invisible format characters (zero-width space and the like) are removed
+	// first, as the redactor does, so "cre<ZWSP>dit application" is still a
+	// credit application.
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
 	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRedactPlainHeaders(t *testing.T) {
@@ -267,5 +268,102 @@ func TestRedactQuotedCookieValuesMidLine(t *testing.T) {
 	}
 	if out := Redact(`<td>Cookie: a=1</td><td>other</td>`); !strings.Contains(out, "<td>other</td>") {
 		t.Errorf("the redaction ran past the tag: %q", out)
+	}
+}
+
+// Found in review: credentials under names no fixed list had, in shapes a flat
+// regex cannot span.
+func TestRedactHeadersByWhatTheirNamesContain(t *testing.T) {
+	for _, in := range []string{
+		"X-Access-Token: LIVE1\nHost: x",
+		"X-CSRF-Token: LIVE2\r\nAccept: */*",
+		"X-Amz-Security-Token: LIVE3\n",
+		"Api-Key: LIVE4\n",
+		"X-Session-Id: LIVE5\n  folded LIVE5b\nHost: x",
+		"<pre>GET /a HTTP/1.1 X-Session-Id: LIVE6</pre>",
+	} {
+		out := Redact(in)
+		if strings.Contains(out, "LIVE") {
+			t.Errorf("Redact(%q) = %q: the credential survived", in, out)
+		}
+	}
+	for _, in := range []string{"Host: app.example.com\nAccept: */*\nUser-Agent: scanner\nWWW-Authenticate: Basic realm=\"x\"\n"} {
+		if out := Redact(in); out != in {
+			t.Errorf("ordinary headers changed: %q", out)
+		}
+	}
+}
+
+func TestRedactJSONNestingEscapingAndNameValuePairs(t *testing.T) {
+	for _, in := range []string{
+		`{"credentials": {"aws": {"accessKeyId": "LIVE1"}}}`,
+		`{"auth": {"meta": {"v":1}, "value": "LIVE2"}}`,
+		`{"body":"{\"token\":\"LIVE3\"}"}`,
+		`{"name":"Cookie","value":"sid=LIVE4"}`,
+		`{"name":"Authorization","value":"Token LIVE5"}`,
+		`{"tokens": [["LIVE6"],["LIVE7"]]}`,
+		`{apiKey: "LIVE8", csrfToken: 'LIVE9'}`,
+		`{"user":"a","session":{"id":"LIVE0","n":[1,2]},"ok":true}`,
+	} {
+		out := Redact(in)
+		if strings.Contains(out, "LIVE") {
+			t.Errorf("Redact(%q) = %q: the credential survived", in, out)
+		}
+	}
+	// Redaction leaves the rest of the structure readable.
+	if out := Redact(`{"user":"a","session":{"id":"LIVE0"},"ok":true}`); !strings.Contains(out, `"user":"a"`) || !strings.Contains(out, `"ok":true`) {
+		t.Errorf("the rest of the JSON was lost: %q", out)
+	}
+	// Names that are not credentials are untouched.
+	for _, in := range []string{`{"name":"Accept","value":"*/*"}`, `{"author":"Jane","title":"Hello","items":[["x"],["y"]]}`} {
+		if out := Redact(in); out != in {
+			t.Errorf("ordinary JSON changed: %q -> %q", in, out)
+		}
+	}
+}
+
+func TestRedactURLCatchesATokenInsideAnEncodedValueAndAFormBodyAnywhere(t *testing.T) {
+	for _, in := range []string{
+		"https://app.example.com/login?next=%2Fcb%3Ftoken%3DLIVE1",
+		"https://app.example.com/login?next=https%3A%2F%2Fx.example%2Fcb%3Faccess_token%3DLIVE2",
+		"https://app.example.com/login?state=Cookie%3A%20sid%3DLIVE3",
+		"https://app.example.com/login?next=https%253A%252F%252Fx.example%252Fcb%253Ftoken%253DLIVE4",
+		"POST /login HTTP/1.1\r\nHost: x\r\n\r\npassword=LIVE5&user=bob",
+		"body password=LIVE6&user=bob",
+		"https://user:p@LIVE7@host.example/cb",
+	} {
+		if out := RedactURL(in); strings.Contains(out, "LIVE") {
+			t.Errorf("RedactURL(%q) = %q: the credential survived", in, out)
+		}
+	}
+	for _, in := range []string{
+		"https://app.example.com/login?next=%2Fdashboard%3Ftab%3D2&page=1",
+		"https://app.example.com/a?email=bob%40example.com&q=a%20b",
+	} {
+		if out := RedactURL(in); out != in {
+			t.Errorf("an ordinary encoded value changed: %q -> %q", in, out)
+		}
+	}
+}
+
+// Adversarial input must not make redaction slow, and must fail closed.
+func TestRedactionOfAdversarialInputIsBoundedAndFailsClosed(t *testing.T) {
+	for name, in := range map[string]string{
+		"unbalanced objects": strings.Repeat(`{"token":{{{{`, 90000),
+		"many members":       strings.Repeat(`{"token":"x"},`, 80000),
+		"many inline":        strings.Repeat("X-Session-Id: a b c ", 50000),
+		"many params":        strings.Repeat("a=b&token=c&", 90000),
+	} {
+		start := time.Now()
+		out := RedactURL(Redact(in))
+		if took := time.Since(start); took > 5*time.Second {
+			t.Errorf("%s: %d bytes took %v", name, len(in), took)
+		}
+		_ = out
+	}
+	// Fails closed past the cap: nothing after the cut survives.
+	in := strings.Repeat(`{"token":"x"},`, maxSecretMembers+10) + `{"plain":"LIVETAIL"}`
+	if out := Redact(in); strings.Contains(out, "LIVETAIL") || !strings.Contains(out, "too many credential fields") {
+		t.Errorf("text past the cap was passed through: %.80q", out[len(out)-80:])
 	}
 }

@@ -108,6 +108,7 @@ func main() {
 	seen := make([]mailbox.Processed, 0, len(messages))
 	var skippedSubjects []string
 	var advisories []triage.Advisory
+	unverifiedIntel := 0
 	intel := triageSenders(cfg.MailboxFeedSenders)
 	for _, msg := range messages {
 		// Never read our own report back in.
@@ -180,7 +181,11 @@ func main() {
 			// must not reach a third-party model on the strength of markers
 			// alone. SenderAuthenticated, not VouchedFor, for the same reason
 			// teamSource uses it: the bypass list is for feeds behind a gateway.
-			if listed || (senderVouched(msg) && len(triage.IntelMarkers(text)) > 0) {
+			markers := !listed && len(triage.IntelMarkers(text)) > 0
+			if markers && !senderVouched(msg) {
+				unverifiedIntel++ // counted and logged below, never silent
+			}
+			if listed || (markers && senderVouched(msg)) {
 				advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
 					msg.From, msg.Subject, listed, msg.BodyText))
 			}
@@ -357,6 +362,11 @@ func main() {
 	// Not fatal: a failure costs today's advisory triage, never the CVE
 	// digest. run-digest sees no file and says triage had nothing to read.
 	if *advisoriesOut != "" {
+		if unverifiedIntel > 0 {
+			log.Printf("advisories: %d message(s) that look like threat intel were NOT saved for triage because "+
+				"their sender was not authenticated (a feed behind a gateway that hides the sender: list its domain "+
+				"in FLEET_UNAUTHENTICATED_SENDERS)", unverifiedIntel)
+		}
 		refused, err := triage.WriteAdvisoryInput(*advisoriesOut, advisories, time.Now())
 		for _, r := range refused {
 			log.Printf("WARNING: advisory not saved for triage: %s", safelog.Line(r))
@@ -528,11 +538,16 @@ func ownsCVEMail(found int, fromFeed, fromTeam bool, msg graph.Message) bool {
 
 // senderVouched reports mail the receiving server authenticated: internal mail,
 // or a From domain that passed DMARC or composite authentication.
+//
+// VouchedFor, not SenderAuthenticated: a tenant whose mail arrives through a
+// gateway that hides the sender lists the feed domains it trusts in
+// FLEET_UNAUTHENTICATED_SENDERS, and those must count here too. Each verdict is
+// audited (once per sender domain and outcome per run).
 func senderVouched(msg graph.Message) bool {
 	if msg.Internal() {
 		return true
 	}
-	ok, _ := msg.SenderAuthenticated()
+	ok, _ := msg.VouchedFor()
 	return ok
 }
 

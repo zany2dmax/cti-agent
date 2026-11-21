@@ -50,7 +50,11 @@ func redactHeaders(s string) string {
 	// The same headers mid-line - a header dump on one line, an echo inside
 	// HTML - and token-shaped JSON values, which no line anchor catches.
 	s = inlineHeaderRE.ReplaceAllString(s, "$1: [redacted by cti-agent]")
-	s = jsonSecretRE.ReplaceAllString(s, `$1"[redacted by cti-agent]"`)
+	// Then any header, inline or at the start of a line, whose NAME carries a
+	// credential, and any JSON member likewise (see redactjson.go).
+	s = redactGenericHeaders(s)
+	s = redactInlineHeaders(s)
+	s = redactJSONSecrets(s)
 	// Since the owner report (November 2026) this evidence leaves the company,
 	// to the developers of the application, so three more shapes go:
 	//
@@ -113,18 +117,12 @@ var (
 	// removing.
 	inlineHeaderRE = regexp.MustCompile(
 		`(?i)\b(set-cookie|cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*:[^\r\n<]*`)
-	// jsonSecretRE is any JSON member whose KEY names a credential or a session,
-	// with a value of any kind (string, number, boolean, null, a flat array or a
-	// flat object). It matches the key by what it contains, not by a list of
-	// exact names: "token", "sessionToken", "x-session", "auth_code" all go.
-	jsonSecretRE = regexp.MustCompile(
-		`(?i)("[^"\\]*(?:token|secret|passw(?:or)?d|pwd|session|sess_?id|credential|cookie|bearer|jwt|csrf|xsrf|signature|api[_-]?key|private[_-]?key|authori[sz]ation|auth(?:entication|[_-]|\b)|sid\b)[^"\\]*"\s*:\s*)` +
-			`(?:"(?:[^"\\]|\\.)*"|\[[^\]]*\]|\{[^{}]*\}|[^\s,}\]"{\[][^,}\]\s]*)`)
 	// urlParamRE is one query, matrix (;jsessionid=) or fragment (#access_token=)
-	// parameter, or the first pair of a form body.
-	urlParamRE = regexp.MustCompile(`((?:^|[?&;#])([^=&#;\s"'<>?]{1,128})=)([^&#;?\s"'<>]*)`)
+	// parameter, or a pair of a form body (after whitespace or at the start of a
+	// line, so "...\r\n\r\npassword=hunter2" is caught).
+	urlParamRE = regexp.MustCompile(`(?m)((?:^|[?&;#\s])([^=&#;\s"'<>?]{1,128})=)([^&#;?\s"'<>]*)`)
 	// urlUserinfoRE is user:password@ in front of a host.
-	urlUserinfoRE = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://)[^/\s"'<>@]+@`)
+	urlUserinfoRE = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://)[^/\s"'<>]*@`)
 	// urlPathTokenRE is a token in a URL path after a segment that names its
 	// use: /reset/<token>, /verify-email/<token>, /invite/<token>.
 	urlPathTokenRE = regexp.MustCompile(
@@ -132,7 +130,7 @@ var (
 	// strongParamRE is a parameter name that carries a credential or a session
 	// whatever else it is: never spared, even when a finding names it.
 	strongParamRE = regexp.MustCompile(
-		`(?i)token|secret|passw|pwd|session|sess_?id|credential|csrf|xsrf|jwt|bearer|api[_-]?key|private[_-]?key|authori[sz]ation|auth(?:entication|[_-]|$)`)
+		`(?i)token|secret|passw|pwd|session|sess_?id|credential|cookie|csrf|xsrf|jwt|bearer|api[_-]?key|private[_-]?key|authori[sz]ation|auth(?:entication|[_-]|$)`)
 )
 
 // strongParam reports whether a parameter name always carries a credential.
@@ -191,10 +189,40 @@ func redactURL(s, keep string) string {
 				return m // the finding's own parameter: its value is the payload
 			}
 		default:
-			return m
+			// Not a credential by name, but its value may carry one: a return
+			// URL or state parameter holding another URL with a token in it
+			// (next=%2Fcb%3Ftoken%3D...), or an encoded header.
+			if !nestedSecret(sub[3]) {
+				return m
+			}
 		}
 		return sub[1] + "[redacted]"
 	})
+}
+
+// nestedHeaderRE is a credential header written inside a decoded value.
+var nestedHeaderRE = regexp.MustCompile(`(?i)\b(?:set-cookie|cookie|authorization|proxy-authorization)\s*:`)
+
+// nestedSecret reports whether a parameter's value, percent-decoded (twice, for
+// a value that was encoded twice), holds a credential parameter, a credential
+// header or user:password@ in front of a host.
+func nestedSecret(v string) bool {
+	for round := 0; round < 3; round++ {
+		for _, m := range urlParamRE.FindAllStringSubmatch(v, -1) {
+			if strongParam(paramName(m[2])) {
+				return true
+			}
+		}
+		if nestedHeaderRE.MatchString(v) || urlUserinfoRE.MatchString(v) {
+			return true
+		}
+		d, err := neturl.PathUnescape(v)
+		if err != nil || d == v {
+			return false
+		}
+		v = d
+	}
+	return false
 }
 
 // RedactURLKeeping is RedactURL that leaves one parameter alone: the one a

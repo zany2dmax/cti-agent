@@ -205,7 +205,13 @@ func ReadSheetRows(data []byte, sheetName string) ([]Row, error) {
 	}
 
 	var shared []string
-	if b, err := pr.read("xl/sharedStrings.xml"); err == nil {
+	b, serr := pr.read("xl/sharedStrings.xml")
+	if serr != nil && !strings.Contains(serr.Error(), "no xl/sharedStrings.xml") {
+		// Present but unreadable (over the size limit, say): an error, not "no
+		// shared strings", which would read every text cell as blank.
+		return nil, serr
+	}
+	if serr == nil {
 		var sst xmlSST
 		if err := xml.Unmarshal(b, &sst); err != nil {
 			return nil, fmt.Errorf("sharedStrings.xml: %w", err)
