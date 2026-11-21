@@ -2724,6 +2724,23 @@ class TestFileShape(unittest.TestCase):
         for bad in ("", "fri", "Friday", "Fri ", "Fri,", "Fri *-*-* 00:00", "Fri;reboot", "Mon,,Fri"):
             self.assertFalse(ok(bad), repr(bad))
 
+    def test_no_unquoted_heredoc_in_the_installer_runs_a_command(self):
+        """The wrapper's heredoc is unquoted so it can expand $FLEET_USER and the
+        paths, which means a backtick or $( inside it is a command substitution that
+        RUNS at install time. A comment saying `cti-agent` ran cti-agent on every
+        install since 1.6.1, and when the file found through PATH was a stale copy,
+        unexecutable, or being written, the install stopped at the wrapper with
+        "Text file busy" or "Permission denied". Backticks in an unquoted heredoc
+        must be escaped (\\`)."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        bad = []
+        for m in re.finditer(r"<<-?(?P<w>[A-Z_]+)\n(?P<body>.*?)\n(?P=w)\n", installer, re.S):
+            for n, line in enumerate(m.group("body").splitlines(), 1):
+                if re.search(r"(?<!\\)`", line):
+                    bad.append(f"<<{m.group('w')} line {n}: {line.strip()[:70]}")
+        self.assertEqual(bad, [], "unescaped backtick inside an unquoted heredoc")
+
     def test_the_wrapper_and_updater_are_replaced_by_rename_not_overwritten(self):
         """`cat > /usr/local/bin/cti-agent` truncates the file in place, and Linux
         refuses ("Text file busy") while anything is executing it, which stopped

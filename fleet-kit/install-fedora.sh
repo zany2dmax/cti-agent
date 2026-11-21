@@ -1091,7 +1091,7 @@ if [ "$MODE" != dryrun ]; then
 #   cti-agent run-checkin --for-real
 #
 # Every command that changes something needs --dry-run or --for-real; with
-# neither it prints usage and exits 2. `cti-agent` alone lists the commands.
+# neither it prints usage and exits 2. \`cti-agent\` alone lists the commands.
 #
 #   cti-agent cti-mailer --check
 #   cti-agent fleet-db recent
