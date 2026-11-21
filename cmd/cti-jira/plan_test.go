@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -135,5 +137,27 @@ func TestPlanDomainsEmptyBecauseOfSkippedDoesNotResolve(t *testing.T) {
 	plan, why := planDomains(open, domainsState{}, domains.ActionsFile{Skipped: []string{"a.example"}})
 	if plan != domainsNothing || !strings.Contains(why, "left out") {
 		t.Errorf("plan %q (%s)", plan, why)
+	}
+}
+
+// Stored state names the CVE it was written for. A ticket relabelled to another
+// CVE still carries the old one's state, which must not be diffed against the
+// new CVE's findings (it could read as "no detections remain").
+func TestStateForADifferentCVEIsIgnored(t *testing.T) {
+	var gotProp bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotProp = true
+		_, _ = w.Write([]byte(`{"key":"cti-exposure","value":{"cve":"CVE-2026-1111","host_count":9,"hosts_hash":"abc"}}`))
+	}))
+	defer srv.Close()
+	c := jira.New(srv.URL, "bot@example.test", "tok")
+	if prev, found := storedState(context.Background(), c, "SEC-1", "CVE-2026-2222"); found || prev != nil {
+		t.Fatalf("state for CVE-2026-1111 was used for CVE-2026-2222: %+v", prev)
+	}
+	if !gotProp {
+		t.Fatal("the property was never read")
+	}
+	if prev, found := storedState(context.Background(), c, "SEC-1", "cve-2026-1111"); !found || prev.HostCount != 9 {
+		t.Errorf("state for the same CVE (any case) was refused: %+v %v", prev, found)
 	}
 }

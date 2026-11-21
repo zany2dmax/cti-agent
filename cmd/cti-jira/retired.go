@@ -47,8 +47,8 @@ const (
 
 // openAppscanJQL is every open AppSec ticket of the fleet.
 func openAppscanJQL(projectKey string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory != Done ORDER BY created ASC`,
-		projectKey, appscanLabel)
+	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory != Done ORDER BY created ASC`,
+		projectKey, appscanLabel, jira.ReporterClause())
 }
 
 // appIDFromLabels returns the scanner id in an app label ("cti-appscan-<id>"),
@@ -208,6 +208,16 @@ func closeTicket(ctx context.Context, c *jira.Client, cfg config.Config, is jira
 	return closed
 }
 
+// stateMatchesLabel says whether a ticket's stored state was written for the
+// application its label names. A label edited to name an application that does
+// not exist is not a retired application: the ticket is left alone. State
+// written before the id was recorded has none, and is accepted until its next
+// update adds it; a name-keyed label has no id to compare.
+func stateMatchesLabel(st appscanState, labels []string) bool {
+	id, _ := appIDFromLabels(labels)
+	return st.AppID == "" || id == "" || strings.EqualFold(st.AppID, id)
+}
+
 // retireOrphans closes the open AppSec tickets of applications the scanner no
 // longer defines. Best effort and last in the run: nothing here can stop a
 // ticket from being filed or updated.
@@ -237,7 +247,10 @@ func retireOrphans(ctx context.Context, c *jira.Client, cfg config.Config,
 	fleetFiled := func(is jira.Issue) bool {
 		var st appscanState
 		found, err := c.GetProperty(ctx, is.Key, appscanPropKey, &st)
-		return err == nil && found
+		if err != nil || !found {
+			return false
+		}
+		return stateMatchesLabel(st, is.Fields.Labels)
 	}
 	retire, why := planRetire(open, tf.ScannerApps, scanned, fleetFiled)
 	if why != "" {

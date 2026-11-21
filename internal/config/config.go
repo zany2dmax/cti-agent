@@ -115,8 +115,12 @@ type Config struct {
 	// as JiraAllowCreate (empty: never). JiraCloseTransition optionally names
 	// the workflow transition to use when a project has more than one that
 	// ends in a done status.
-	JiraAllowClose      string
-	JiraCloseTransition string
+	// JiraTrustedReporters are Jira account ids (comma-separated) whose
+	// tickets the fleet adopts besides the ones its own account filed
+	// (JIRA_TRUSTED_REPORTERS). Empty: only its own.
+	JiraTrustedReporters string
+	JiraAllowClose       string
+	JiraCloseTransition  string
 }
 
 // DefaultDigestSkipSubjects is what the digest ignores when
@@ -414,8 +418,9 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraVMScanIssueType:  os.Getenv("JIRA_VMSCAN_ISSUE_TYPE"),
 		JiraSupplierProject:  os.Getenv("SUPPLIER_JIRA_PROJECT"),
 
-		JiraAllowClose:      os.Getenv("JIRA_ALLOW_CLOSE"),
-		JiraCloseTransition: os.Getenv("JIRA_CLOSE_TRANSITION"),
+		JiraAllowClose:       os.Getenv("JIRA_ALLOW_CLOSE"),
+		JiraTrustedReporters: os.Getenv("JIRA_TRUSTED_REPORTERS"),
+		JiraCloseTransition:  os.Getenv("JIRA_CLOSE_TRANSITION"),
 	}
 
 	missing := []string{}

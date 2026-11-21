@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,10 +44,13 @@ const followUpWindow = "-30d"
 // followUpJQL selects the fleet's own tickets: the cti-agent marker label
 // that every ticket this lane files carries, in the configured project.
 func followUpJQL(projectKey string) string {
-	return fmt.Sprintf(`project = %q AND labels = "cti-agent" AND `+
+	return fmt.Sprintf(`project = %q AND labels = "cti-agent" AND %s AND `+
 		`(statusCategory != Done OR updated >= %s) ORDER BY created ASC`,
-		projectKey, followUpWindow)
+		projectKey, jira.ReporterClause(), followUpWindow)
 }
+
+// cveLabelRE is the shape of a CVE id.
+var cveLabelRE = regexp.MustCompile(`^CVE-[0-9]{4}-[0-9]{4,}$`)
 
 // cveFromLabels recovers the CVE from a ticket's idempotency label,
 // "cti-cve-2026-1234". The label rather than the summary, because the label is
@@ -55,7 +59,11 @@ func cveFromLabels(labels []string) string {
 	for _, l := range labels {
 		l = strings.ToLower(strings.TrimSpace(l))
 		if strings.HasPrefix(l, "cti-cve-") {
-			return strings.ToUpper(strings.TrimPrefix(l, "cti-"))
+			// A CVE id and nothing else: the label feeds a map the digest
+			// renders, and anyone who can edit labels can write any text here.
+			if cve := strings.ToUpper(strings.TrimPrefix(l, "cti-")); cveLabelRE.MatchString(cve) {
+				return cve
+			}
 		}
 	}
 	return ""

@@ -505,3 +505,24 @@ func TestAHighQDSIsFiledWithoutApproval(t *testing.T) {
 		t.Error("a Sev5 at QDS 90 still waits for approval")
 	}
 }
+
+// Every lookup that decides "this ticket is ours" requires that the bot filed
+// it. A label is text anyone who can edit the issue can write.
+func TestEveryFleetLookupRequiresTheBotAsReporter(t *testing.T) {
+	SetTrustedReporters("")
+	q := FindJQL("SEC", "CVE-2026-1234")
+	if !strings.Contains(q, "reporter = currentUser()") {
+		t.Errorf("FindJQL does not limit to the bot's own tickets: %s", q)
+	}
+	if bad := SetTrustedReporters("5b10ac8d82e05b22cc7d4ef5, 712020:abc-123 ,not an id,"); len(bad) != 1 || bad[0] != "not an id" {
+		t.Errorf("bad = %v", bad)
+	}
+	t.Cleanup(func() { SetTrustedReporters("") })
+	q = ReporterClause()
+	if q != `reporter in (currentUser(), "5b10ac8d82e05b22cc7d4ef5", "712020:abc-123")` {
+		t.Errorf("clause = %s", q)
+	}
+	if bad := SetTrustedReporters(`x" OR project = "OTHER`); len(bad) != 1 || ReporterClause() != "reporter = currentUser()" {
+		t.Errorf("a JQL injection through the setting was accepted: %v %s", bad, ReporterClause())
+	}
+}

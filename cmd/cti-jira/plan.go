@@ -114,13 +114,24 @@ func (p updatePlan) describe(f jira.Finding) string {
 // storedState reads a ticket's exposure property. A malformed or unreadable
 // one is reported and treated as absent: it costs one comparison and must not
 // kill the run.
-func storedState(ctx context.Context, c *jira.Client, key string) (*jira.ExposureState, bool) {
+//
+// The state names the CVE it was written for. A ticket whose label was changed
+// to another CVE (by anyone who can edit labels) still carries the old CVE's
+// state; diffing the new CVE's findings against it would read a different
+// vulnerability's host list as this one's, and could post "no detections remain"
+// for a live exposure. State for a different CVE is treated as absent.
+func storedState(ctx context.Context, c *jira.Client, key, cve string) (*jira.ExposureState, bool) {
 	var prev jira.ExposureState
 	found, err := c.GetProperty(ctx, key, jira.PropertyKey, &prev)
 	if err != nil {
 		logf("WARNING: %s", safelog.Line(err.Error()))
 	}
 	if !found {
+		return nil, false
+	}
+	if prev.CVE != "" && !strings.EqualFold(prev.CVE, cve) {
+		logf("WARNING: %s holds state for %s but is being updated for %s (a changed label?) - the stored state is ignored",
+			safelog.Line(key), safelog.Line(prev.CVE), safelog.Line(cve))
 		return nil, false
 	}
 	return &prev, true
@@ -130,6 +141,6 @@ func storedState(ctx context.Context, c *jira.Client, key string) (*jira.Exposur
 // Reads only - the property GET is the one Jira call it makes.
 func previewUpdate(ctx context.Context, c *jira.Client, issue jira.Issue,
 	f jira.Finding, now time.Time) string {
-	prev, _ := storedState(ctx, c, issue.Key)
+	prev, _ := storedState(ctx, c, issue.Key, f.CVE)
 	return planUpdate(issue, prev, f, now).describe(f)
 }

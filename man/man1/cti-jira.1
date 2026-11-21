@@ -627,6 +627,14 @@ The project must also be in
 The write allowlist. Optional; empty means write nothing to Jira.
 Section 9.
 .TP
+.B JIRA_TRUSTED_REPORTERS
+Comma\-separated Jira account ids whose tickets the fleet adopts besides its own.
+Every lookup that decides "this ticket is the fleet's" (a CVE's ticket, an
+application's, the domains lock\-down ticket, the daily follow\-up) requires
+that the account the fleet signs in as, or a listed account, reported it, because
+a label is text anyone who can edit the issue can write. An entry that is not an
+account id is ignored with a warning. Default:\~empty (only its own tickets).
+.TP
 .B JIRA_ALLOW_CLOSE
 The close allowlist: comma-separated project keys in which a retired
 application's ticket may be closed (see

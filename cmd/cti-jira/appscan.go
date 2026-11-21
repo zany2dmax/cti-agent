@@ -78,6 +78,10 @@ func stateKeys(t appscan.AppTicket) []string {
 
 // appscanState is kept on each ticket.
 type appscanState struct {
+	// AppID is the scanner application id the ticket was filed for. A label is
+	// editable text; this is what the fleet wrote, so retiring a ticket checks
+	// the label still agrees with it.
+	AppID    string    `json:"appId,omitempty"`
 	Hash     string    `json:"hash"`
 	Keys     []string  `json:"keys"`
 	PostedAt time.Time `json:"postedAt"`
@@ -91,15 +95,15 @@ type AppscanRefs struct {
 }
 
 func appscanJQL(projectKey, label string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory != Done ORDER BY created DESC`,
-		projectKey, label)
+	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory != Done ORDER BY created DESC`,
+		projectKey, label, jira.ReporterClause())
 }
 
 // priorJQL finds this application's most recent CLOSED ticket, for a new
 // ticket to point back to when the findings return.
 func priorJQL(projectKey, label string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory = Done ORDER BY created DESC`,
-		projectKey, label)
+	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory = Done ORDER BY created DESC`,
+		projectKey, label, jira.ReporterClause())
 }
 
 // priorTicket is a resolved or closed ticket for the same application.
@@ -313,7 +317,7 @@ func appscanOne(ctx context.Context, c *jira.Client, cfg config.Config, t appsca
 		return refFor("gate-closed", open, "the Jira write gate is closed (JIRA_ALLOW_CREATE)")
 	}
 
-	st := appscanState{Hash: t.Hash, Keys: stateKeys(t), PostedAt: now}
+	st := appscanState{AppID: t.AppID, Hash: t.Hash, Keys: stateKeys(t), PostedAt: now}
 	attachReport := func(key string) {
 		if !hasRep {
 			return

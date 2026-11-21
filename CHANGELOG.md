@@ -69,6 +69,30 @@ scanner's own address).
     capped fields, plausible totals), with refused messages named in the log and
     the report's gaps.
 
+- **Fixed issues found by PrimeSec AI: Tier 3, Jira tickets the fleet adopts.**
+  The fleet found its tickets by label, and a label is text anyone who can create
+  or edit an issue in the project can write. A project member could plant a
+  decoy (10786476, 10786472, 10786471, 10786467, 10786473) so the fleet updated
+  it, sent its host lists there and starved the real ticket, or relabel a real
+  one so the bot posted a false "no detections remain" (10969087) or closed it
+  as a retired application (10786540). Also, an earlier entry says the domains
+  lock-down lookup needed both labels; the code checked only one.
+  - **Every lookup now requires the fleet's own account as reporter.** CVE
+    tickets, the daily follow-up, AppSec tickets (open, prior and the retire
+    check), the domains lock-down ticket and the VM-scan fixes ticket add
+    `reporter = currentUser()`. A ticket a person filed by hand is adopted only
+    if their Jira account id is in the new `JIRA_TRUSTED_REPORTERS`. **Upgrade:**
+    if you have a hand-made ticket the fleet should keep using (the INF
+    lock-down ticket), put its reporter's account id in `JIRA_TRUSTED_REPORTERS`,
+    or the next run files a new ticket. Tickets filed under an earlier Jira
+    account than the one in `JIRA_EMAIL` now are not matched either.
+  - **Stored state is bound to what it was written for.** A ticket's exposure
+    state names its CVE and is ignored if the ticket is now being updated for a
+    different CVE; an AppSec ticket's state records its application id, and a
+    ticket is retired only if its label still agrees with it.
+  - **A label must be a CVE id to be read as one** (`CVE-YYYY-NNNN+`), so text
+    after `cti-cve-` can no longer reach the digest.
+
 - **Fixed issues found by PrimeSec AI: Tier 2, the domains lane.**
   - **One odd page no longer crashes the weekly run (11583476).** `title()` took
     offsets on a lower-cased copy and applied them to the original; a page with a

@@ -261,9 +261,14 @@ func TestTheSearchSelectsTheFleetsOwnTickets(t *testing.T) {
 
 func TestTheCVEComesFromTheIdempotencyLabel(t *testing.T) {
 	for labels, want := range map[string]string{
-		"cti-agent,cti-cve-2026-1234": "CVE-2026-1234",
-		"CTI-CVE-2026-9,cti-agent":    "CVE-2026-9",
-		"cti-agent,urgent":            "",
+		"cti-agent,cti-cve-2026-1234":  "CVE-2026-1234",
+		"CTI-CVE-2026-12345,cti-agent": "CVE-2026-12345",
+		"cti-agent,urgent":             "",
+		// Anyone who can edit labels can write any text after the prefix: only a
+		// CVE id comes back.
+		"cti-agent,cti-cve-2026-9":             "",
+		"cti-agent,cti-cve-<script>alert(1)":   "",
+		"cti-agent,cti-cve-2026-1234-and-more": "",
 	} {
 		if got := cveFromLabels(strings.Split(labels, ",")); got != want {
 			t.Errorf("cveFromLabels(%s) = %q, want %q", labels, got, want)

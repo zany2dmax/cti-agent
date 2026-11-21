@@ -139,3 +139,41 @@ func TestRetireCommentSaysWhy(t *testing.T) {
 		}
 	}
 }
+
+// A label is editable text. A ticket whose stored state was written for one
+// application is not retired because its label was changed to name another that
+// the scanner does not have.
+func TestAnEditedAppLabelDoesNotGetATicketRetired(t *testing.T) {
+	labels := []string{"cti-agent", "cti-appscan", "cti-appscan-999999"}
+	if stateMatchesLabel(appscanState{AppID: "1205213703"}, labels) {
+		t.Error("a ticket filed for app 1205213703 was treated as app 999999's")
+	}
+	if !stateMatchesLabel(appscanState{AppID: "999999"}, labels) {
+		t.Error("a ticket whose label still matches its state was refused")
+	}
+	if !stateMatchesLabel(appscanState{}, labels) {
+		t.Error("state written before the id was recorded must still be accepted")
+	}
+	if !stateMatchesLabel(appscanState{AppID: "1205213703"}, []string{"cti-appscan-some-name-a1b2c3"}) {
+		t.Error("a name-keyed label has no id to compare and must not block")
+	}
+}
+
+// Every lookup that decides "this ticket is the fleet's" requires the bot as
+// reporter.
+func TestEveryAppSecDomainsAndFollowUpLookupRequiresTheBot(t *testing.T) {
+	jira.SetTrustedReporters("")
+	for name, q := range map[string]string{
+		"appscan":         appscanJQL("SEC", "cti-appscan-1"),
+		"prior":           priorJQL("SEC", "cti-appscan-1"),
+		"open appscan":    openAppscanJQL("SEC"),
+		"domains":         domainsJQL("SEC"),
+		"vmscan fixes":    vmscanFixesJQL("SEC"),
+		"daily follow-up": followUpJQL("SEC"),
+		"cve":             jira.FindJQL("SEC", "CVE-2026-1234"),
+	} {
+		if !strings.Contains(q, "reporter = currentUser()") {
+			t.Errorf("%s lookup adopts a ticket on its label alone: %s", name, q)
+		}
+	}
+}

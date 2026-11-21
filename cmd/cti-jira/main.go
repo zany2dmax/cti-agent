@@ -149,6 +149,9 @@ func run() int {
 		return die("%s", safelog.Line(err.Error()))
 	}
 
+	if bad := jira.SetTrustedReporters(cfg.JiraTrustedReporters); len(bad) > 0 {
+		logf("WARNING: JIRA_TRUSTED_REPORTERS: ignoring %s (Jira account ids only)", safelog.Line(strings.Join(bad, ", ")))
+	}
 	c := jira.New(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)
 	if cfg.JiraCloudID != "" {
 		// A scoped API token is refused at the site URL; it must go through
@@ -485,7 +488,7 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 
 	// Decided by planUpdate, the same function a dry run prints - so what a
 	// preview says and what a real run does cannot drift apart.
-	prev, found := storedState(ctx, c, key)
+	prev, found := storedState(ctx, c, key, f.CVE)
 	plan := planUpdate(issue, prev, f, now)
 	outcome = pastTense(plan.describe(f))
 

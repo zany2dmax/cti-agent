@@ -45,8 +45,8 @@ type domainsState struct {
 }
 
 func domainsJQL(projectKey string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory != Done ORDER BY created DESC`,
-		projectKey, domainsLabel)
+	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory != Done ORDER BY created DESC`,
+		projectKey, domainsLabel, jira.ReporterClause())
 }
 
 func doDomainsActions(ctx context.Context, c *jira.Client, cfg config.Config,

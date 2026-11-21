@@ -23,9 +23,11 @@ import (
 	"encoding/csv"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -134,6 +136,60 @@ func Labels(f Finding) []string {
 	return out
 }
 
+// WHICH TICKETS ARE THE FLEET'S
+//
+// The fleet finds its own tickets by label, and a label is text anyone who can
+// create or edit an issue in the project can write. Adopting a ticket on its
+// label alone let a project member plant a decoy that the fleet then updated
+// (diverting its updates and host lists), or relabel a real one so the bot
+// posted a false all-clear on it. So every lookup also requires that the BOT
+// filed the ticket: reporter = currentUser(), the account the fleet signs in
+// as. A person who legitimately files one by hand (the lock-down ticket, say)
+// is trusted by listing their Jira account id in JIRA_TRUSTED_REPORTERS.
+
+var (
+	trustedMu        sync.RWMutex
+	trustedReporters []string
+	accountIDRE      = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,128}$`)
+)
+
+// SetTrustedReporters sets the extra Jira account ids whose tickets the fleet
+// adopts besides its own (JIRA_TRUSTED_REPORTERS, comma-separated). Entries
+// that are not account ids are dropped and returned.
+func SetTrustedReporters(list string) (bad []string) {
+	var ok []string
+	for _, e := range strings.Split(list, ",") {
+		e = strings.TrimSpace(e)
+		switch {
+		case e == "":
+		case accountIDRE.MatchString(e):
+			ok = append(ok, e)
+		default:
+			bad = append(bad, e)
+		}
+	}
+	trustedMu.Lock()
+	trustedReporters = ok
+	trustedMu.Unlock()
+	return bad
+}
+
+// ReporterClause is the JQL condition that limits a search to tickets the
+// fleet filed (or a trusted reporter did). It is part of every lookup that
+// decides "this ticket is ours".
+func ReporterClause() string {
+	trustedMu.RLock()
+	defer trustedMu.RUnlock()
+	if len(trustedReporters) == 0 {
+		return "reporter = currentUser()"
+	}
+	q := make([]string, len(trustedReporters))
+	for i, id := range trustedReporters {
+		q[i] = fmt.Sprintf("%q", id)
+	}
+	return "reporter in (currentUser(), " + strings.Join(q, ", ") + ")"
+}
+
 // FindJQL is the query that finds an existing ticket for this CVE.
 //
 // Scoped to the project and NOT scoped by status: a resolved ticket still
@@ -142,8 +198,8 @@ func Labels(f Finding) []string {
 // the fleet's job is to avoid filing a second ticket for the same thing while
 // the first is still the right place to talk about it.
 func FindJQL(projectKey, cve string) string {
-	return fmt.Sprintf("project = %q AND labels = %q ORDER BY created ASC",
-		projectKey, IdempotencyLabel(cve))
+	return fmt.Sprintf("project = %q AND labels = %q AND %s ORDER BY created ASC",
+		projectKey, IdempotencyLabel(cve), ReporterClause())
 }
 
 // Summary is the ticket title.

@@ -39,8 +39,8 @@ type vmscanFixesState struct {
 }
 
 func vmscanFixesJQL(projectKey string) string {
-	return fmt.Sprintf(`project = %q AND labels = %q AND statusCategory != Done ORDER BY created DESC`,
-		projectKey, vmscanFixesLabel)
+	return fmt.Sprintf(`project = %q AND labels = %q AND %s AND statusCategory != Done ORDER BY created DESC`,
+		projectKey, vmscanFixesLabel, jira.ReporterClause())
 }
 
 func doVMScanFixes(ctx context.Context, c *jira.Client, cfg config.Config,

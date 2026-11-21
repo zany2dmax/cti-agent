@@ -2279,7 +2279,11 @@ CVE and AppSec tickets are unaffected. The lane finds its ticket by the labels
 said as an issue property on it. A ticket someone created by hand has neither,
 so the next run files a new one: to have the lane adopt an existing ticket
 (INF-590 replaced CR-24907), add both labels to it in Jira first, and close the
-old ticket yourself. The service account needs Browse, Create, Comment and
+old ticket yourself. The lane also adopts a ticket only if its own account filed
+it or the person who filed it is listed in `JIRA_TRUSTED_REPORTERS` (their Jira
+account id, from the URL of their profile page): a label is text anyone who can
+edit the ticket can write. A hand-made ticket from anyone else is ignored, and
+the next run files a new one. The service account needs Browse, Create, Comment and
 Attach in the new project; `cti-jira --check` looks only at `JIRA_PROJECT_KEY`.
 
 ### 4. Public DNS, and outbound port 53
