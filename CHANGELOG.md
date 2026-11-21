@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 1.7.2 — 2026-11-21
 
 **Upgrade:** `sudo cti-agent-update --for-real`. Nothing to configure.
 
