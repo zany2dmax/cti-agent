@@ -47,6 +47,10 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   - settings equal to their default or set to nothing, which can go;
   - each secret, with the programs that actually read it.
 
+  A key that other settings use as `$NAME` is listed as a helper, not as a
+  typo. A `$NAME` whose key isn't set above the line that uses it is
+  flagged, since bash expands it to nothing.
+
   It never prints a value. `list --by-reader` is the map step 2 will grant
   credentials from. Its knowledge is `settings.manifest`, generated from the
   code by `scripts/settings-manifest` and kept in step by a test. It holds

@@ -3065,10 +3065,13 @@ sudo cti-agent fleet-config list --by-reader
 | `NOT READ BY ANY CODE` | A typo (it suggests the nearest name) or a leftover. Fix or remove it. |
 | `SET MORE THAN ONCE` | The last line wins. Keep one. |
 | `NOT A SETTING` | Line numbers that aren't `KEY=value`. |
+| `REFERENCES THAT EXPAND TO NOTHING` | A `$NAME` in a value whose key isn't set above that line. Bash reads the file top to bottom, so it expands to nothing. Move the helper up, or set it. |
+| `HELPERS` | Keys no code reads that other settings use as `$NAME` (a team list added to several address lists, say). Not a problem. |
 | `EQUAL TO THE DEFAULT` / `SET TO NOTHING` | Can be removed: the code does the same without them. |
 | `SECRETS SET` | Each secret, and the programs that actually read it. Step 2 grants each secret only to those. |
 
-It exits 1 only for the first four, so it can gate an install. Removable
+It exits 1 only for the problems (missing, unknown, set twice, not a
+setting, references that expand to nothing), so it can gate an install. Removable
 settings aren't problems.
 
 **Where its knowledge comes from.** `/opt/cti-agent/settings.manifest`, built

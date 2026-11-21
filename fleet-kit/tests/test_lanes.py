@@ -6626,6 +6626,27 @@ class FleetConfig(unittest.TestCase):
             block = text.split("key: " + k + "\n", 1)[1].split("\n\n", 1)[0]
             self.assertIn("empty-differs: yes", block, k)
 
+    def test_a_helper_other_settings_use_is_not_a_typo(self):
+        r = self.run_tool("check", "--json", env_text=(
+            "CLIENT_SECRET=x\nLOOKUP_PROVIDER=none\nTEAM_LIST=a@example.test,b@example.test\n"
+            "DOM_TO=ops@example.test,$TEAM_LIST\nSUPPLIER_MODEL=${TEAM_LIST}\n"))
+        j = json.loads(r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(j["unknown"], [])
+        self.assertEqual(j["helpers"], [{"key": "TEAM_LIST", "used_by": 2}])
+        self.assertNotIn("example.test", r.stdout)
+
+    def test_a_reference_above_its_setting_expands_to_nothing(self):
+        r = self.run_tool("check", "--json", env_text=(
+            "CLIENT_SECRET=x\nLOOKUP_PROVIDER=none\nDOM_TO=ops@example.test,$TEAM_LIST\n"
+            "TEAM_LIST=a@example.test\nSUPPLIER_MODEL=$NOWHERE\nGRAPH_FOLDER=$HOME/x\nDIGEST='$LITERAL'\n"))
+        self.assertEqual(r.returncode, 1)
+        late = {x["refers_to"]: x for x in json.loads(r.stdout)["late_references"]}
+        self.assertEqual(set(late), {"TEAM_LIST", "NOWHERE"})
+        self.assertEqual(late["TEAM_LIST"]["line"], 3)
+        self.assertIn("below", late["TEAM_LIST"]["why"])
+        self.assertIn("not set", late["NOWHERE"]["why"])
+
     def test_an_unreadable_file_is_an_error_not_a_pass(self):
         r = self.run_tool("check", "--env", str(self.tmp / "missing.env"))
         self.assertEqual(r.returncode, 1)

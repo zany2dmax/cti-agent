@@ -40,6 +40,11 @@ settings no code reads, with the nearest known name, as for a typo;
 keys set more than once (the last one wins);
 lines that are not
 .BR KEY=value ;
+references
+.RB ( $NAME )
+to a key not set above the line using them, which bash expands to nothing;
+helpers, keys no code reads that other settings use as
+.BR $NAME ;
 settings equal to their default, and settings set to nothing, which can be
 removed; and each secret that is set, with the programs that read it.
 .TP
