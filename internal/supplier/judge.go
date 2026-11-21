@@ -81,6 +81,11 @@ type Config struct {
 	// NotRequest answer is accepted only for a thread that a sender at one of
 	// these started. Empty means none is accepted.
 	InternalDomains []string
+	// HoldPhrases are word sequences that mark a thread as one that must never
+	// be sent to the model (a customer's credit application, say: it is not a
+	// supplier request and holds a stranger's financial and personal detail).
+	// Nil means DefaultHoldPhrases; empty means none.
+	HoldPhrases []string
 }
 
 // internalSender is true when the address is at one of the internal domains.
@@ -425,4 +430,75 @@ func judge(raw []byte, in Input, source string, cfg Config) Decision {
 		return gate(fmt.Sprintf("the name, subject or notes contain %q, a technology word", w))
 	}
 	return d
+}
+
+// ─── threads that never reach the model ─────────────────────────────────────
+
+// DefaultHoldPhrases mark a thread as a customer's credit application or the
+// like. Matched as whole-word sequences, case-insensitively, in the subject,
+// the message text and the form's name and notes.
+var DefaultHoldPhrases = []string{
+	"credit application", "credit app", "application for credit", "customer credit",
+	"personal guarantee", "personal guaranty", "guarantor",
+}
+
+func (c Config) holdPhrases() []string {
+	if c.HoldPhrases != nil {
+		return c.HoldPhrases
+	}
+	return DefaultHoldPhrases
+}
+
+func holdWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// HoldPhrase returns the first phrase that marks the request as one the model
+// must not see, or "".
+//
+// WHY CODE DECIDES. The agent instructions let the model call a customer's
+// credit application "not a request"; to say so it had to read the application
+// first, with a stranger's name, address, bank and trade references in it. The
+// redaction catches account and tax numbers, not who someone is. A thread that
+// plainly is one is recognised here, before anything is sent, and goes to a
+// person as an Unsure (HeldDecision): the model never receives it.
+func (c Config) HoldPhrase(in Input) string {
+	text := in.Subject + "\n" + in.Body
+	if in.Form != nil {
+		text += "\n" + in.Form.Name + "\n" + in.Form.Notes
+	}
+	w := holdWords(text)
+	for _, p := range c.holdPhrases() {
+		pw := holdWords(p)
+		if len(pw) == 0 {
+			continue
+		}
+	scan:
+		for i := 0; i+len(pw) <= len(w); i++ {
+			for j := range pw {
+				if w[i+j] != pw[j] {
+					continue scan
+				}
+			}
+			return strings.Join(pw, " ")
+		}
+	}
+	return ""
+}
+
+// HeldDecision is the verdict for a thread that was held from the model: always
+// Unsure, so a person looks at it. Never a No and never a NotRequest, whatever
+// the thread says: "credit application" is a customer applying to us, or us
+// applying to a new supplier (which IS a supplier request), and code cannot
+// tell which without reading what the model must not see. An Unsure costs a
+// person a look; a wrong dismissal costs a missed supplier review.
+func HeldDecision(phrase string) Decision {
+	return Decision{
+		Verdict: Unsure,
+		Reason: "This looks like a credit application, so it was not sent to the AI. " +
+			"It may be a customer's (not a supplier request) or ours to a new supplier (which is one); a person needs to look.",
+		Notes: []string{fmt.Sprintf("held from the AI: the thread contains %q; no model judged it", phrase)},
+	}
 }

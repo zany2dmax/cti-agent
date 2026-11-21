@@ -129,7 +129,10 @@ why the field list is short. A reply in the thread is shown as its sender's
 domain, like the first message. The people who file and review a
 request still get the full form; only the model's copy is cut. What still leaves
 the host is a supplier's name, what it supplies and the requester's own
-description, under the company's terms for the Claude service.
+description, under the company's terms for the Claude service. A thread that is
+plainly a credit application (a phrase in `SUPPLIER_HOLD_PHRASES`) is not sent at
+all: code holds it and a person gets it as an Unsure, because it holds a
+stranger's personal and financial detail that redaction by pattern cannot remove.
 
 What code does with the answer is the control. `cti-supplier` parses it
 strictly, requires every quoted line to appear in the request, and can **only

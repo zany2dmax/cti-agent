@@ -829,3 +829,66 @@ func TestOnADayWithNoDigestAThreadSetAsideIsKeptForALaterDigestButAQuietReplyIsR
 		t.Error("SeenRecords is SeenRecordsFor with a digest sent")
 	}
 }
+
+// A credit application is held from the model: no input is rendered, nothing
+// of it is kept for a model, and finish files an Unsure for a person - even if
+// a (stray) model result exists for it, and even for an internal sender with
+// no form, where a model's NotRequest would have set it aside.
+func TestACreditApplicationNeverReachesTheModelAndGoesToAPerson(t *testing.T) {
+	mail := fakeMail{[]graph.AddressedMessage{
+		msg("m1", "c1", "Fw: Example Mills Credit Application", "buyer@example.test",
+			"Forwarding the credit application: John Smith, 12 Elm St, bank ref First National.", 9, false),
+		msg("m2", "c2", "new supplier", "buyer@example.test", "Please add a gravel supplier.", 10, false),
+	}}
+	cfg := Config{InternalDomains: []string{"example.test"}}
+	items, _, err := Collect(context.Background(), mail, &perMessage{}, Policy{}, cfg, nil, mailbox, epoch, nil)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items %d err %v", len(items), err)
+	}
+	var held, plain Item
+	for _, it := range items {
+		if it.Request.MessageID == "m1" {
+			held = it
+		} else {
+			plain = it
+		}
+	}
+	if held.Held != "credit application" || held.Input != "" || held.Source != "" {
+		t.Fatalf("the credit application was prepared for the model: %+v", held)
+	}
+	if plain.Held != "" || plain.Input == "" {
+		t.Fatalf("an ordinary request was held: %+v", plain)
+	}
+	tk := &fakeTickets{}
+	stray := []byte(`{"schema":"cti-supplier/1","message_id":"m1","verdict":"not_request","reason":"x","evidence":["SUBJECT: Fw: Example Mills Credit Application"]}`)
+	out := Finish(context.Background(), []Item{held}, map[int][]byte{0: stray}, cfg, tk, "CYBR", true)
+	d := out[0].Request.Decision
+	if d.Verdict != Unsure || !strings.Contains(d.Reason, "not sent to the AI") || len(tk.created) != 1 {
+		t.Errorf("decision %+v, created %v", d, tk.created)
+	}
+}
+
+func TestHoldPhrasesMatchWholeWordsAndCanBeChanged(t *testing.T) {
+	c := Config{}
+	for text, want := range map[string]string{
+		"Credit Application attached":          "credit application",
+		"the customer-credit form":             "customer credit",
+		"he signed a personal guarantee":       "personal guarantee",
+		"credit approval for the new supplier": "",
+		"discredit application of the policy":  "",
+		"a plain supplier request":             "",
+	} {
+		if got := c.HoldPhrase(Input{Subject: text}); got != want {
+			t.Errorf("%q -> %q, want %q", text, got, want)
+		}
+	}
+	if got := c.HoldPhrase(Input{Subject: "x", Form: &Form{Notes: "needs a guarantor"}}); got != "guarantor" {
+		t.Errorf("form notes are not screened: %q", got)
+	}
+	if got := (Config{HoldPhrases: []string{}}).HoldPhrase(Input{Subject: "credit application"}); got != "" {
+		t.Errorf("an empty list should hold nothing: %q", got)
+	}
+	if got := (Config{HoldPhrases: []string{"tax return"}}).HoldPhrase(Input{Body: "Our Tax Return is attached"}); got != "tax return" {
+		t.Errorf("operator phrase not used: %q", got)
+	}
+}

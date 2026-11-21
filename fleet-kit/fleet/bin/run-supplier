@@ -146,14 +146,17 @@ fi
 shopt -s nullglob
 INPUTS=("$WORK"/*.input.txt)
 shopt -u nullglob
-if [ "${#INPUTS[@]}" -eq 0 ]; then
+# A thread held from the model (a credit application) has no input file, so an
+# all-held run has none either: collect leaves has-items when there is anything
+# to finish.
+if [ "${#INPUTS[@]}" -eq 0 ] && [ ! -e "$WORK/has-items" ]; then
   log "no new supplier requests - nothing to judge or send"
   record_owned
   rm -rf "$WORK"
   log "done"
   exit 0
 fi
-log "${#INPUTS[@]} new request(s)"
+log "${#INPUTS[@]} request(s) for the model; any others were held from it and go to a person"
 
 # ── the model ───────────────────────────────────────────────────────────────
 # THE MODEL'S ENVIRONMENT. The unit loads fleet.env as its environment and this
@@ -267,7 +270,7 @@ judge_all() {
   [ -n "$cost_trace" ] && [ -e "$cost_trace" ] && log "cost recorded in $cost_trace (sudo cti-agent fleet-trace list)"
   return 0
 }
-judge_all
+if [ "${#INPUTS[@]}" -gt 0 ]; then judge_all; fi
 
 # ── file, render ────────────────────────────────────────────────────────────
 "$SUPPLIER" "$SMODE" --finish "$WORK" \

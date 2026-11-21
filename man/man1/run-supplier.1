@@ -167,6 +167,13 @@ is set aside as not a supplier request only when someone at one of these started
 Comma\-separated words that stop a No from standing. Unset: built\-in list; set
 and empty: none.
 .TP
+.B SUPPLIER_HOLD_PHRASES
+Comma\-separated phrases that keep a thread from the model altogether (whole
+words, any case, in the subject, text or form name and notes). A held thread goes
+to a person as an Unsure, never a No. Unset: built\-in list (credit application,
+credit app, application for credit, customer credit, personal guarantee,
+personal guaranty, guarantor); set and empty: none.
+.TP
 .B SUPPLIER_FORM_TYPES
 File types that may be read (default .xlsx). Names that look like a tax or bank
 form are refused whatever the type.

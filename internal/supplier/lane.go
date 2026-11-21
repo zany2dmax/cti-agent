@@ -35,6 +35,10 @@ type Item struct {
 	Input string `json:"input"`
 	// Source is the untrusted text, kept so evidence can be checked at finish.
 	Source string `json:"source"`
+	// Held is the phrase that kept this thread from the model (see
+	// Config.HoldPhrase). A held item has no Input and no Source: nothing of it
+	// is written for a model, and finish judges it by code alone.
+	Held string `json:"held,omitempty"`
 	// Messages are the thread's messages the lane read, for the record the
 	// mailbox cleanup uses (see OwnedRefs).
 	Messages []MsgRef `json:"messages,omitempty"`
@@ -336,6 +340,9 @@ func buildItem(ctx context.Context, t thread, src Source, p Policy, cfg Config) 
 	}
 	in := Input{MessageID: req.MessageID, Received: req.Received.UTC().Format(time.RFC3339),
 		Sender: req.From, Subject: req.Subject, Body: body, State: req.State, Form: req.Form}
+	if phrase := cfg.HoldPhrase(in); phrase != "" {
+		return Item{Request: req, Held: phrase, Messages: refs(t)}, nil
+	}
 	return Item{Request: req, Input: Render(in, cfg), Source: in.Source(), Messages: refs(t)}, nil
 }
 
@@ -383,7 +390,9 @@ func Finish(ctx context.Context, items []Item, results map[int][]byte, cfg Confi
 	for i, it := range items {
 		req := it.Request
 		raw, ok := results[i]
-		if !ok || len(raw) == 0 {
+		if it.Held != "" {
+			req.Decision = HeldDecision(it.Held)
+		} else if !ok || len(raw) == 0 {
 			req.Decision = Decision{Verdict: Unsure,
 				Reason: "No judgement was available for this request, so it needs a person.",
 				Notes:  []string{"no model judgement was run"}}

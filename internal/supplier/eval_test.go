@@ -139,6 +139,10 @@ func TestEvalSupplierJudgement(t *testing.T) {
 
 func evalOnce(claude, model, instr string, c EvalCase) evalRun {
 	in := c.input()
+	// Production never sends a held thread to the model, so neither does the eval.
+	if phrase := evalConfig.HoldPhrase(in); phrase != "" {
+		return evalRun{Raw: "held", Final: HeldDecision(phrase).Verdict}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, claude, ModelArgs(model, instr)...)

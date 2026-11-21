@@ -69,6 +69,20 @@ scanner's own address).
     capped fields, plausible totals), with refused messages named in the log and
     the report's gaps.
 
+- **The supplier lane no longer sends credit applications to the model
+  (PrimeSec "Prohibit Sensitive Data in AI Tools").** The model used to read a
+  customer's credit application (names, addresses, bank and trade references)
+  just to say it was not a supplier request, and redaction by pattern cannot
+  remove who someone is. A thread whose subject, text or form name and notes
+  holds a phrase from `SUPPLIER_HOLD_PHRASES` (default: credit application,
+  credit app, application for credit, customer credit, personal guarantee,
+  personal guaranty, guarantor) is now held by code: nothing of it is written for
+  the model, and it goes to a person as an Unsure ("not sent to the AI") with the
+  usual Kanban item. It is never a No or a "not a request", because a credit
+  application can also be yours to a new supplier. **Upgrade:** nothing; expect an
+  Unsure item for each such thread, which the model used to set aside. Set
+  `SUPPLIER_HOLD_PHRASES=` (empty) to hold nothing, or a list of your own.
+
 - **The AppSec weekly had counts for 1 application of 13.** The daily owners
   lane recorded each sent scan's results notice for the mailbox cleanup, which
   archived it 48 hours later; the weekly reads only the inbox, so by Friday most

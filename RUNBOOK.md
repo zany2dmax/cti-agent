@@ -1588,6 +1588,17 @@ The wording is yours: `SUPPLIER_QUESTION`, `SUPPLIER_MEANING`, `SUPPLIER_TPRM` a
 words that stop a No from standing (a supplier whose name, subject or notes hold
 one is Unsure, not No).
 
+**Threads the model never sees.** A thread whose subject, text, or form name or
+notes holds a phrase from `SUPPLIER_HOLD_PHRASES` (default: credit application,
+credit app, application for credit, customer credit, personal guarantee,
+personal guaranty, guarantor; whole words, any case) is not shown to the model at
+all: it goes to a person as an Unsure, with the reason "not sent to the AI", and
+gets the same Kanban item as any Unsure. It is never a No or a "not a request",
+because "credit application" can be a customer applying to you or you applying to
+a new supplier, and code cannot tell which without reading what the model must
+not see. Set the variable empty to hold nothing; set it to your own list to
+replace the default.
+
 **Testing the judgement.** `task eval:supplier` runs the real model on 53 invented
 requests (clear materials, clear technology, blank and vague forms, linked and
 unreadable forms, and hostile ones: injected instructions, a request that tries

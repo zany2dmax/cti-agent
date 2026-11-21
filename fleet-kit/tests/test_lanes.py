@@ -5732,6 +5732,7 @@ class SupplierRunner(unittest.TestCase):
                                                           shlex.quote(str(self.tmp / "claude.env"))))
         self.problems = ""
         self.requests = 2
+        self.held_only = False  # collect finds items, but all are held from the model
         self.write_supplier()
 
     def stub(self, name, body):
@@ -5754,6 +5755,7 @@ while [ $# -gt 0 ]; do
 done
 if [ "$MODE" = collect ]; then
   for (( i = 0; i < %d; i++ )); do printf 'REQUEST %%s' "$i" > "$DIR/00$i.input.txt"; done
+  if [ "%s" = yes ]; then : > "$DIR/has-items"; fi
   echo '{"entries":[{"id":"settled-earlier"}]}' > "$DIR/owned.json"
 fi
 if [ "$MODE" = finish ]; then
@@ -5762,7 +5764,7 @@ if [ "$MODE" = finish ]; then
   echo '{"entries":[{"id":"settled-earlier"},{"id":"settled-now"}]}' > "$DIR/owned.json"
   printf '%%s' "%s" > "$DIR/problems.txt"
 fi
-""" % (self.requests, digest_cmds, self.problems))
+""" % (self.requests, "yes" if self.held_only else "no", digest_cmds, self.problems))
 
     def run_it(self, *args, env=None):
         e = {"PATH": "/usr/bin:/bin", "HOME": str(self.home), "FLEET_HOME": str(self.home),
@@ -5780,6 +5782,18 @@ fi
 
     def model_calls(self):
         return [c for c in self.calls() if c.startswith("claude ")]
+
+    def test_a_run_of_only_held_threads_is_still_finished_and_never_shown_to_the_model(self):
+        # A credit application is held from the model: collect writes no input
+        # file for it. The run must not be taken for empty (it would never be
+        # filed or digested), and the model must not be called.
+        self.requests, self.held_only = 0, True
+        self.write_supplier()
+        r = self.run_it("--for-real", env={"SUPPLIER_MODEL": "sonnet"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.model_calls(), [])
+        self.assertTrue(any(" --finish " in c for c in self.calls()), self.calls())
+        self.assertIn("held from it", r.stderr)
 
     def test_two_credentials_mean_no_judgement(self):
         r = self.run_it("--dry-run", env={"SUPPLIER_MODEL": "sonnet",

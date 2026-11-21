@@ -131,6 +131,16 @@ func laneConfig() supplier.Config {
 			c.InternalDomains = append(c.InternalDomains, d)
 		}
 	}
+	// Threads that never reach the model. Set and empty means none; unset means
+	// the defaults.
+	if v, ok := os.LookupEnv("SUPPLIER_HOLD_PHRASES"); ok {
+		c.HoldPhrases = []string{}
+		for _, t := range strings.Split(v, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				c.HoldPhrases = append(c.HoldPhrases, t)
+			}
+		}
+	}
 	// Set and empty means "no technology words"; unset means the defaults.
 	if v, ok := os.LookupEnv("SUPPLIER_TECH_TERMS"); ok {
 		c.TechTerms = []string{}
@@ -280,7 +290,18 @@ func writeItems(dir string, c supplier.Collected) error {
 	if err := writeOwned(dir, c.Settled); err != nil {
 		return err
 	}
+	// A request that is all held threads leaves no input file, so the runner
+	// would take the run for empty and never finish it. This marker says there
+	// are items to finish.
+	if len(items) > 0 {
+		if err := os.WriteFile(filepath.Join(dir, "has-items"), nil, 0o600); err != nil {
+			return err
+		}
+	}
 	for i, it := range items {
+		if it.Held != "" {
+			continue // never written for a model; finish judges it by code alone
+		}
 		if err := os.WriteFile(inputPath(dir, i), []byte(it.Input), 0o600); err != nil {
 			return err
 		}

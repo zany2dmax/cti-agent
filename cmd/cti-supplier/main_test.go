@@ -234,3 +234,31 @@ func TestCommitOwnedRecordsSettledMailForTheCleanupUnderTheSupplierOwner(t *test
 		t.Errorf("processed-supplier.json:\n%s", got)
 	}
 }
+
+// A held thread (a credit application) is never written for a model: no input
+// file, but the run is marked as having items so the runner still finishes it.
+func TestAHeldItemHasNoInputFileButTheRunIsMarked(t *testing.T) {
+	dir := t.TempDir()
+	r := supplier.Request{MessageID: "h", ConversationID: "c", Subject: "credit application",
+		From: "a@example.test", Received: time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC), State: supplier.StateNone}
+	items := append(twoItems()[:1], supplier.Item{Request: r, Held: "credit application"})
+	if err := writeItems(dir, supplier.Collected{Items: items}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "000.input.txt")); err != nil {
+		t.Error("the ordinary item lost its input file")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "001.input.txt")); err == nil {
+		t.Error("a held thread was written for the model")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "has-items")); err != nil {
+		t.Errorf("the run is not marked as having items: %v", err)
+	}
+	empty := t.TempDir()
+	if err := writeItems(empty, supplier.Collected{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(empty, "has-items")); err == nil {
+		t.Error("an empty run was marked as having items")
+	}
+}
