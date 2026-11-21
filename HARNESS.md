@@ -36,10 +36,15 @@ these tools work, so each item says what it teaches as well as what it fixes.
 
 ## 1. What already exists
 
-Only one lane calls a model today: the orchestrator check-in
-(`fleet-kit/fleet/bin/run-checkin`, which runs `claude -p "/checkin"`). Every
-other lane is deterministic Go or Python. The triage agent
-(`fleet-kit/fleet/agents/triage`) is designed but not wired in.
+When this page was written, only one lane called a model: the orchestrator
+check-in (`fleet-kit/fleet/bin/run-checkin`, which runs `claude -p
+"/checkin"`). Since 1.6 and 1.7 two more do, both with no tools: the supplier
+judge (`run-supplier`, through the shared `share/model-lane.sh`, H4) and
+advisory triage's reader and judge (`cti-triage`, from the daily digest when
+`TRIAGE_ENABLED=1`; agents `triage-reader` and `triage-judge`). Every other
+lane is deterministic Go or Python. The single triage agent this page first
+anticipated (`fleet-kit/fleet/agents/triage`) was superseded by those two and
+is not invoked.
 
 | Harness piece | Where it lives |
 |---|---|

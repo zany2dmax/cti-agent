@@ -153,9 +153,10 @@ eval:supplier`) runs the same arguments.
 
 ## AI triage: untrusted input reaching a model with tools
 
-> **STATUS: PARTLY BUILT, NOT LIVE (2026-11-19).** The design changed. Relevance
-> is no longer judged against a hand-written organisation profile but against
-> facts from the organisation's own tools, in two model steps:
+> **STATUS: BUILT AND LIVE (1.7, 2026-11-20).** Advisory triage runs in the
+> daily digest when `TRIAGE_ENABLED=1`. The design changed on the way: relevance
+> is not judged against a hand-written organisation profile but against facts
+> from the organisation's own tools, in two model steps:
 >
 > - **The reader** (`cti-triage`, `agents/triage-reader/CLAUDE.md`) is a
 >   no-tools model shown only the advisory. Code checks its answer against
@@ -170,27 +171,34 @@ eval:supplier`) runs the same arguments.
 >   sightings are reported by code whatever the judge says.
 >   The reader may later be given web search, because it never holds our data.
 >
-> **In the daily digest behind `TRIAGE_ENABLED` (off by default).** Ingest
-> saves only threat-intel mail: anyone's mail holding a CVE, ATT&CK ID,
-> defanged indicator, public IP or hash, and anything from an authenticated
-> `TRIAGE_SENDERS` sender. Supplier and finance threads never reach a model.
-> Anyone can therefore spend reader calls by mailing an indicator, up to
-> `TRIAGE_MAX_PER_RUN` a day, and the reader holds nothing of ours to leak. `cti-triage --batch` triages them, and
-> `brief.py` renders FLEET ADVISORIES with every value escaped and nothing
-> made a link. Any failure costs the section, never the digest. Until it is
-> turned on, nothing here runs on a timer.
+> **In the daily digest, behind `TRIAGE_ENABLED` (`1` turns it on; the
+> default is off).** Ingest saves only threat-intel mail: a message holding a
+> CVE, ATT&CK ID, defanged indicator, public IP or hash **from a sender the
+> receiving server authenticated** (or internal mail), and anything from an
+> authenticated `TRIAGE_SENDERS` sender. A forged From with an indicator in it
+> does not reach a model. Supplier and finance threads, replies and auto-replies
+> never do. What is sent to a model passes `internal/redact` (tax ids, bank and
+> card numbers), and the model, the saved input and the report see the sender's
+> domain, never the address. At most `TRIAGE_MAX_PER_RUN` advisories are
+> triaged a day (authenticated feed senders first), and the input and report
+> files are validated as they are written and read. `cti-triage --batch`
+> triages them, and `brief.py` renders FLEET ADVISORIES with every value
+> escaped and nothing made a link. Any failure costs the section, never the
+> digest.
 
 This is the newest and sharpest boundary in the system, and the one most
-likely to be got wrong by a well-meaning change. The agent's standing
+likely to be got wrong by a well-meaning change. The two agents' standing
 instructions are written and reviewable at
-[`fleet-kit/fleet/agents/triage/CLAUDE.md`](fleet-kit/fleet/agents/triage/CLAUDE.md);
-the organisation profile it reads to judge relevance is a hand-written
-template at
-[`ORG-PROFILE.md`](fleet-kit/fleet/agents/triage/ORG-PROFILE-TEMPLATE.md) — the
-template is in the repository, the filled-in copy lives only at
-`/etc/cti-agent/ORG-PROFILE.md` and is gitignored — and is
-deliberately categories rather than inventory, because the repository is
-public.
+[`fleet-kit/fleet/agents/triage-reader/CLAUDE.md`](fleet-kit/fleet/agents/triage-reader/CLAUDE.md)
+and
+[`fleet-kit/fleet/agents/triage-judge/CLAUDE.md`](fleet-kit/fleet/agents/triage-judge/CLAUDE.md),
+installed root-owned. The earlier design, one agent judging relevance against a
+hand-written organisation profile
+([`agents/triage/`](fleet-kit/fleet/agents/triage/CLAUDE.md) and
+`ORG-PROFILE-TEMPLATE.md`, with the `cti-triage/1` verifier in
+`internal/triage/result.go`), is superseded: nothing invokes it. The rest of
+this section was written for that design; what it requires holds for the two
+agents that replaced it, and each point below says where it is now enforced.
 
 ### The problem
 
@@ -223,7 +231,7 @@ privilege inverts least privilege.
 The analysis agent must therefore be **separate, with its own standing
 instructions and its own — much smaller — set of permissions**:
 
-| | Orchestrator | Analysis agent |
+| | Orchestrator | Analysis agents (reader, judge) |
 |---|---|---|
 | Read the mailbox | yes | **no** — it is handed a prepared file |
 | Send mail | via the mailer | **no** |
@@ -233,7 +241,13 @@ instructions and its own — much smaller — set of permissions**:
 | Filesystem | fleet state | **one input file, one output file** |
 
 If the analysis agent is fully subverted by a crafted advisory, the worst case
-must be a wrong JSON document, validated by code that does not trust it.
+must be a wrong JSON document, validated by code that does not trust it. That
+is how both triage agents run: `claude` with no tools, no MCP servers, no
+settings from the host, an empty home directory and none of the fleet's
+secrets in its environment: the supplier judge's lock-down, applied in Go
+(`internal/triage/model.go`; the supplier lane's is `share/model-lane.sh`). The Falcon token
+is held by Go and never by a model. And the one agent that sees our data, the
+judge, never sees the advisory.
 
 This is not hypothetical. The campaign that prompted this design documents the
 attackers running a purpose-written skill to strip their own harness's content
@@ -248,8 +262,10 @@ judgment. Neither substitutes for the other.
 **Floor** — regex over stripped text, always runs, no model: CVE IDs, MITRE
 technique IDs, defanged indicators, links, counts. If everything else fails,
 the digest still reports *that* non-CVE intelligence arrived and what raw
-artifacts it contained. Today only the CVE half of this floor exists, in
-`internal/cti`; the rest is unbuilt.
+artifacts it contained. Both halves exist: CVEs in `internal/cti`, and ATT&CK
+IDs, defanged indicators, public IPs, hashes and links in
+`internal/triage/extract.go` (`triage.IntelMarkers` decides what counts as
+threat intel at ingest).
 
 **Ceiling** — the model: how many distinct items, what each is about, and
 whether it plausibly matters to this organisation.
@@ -277,6 +293,27 @@ waits on it and never fails because of it.
 
 4. **Output must be escaped on render**, the same as every other third-party
    string that reaches an email from this system.
+
+Where each control lives in the built lane:
+
+1. **Annotate, never gate.** FLEET ADVISORIES lists every advisory that was
+   saved for triage: sightings first, then likely and possible with the
+   evidence, one line each for the rest (a "no threat found" line included),
+   and any not triaged with the reason (over the cap, out of time, a failure).
+   Neither model can remove an advisory from the section.
+2. **Verified against the source.** The reader's vendors, products, versions
+   and techniques are dropped unless the advisory supports them
+   (`triage.VerifySubjects`). Indicators come from code's extraction, not from
+   a model. The judge must cite numbered facts from the lookups; an invented
+   fact, or another subject's, is dropped, an unsupported verdict is corrected,
+   and code raises what it knows (`triage.VerifyJudgement`): installed software
+   not known to be fixed is never below "possible", and a host that saw an
+   indicator is reported by code whatever the judge said.
+3. **Schema-validated.** The reader's answer must parse as `cti-subjects/2` and
+   the judge's as `cti-judgement/1`, strictly; anything else is a failure for that
+   advisory, reported in the section, never an empty result.
+4. **Escaped on render.** `brief.py` escapes every value and makes nothing a
+   link.
 
 ### Instruction-injection posture
 
@@ -1077,8 +1114,8 @@ port, path or credentials, and the client follows no redirect. So neither a
 typo nor a 3xx can send the client secret or the bearer token anywhere else.
 Errors carry the API's own error text, sanitised and shortened, never a
 response body, which on a token call could echo the request. `--check` prints
-counts at most and revokes its token on exit. Advisory triage, when built,
-will call this from deterministic Go only. No model is ever given the token.
+counts at most and revokes its token on exit. Advisory triage calls this from
+deterministic Go only (`cti-triage`). No model is ever given the token.
 
 Model usage is rationed by `cti-budget` — window and daily ceilings with
 exponential backoff — so an agent loop cannot consume a shared subscription.
@@ -1099,10 +1136,14 @@ a timer with nobody watching. Four properties follow:
 2. **It cannot permanently delete.** See the Graph section above.
 3. **It acts only on messages a completed run recorded as processed.** No
    record, no move — that log is its entire authority.
-4. **Only three kinds of message move**: an advisory the agent took a CVE
-   from, a message whose own headers declare it an automatic reply, and the
-   fleet's own report carrying a correctly **signed** `X-CTI-Agent-Sent`
-   header. Everything else is left where a human can see it.
+4. **Only these kinds of message move**: mail a lane recorded that it dealt
+   with (an advisory the digest took a CVE from, a Qualys notice a scan report
+   used and its companion notices, a supplier request the supplier lane judged),
+   unless a person flagged it; a message whose own headers or subject declare it
+   an automatic reply; a quarantine digest, unless it lists held mail the fleet
+   reads or cannot be read; and the fleet's own report carrying a correctly
+   **signed** `X-CTI-Agent-Sent` header. Everything else is left where a human
+   can see it (`internal/mailbox/plan.go` has the rules, in order).
 
 Rule 4 is a security property, not tidiness. The mailbox is a shared reporting
 address: it receives phishing reports from colleagues, alerts, and ordinary
@@ -1587,9 +1628,10 @@ nor the portal reports the effective scope.
   live in a markdown file the agent reads. The controls that are actually
   enforced are the ones in code: the send gate, dry-run defaults, the absence
   of a delete verb.
-- **Model-based triage will be non-deterministic.** The controls designed for
-  it are compensating, not eliminating. A model can still be wrong about
-  relevance — which is why it must not be able to suppress.
+- **Model-based triage is non-deterministic.** Its controls are compensating,
+  not eliminating. A model can still be wrong about relevance — which is why it
+  cannot suppress an advisory, and why sightings come from code. A "likely" or
+  "possible" is a reason for a person to look, not a finding.
 - **`#nosec` annotations exist**, each inline with its reason - mostly G304
   (config and state paths set by the operator), plus G706, G204, G306, and two
   G402 in the domains lane, where the web fetch deliberately skips certificate
