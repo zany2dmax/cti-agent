@@ -153,9 +153,9 @@ def sign_self_header(secret, mailbox, nonce=None):
 
 
 def token():
-    tenant = os.environ.get("TENANT_ID") or die("TENANT_ID not set")
+    tenant = secret("TENANT_ID") or die("TENANT_ID not set")
     body = urllib.parse.urlencode({
-        "client_id": os.environ.get("CLIENT_ID") or die("CLIENT_ID not set"),
+        "client_id": secret("CLIENT_ID") or die("CLIENT_ID not set"),
         "client_secret": secret("CLIENT_SECRET") or die("CLIENT_SECRET not set"),
         "scope": "https://graph.microsoft.com/.default",
         "grant_type": "client_credentials",

@@ -70,6 +70,8 @@ def load_manifest(path):
         r = e.get("readers", "")
         e["readers"] = [] if r in ("", "NONE") else r.split()
         e["secret"] = e.get("secret", "") == "yes"
+        # The login half of a secret: stored with it, as a credential.
+        e["credential"] = e.get("credential", "") == "yes"
         e["default"] = e.get("default", e.get("code-default"))
         e["empty_differs"] = e.get("empty-differs", "") == "yes"
     return entries
@@ -168,7 +170,9 @@ def check(env_path, manifest):
         unknown.append({"key": k, "did_you_mean": near[0] if near else None})
     at_default, empty, missing = [], [], []
     listed = stored_names()
-    in_store = {k for k, e in manifest.items() if e["secret"] and k in listed}
+    in_store = {k for k, e in manifest.items() if (e["secret"] or e["credential"]) and k in listed}
+    logins_in_env = sorted(k for k, e in manifest.items()
+                           if e["credential"] and values.get(k) and k not in listed)
     for k, e in sorted(manifest.items()):
         need, why = required_now(e.get("required", ""), values, manifest)
         if k not in values:
@@ -202,6 +206,7 @@ def check(env_path, manifest):
         # each lane's dry run has passed (cti-agent-secrets status says the same).
         "stored_and_in_env": sorted(k for k in in_store if values.get(k)),
         "stored": sorted(in_store),
+        "logins_in_env": logins_in_env,
     }
 
 
@@ -246,6 +251,9 @@ def print_check(r, out):
     if r["stored_and_in_env"]:
         p(f"\nSTORED, AND STILL IN fleet.env - delete these lines once each lane's dry run passes: {len(r['stored_and_in_env'])}")
         p("  " + " ".join(r["stored_and_in_env"]))
+    if r["logins_in_env"]:
+        p(f"\nLOGINS NOT MOVED YET - the login half of a secret, still in fleet.env: {len(r['logins_in_env'])}")
+        p("  " + " ".join(r["logins_in_env"]) + "   (sudo cti-agent-secrets import)")
     p(f"\nSECRETS IN fleet.env: {len(r['secrets_set'])} of the {r['secrets_known']} the fleet knows."
       " Every lane's environment holds these; each is read by:")
     for s in r["secrets_set"]:

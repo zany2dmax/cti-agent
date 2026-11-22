@@ -58,7 +58,7 @@ NAMES_SECRETS_ONLY = {"checkin-bash-guard"}
 # a new secret does not credit the guard with reading it.
 SECRET_NAME = re.compile(r"(SECRET|TOKEN|PASSWORD|_PAT$|API_KEY|SALT)")
 # Hand-kept fields, in the order they are written.
-KEPT = ("secret", "required", "default", "note")
+KEPT = ("secret", "credential", "required", "default", "note")
 
 KEY_LINE = re.compile(r'^#?\s?([A-Z][A-Z0-9_]{2,})=("[^"]*"|\'[^\']*\'|\S*)\s*$')
 SECTION = re.compile(r"^# ══ (.+?) ═")
@@ -202,8 +202,10 @@ HEADER = """\
 # than unset, so it is a setting, not a removable line) come from the code
 # and are rewritten.
 # Kept by hand, and preserved on --write:
-#   secret:    yes - a credential; step 2 of the fleet.env split moves these
-#              into systemd credentials, one lane at a time
+#   secret:    yes - a secret; it lives in a systemd credential, not fleet.env
+#   credential: yes - not a secret, but the login half of one (a client ID, a
+#              username, the API host); it moves into a credential with its
+#              secret, so a lane that does not use that system never sees it
 #   required:  always | if KEY=VALUE  - fleet-config check reports it missing
 #   default:   VALUE - what the code uses when the key is unset; a setting
 #              equal to it can be removed. Overrides code-default when both
@@ -254,7 +256,7 @@ def grants(scanned, kept):
     program is "started by path" when its name appears after a "/"
     ($FLEET_CODE/bin/cti-mailer, lanes/enrich.py, share/model-lane.sh), which
     a mention in prose does not match."""
-    secrets = {k for k, h in kept.items() if h.get("secret") == "yes"}
+    secrets = {k for k, h in kept.items() if h.get("secret") == "yes" or h.get("credential") == "yes"}
     reads = {}
     for k in secrets:
         for r in scanned.get(k, {}).get("readers", []):

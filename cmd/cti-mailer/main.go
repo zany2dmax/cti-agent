@@ -380,7 +380,7 @@ func run() int {
 	}
 
 	save := strings.EqualFold(strings.TrimSpace(*saveToSent), "true")
-	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
+	g := graph.New(fleetenv.Secret("TENANT_ID"), fleetenv.Secret("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -644,7 +644,7 @@ func preflight(mailbox string) int {
 		return exitFailure
 	}
 
-	g := graph.New(os.Getenv("TENANT_ID"), os.Getenv("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
+	g := graph.New(fleetenv.Secret("TENANT_ID"), fleetenv.Secret("CLIENT_ID"), fleetenv.Secret("CLIENT_SECRET"))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	tok, err := g.AccessToken(ctx)

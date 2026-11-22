@@ -6592,7 +6592,8 @@ class FleetConfig(unittest.TestCase):
             "key: GRAPH_FOLDER\nreaders: cti-agent\ncode-default: Inbox\n\n"
             "key: LOOKUP_PROVIDER\nreaders: cti-agent\ncode-default: qualys\n\n"
             "key: QUALYS_PASSWORD\nreaders: cti-vmscan\nsecret: yes\nrequired: if LOOKUP_PROVIDER=qualys\n\n"
-            "key: DOM_TO\nreaders: run-domains\n\n")
+            "key: DOM_TO\nreaders: run-domains\n\n"
+            "key: TENANT_ID\nreaders: cti-mailer\ncredential: yes\n\n")
 
     def run_tool(self, *args, env_text=None):
         env = {"PATH": os.environ["PATH"], "FLEET_CODE": str(self.tmp),
@@ -6697,13 +6698,20 @@ class FleetConfig(unittest.TestCase):
         self.assertIn("not set", late["NOWHERE"]["why"])
 
     def test_a_secret_moved_to_a_credential_is_not_missing(self):
-        (self.tmp / "credentials.stored").write_text("# names only\nCLIENT_SECRET\n")
+        (self.tmp / "credentials.stored").write_text("# names only\nCLIENT_SECRET\nTENANT_ID\n")
         r = self.run_tool("check", "--json", env_text="LOOKUP_PROVIDER=none\n")
         j = json.loads(r.stdout)
         self.assertEqual(j["missing"], [])
-        self.assertEqual(j["stored"], ["CLIENT_SECRET"])
+        self.assertEqual(j["stored"], ["CLIENT_SECRET", "TENANT_ID"])
         r = self.run_tool("check", "--json", env_text="LOOKUP_PROVIDER=none\nCLIENT_SECRET=still-here\n")
         self.assertEqual(json.loads(r.stdout)["stored_and_in_env"], ["CLIENT_SECRET"])
+
+    def test_a_login_not_moved_yet_is_listed(self):
+        (self.tmp / "credentials.stored").write_text("CLIENT_SECRET\n")
+        r = self.run_tool("check", "--json", env_text="LOOKUP_PROVIDER=none\nTENANT_ID=tenant-guid-x\n")
+        j = json.loads(r.stdout)
+        self.assertEqual(j["logins_in_env"], ["TENANT_ID"])
+        self.assertNotIn("tenant-guid-x", r.stdout)
         self.assertNotIn("still-here", r.stdout)
 
     def test_an_unreadable_file_is_an_error_not_a_pass(self):
@@ -6746,7 +6754,7 @@ class SecretsAsCredentials(unittest.TestCase):
         (self.tmp / "code").mkdir()
         (self.tmp / "code" / "settings.manifest").write_text(
             "key: CLIENT_SECRET\nsecret: yes\n\nkey: JIRA_API_TOKEN\nsecret: yes\n\n"
-            "key: NVD_API_KEY\nsecret: yes\n\nkey: GRAPH_FOLDER\n\n")
+            "key: NVD_API_KEY\nsecret: yes\n\nkey: GRAPH_FOLDER\n\nkey: CLIENT_ID\ncredential: yes\n\n")
         self.store = self.tmp / "store"
         self.argv_log = self.tmp / "argv.log"
         fake = self.tmp / "systemd-creds"
@@ -6764,14 +6772,16 @@ class SecretsAsCredentials(unittest.TestCase):
 
     def test_import_stores_known_secrets_and_never_shows_a_value(self):
         (self.tmp / "fleet.env").write_text(
-            "CLIENT_SECRET=client-value-1  # a note bash ignores\nJIRA_API_TOKEN='jira-value-2'\n"
+            "CLIENT_SECRET=client-value-1  # a note bash ignores\nJIRA_API_TOKEN='jira-value-2'\nCLIENT_ID=app-id-3\n"
             "HELPER=nvd-part\nNVD_API_KEY=$HELPER-x\nGRAPH_FOLDER=Inbox\nUNKNOWN_SECRET=x\n")
         r = self.run_tool("import", "--dry-run")
         self.assertIn("would store CLIENT_SECRET", r.stdout)
         self.assertFalse(self.store.exists() and any(self.store.iterdir()), "a dry run stored something")
         r = self.run_tool("import")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(sorted(p.name for p in self.store.iterdir()), ["CLIENT_SECRET", "JIRA_API_TOKEN", "NVD_API_KEY"])
+        self.assertEqual(sorted(p.name for p in self.store.iterdir()),
+                         ["CLIENT_ID", "CLIENT_SECRET", "JIRA_API_TOKEN", "NVD_API_KEY"],
+                         "a login half (credential: yes) moves with its secret")
         self.assertEqual((self.store / "JIRA_API_TOKEN").read_text(), "ENC:jira-value-2")
         self.assertEqual((self.store / "CLIENT_SECRET").read_text(), "ENC:client-value-1", "bash drops the comment")
         self.assertEqual((self.store / "NVD_API_KEY").read_text(), "ENC:nvd-part-x", "bash expands the helper")
@@ -6779,11 +6789,11 @@ class SecretsAsCredentials(unittest.TestCase):
         listed = (self.tmp / "credentials.stored").read_text()
         self.assertIn("CLIENT_SECRET\n", listed)
         everything = r.stdout + r.stderr + self.argv_log.read_text() + listed
-        for v in ("client-value-1", "jira-value-2", "nvd-part"):
+        for v in ("client-value-1", "jira-value-2", "nvd-part", "app-id-3"):
             self.assertNotIn(v, everything, "a value was printed or put on a command line")
         self.assertIn("--name=CLIENT_SECRET", self.argv_log.read_text())
         r = self.run_tool("status")
-        self.assertIn("3 of 3 secrets stored", r.stdout)
+        self.assertIn("4 of 4 secrets and logins stored", r.stdout)
         self.assertNotIn("client-value-1", r.stdout)
         r = self.run_tool("import")
         self.assertIn("nothing to import", r.stdout)
@@ -6825,6 +6835,26 @@ class SecretsAsCredentials(unittest.TestCase):
                 mode = next(i for i, l in enumerate(lines) if re.match(r'^\. ".*share/fleet-mode\.sh"$', l))
                 self.assertGreater(call, env)
                 self.assertGreater(call, mode)
+
+    def test_no_unit_or_command_gets_a_secret_without_its_login(self):
+        """Once the login halves leave fleet.env, a grant with the secret but
+        not its client ID or username would fail - on the box, at night."""
+        pairs = {"CLIENT_SECRET": ["TENANT_ID", "CLIENT_ID"],
+                 "QUALYS_PASSWORD": ["QUALYS_USERNAME", "QUALYS_BASE_URL"],
+                 "JIRA_API_TOKEN": ["JIRA_EMAIL", "JIRA_BASE_URL"],
+                 "FALCON_CLIENT_SECRET": ["FALCON_CLIENT_ID", "FALCON_BASE_URL"],
+                 "POD_API_TOKEN": ["POD_CLUSTER_ID"]}
+        grants = [(p.name, set(re.findall(r"(?m)^ImportCredential=(\S+)", p.read_text())))
+                  for p in (KIT / "fleet" / "systemd-fedora").glob("*.service")]
+        for line in (KIT / "fleet" / "credentials.map").read_text().splitlines():
+            if line and not line.startswith("#"):
+                name, *keys = line.split()
+                grants.append((name, set(keys)))
+        for name, keys in grants:
+            for secret, logins in pairs.items():
+                if secret in keys:
+                    with self.subTest(grant=name, secret=secret):
+                        self.assertEqual([l for l in logins if l not in keys], [])
 
     def test_the_model_token_reaches_only_the_claude_subshell(self):
         creds = self.tmp / "creds"

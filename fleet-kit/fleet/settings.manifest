@@ -6,8 +6,10 @@
 # than unset, so it is a setting, not a removable line) come from the code
 # and are rewritten.
 # Kept by hand, and preserved on --write:
-#   secret:    yes - a credential; step 2 of the fleet.env split moves these
-#              into systemd credentials, one lane at a time
+#   secret:    yes - a secret; it lives in a systemd credential, not fleet.env
+#   credential: yes - not a secret, but the login half of one (a client ID, a
+#              username, the API host); it moves into a credential with its
+#              secret, so a lane that does not use that system never sees it
 #   required:  always | if KEY=VALUE  - fleet-config check reports it missing
 #   default:   VALUE - what the code uses when the key is unset; a setting
 #              equal to it can be removed. Overrides code-default when both
@@ -111,6 +113,7 @@ readers: model-lane.sh run-checkin
 key: CLIENT_ID
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-alert cti-appreport cti-appscan cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-vmscan dev-run mailer.py run-appscan
+credential: yes
 required: always
 
 key: CLIENT_SECRET
@@ -197,10 +200,12 @@ readers: cti-domains cti-mailer installer run-domains
 key: FALCON_BASE_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-falcon cti-triage installer
+credential: yes
 
 key: FALCON_CLIENT_ID
 section: not in fleet.env.example
 readers: cti-agent cti-falcon cti-triage
+credential: yes
 
 key: FALCON_CLIENT_SECRET
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -390,6 +395,7 @@ secret: yes
 key: JIRA_BASE_URL
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan installer
+credential: yes
 
 key: JIRA_CLOSE_TRANSITION
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -398,6 +404,7 @@ readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesd
 key: JIRA_CLOUD_ID
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan installer
+credential: yes
 
 key: JIRA_DOMAINS_ISSUE_TYPE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -410,6 +417,7 @@ readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesd
 key: JIRA_EMAIL
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+credential: yes
 
 key: JIRA_ISSUE_TYPE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -502,6 +510,7 @@ secret: yes
 key: POD_CLUSTER_ID
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-podprobe installer
+credential: yes
 
 key: PROOFPOINT_POD_IPS
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -514,6 +523,7 @@ readers: cti-domains cti-jira
 key: QUALYS_BASE_URL
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
 readers: cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-triage cti-vmscan dev-run installer
+credential: yes
 required: if LOOKUP_PROVIDER=qualys
 
 key: QUALYS_KB_CACHE
@@ -542,6 +552,7 @@ readers: cti-appreport cti-appscan cti-jira cti-vmscan
 key: QUALYS_USERNAME
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run
+credential: yes
 required: if LOOKUP_PROVIDER=qualys
 
 key: REPORT_HOSTNAMES
@@ -660,6 +671,7 @@ readers: cti-supplier
 key: TENANT_ID
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-alert cti-appreport cti-appscan cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-vmscan dev-run mailer.py run-appscan
+credential: yes
 required: always
 
 key: TRIAGE_BLIND_SPOTS

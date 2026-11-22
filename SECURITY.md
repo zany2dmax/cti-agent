@@ -187,6 +187,11 @@ secret reaches a program:
   from the timer: `PrivateTmp`, `ProtectHome` and `ProtectSystem`, so a file
   the operator passes stays readable.
 
+**Logins too.** Each secret's login half (client ID, username, API host) is
+marked `credential: yes` and moves with it, so a lane that doesn't use a
+system holds none of its login. `TENANT_ID` is discoverable from the domain
+anyway; the gain is that each lane sees only the systems it uses.
+
 **Limits.** The grants are generated as "could read", so wider than needed:
 a runner gets the secrets of every program it calls. Until a secret's line is
 deleted from `fleet.env`, the unit's own starting environment still holds it

@@ -259,7 +259,7 @@ func run() int {
 		since, to := domains.GatewayWindow(opt.Now, gwDays)
 		go func() {
 			defer close(gwDone)
-			cluster := strings.TrimSpace(os.Getenv("POD_CLUSTER_ID"))
+			cluster := strings.TrimSpace(fleetenv.Secret("POD_CLUSTER_ID"))
 			token := strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN"))
 			if cluster == "" || token == "" {
 				gwStatus.Err = "POD_CLUSTER_ID and POD_API_TOKEN are not both set in fleet.env"
@@ -478,7 +478,7 @@ func doCheck(inventory string) int {
 	case "", "off":
 		logf("note   : mail gateway check is off (DOMAINS_MAIL_GATEWAY)")
 	case "pod":
-		if strings.TrimSpace(os.Getenv("POD_CLUSTER_ID")) == "" || strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN")) == "" {
+		if strings.TrimSpace(fleetenv.Secret("POD_CLUSTER_ID")) == "" || strings.TrimSpace(fleetenv.Secret("POD_API_TOKEN")) == "" {
 			logf("FAIL   : DOMAINS_MAIL_GATEWAY=pod but POD_CLUSTER_ID and POD_API_TOKEN are not both set")
 			failed++
 		} else {

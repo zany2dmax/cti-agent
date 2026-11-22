@@ -81,6 +81,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     credential is skipped, and every program falls back to `fleet.env`, so
     secrets move one at a time.
 
+  - **The login halves move with their secrets.** That's the client IDs,
+    usernames and API hosts (`TENANT_ID`, `CLIENT_ID`, `QUALYS_USERNAME`,
+    `QUALYS_BASE_URL`, `JIRA_EMAIL`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`,
+    `FALCON_CLIENT_ID`, `FALCON_BASE_URL`, `POD_CLUSTER_ID`), marked
+    `credential: yes`. A lane that doesn't use a system sees none of its
+    login. A test checks that every grant with a secret also has its login.
+
   **Upgrade:** nothing required. To move the secrets, follow RUNBOOK §11n:
   `sudo cti-agent-secrets import`, run each lane's dry run, then delete the
   secrets' lines from `fleet.env`. Needs systemd 254 or later.

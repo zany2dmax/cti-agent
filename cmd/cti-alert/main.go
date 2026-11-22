@@ -303,8 +303,8 @@ func boardLine(f failure) (level, msg string) {
 // sendEmail mails the alert. to overrides the recipient (a dev test); empty
 // means the operator, as always.
 func sendEmail(subject, htmlBody string, f failure, to string) (string, error) {
-	tenant := os.Getenv("TENANT_ID")
-	clientID := os.Getenv("CLIENT_ID")
+	tenant := fleetenv.Secret("TENANT_ID")
+	clientID := fleetenv.Secret("CLIENT_ID")
 	secret := fleetenv.Secret("CLIENT_SECRET")
 	from := os.Getenv("GRAPH_MAILBOX")
 	if to == "" {

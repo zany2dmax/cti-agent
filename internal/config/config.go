@@ -370,8 +370,8 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 	}
 
 	cfg := Config{
-		TenantID:     os.Getenv("TENANT_ID"),
-		ClientID:     os.Getenv("CLIENT_ID"),
+		TenantID:     fleetenv.Secret("TENANT_ID"),
+		ClientID:     fleetenv.Secret("CLIENT_ID"),
 		ClientSecret: fleetenv.Secret("CLIENT_SECRET"),
 		// No default. A hardcoded address here shipped one organisation's
 		// internal distribution list as the fallback for everyone else's
@@ -383,8 +383,8 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		DigestSkipSubjects:   strings.Join(skipSubjects(), ","),
 		GraphLookback:        time.Duration(lookbackHours) * time.Hour,
 		LookupProvider:       getenvDefault("LOOKUP_PROVIDER", "qualys"),
-		QualysBaseURL:        os.Getenv("QUALYS_BASE_URL"),
-		QualysUsername:       os.Getenv("QUALYS_USERNAME"),
+		QualysBaseURL:        fleetenv.Secret("QUALYS_BASE_URL"),
+		QualysUsername:       fleetenv.Secret("QUALYS_USERNAME"),
 		QualysPassword:       fleetenv.Secret("QUALYS_PASSWORD"),
 		QualysKBCachePath:    getenvDefault("QUALYS_KB_CACHE", "./qualys_kb_cache.json"),
 		QualysKBMaxAge:       time.Duration(kbMaxAgeHours) * time.Hour,
@@ -399,9 +399,9 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		MailboxFeedSenders:   os.Getenv("MAILBOX_FEED_SENDERS"),
 		MailboxTeamSenders:   os.Getenv("MAILBOX_TEAM_SENDERS"),
 
-		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
-		JiraCloudID:  os.Getenv("JIRA_CLOUD_ID"),
-		JiraEmail:    os.Getenv("JIRA_EMAIL"),
+		JiraBaseURL:  fleetenv.Secret("JIRA_BASE_URL"),
+		JiraCloudID:  fleetenv.Secret("JIRA_CLOUD_ID"),
+		JiraEmail:    fleetenv.Secret("JIRA_EMAIL"),
 		JiraAPIToken: fleetenv.Secret("JIRA_API_TOKEN"),
 		// No defaults, on purpose. "Task" would have been the obvious one and
 		// it is WRONG here: the CR project is a Service Management desk whose

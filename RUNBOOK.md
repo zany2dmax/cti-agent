@@ -3157,6 +3157,16 @@ the secrets in `fleet.env`: nothing else changes. The model token must be
 5. **Let one day of timers run**, then check the Daily Brief and
    `sudo cti-agent fleet-journal` as usual.
 
+**The login halves move too.** A secret is only half a login. Its client ID,
+username or API host (`TENANT_ID`, `CLIENT_ID`, `QUALYS_USERNAME`,
+`QUALYS_BASE_URL`, `JIRA_EMAIL`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`,
+`FALCON_CLIENT_ID`, `FALCON_BASE_URL`, `POD_CLUSTER_ID`) is marked
+`credential: yes` in `settings.manifest`. It moves with its secret, and only
+the units that get the secret get it. `cti-agent-secrets import` stores them,
+and `fleet-config check` lists any still in `fleet.env` under `LOGINS NOT
+MOVED YET`. Then run the lanes' dry runs and delete those lines, as for the
+secrets.
+
 **Rotating a secret** (a new Graph client secret, say):
 `sudo cti-agent-secrets set CLIENT_SECRET`. The next run of every unit uses
 it. No `fleet.env` edit and no restart.

@@ -52,10 +52,17 @@ Environment=FLEET_FEEDS=/etc/cti-agent/feeds.txt
 # Only these secrets reach this unit, as files under $CREDENTIALS_DIRECTORY.
 # One missing from /etc/credstore.encrypted is skipped, not an error.
 ImportCredential=CLAUDE_CODE_OAUTH_TOKEN
+ImportCredential=CLIENT_ID
 ImportCredential=CLIENT_SECRET
 ImportCredential=JIRA_API_TOKEN
+ImportCredential=JIRA_BASE_URL
+ImportCredential=JIRA_CLOUD_ID
+ImportCredential=JIRA_EMAIL
 ImportCredential=NVD_API_KEY
+ImportCredential=QUALYS_BASE_URL
 ImportCredential=QUALYS_PASSWORD
+ImportCredential=QUALYS_USERNAME
+ImportCredential=TENANT_ID
 # END credentials
 ExecStart=/opt/cti-agent/bin/run-appowners --for-real
 TimeoutStartSec=3600
