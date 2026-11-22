@@ -2539,9 +2539,14 @@ direction, header From, sender IP, route names, DMARC and SPF results.
 
 ## 11h. Man pages
 
-Every operator command has a page: the ten Go binaries, the `run-*` runners,
-`fleet-db`, `fleet-board`, the `cti-agent` wrapper, the Python lanes and
-`dev-run`. The installer puts them in `/usr/local/share/man/man1`:
+Every operator command has a page:
+- every Go binary, the `run-*` runners, the `fleet-*` tools, the `cti-agent`
+  wrapper, the Python lanes and `dev-run`;
+- the root tools run with plain `sudo`: `cti-agent-update`,
+  `cti-agent-secrets` and `cti-agent-settings`.
+
+The installer puts them in `/usr/local/share/man/man1`. The wrapper and the
+three root tools also have bash and zsh tab completion:
 
 ```bash
 man cti-domains

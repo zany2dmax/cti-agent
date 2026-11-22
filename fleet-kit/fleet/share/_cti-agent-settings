@@ -1,0 +1,22 @@
+#compdef cti-agent-settings
+# zsh completion for cti-agent-settings. Installed by install-fedora.sh into
+# site-functions. Works under sudo. A test (test_lanes.py, SbinTools) fails
+# when these subcommands and flags differ from the tool's own.
+_cti-agent-settings() {
+  local -a subs d
+  subs=(
+    'status:split or not; which files, how many settings each'
+    'split:write fleet.d/ (core + one file per lane) and move fleet.env aside'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'cti-agent-settings command' subs
+    return
+  fi
+  [[ "${words[2]}" == split ]] || return
+  (( ${words[(I)(--dry-run|--for-real)]} )) && return 0
+  d=("--dry-run   -- which setting would go where; write nothing")
+  compadd -V required/safe -X "%B%F{green}REQUIRED, one of - SAFE: writes nothing%f%b" -d d -- --dry-run
+  d=("--for-real  -- write the files and move fleet.env aside")
+  compadd -V required/changes -X "%B%F{red}REQUIRED, one of - CHANGES THE SETTINGS%f%b" -d d -- --for-real
+}
+_cti-agent-settings "$@"

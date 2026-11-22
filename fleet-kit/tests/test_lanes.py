@@ -7041,5 +7041,55 @@ class SettingsPerLane(unittest.TestCase):
                 self.assertLess(j, t.index("\nset +a\n"))
 
 
+
+class SbinTools(unittest.TestCase):
+    """A root tool in /usr/local/sbin is a command the operator types, so it
+    gets what cti-agent-update has: a man page, bash and zsh completion that
+    the installer installs, relabels and removes, a line in the README's file
+    tree and in the cheat sheet - and completions that offer exactly the
+    tool's own subcommands and flags. cti-agent-secrets shipped without its
+    completion; this keeps the next one from doing the same."""
+
+    REPO = KIT.parent
+    TOOLS = ("cti-agent-secrets", "cti-agent-settings")
+
+    def test_each_tool_has_its_man_page_completion_and_docs(self):
+        inst = (KIT / "install-fedora.sh").read_text()
+        readme = (KIT / "README.md").read_text()
+        cheat = (self.REPO / "CHEATSHEET.md").read_text()
+        for t in self.TOOLS:
+            with self.subTest(tool=t):
+                self.assertTrue((self.REPO / "man" / "man1" / f"{t}.1").is_file(), "man page")
+                for f in (f"{t}.bash", f"_{t}"):
+                    self.assertTrue((KIT / "fleet" / "share" / f).is_file(), f)
+                self.assertIn(f"/usr/local/sbin/{t}", inst, "installed")
+                self.assertIn("for t in cti-agent-secrets cti-agent-settings; do", inst, "completion installed")
+                self.assertIn(f"/usr/share/bash-completion/completions/{t}", inst, "relabelled and removed")
+                self.assertIn(f"/usr/share/zsh/site-functions/_{t}", inst)
+                self.assertIn(f"bin/{t}", readme, "README file tree")
+                self.assertIn(f"sudo {t} ", cheat, "cheat sheet")
+
+    def test_each_man_page_documents_every_subcommand_and_flag(self):
+        for t in self.TOOLS:
+            src = (KIT / "bin" / t).read_text()
+            page = (self.REPO / "man" / "man1" / f"{t}.1").read_text().replace("\\-", "-")
+            for w in set(re.findall(r'add_parser\("([a-z-]+)"', src)) | set(re.findall(r'add_argument\("(--[a-z-]+)"', src)):
+                with self.subTest(tool=t, word=w):
+                    self.assertIn(w, page)
+
+    def test_completions_offer_exactly_the_tools_subcommands_and_flags(self):
+        for t in self.TOOLS:
+            src = (KIT / "bin" / t).read_text()
+            subs = set(re.findall(r'add_parser\("([a-z-]+)"', src))
+            flags = set(re.findall(r'add_argument\("(--[a-z-]+)"', src))
+            for f in (f"{t}.bash", f"_{t}"):
+                comp = (KIT / "fleet" / "share" / f).read_text()
+                with self.subTest(tool=t, completion=f):
+                    for w in subs | flags:
+                        self.assertIn(w, comp, f"{w} is the tool's but the completion does not offer it")
+                    offered = set(re.findall(r"(?<![\w-])(--[a-z][a-z-]+)", comp))
+                    self.assertEqual(offered - flags, set(), "the completion offers a flag the tool does not take")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

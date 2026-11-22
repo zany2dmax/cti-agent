@@ -1928,6 +1928,8 @@ fleet-kit/
 ├── install-fedora.sh              idempotent installer (Fedora/RHEL, FHS layout)
 ├── update-fedora.sh               pull the kit, then run the installer from it (cti-agent-update)
 ├── bin/dev-run                    local runner: doctor/ingest/enrich/brief/send
+├── bin/cti-agent-secrets          root tool: move secrets and logins into systemd credentials (status/import/set/remove)
+├── bin/cti-agent-settings         root tool: split fleet.env into fleet.d/ core + one file per lane (status/split)
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate
     ├── fleet.env.example          all config, superset of the Go agent's .env
