@@ -340,6 +340,44 @@ sudo cti-agent cti-triage --batch /var/lib/cti-agent/state/enriched-$(date +%F)-
 sudo cti-agent cti-podprobe --since 2026-11-02T10:00:00-0500 --to 2026-11-02T11:00:00-0500   # PoD Log API counts, read only
 ```
 
+## 10a. Secrets and settings (fleet.env, split in three steps)
+
+`fleet.env` held every secret and every setting, and every unit loaded all of
+it. It is being split so each lane sees only its own. Each step is optional and
+reversible; nothing changes until you take it. Full steps: RUNBOOK 11m, 11n, 11o.
+
+```bash
+sudo cti-agent fleet-config check               # step 1: typos, missing, removable, which secrets are still in the file; never prints a value
+sudo cti-agent fleet-config list --by-reader    # which programs read each setting
+sudo cti-agent-secrets status                   # step 2: each secret and login: stored or not, still in fleet.env or not
+sudo cti-agent-secrets import --dry-run         # what would be encrypted
+sudo cti-agent-secrets import                   # encrypt what fleet.env holds into /etc/credstore.encrypted
+sudo cti-agent-secrets set CLIENT_SECRET        # store or ROTATE one (typed, not echoed); the next run of every unit uses it
+sudo cti-agent-secrets remove NAME              # go back: programs fall back to the fleet.env line
+sudo cti-agent-settings status                  # step 3: is fleet.env split into fleet.d/ yet?
+sudo cti-agent-settings split --dry-run         # the plan, key names only; refuses while a secret is still in fleet.env
+sudo cti-agent-settings split --for-real        # write fleet.d/ (core + one file per lane), move fleet.env aside
+journalctl -u 'cti-manual-*' -n 50              # hand runs, once a secret is stored (see below)
+```
+
+- **`cti-agent-secrets` and `cti-agent-settings` are run with plain `sudo`**,
+  not through `sudo cti-agent`. They need systemd 254 or later; the installer
+  warns if the box is older.
+- **The order:** `fleet-config check`, then `cti-agent-secrets import`, then run
+  each lane's dry run, then delete the secrets' lines from `fleet.env`, let a
+  day of timers run, then `cti-agent-settings split`. The split refuses while a
+  secret or login is still in the file.
+- **After a secret is stored,** `sudo cti-agent CMD` runs as a temporary systemd
+  unit with the same grants as that command's timer. You see its output and exit
+  code as usual; the journal records it as `cti-manual-*`, with who ran it.
+- **After the split,** edit the file a setting belongs in (`fleet-config check`
+  flags one in the wrong file under `IN THE WRONG FILE`). The old file is kept as
+  `fleet.env.pre-split-<time>`, root-only; moving it back and removing `fleet.d`
+  undoes the split.
+- **A missing credential is skipped, never an error:** a program that cannot
+  find a secret as a credential reads `fleet.env` instead, so a half-finished
+  move still works.
+
 ## 11. Updating the box
 
 The whole loop, laptop to production, is two commands:
