@@ -6,8 +6,8 @@
 
 Network is never touched: the enrichment fetchers are stubbed, so these run
 offline and deterministically. What they cover is the logic that decides what a
-human sees - priority assignment, report parsing, digest rendering, and the
-mailer's autonomy gate.
+human sees - priority assignment, report parsing and digest rendering. The
+mailer's gate is Go now (internal/mailer, cmd/cti-mailer) and tested there.
 """
 import base64
 import contextlib
@@ -53,7 +53,6 @@ def load(name):
 
 enrich = load("enrich")
 brief = load("brief")
-mailer = load("mailer")
 
 
 REPORT = """# CTI / CVE Daily Report
@@ -424,149 +423,6 @@ class BriefRendering(unittest.TestCase):
         self.assertIn("Presence determined solely", text)
 
 
-class GrantedRoles(unittest.TestCase):
-    """What the token can actually do, checked without touching Entra.
-
-    These run in `task test`, so they are inside `task ship`. The LIVE check -
-    `mailer.py --check`, which fetches a real token - stays in
-    `task dev:doctor` on purpose: coupling a pre-push gate to tenant state and
-    network would mean a consent problem in Entra blocks a code push, and the
-    gate would fail on any machine without credentials.
-    """
-
-    def token(self, roles):
-        """A JWT-shaped string carrying the roles claim; only the payload is read."""
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"tid": "t", "appid": "a", "roles": roles}).encode()
-        ).decode().rstrip("=")
-        return f"header.{payload}.signature"
-
-    def check(self, roles):
-        buf = io.StringIO()
-        with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
-            rc = mailer.check(self.token(roles), "cti@example.com")
-        return rc, buf.getvalue()
-
-    def test_the_two_required_capabilities_pass(self):
-        rc, out = self.check(["Mail.Read", "Mail.Send"])
-        self.assertEqual(rc, 0, out)
-        self.assertIn("read the CTI mailbox", out)
-        self.assertIn("send the digest", out)
-
-    def test_readwrite_satisfies_the_read_requirement(self):
-        """Mail.ReadWrite supersedes Mail.Read.
-
-        The previous check required the literal string "Mail.Read", so a tenant
-        that pruned it after granting Mail.ReadWrite - which is what least
-        privilege tells you to do - would have been reported as broken.
-        """
-        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
-        self.assertEqual(rc, 0, out)
-        self.assertNotIn("MISSING", out)
-
-    def test_a_missing_send_role_fails(self):
-        rc, out = self.check(["Mail.Read"])
-        self.assertEqual(rc, 1)
-        self.assertIn("MISSING", out)
-        self.assertIn("Mail.Send", out)
-
-    def test_readwrite_is_reported_but_never_fatal(self):
-        """The cleanup lane is opt-in, so its permission cannot fail the check."""
-        rc, out = self.check(["Mail.Read", "Mail.Send"])
-        self.assertEqual(rc, 0)
-        self.assertIn("absent", out)
-        self.assertIn("cti-mailbox", out)
-        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
-        self.assertEqual(rc, 0)
-        cleanup = [l for l in out.split("\n") if "cti-mailbox cleanup" in l]
-        self.assertTrue(cleanup and "OK" in cleanup[0], out)
-        self.assertNotIn("absent   Mail.ReadWrite", out)
-
-    def test_sites_selected_is_used_and_points_at_the_real_test(self):
-        """The VM scan coverage lane reads the subnets file with Sites.Selected.
-
-        The check used to list it as UNUSED and suggest removing it - the one
-        grant IT added for that lane. The role is reported OK, and since the
-        site grant it needs is not in the token, the output names the command
-        that reads the file.
-        """
-        rc, out = self.check(["Mail.ReadWrite", "Mail.Send", "Sites.Selected"])
-        self.assertEqual(rc, 0)
-        self.assertNotIn("UNUSED", out)
-        self.assertNotIn("BROAD", out)
-        line = [l for l in out.split("\n") if "cti-vmscan coverage" in l][0]
-        self.assertIn("OK", line)
-        self.assertIn("Sites.Selected", line)
-        self.assertIn("cti-vmscan --check", out)
-
-    def test_a_missing_site_role_is_reported_not_fatal(self):
-        rc, out = self.check(["Mail.ReadWrite", "Mail.Send"])
-        self.assertEqual(rc, 0)
-        line = [l for l in out.split("\n") if "cti-vmscan coverage" in l][0]
-        self.assertIn("absent", line)
-        self.assertIn("Sites.Selected", line)
-
-    def test_a_tenant_wide_file_role_is_called_broad_not_unused(self):
-        for role in ("Files.Read.All", "Sites.Read.All"):
-            rc, out = self.check(["Mail.ReadWrite", "Mail.Send", role])
-            self.assertEqual(rc, 0)
-            self.assertNotIn("UNUSED", out)
-            self.assertIn("BROAD", out)
-            self.assertIn(role, [l for l in out.split("\n") if "BROAD" in l][0])
-
-    def test_unused_permissions_are_named(self):
-        """The finding from the real app registration.
-
-        It had Directory.Read.All, User.Read.All and AuditLog.Read.All
-        consented and called by nothing - a far wider grant than the mail
-        access the code uses. Reported, not fatal: it is a judgement for the
-        operator, and a check that fails on it would be one people switch off.
-        """
-        rc, out = self.check(["Mail.Read", "Mail.Send", "Mail.ReadWrite",
-                              "Directory.Read.All", "User.Read.All",
-                              "AuditLog.Read.All"])
-        self.assertEqual(rc, 0, "unused roles must not fail the check")
-        self.assertIn("UNUSED", out)
-        for r in ("Directory.Read.All", "User.Read.All", "AuditLog.Read.All"):
-            self.assertIn(r, out)
-        # The three it does use must not be listed as unused.
-        unused_line = [l for l in out.split("\n") if "UNUSED" in l][0]
-        for r in ("Mail.Read", "Mail.Send", "Mail.ReadWrite"):
-            self.assertNotIn(r, unused_line)
-
-    def test_a_minimal_grant_reports_nothing_unused(self):
-        _, out = self.check(["Mail.ReadWrite", "Mail.Send"])
-        self.assertNotIn("UNUSED", out)
-
-    def test_no_roles_at_all_is_reported_not_crashed(self):
-        rc, out = self.check([])
-        self.assertEqual(rc, 1)
-        self.assertIn("(none)", out)
-
-    def test_the_used_set_matches_the_endpoints_the_code_calls(self):
-        """USED_ROLES is a claim about the codebase; verify it against the code.
-
-        If someone adds a Graph call needing a fourth permission, the unused
-        report would start naming a role that is genuinely required.
-        """
-        root = pathlib.Path(__file__).resolve().parents[2]
-        graph = (root / "internal" / "graph" / "client.go").read_text()
-        # The three endpoints, and nothing else that would need another role.
-        self.assertIn("/mailFolders/%s/messages", graph)
-        self.assertIn("/sendMail", graph)
-        self.assertIn("/messages/%s/move", graph)
-        drive = (root / "internal" / "graph" / "driveitem.go").read_text()
-        self.assertIn('"/drives/"', drive)
-        self.assertIn("/content", drive)
-        for forbidden in ("/auditLogs", "/directoryObjects", "/servicePrincipals"):
-            self.assertNotIn(forbidden, graph,
-                             f"{forbidden} needs a permission USED_ROLES omits")
-        self.assertEqual(mailer.USED_ROLES,
-                         frozenset({"Mail.Read", "Mail.ReadWrite", "Mail.Send",
-                                    "Sites.Selected", "Files.Read.All",
-                                    "Sites.Read.All"}))
-
-
 class Attribution(unittest.TestCase):
     """The footer credit is configuration, not code.
 
@@ -671,168 +527,6 @@ class Attribution(unittest.TestCase):
         self.assertIn("safeLinkURL", go)
         # The Go side must accept exactly http and https, like safe_link_url.
         self.assertIn('case "http", "https":', go)
-
-
-class MailerGate(unittest.TestCase):
-    """The autonomy gate is a control, not advice. It must exit non-zero."""
-
-    def setUp(self):
-        self.env = dict(os.environ)
-        os.environ.update({
-            "GRAPH_MAILBOX": "security@example.com",
-            "DIGEST_TO": "soc@example.com",
-            "VM_ALLOW_TO": "soc@example.com",
-            "FLEET_OPERATOR_EMAIL": "operator@example.com",
-            "FLEET_HOME": tempfile.mkdtemp(),
-        })
-
-    def tearDown(self):
-        os.environ.clear()
-        os.environ.update(self.env)
-
-    def run_mailer(self, *args):
-        sys.argv = ["mailer.py", *args, "--dry-run"]
-        try:
-            with quiet():
-                return mailer.main() or 0
-        except SystemExit as e:
-            return e.code if isinstance(e.code, int) else 1
-
-    def test_scheduled_digest_to_the_dl_is_allowed(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as f:
-            f.write("<html><body>d</body></html>")
-        self.assertEqual(self.run_mailer("--html", f.name, "--subject", "s"), 0)
-
-    def test_every_email_carries_the_attribution_even_when_a_lane_forgot(self):
-        os.environ["FLEET_ATTRIBUTION"] = "Sent by the Example <fleet>"
-        out = mailer.with_attribution("<html><body><p>report</p></body></html>")
-        self.assertIn("Sent by the Example &lt;fleet&gt;", out)
-        self.assertTrue(out.endswith("</div></body></html>"))
-        # A body that already has it, escaped or not, is left alone.
-        once = out
-        self.assertEqual(mailer.with_attribution(once), once)
-        plain = "<body>Sent by the Example <fleet></body>"
-        os.environ["FLEET_ATTRIBUTION"] = "Sent by the Example <fleet>"
-        self.assertEqual(mailer.with_attribution(plain), plain)
-        # Unset adds nothing, and a body with no closing tag still gets it.
-        del os.environ["FLEET_ATTRIBUTION"]
-        self.assertEqual(mailer.with_attribution("<p>x</p>"), "<p>x</p>")
-        os.environ["FLEET_ATTRIBUTION"] = "Credit"
-        self.assertIn("Credit", mailer.with_attribution("<p>x</p>"))
-
-    def test_the_self_header_matches_the_go_signature(self):
-        # Golden value from internal/graph/selfsign.go selfMAC with the same
-        # inputs. If either side changes, cti-mailbox stops archiving our reports.
-        v = mailer.sign_self_header("s3cret", "Cyber@Example.com",
-                                    nonce="0123456789abcdef01234567")
-        self.assertEqual(
-            v, "Cyber@Example.com; n=0123456789abcdef01234567; sig="
-               "eaebc36cad57f3d0088c739280c34581fd20ca911b3ed4de4e170490c45cf4e8")
-        self.assertEqual(mailer.sign_self_header("", "a@b.c"), "a@b.c")
-
-    def test_operator_escalation_needs_no_approval(self):
-        self.assertEqual(
-            self.run_mailer("--to-operator", "--subject", "s", "--message", "m"), 0)
-
-    def test_third_party_is_refused(self):
-        self.assertNotEqual(
-            self.run_mailer("--to", "outsider@elsewhere.com",
-                            "--subject", "s", "--message", "m"), 0)
-
-    def test_third_party_with_approve_is_allowed(self):
-        self.assertEqual(
-            self.run_mailer("--to", "outsider@elsewhere.com", "--approve",
-                            "--subject", "s", "--message", "m"), 0)
-
-    def test_require_approval_without_approve_is_refused(self):
-        self.assertNotEqual(
-            self.run_mailer("--to-operator", "--require-approval",
-                            "--subject", "s", "--message", "m"), 0)
-
-    def test_old_allowlist_name_is_still_read(self):
-        del os.environ["VM_ALLOW_TO"]
-        os.environ["FLEET_ALLOW_TO"] = "soc@example.com,ok@example.com"
-        self.assertEqual(
-            self.run_mailer("--to", "ok@example.com", "--subject", "s", "--message", "m"), 0)
-
-    def test_both_allowlist_names_disagreeing_is_refused(self):
-        os.environ["FLEET_ALLOW_TO"] = "soc@example.com,other@example.com"
-        self.assertNotEqual(
-            self.run_mailer("--html", __file__, "--subject", "s"), 0,
-            "two names for one control, with two values, must not send")
-
-    def test_both_names_agreeing_still_sends(self):
-        os.environ["FLEET_ALLOW_TO"] = " SOC@example.com "
-        self.assertEqual(
-            self.run_mailer("--to", "soc@example.com", "--subject", "s", "--message", "m"), 0)
-
-    def test_allowlist_conflict_does_not_close_the_alert_path(self):
-        os.environ["FLEET_ALLOW_TO"] = "other@example.com"
-        self.assertEqual(
-            self.run_mailer("--to-operator", "--subject", "s", "--message", "m"), 0)
-
-    def test_no_recipient_is_refused_rather_than_guessed(self):
-        del os.environ["DIGEST_TO"]
-        del os.environ["VM_ALLOW_TO"]
-        self.assertNotEqual(self.run_mailer("--subject", "s", "--message", "m"), 0)
-
-    def test_missing_sending_mailbox_is_refused(self):
-        del os.environ["GRAPH_MAILBOX"]
-        self.assertNotEqual(
-            self.run_mailer("--to-operator", "--subject", "s", "--message", "m"), 0)
-
-    def test_invalid_address_is_refused(self):
-        self.assertNotEqual(
-            self.run_mailer("--to", "not-an-email", "--approve",
-                            "--subject", "s", "--message", "m"), 0)
-
-    def test_html_and_message_together_is_refused(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as f:
-            f.write("<html></html>")
-        self.assertNotEqual(
-            self.run_mailer("--to-operator", "--html", f.name,
-                            "--message", "m", "--subject", "s"), 0)
-
-    def test_escalation_body_carries_reply_instructions(self):
-        body = mailer.escalation_html("Need a decision.", "q17")
-        self.assertIn("[FLEET q17]", body)
-        self.assertIn("reply", body.lower())
-
-    def test_escalation_body_escapes_html(self):
-        body = mailer.escalation_html("<script>alert(1)</script>", None)
-        self.assertNotIn("<script>", body)
-        self.assertIn("&lt;script&gt;", body)
-
-    def test_escalation_fallback_colours_equal_the_token_file(self):
-        # The fallback is used only when email-tokens.json is missing; it must
-        # not drift from the file, or that install's escalations look different.
-        path = os.path.join(os.path.dirname(mailer.__file__), "email-tokens.json")
-        with open(path, encoding="utf-8") as f:
-            t = json.load(f)
-        fb = mailer._ESC_TOKENS
-        for k in ("font", "page_bg", "navy", "band_text", "ink", "soft", "muted", "rule"):
-            self.assertEqual(fb[k], t[k], k)
-        self.assertEqual(fb["blue"], t["tones"]["blue"])
-
-    def test_a_token_that_could_break_out_of_a_style_is_ignored(self):
-        bad = {"font": 'Arial"><script>x</script>', "navy": "red;}</style>",
-               "tones": {"blue": {"fg": '#fff"', "bg": "#ebf4ff"}}}
-        d = tempfile.mkdtemp()
-        try:
-            shutil.copy(mailer.__file__, d)
-            with open(os.path.join(d, "email-tokens.json"), "w", encoding="utf-8") as f:
-                json.dump(bad, f)
-            spec = importlib.util.spec_from_file_location(
-                "mailer_badtokens", os.path.join(d, "mailer.py"))
-            m = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(m)
-            t = m._esc_tokens()
-            self.assertEqual(t["font"], m._ESC_TOKENS["font"])
-            self.assertEqual(t["navy"], m._ESC_TOKENS["navy"])
-            self.assertEqual(t["blue"], m._ESC_TOKENS["blue"])
-            self.assertNotIn("<script>", m.escalation_html("hi", "q1"))
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
 
 
 class BandLabelsDoNotOverclaim(unittest.TestCase):
@@ -955,147 +649,6 @@ class BandLabelsDoNotOverclaim(unittest.TestCase):
         for band, (_, _, label) in brief.PRI.items():
             for p in ("P1", "P2", "P3", "P4"):
                 self.assertNotIn(p, label, f"{band} label mentions {p}")
-
-
-class MailerCc(unittest.TestCase):
-    """CC exists so individuals can receive the digest without appearing on a
-    distribution list's To line. It is still a delivery, so the allowlist
-    covers it."""
-
-    def env(self, **extra):
-        e = {"TENANT_ID": "t", "CLIENT_ID": "c", "CLIENT_SECRET": "s",
-             "GRAPH_MAILBOX": "cti@example.com",
-             "FLEET_OPERATOR_EMAIL": "op@example.com",
-             "DIGEST_TO": "dl@example.com"}
-        e.update(extra)
-        return e
-
-    def run_mailer(self, env, *argv):
-        tmp = tempfile.TemporaryDirectory()
-        html = os.path.join(tmp.name, "d.html")
-        with open(html, "w") as f:
-            f.write("<html>x</html>")
-        old = dict(os.environ)
-        os.environ.clear()
-        os.environ.update(env, FLEET_HOME=tmp.name,
-                          FLEET_ENV=os.path.join(tmp.name, "absent.env"))
-        sys.argv = ["mailer.py", "--html", html, "--subject", "S",
-                    "--dry-run", *argv]
-        out = io.StringIO()
-        code = 0
-        try:
-            with contextlib.redirect_stdout(out), \
-                    contextlib.redirect_stderr(io.StringIO()):
-                mailer.main()
-        except SystemExit as e:
-            code = e.code or 0
-        finally:
-            os.environ.clear()
-            os.environ.update(old)
-            tmp.cleanup()
-        return code, out.getvalue()
-
-    def test_cc_outside_the_allowlist_is_refused(self):
-        code, _ = self.run_mailer(self.env(), "--cc", "outsider@example.com")
-        self.assertNotEqual(code, 0,
-                            "an unapproved CC must be refused, not delivered")
-
-    def test_cc_on_the_allowlist_is_sent(self):
-        code, out = self.run_mailer(
-            self.env(VM_ALLOW_TO="dl@example.com,ok@example.com"),
-            "--cc", "ok@example.com")
-        self.assertEqual(code, 0)
-        self.assertIn("ok@example.com", json.loads(out)["cc"])
-
-    def test_cc_duplicating_a_to_recipient_is_dropped(self):
-        code, out = self.run_mailer(self.env(), "--cc", "dl@example.com")
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["cc"], [],
-                         "a CC that is already a To recipient would deliver twice")
-
-    def test_digest_cc_env_var_is_honoured(self):
-        code, out = self.run_mailer(self.env(
-            DIGEST_CC="ok@example.com",
-            VM_ALLOW_TO="dl@example.com,ok@example.com"))
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["cc"], ["ok@example.com"])
-
-    def test_allowlist_can_supply_the_cc(self):
-        # One edit instead of two: add a standing recipient to VM_ALLOW_TO
-        # and they receive the digest.
-        code, out = self.run_mailer(self.env(
-            VM_ALLOW_TO="dl@example.com,alice@example.com,bob@example.com",
-            DIGEST_CC_FROM_ALLOW_TO="true"))
-        self.assertEqual(code, 0)
-        self.assertEqual(sorted(json.loads(out)["cc"]),
-                         ["alice@example.com", "bob@example.com"])
-
-    def test_allowlist_cc_excludes_the_to_recipients(self):
-        # DIGEST_TO is in the allowlist by definition, so without this every
-        # digest would CC its own To line.
-        code, out = self.run_mailer(self.env(
-            VM_ALLOW_TO="dl@example.com", DIGEST_CC_FROM_ALLOW_TO="1"))
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["cc"], [])
-
-    def test_allowlist_cc_does_not_include_the_operator(self):
-        # The operator is added to the allow SET in code so escalations always
-        # work. Deriving the CC from the raw variable keeps them off the
-        # digest unless they are listed deliberately.
-        code, out = self.run_mailer(self.env(
-            VM_ALLOW_TO="dl@example.com,alice@example.com",
-            DIGEST_CC_FROM_ALLOW_TO="yes"))
-        self.assertEqual(code, 0)
-        self.assertNotIn("op@example.com", json.loads(out)["cc"])
-
-    def test_allowlist_cc_merges_with_an_explicit_digest_cc(self):
-        code, out = self.run_mailer(self.env(
-            VM_ALLOW_TO="dl@example.com,alice@example.com,carol@example.com",
-            DIGEST_CC="alice@example.com",
-            DIGEST_CC_FROM_ALLOW_TO="on"))
-        self.assertEqual(code, 0)
-        cc = json.loads(out)["cc"]
-        self.assertEqual(sorted(cc), ["alice@example.com", "carol@example.com"])
-        self.assertEqual(len(cc), len(set(cc)), "merged CC contains a duplicate")
-
-    def test_allowlist_cc_is_off_unless_explicitly_enabled(self):
-        for value in ("", "ture", "maybe", "0", "false", "no"):
-            code, out = self.run_mailer(self.env(
-                VM_ALLOW_TO="dl@example.com,alice@example.com",
-                DIGEST_CC_FROM_ALLOW_TO=value))
-            self.assertEqual(code, 0)
-            self.assertEqual(json.loads(out)["cc"], [],
-                             f"{value!r} should not enable allowlist CC")
-
-    def test_allowlist_cc_never_applies_to_an_escalation(self):
-        tmp = tempfile.TemporaryDirectory()
-        old = dict(os.environ)
-        os.environ.clear()
-        os.environ.update(self.env(VM_ALLOW_TO="dl@example.com,alice@example.com",
-                                   DIGEST_CC_FROM_ALLOW_TO="true"),
-                          FLEET_HOME=tmp.name,
-                          FLEET_ENV=os.path.join(tmp.name, "absent.env"))
-        sys.argv = ["mailer.py", "--to-operator", "--subject", "S",
-                    "--message", "M", "--dry-run"]
-        out = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(out), \
-                    contextlib.redirect_stderr(io.StringIO()):
-                mailer.main()
-        except SystemExit:
-            pass
-        finally:
-            os.environ.clear()
-            os.environ.update(old)
-            tmp.cleanup()
-        d = json.loads(out.getvalue())
-        self.assertEqual(d["to"], ["op@example.com"])
-        self.assertEqual(d["cc"], [], "a question to one person is not a thread")
-
-    def test_invalid_cc_address_is_refused(self):
-        code, _ = self.run_mailer(
-            self.env(VM_ALLOW_TO="dl@example.com,notanemail"), "--cc", "notanemail")
-        self.assertNotEqual(code, 0)
 
 
 class KevDeadlines(unittest.TestCase):
@@ -1349,9 +902,11 @@ class DigestSendLedger(unittest.TestCase):
 
 
 class EverySendGoesThroughCtiMailer(unittest.TestCase):
-    """Since 1.6.6 every runner sends through the Go cti-mailer. mailer.py
-    stays on disk for a rollback, so nothing would fail if a runner drifted
-    back to it - the two would just quietly diverge again."""
+    """Since 1.6.6 every runner sends through the Go cti-mailer, and the
+    Python mailer.py was removed after 1.7.2. This keeps it from coming back."""
+
+    def test_the_python_mailer_is_gone(self):
+        self.assertFalse((LANES / "mailer.py").exists())
 
     def test_no_runner_calls_the_python_mailer(self):
         # The box's runners and the checkout's dev tools. Any mention on a
@@ -4660,7 +4215,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
     def test_every_lane_argument_is_in_its_man_page(self):
         root = pathlib.Path(__file__).resolve().parents[2]
         arg = re.compile(r"add_argument\(\s*\"--([a-z][a-z0-9-]*)\"")
-        for lane in ("enrich.py", "scout.py", "brief.py", "mailer.py"):
+        for lane in ("enrich.py", "scout.py", "brief.py"):
             src = (root / "fleet-kit" / "fleet" / "lanes" / lane).read_text(encoding="utf-8")
             with self.subTest(lane=lane):
                 self._assert_documented(lane, arg.findall(src))
@@ -6543,14 +6098,14 @@ class TlsFloor(unittest.TestCase):
 
     def test_each_lane_context_has_a_tls_12_floor(self):
         import ssl
-        for name in ("scout", "enrich", "mailer"):
+        for name in ("scout", "enrich"):
             ctx = load(name).tls_context()
             self.assertGreaterEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2, name)
             self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED, name)
             self.assertTrue(ctx.check_hostname, name)
 
     def test_no_lane_builds_its_own_unfloored_context(self):
-        for name in ("scout", "enrich", "mailer", "brief"):
+        for name in ("scout", "enrich", "brief"):
             src = (LANES / f"{name}.py").read_text()
             for ln, line in enumerate(src.splitlines(), 1):
                 if "create_default_context" in line:
@@ -6558,17 +6113,6 @@ class TlsFloor(unittest.TestCase):
                     # the next line.
                     nxt = src.splitlines()[ln]
                     self.assertIn("minimum_version", nxt, f"{name}.py:{ln}")
-
-    def test_the_mailer_refuses_every_redirect(self):
-        # urllib copies Authorization to whatever host a redirect names, even
-        # another https host, so the mailer (which carries the Graph token and
-        # never legitimately redirects) follows none.
-        handler = load("mailer")._NoRedirect()
-        req = urllib.request.Request("https://graph.microsoft.com/v1.0/x")
-        for target in ("http://graph.microsoft.com/v1.0/x", "https://evil.example/x"):
-            with self.assertRaises(urllib.error.HTTPError) as cm:
-                handler.redirect_request(req, io.BytesIO(b""), 307, "Redirect", {}, target)
-            cm.exception.close()
 
     def test_enrich_refuses_a_redirect_to_plain_http(self):
         # The NVD API key rides on these requests.

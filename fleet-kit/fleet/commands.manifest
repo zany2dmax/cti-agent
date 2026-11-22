@@ -26,7 +26,7 @@
 #            (--dry-run safe, --to-dev writes, --for-real changes), --check, and
 #            every flag of a read command are classed already; list the rest here.
 #   exempt:  flags that make an effect command read-only, so no mode is needed
-#            (cti-jira --check, cti-mailer --check and --armed, mailer.py --check)
+#            (cti-jira --check, cti-mailer --check and --armed)
 
 command: brief.py
 about: Render the CTI digest from an enriched file
@@ -412,28 +412,6 @@ about: Whether a timer has been disabled, which raises no alarm on its own
 runs: read
 flag: -a | the same as --all
 flag: --all | every cti-agent timer, not just the scheduled ones
-
-command: mailer.py
-about: Send the digest or an escalation through Graph
-runs: effect
-modes: --dry-run --for-real
-exempt: --check
-flag: --html FILE | HTML body
-flag: --message TEXT | short plain-text body for escalations
-flag: --text FILE | plain-text alternative (logged only)
-flag: --subject TEXT | subject line
-flag: --to LIST | comma-separated recipients, default DIGEST_TO
-flag: --cc LIST | comma-separated cc, default DIGEST_CC
-flag: --to-operator | send to FLEET_OPERATOR_EMAIL
-flag: --from-mailbox ADDR | send as this mailbox
-flag: --attach FILE | attach a file; repeatable
-flag: --board-id ID | board line id to match a reply to
-flag: --dry-run | build and validate, send nothing
-flag: --require-approval | refuse unless --approve is also given
-flag: --approve | the operator approved this off-cycle send
-flag: --save-to-sent MODE | keep a copy in Sent Items
-flag: --check | verify credentials and granted roles
-flag: --for-real | send the message
 
 command: run-appowners
 about: Daily application scan reports to their owners

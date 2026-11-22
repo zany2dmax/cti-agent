@@ -298,8 +298,8 @@ relative. **Do not build these speculatively**: see the rule in
 
 Five commands construct a `graph.Client` directly: `cti-agent` and `cti-appscan`
 read the mailbox, `cti-mailer` and `cti-alert` send, and `cti-mailbox` moves
-messages. The Python `mailer.py` is a second, separate sender, called by
-nothing since 1.6.6 and kept only for a rollback until it is deleted.
+messages. (The old Python `mailer.py` was a second sender; it was removed
+after 1.7.2.)
 
 A fleet on Google Workspace, or on plain SMTP and IMAP, cannot use any of it.
 Three small interfaces would split it cleanly: read recent messages (the

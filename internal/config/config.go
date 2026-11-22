@@ -206,7 +206,7 @@ func Load() (Config, error) { return load(true, true, false) }
 // vulnerability scanner.
 //
 // cti-patchtuesday correlates against Host Detection but never touches a
-// mailbox - mailer.py is the single outbound channel and the runner hands this
+// mailbox - cti-mailer is the single outbound channel and the runner hands this
 // command's output to it. Requiring Graph credentials to do a Qualys lookup
 // meant a replay on a workstation failed with
 //

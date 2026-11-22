@@ -34,7 +34,7 @@ lists every location.
 - [10. Rolling out mailbox cleanup](#10-rolling-out-mailbox-cleanup)
 - [11. The monthly Patch Tuesday lane](#11-the-monthly-patch-tuesday-lane)
 - [11a. Catching up after the lane was off](#11a-catching-up-after-the-lane-was-off)
-- [11b. Switching the mailer](#11b-switching-the-mailer)
+- [11b. The mailer](#11b-the-mailer)
 - [11c. Verifying the Jira connection](#11c-verifying-the-jira-connection)
 - [11d. What version is this box running?](#11d-what-version-is-this-box-running)
 - [11e. Taking a host off the schedule](#11e-taking-a-host-off-the-schedule)
@@ -847,80 +847,23 @@ is a reporting fault, not an incident: the beat still ran. A run of them after
 a change to the skill or `CHECKIN_MODEL` means the model is not following the
 format; `task eval:checkin` reproduces it on your workstation.
 
-## 11b. Switching the mailer
+## 11b. The mailer
 
-`mailer.py` was ported to `cmd/cti-mailer`, and **since 1.6.6 every runner
-sends through `cti-mailer`**: `run-digest` and `run-patchtuesday` were the last
-two. `mailer.py` is still installed so the switch can be undone with one line
-per runner and a redeploy, and nothing calls it. A test (`EverySendGoesThroughCtiMailer`) fails if a
-runner goes back to it.
+`cti-mailer` is the fleet's only mailer. It is the Go port of the old
+`lanes/mailer.py`, and **since 1.6.6 every runner sends through it**. The
+Python mailer was removed after 1.7.2, after dailies, weeklies and a Patch
+Tuesday had all gone through `cti-mailer`. The installer deletes the old
+`lanes/mailer.py` and its man page from the box on update, so `sudo cti-agent
+mailer.py` no longer runs anything. A test (`EverySendGoesThroughCtiMailer`)
+fails if the file or a runner calling it comes back.
 
-The switch waited until the two agreed on real digests, because this is the
-component where a subtle difference is discovered by somebody not receiving a
-security finding.
+There is no longer a one-line rollback. To go back to the Python mailer,
+install 1.7.2 or earlier.
 
-### Compare them
-
-One command runs both mailers across nineteen cases and prints a verdict:
-
-```bash
-task compare:mailers
-```
-
-Nothing is sent. Every case passes `--dry-run`, and the harness overrides
-every routing variable with `example.com` addresses, so it cannot reference a
-real distribution list even if a case escaped the dry run. It compares stdout
-(the JSON the runners parse), stderr (the text an operator reads) and the exit
-code, and fails the whole run if any case differs.
-
-Nine of the nineteen are refusals — a recipient nobody approved, a stranger on
-Cc, `--require-approval` without `--approve`, a malformed address, and the
-mutually exclusive flag combinations. **Those are the cases worth reading.** A
-port that sends identical mail but has quietly loosened the gate looks like
-success from the happy path.
-
-To compare a real report by hand on the box (nothing is sent):
-
-```bash
-D=/var/lib/cti-agent/reports/digest-daily-$(date +%F).html
-S='[Sev5] CTI test comparison'
-
-sudo cti-agent mailer.py    --html "$D" --subject "$S" --dry-run > /tmp/py.json
-sudo cti-agent cti-mailer   --html "$D" --subject "$S" --dry-run > /tmp/go.json
-diff <(python3 -m json.tool --sort-keys /tmp/py.json) <(python3 -m json.tool --sort-keys /tmp/go.json)
-```
-
-They should differ in nothing. Repeat for the cases that matter:
-
-| Case | Command |
-|---|---|
-| the real digest, with its attachment | add `--attach /var/lib/cti-agent/reports/raw-$(date +%F).md` |
-| an escalation | `--to-operator --message "test" --board-id q1 --subject "test"` |
-| a recipient outside the allowlist | `--to stranger@example.com` — **both must refuse, with the same message** |
-| `--require-approval` without `--approve` | both must refuse |
-| the role report | `--check` on both |
-
-### Rolling back
-
-In `run-digest` and `run-patchtuesday` the send is one line:
-
-```bash
-grep -n 'RESULT=$("$FLEET_CODE/bin/cti-mailer"' $FLEET_CODE/bin/run-digest $FLEET_CODE/bin/run-patchtuesday
-```
-
-Change `"$FLEET_CODE/bin/cti-mailer"` back to `python3 "$FLEET_CODE/lanes/mailer.py"`
-in each, in the repo (the test above has to go with it), and redeploy. The flags
-and the parsed JSON are identical, so nothing else in either runner moves.
-
-`run-checkin` and `run-mailbox-cleanup` do **not** call either mailer — they
+`run-checkin` and `run-mailbox-cleanup` do **not** call the mailer: they
 escalate through `cti-alert`, which talks to `internal/graph` directly and has
 its own recipient handling. (`cti-alert` bypassing `VM_ALLOW_TO` is a separate
 known gap, recorded in SECURITY.md.)
-
-Deleting `mailer.py` is a separate release, after a few weeks of dailies, a
-weekly and one Patch Tuesday through `cti-mailer`. Until it goes,
-`task compare:mailers` still works and the two ST1005 suppressions in
-`internal/mailer` still earn their place.
 
 ### What the port changed on purpose
 

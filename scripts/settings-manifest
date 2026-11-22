@@ -66,7 +66,7 @@ LANE_RULES = [
 ]
 # Programs whose reads say nothing about which lane owns a setting: the
 # mailer and the tools that report on every setting by name.
-SHARED_READERS = {"cti-mailer", "mailer.py", "installer", "dev-run", "fleet-config",
+SHARED_READERS = {"cti-mailer", "installer", "dev-run", "fleet-config",
                   "cti-agent-secrets", "cti-agent-settings", "checkin-bash-guard"}
 # Checked by the check-in, which therefore loads every lane's file.
 ALL_FILES_LANE = "checkin"
@@ -94,6 +94,11 @@ KEPT = ("secret", "credential", "lane", "required", "default", "note")
 
 KEY_LINE = re.compile(r'^#?\s?([A-Z][A-Z0-9_]{2,})=("[^"]*"|\'[^\']*\'|\S*)\s*$')
 SECTION = re.compile(r"^# ══ (.+?) ═")
+# Keys Go reads through a named constant rather than a literal, which GO_READ
+# cannot see. FLEET_ALLOW_TO is VM_ALLOW_TO's old name (internal/mailer,
+# LegacyAllowVar); mailer.py read it by name and kept it on this list until
+# it was retired.
+INDIRECT = {"FLEET_ALLOW_TO"}
 GO_READ = re.compile(r'(?:Getenv|LookupEnv|\benv|envOr|envInt|envDuration|getenvDefault|Secret)\(\s*"([A-Z][A-Z0-9_]{2,})"')
 PY_READ = re.compile(r'(?:environ(?:\.get)?[\[(]|getenv\()\s*["\']([A-Z][A-Z0-9_]{2,})["\']')
 # Reads that tell "set to nothing" from "unset": Go's LookupEnv with its ok,
@@ -172,6 +177,8 @@ def scan(kept=None):
         for k in (GO_READ if is_go else PY_READ).findall(text):
             if k not in RUNTIME:
                 keys.setdefault(k, "not in fleet.env.example")
+    for k in INDIRECT:
+        keys.setdefault(k, "not in fleet.env.example")
     # A default counts only when every source file that reads the key states
     # the same one: a bash ${K:-v} says nothing about a Go reader of K that
     # has its own idea, and "can be removed" must never be a guess.

@@ -638,8 +638,7 @@ answer that does not depend on reading a journal.
   and `--dry-run` write no events for changes. The one exception is a trust
   decision, not a write: reading mail from a sender domain listed in
   `FLEET_UNAUTHENTICATED_SENDERS` is recorded, first acceptance of each domain in
-  a run, even in a dry run. The Python mailer kept as a rollback fallback
-  (`mailer.py`) does not write events; the live path, `cti-mailer`, does.
+  a run, even in a dry run. `cti-mailer` writes them.
   The files are mode 0600 in a 0750 directory, so a root-run collector reads
   them as they are and a collector running as another user needs read access
   granted (an ACL).
@@ -720,8 +719,7 @@ call itself is a control, not a detail.
   `http://` feeds; `scout` and `enrich` refuse a redirect to plain http. The
   mailer follows **no** redirect: urllib copies the `Authorization` header to
   whatever host a redirect names, so a Graph redirect would otherwise hand
-  over the bearer token. The Go mailer (`cti-mailer`) is the live path since
-  1.6.6; `mailer.py` is a rollback fallback with the same protections.
+  over the bearer token. The Go mailer (`cti-mailer`) is the only mailer.
 - **What this does not claim:** it is a version floor and an https-only rule.
   It is not FIPS 140-3 validation (that is a property of the host's crypto
   module and mode, not of this code), and it does not pin certificates. Go's
@@ -1096,9 +1094,9 @@ not run a beat.
 
 Deliberately absent from the grant:
 
-- **`cti-mailer` and `mailer.py`.** The orchestrator cannot address mail. It
-  reads attacker-supplied threat intel, so an injection reaching either of
-  these would have the fleet's whole recipient allowlist behind it.
+- **`cti-mailer`.** The orchestrator cannot address mail. It
+  reads attacker-supplied threat intel, so an injection reaching it
+  would have the fleet's whole recipient allowlist behind it.
 
   `cti-alert` **is** granted, as the single escalation channel, and it is safe
   to grant for a structural reason rather than a hopeful one: it has **no
@@ -1311,7 +1309,6 @@ about where:
 | `fleet-db` | yes | Python | yes |
 | `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |
 | `brief.py` | no | Python | **no** — historical |
-| `mailer.py` | no | Python | called by nothing since 1.6.6, kept for a rollback; being retired — see below |
 | `cti-mailer` | no | Go | yes |
 | the other six `cti-*` binaries | no | Go | yes |
 
@@ -1355,9 +1352,9 @@ functions, so the allowlist is tested against a table of cases rather than by
 sending mail — in Python it could only be exercised by sending, which is why
 it never was.
 
-**Since 1.6.6 every runner calls `cti-mailer`.** `mailer.py` stays installed,
-called by nothing, so the switch can be undone; it is deleted in a later
-release. See [RUNBOOK → Switching the mailer](RUNBOOK.md#11b-switching-the-mailer).
+**Since 1.6.6 every runner calls `cti-mailer`**, and `mailer.py` was removed
+after 1.7.2; the installer deletes it from the box. See
+[RUNBOOK → The mailer](RUNBOOK.md#11b-the-mailer).
 
 `brief.py` is 689 lines of email layout. The case for moving it is weaker and
 mostly about `html/template` being a better escaping story than string
@@ -1652,7 +1649,7 @@ nor the portal reports the effective scope.
 - **Three `fmt.Printf` calls at the end of the ingest lane** print a
   configured path without the sanitiser the `log` calls in the same file use.
   They reach the journal identically.
-- **`cti-mailer --attach` (and `mailer.py --attach`) has no path allowlist.** The send gate covers
+- **`cti-mailer --attach` has no path allowlist.** The send gate covers
   recipients, not payloads; any readable file up to 3 MB can be attached.
 
 **Accepted, with reasons**

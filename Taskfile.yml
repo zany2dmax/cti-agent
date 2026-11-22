@@ -403,7 +403,7 @@ tasks:
     # a file in the repo, which Claude CAN read.
     #
     #   task log -- ship
-    #   task log -- compare:mailers
+    #   task log -- test
     #
     # ONLY FOR BUILD AND TEST OUTPUT. Do not tee a lane through this:
     # run-digest and run-patchtuesday print real recipients and real findings,
@@ -422,14 +422,6 @@ tasks:
       - |
         set -o pipefail
         task {{.CLI_ARGS}} 2>&1 | tee .logs/last-run.log
-
-  compare:mailers:
-    desc: "Prove cti-mailer behaves exactly like mailer.py. Sends nothing."
-    # The refusal cases matter more than the successes: a port that sends the
-    # same mail but has quietly loosened the recipient gate looks like success
-    # from the happy path.
-    cmds:
-      - ./scripts/compare-mailers.sh
 
   test:mailer:
     desc: The recipient gate, audience resolution, subjects and escalation HTML

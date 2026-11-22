@@ -195,7 +195,7 @@ class TestEveryEffectCommandMustBeToldHowToRun(unittest.TestCase):
                 with self.subTest(unit=f.name):
                     self.assertIn("--for-real", line, f"{f.name} does not say --for-real")
 
-    def test_go_and_python_commands_refuse_to_run_without_a_mode(self):
+    def test_go_commands_refuse_to_run_without_a_mode(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             checks = [("cti-alert", ["--unit", "cti-agent-digest.service"]),
@@ -211,12 +211,6 @@ class TestEveryEffectCommandMustBeToldHowToRun(unittest.TestCase):
                                        text=True, env={"PATH": "/usr/bin:/bin", "HOME": tmp})
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                     self.assertIn("say how to run it", r.stderr)
-            py = subprocess.run(
-                ["python3", str(ROOT / "fleet-kit" / "fleet" / "lanes" / "mailer.py"),
-                 "--html", "x"], check=False, capture_output=True, text=True,
-                env={"PATH": "/usr/bin:/bin", "HOME": tmp})
-            self.assertEqual(py.returncode, 2, py.stderr)
-            self.assertIn("say how to run it", py.stderr)
 
     def test_the_read_only_check_flags_need_no_mode(self):
         self.assertEqual(self.cmds["cti-jira"]["exempt"], ["--check", "--list"])

@@ -14,7 +14,7 @@
 //
 // What it reuses rather than reinventing: the Qualys KnowledgeBase cache for
 // CVE-to-QID mapping, Host Detection for presence, enrich.py for severity
-// banding, and mailer.py as the single outbound channel. Presence still comes
+// banding, and cti-mailer as the single outbound channel. Presence still comes
 // only from the scanner.
 package patchtuesday
 

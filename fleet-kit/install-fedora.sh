@@ -389,9 +389,19 @@ for f in "$SRC"/fleet/bin/*; do
   run install -m 0755 -o root -g root "$f" "$CODE_DIR/bin/$(basename "$f")"
   info "bin/$(basename "$f")"
 done
-for f in enrich.py scout.py brief.py mailer.py; do
+for f in enrich.py scout.py brief.py; do
   run install -m 0755 -o root -g root "$SRC/fleet/lanes/$f" "$CODE_DIR/lanes/$f"
   info "lanes/$f"
+done
+# Retired files. An update installs over the old tree and never deletes, so a
+# file the repo no longer ships stays on the box, and the cti-agent wrapper
+# still runs anything in lanes/. mailer.py was replaced by cti-mailer in 1.6.6
+# and removed after 1.7.2: take it, and its man page, off the box.
+for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1"; do
+  if [ -e "$f" ]; then
+    run rm -f "$f"
+    info "removed $f (retired)"
+  fi
 done
 # The colours and font brief.py shares with the Go lanes (internal/emailkit).
 # Data, not code: 0644. Without it the digest still renders, from a built-in
@@ -917,9 +927,8 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-mailbox"
   ok "built $CODE_DIR/bin/cti-mailbox"
 
-  # The mailer every runner sends through (since 1.6.6). The Go port of
-  # mailer.py, which stays installed, called by nothing, for a rollback
-  # (RUNBOOK 11b).
+  # The fleet's only mailer: every runner sends through it (since 1.6.6).
+  # The Go port of the old mailer.py, which was removed after 1.7.2.
   #
   # The chmod is not decorative. This script runs as root, the wrapper runs
   # the binary as $FLEET_USER, and root's umask decides whether that is

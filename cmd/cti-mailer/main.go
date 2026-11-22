@@ -1,8 +1,8 @@
 // Command cti-mailer is the fleet's single outbound mail channel.
 //
-// A port of lanes/mailer.py, flag for flag and output for output, so the
-// runners that call it do not have to change and the two can be compared
-// side by side before the Python one is retired.
+// A port of the old lanes/mailer.py, flag for flag and output for output, so
+// the runners that called it did not have to change. The Python mailer was
+// retired after 1.7.2; this is the fleet's only mailer.
 //
 //	cti-mailer --html digest.html                            # -> DIGEST_TO
 //	cti-mailer --html d.html --text d.txt --subject "..."
@@ -537,8 +537,8 @@ func loadAttachments(paths []string) ([]graph.Attachment, []string) {
 
 // ---------------------------------------------------------------- --check
 
-// required and optional mirror mailer.py's tables, kept here rather than
-// inline so the preflight report and the documentation cannot drift apart.
+// required and optional began as mailer.py's tables. They are kept here,
+// not inline, so the preflight report and the documentation cannot drift.
 var required = [][2]string{
 	{"TENANT_ID", "Entra tenant the app registration lives in"},
 	{"CLIENT_ID", "the app registration"},
@@ -676,8 +676,8 @@ var siteRoles = []string{"Sites.Selected", "Files.Read.All", "Sites.Read.All"}
 // Needed only by one lane each. Reported, never fatal: not every install runs
 // them, and a check that fails for a feature you chose not to use is a check
 // people learn to ignore. Each entry: what it is for, the roles that satisfy
-// it (narrowest first), and what happens without it. Kept in step with
-// OPTIONAL_ROLES in mailer.py.
+// it (narrowest first), and what happens without it. Pinned by
+// the role tests in roles_test.go.
 var optionalRoles = []struct {
 	what         string
 	alternatives []string

@@ -227,12 +227,9 @@ on the directory, or the forwarding setting instead.
 must be an absolute path.
 .B AUDIT_DIR=off
 discards events and also turns forwarding off, and says so on stderr; inside a
-systemd unit it is refused and the default directory is used. The Python mailer kept as a
-rollback fallback
-.RB ( mailer.py )
-does not write audit events; the live path,
-.BR cti\-mailer (1),
-does.
+systemd unit it is refused and the default directory is used.
+.BR cti\-mailer (1)
+writes audit events.
 .SH SEE ALSO
 .BR run\-mailbox\-cleanup (1),
 .BR fleet\-owners (1),

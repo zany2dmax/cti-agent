@@ -465,7 +465,7 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 # inherit the grant.
 #
 # NOT GRANTED, deliberately:
-#   cti-mailer / mailer.py  - the orchestrator must not be able to address
+#   cti-mailer              - the orchestrator must not be able to address
 #                             mail. Escalation goes through cti-alert, which
 #                             IS granted below and has no recipient argument.
 #                             The one exception is the exact command

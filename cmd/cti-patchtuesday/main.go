@@ -2,7 +2,7 @@
 //
 // It reads the Qualys and BleepingComputer wrap-ups, correlates the CVEs
 // against Qualys Host Detection to find what actually landed here, and writes
-// the email. It does not send: mailer.py is the single outbound channel, and
+// the email. It does not send: cti-mailer is the single outbound channel, and
 // run-patchtuesday hands this output to it.
 //
 //	cti-patchtuesday                      the most recent release
@@ -23,7 +23,7 @@
 // A normal run also writes $FLEET_HOME/state/patchtuesday-YYYY-MM.json listing
 // the release's CVEs, with "sent": false. The daily digest reads it and holds
 // those CVEs back - but only once run-patchtuesday has called --mark-sent,
-// which it does after mailer.py reports success and at no other time. A
+// which it does after cti-mailer reports success and at no other time. A
 // manifest from a run whose email never went out must not silence the daily,
 // or those CVEs appear in no email at all from either lane.
 //

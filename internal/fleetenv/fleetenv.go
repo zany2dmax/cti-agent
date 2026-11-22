@@ -7,7 +7,7 @@
 // layout - FLEET_HOME, FLEET_CODE, FLEET_ENV, FLEET_FEEDS, HOME - and never
 // sources fleet.env. Under systemd the credentials arrive through
 // EnvironmentFile, so nothing noticed: run-digest and run-patchtuesday source
-// the file themselves in shell, mailer.py reads it in Python, and cti-alert
+// the file themselves in shell, mailer.py read it in Python, and cti-alert
 // had its own copy of this logic in Go.
 //
 // cti-mailbox did not, so `sudo cti-agent cti-mailbox` - the command the

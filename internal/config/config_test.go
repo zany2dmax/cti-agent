@@ -114,7 +114,7 @@ func TestEachLoaderAsksOnlyForWhatItsCommandUses(t *testing.T) {
 		{"Load satisfied", Load, append(append([]string{}, graphVars...), qualysVars...), nil},
 
 		// cti-patchtuesday. It correlates against Host Detection and hands its
-		// output to mailer.py; it never opens a mailbox.
+		// output to cti-mailer; it never opens a mailbox.
 		{"LoadVulnLookup wants Qualys only", LoadVulnLookup, nil, qualysVars},
 		{"LoadVulnLookup runs on Qualys alone, no Graph", LoadVulnLookup, qualysVars, nil},
 

@@ -144,6 +144,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   the orchestrator's prompt used it, but nothing has read it. The scan that
   builds `settings.manifest` found it. A box that still sets it gets `NOT
   READ BY ANY CODE` from `fleet-config check`.
+- **The Python mailer, `lanes/mailer.py`.** `cti-mailer` replaced it in 1.6.6,
+  and nothing has called it since. Removed with it: its man page, the
+  `compare:mailers` task and `scripts/compare-mailers.sh`, its
+  `credentials.map` and `commands.manifest` entries, and the healthcheck's
+  `mailer.py --check`.
+  - **On the box:** an update now deletes `lanes/mailer.py` and its man page,
+    since the installer otherwise never removes a file the repo stops
+    shipping. There's no longer a one-line rollback; install 1.7.2 or earlier
+    to get it back.
+  - **Tests:** the Python suite's role-check tests for `--check` moved to Go
+    (`cmd/cti-mailer/roles_test.go`). The rest were already covered by
+    `internal/mailer`, `internal/graph` and `internal/httpx`.
+  - **Two error messages lose their trailing period.** They were kept only to
+    match `mailer.py` word for word.
+  - `settings-manifest` still lists `FLEET_ALLOW_TO`. Go reads it through a
+    constant, which the scan can't see; `mailer.py` was the only file that
+    named it.
 
 ---
 

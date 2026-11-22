@@ -261,7 +261,7 @@ fi
 # nothing is sent or written.
 if [ "$DEEP" = 1 ]; then
   section "Outbound (--deep)"
-  for c in "cti-mailer --check" "mailer.py --check" "cti-jira --check"; do
+  for c in "cti-mailer --check" "cti-jira --check"; do
     # shellcheck disable=SC2086  # word-split on purpose: command plus flag
     if out="$(fleet $c 2>&1)"; then pass "$c"
     else fail "$c"; printf '%s\n' "$out" | tail -15 | show; fi

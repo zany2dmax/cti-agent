@@ -34,7 +34,7 @@ is real, not before. Finished work moves out of this file into
     to GoDaddy)
   - Mail transport interfaces (read, send, move) so a fleet on Google
     Workspace or SMTP/IMAP can run it; Microsoft Graph is used directly by five
-    commands plus `mailer.py`. The recipient allowlist stays above the
+    commands. The recipient allowlist stays above the
     interface in `cti-mailer`. Largest, most valuable
   - A ticket-tracker interface (`tickets.Tracker`) so ServiceNow, Azure
     DevOps or GitHub Issues can replace Jira. Needs an answer for state kept
@@ -287,7 +287,7 @@ is real, not before. Finished work moves out of this file into
      `LoadCredentialEncrypted=`, so each lane gets only its own and the values
      reach the process as files under `$CREDENTIALS_DIRECTORY`, not as
      environment its children inherit. A `Secret(name)` helper in
-     `internal/fleetenv` (and its twins in `mailer.py` and the shell runners)
+     `internal/fleetenv` (and its twins in the Python lanes and the shell runners)
      reads the credential and falls back to the environment during the move.
      Start with the check-in, then one lane at a time
   3. **Settings split per lane**: built (Unreleased, RUNBOOK §11o) with

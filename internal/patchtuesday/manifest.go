@@ -38,7 +38,7 @@ import (
 // nobody is told.
 //
 // So cti-patchtuesday writes Sent=false, and run-patchtuesday calls
-// `cti-patchtuesday --mark-sent` only after mailer.py reports success. Held is
+// `cti-patchtuesday --mark-sent` only after cti-mailer reports success. Held is
 // the only function that decides anything, and it ignores every manifest that
 // is not marked sent.
 type Manifest struct {

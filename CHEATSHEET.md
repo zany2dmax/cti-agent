@@ -527,7 +527,6 @@ Rules:
 
 ```bash
 sudo cti-agent cti-mailer --check       # token, granted roles, version
-sudo cti-agent mailer.py --check        # the old Python mailer, kept for a rollback; nothing calls it
 sudo cti-agent cti-mailbox --dry-run    # cleanup plan; without --dry-run it moves mail
 ```
 

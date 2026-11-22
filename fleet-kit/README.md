@@ -1958,7 +1958,6 @@ fleet-kit/
     │   ├── enrich.py              NVD + EPSS + KEV → Sev5–Sev1, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
     │   ├── brief.py               HTML + plain-text digest renderer
-    │   ├── mailer.py              the old Python mailer; nothing calls it since 1.6.6 (bin/cti-mailer sends)
     │   └── feeds.txt              feed list — trim to your estate
     ├── skills/
     │   ├── checkin/SKILL.md       the heartbeat's brain
@@ -2191,12 +2190,10 @@ of `main.go` would be roughly 15 lines in `internal/report/`, and `enrich.py`
 would read it directly instead.
 
 **2. Port the mailer to Go.** Done: `cmd/cti-mailer` is the port, and every
-runner sends through it since 1.6.6. `lanes/mailer.py` implemented the "email
-the report to a distribution list" feature request in Python. The same logic ports to
-Go using the token already fetched in `internal/graph`; the endpoint is
-`POST /users/{mailbox}/sendMail`. Worth doing alongside the Docker packaging
-request, since one binary containerizes more cleanly than a binary plus four
-Python lanes.
+runner sends through it since 1.6.6. The Python `lanes/mailer.py`, which
+implemented the "email the report to a distribution list" feature request,
+was removed after 1.7.2. `cti-mailer` uses the token `internal/graph` already
+fetches; the endpoint is `POST /users/{mailbox}/sendMail`.
 
 ---
 
