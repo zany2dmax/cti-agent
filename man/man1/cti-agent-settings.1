@@ -1,0 +1,71 @@
+.TH CTI-AGENT-SETTINGS 1 "2026-11-22" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-agent-settings \- split fleet.env into core plus one file per lane
+.SH SYNOPSIS
+.B sudo cti\-agent\-settings status
+.br
+.B sudo cti\-agent\-settings split
+.BR \-\-dry\-run " | " \-\-for\-real
+.SH DESCRIPTION
+Step 3 of splitting
+.IR fleet.env .
+It writes
+.I /etc/cti\-agent/fleet.d/00\-core.env
+(what several lanes read) and one file per lane (what only that lane reads),
+and moves
+.I fleet.env
+aside. Each unit then loads core and its own file; the check-in loads every
+file. The files stay plain text.
+.PP
+Which file a setting goes in is
+.B file:
+in
+.IR settings.manifest ,
+generated from the code. Each setting line is kept as written, with the
+comment lines directly above it. A helper other settings use as
+.B $NAME
+goes before them, or into core when several files use it. A setting no code
+reads goes into core and is named.
+.PP
+It refuses while a secret or login is still in
+.I fleet.env
+(they are systemd credentials:
+.BR cti\-agent\-secrets (1)),
+and when a setting would use
+.B $NAME
+from another lane's file, which its lane never loads. It never prints a
+value. Root only.
+.SH COMMANDS
+.TP
+.B status
+Split or not; each file and how many settings it holds.
+.TP
+.B split \-\-dry\-run
+Which setting would go to which file, by name.
+.TP
+.B split \-\-for\-real
+Write the files (0640 root and the service group) and move
+.I fleet.env
+to
+.IR fleet.env.pre\-split\-TIME ,
+root-only.
+.SH EXIT STATUS
+.B 0
+done;
+.B 1
+refused (already split, no fleet.env, a secret still in it, a cross-lane
+reference) or the manifest could not be read;
+.B 2
+bad usage or not root.
+.SH EXAMPLES
+.RS
+.B sudo cti\-agent\-settings split \-\-dry\-run
+.br
+.B sudo cti\-agent\-settings split \-\-for\-real
+.br
+.B sudo cti\-agent fleet\-config check
+.RE
+.SH SEE ALSO
+.BR fleet\-config (1),
+.BR cti\-agent\-secrets (1),
+RUNBOOK.md section 11o.

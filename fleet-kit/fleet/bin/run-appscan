@@ -48,6 +48,11 @@ _inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
 set -a
 # shellcheck source=/dev/null
 [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+# The per-lane settings files (step 3, RUNBOOK 11o): core, then this lane's.
+for _f in ${FLEET_ENV_FILES:-}; do
+  # shellcheck source=/dev/null
+  if [ -f "$_f" ]; then . "$_f"; fi
+done
 set +a
 [ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
 [ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"

@@ -49,8 +49,18 @@ func Path() string {
 // already present and this call is a no-op, and a command that refused to run
 // without the file would break the path that works. The caller's own config
 // validation is what reports a genuinely missing setting, by name.
+//
+// Since the settings were split per lane (step 3), FLEET_ENV_FILES names the
+// fleet.d files this run loads - core, then the lane's own - and a later file
+// wins. Load sets only what is still unset, so it reads them last first, then
+// fleet.env (which exists only before the split).
 func Load() int {
-	return LoadFrom(Path())
+	n := 0
+	files := strings.Fields(os.Getenv("FLEET_ENV_FILES"))
+	for i := len(files) - 1; i >= 0; i-- {
+		n += LoadFrom(files[i])
+	}
+	return n + LoadFrom(Path())
 }
 
 // LoadFrom reads a specific file. Separated so it is testable without

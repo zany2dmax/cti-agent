@@ -101,6 +101,31 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   qualys.net) is now left out before triage, and ingest logs how many it
   left out. A Qualys address put on `TRIAGE_SENDERS` by name is still read.
 
+- **Settings per lane** (step 3 of the split, RUNBOOK §11o).
+  - **`cti-agent-settings split`** (root, `--dry-run` or `--for-real`) splits
+    what's left of `fleet.env` into `fleet.d/00-core.env` plus one plain file
+    per lane. It keeps every line and its comments, places helpers, keeps
+    unread settings in core and names them, and moves `fleet.env` aside. It
+    refuses while a secret or login is still in the file, or when a setting
+    would use `$NAME` from a lane file its lane never loads.
+  - **Units and runners:** each unit loads core and its own file (the check-in
+    loads all), through generated `EnvironmentFile=` lines and
+    `FLEET_ENV_FILES`. Runners, `fleetenv.Load` and `mailer.py` read the same
+    list.
+  - **Hand runs** of a runner load exactly its unit's files. Other hand runs
+    load them all.
+  - **Placement:** each setting's file is generated into `settings.manifest`
+    (`file:`). It stays in its lane's file only if no other lane could read
+    it.
+  - **`fleet-config check`** reads every file and flags a setting in the wrong
+    file and a `$NAME` its lane doesn't load.
+  - **The installer** keeps a split `fleet.d/` (it never recreates
+    `fleet.env` over it) and checks the owner, mode and SELinux label of
+    every file.
+
+  **Upgrade:** nothing changes until you split. Every unit loads `fleet.env`
+  first while it exists.
+
 ### Removed
 
 - `FLEET_OPERATOR` from `fleet.env.example` and the README. The README said

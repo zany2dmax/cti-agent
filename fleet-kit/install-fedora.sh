@@ -187,8 +187,28 @@ replace_file() {
 #
 # sed returns 0 when it substitutes nothing, so an absent key reads as empty,
 # which is what every caller here already handles.
+# settings_files - every file the fleet's settings live in, in load order:
+# fleet.env (before the split, RUNBOOK 11o), then fleet.d/00-core.env and the
+# lane files. Paths here have no spaces.
+settings_files() {
+  local f
+  for f in "$CONF_DIR/fleet.env" "$CONF_DIR/fleet.d/00-core.env" "$CONF_DIR"/fleet.d/*.env; do
+    [ -f "$f" ] && printf '%s\n' "$f"
+  done | awk '!seen[$0]++'
+}
+# split_settings_files - only the fleet.d files, space-separated: what a
+# unit's FLEET_ENV_FILES names.
+split_settings_files() {
+  local f
+  for f in $(settings_files); do
+    case "$f" in */fleet.d/*) printf '%s ' "$f" ;; esac
+  done
+}
 cfgval() {
-  sed -n "s/^$1=//p" "${2:-$CONF_DIR/fleet.env}" 2>/dev/null \
+  local files
+  if [ -n "${2:-}" ]; then files="$2"; else files="$(settings_files)"; fi
+  # shellcheck disable=SC2086 # a list of paths with no spaces
+  sed -n "s/^$1=//p" $files /dev/null 2>/dev/null \
     | tail -1 | tr -d '"'"'"' '
 }
 
@@ -217,7 +237,7 @@ if [ "$ACTION" != install ]; then
   rm -f "$UNIT_DIR"/cti-agent-*.service "$UNIT_DIR"/cti-agent-*.timer
   systemctl daemon-reload
   ok "units removed"
-  rm -f /usr/local/sbin/cti-agent-update /usr/local/sbin/cti-agent-secrets
+  rm -f /usr/local/sbin/cti-agent-update /usr/local/sbin/cti-agent-secrets /usr/local/sbin/cti-agent-settings
   # /etc/credstore.encrypted is left alone: it holds the fleet's secrets,
   # encrypted to this machine, and removing them is a decision, not cleanup.
   bold "Removing tab completion"
@@ -392,6 +412,8 @@ run install -m 0644 -o root -g root "$SRC/fleet/credentials.map" "$CODE_DIR/shar
 # from the names-only list cti-agent-secrets writes, not by listing here.
 if [ ! -d "$CREDSTORE_DIR" ]; then run install -d -m 0700 -o root -g root "$CREDSTORE_DIR"; fi
 run install -m 0755 -o root -g root "$SRC/bin/cti-agent-secrets" /usr/local/sbin/cti-agent-secrets
+# Splits fleet.env into core plus one file per lane (RUNBOOK 11o).
+run install -m 0755 -o root -g root "$SRC/bin/cti-agent-settings" /usr/local/sbin/cti-agent-settings
 if command -v systemctl >/dev/null 2>&1; then
   sdv="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
   case "$sdv" in
@@ -574,20 +596,9 @@ fi
 # would mean to a beat is checked by run-checkin --audit below.
 
 # ───────────────────────────────────────────────────────────── config ────────
-bold "Config"
-if [ -f "$CONF_DIR/fleet.env" ]; then
-  ok "$CONF_DIR/fleet.env exists, keeping its contents"
-  # Contents are the operator's; ownership and mode are this installer's job.
-  # A file staged by hand arrives owned by whoever ran the editor, often 0400,
-  # which root can still read - so nothing appears wrong until the service
-  # account tries and the verification step fails with no obvious cause.
-  # Correcting it here is safe: it changes no secret, only who may read one.
-  before="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env")"
-  run chown root:"$FLEET_GROUP" "$CONF_DIR/fleet.env"
-  run chmod 0640 "$CONF_DIR/fleet.env"
-  after="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo "$before")"
-  [ "$before" = "$after" ] || warn "corrected $before -> $after"
-
+# check_layout_paths - the path settings, wherever they live (fleet.env, or the
+# fleet.d files it was split into: cfgval reads them all).
+check_layout_paths() {
   # Path settings are layout, not secrets - and an existing fleet.env skips the
   # rewrite below, so a file copied from a developer's laptop keeps that
   # laptop's paths. run-digest then fails with "CTI_AGENT_DIR not found", which
@@ -619,12 +630,41 @@ if [ -f "$CONF_DIR/fleet.env" ]; then
     check_path REPORT_PATH     "$STATE_DIR/reports/raw-latest.md"
     check_path FLEET_FEEDS     "$CONF_DIR/feeds.txt"
     if [ "$PATHFAIL" != 0 ]; then
-      bad "fix the paths above in $CONF_DIR/fleet.env - every one of them is a"
+      bad "fix the paths above in the settings files - every one of them is a"
       info "guaranteed runtime failure, several minutes into a run rather than"
       info "at startup. This blocks the install deliberately."
       info "The cti-agent wrapper is already installed; re-run when fixed."
     fi
   fi
+}
+
+bold "Config"
+if [ ! -f "$CONF_DIR/fleet.env" ] && [ -f "$CONF_DIR/fleet.d/00-core.env" ]; then
+  # Split into per-lane files (RUNBOOK 11o): keep them, and own them as
+  # fleet.env was owned - root writes, the service account reads.
+  ok "$CONF_DIR/fleet.d exists (settings split per lane), keeping its contents"
+  run chown root:"$FLEET_GROUP" "$CONF_DIR/fleet.d"
+  run chmod 0750 "$CONF_DIR/fleet.d"
+  for f in "$CONF_DIR"/fleet.d/*.env; do
+    [ -f "$f" ] || continue
+    run chown root:"$FLEET_GROUP" "$f"
+    run chmod 0640 "$f"
+  done
+  check_layout_paths
+elif [ -f "$CONF_DIR/fleet.env" ]; then
+  ok "$CONF_DIR/fleet.env exists, keeping its contents"
+  # Contents are the operator's; ownership and mode are this installer's job.
+  # A file staged by hand arrives owned by whoever ran the editor, often 0400,
+  # which root can still read - so nothing appears wrong until the service
+  # account tries and the verification step fails with no obvious cause.
+  # Correcting it here is safe: it changes no secret, only who may read one.
+  before="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env")"
+  run chown root:"$FLEET_GROUP" "$CONF_DIR/fleet.env"
+  run chmod 0640 "$CONF_DIR/fleet.env"
+  after="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo "$before")"
+  [ "$before" = "$after" ] || warn "corrected $before -> $after"
+
+  check_layout_paths
 else
   run install -m 0640 -o root -g "$FLEET_GROUP" \
       "$SRC/fleet/fleet.env.example" "$CONF_DIR/fleet.env"
@@ -704,7 +744,7 @@ reach_cfg() {
     *) reach "$2" "${3:-443}" ;;
   esac
 }
-if [ -r "$CONF_DIR/fleet.env" ]; then
+if [ -n "$(settings_files)" ]; then
   checked=0
   if [ "$(cfgval LOOKUP_PROVIDER)" != none ]; then
     if [ -n "$(cfgval QUALYS_BASE_URL)" ]; then
@@ -955,7 +995,7 @@ TZFAIL=0
 FLEET_TZ=""; DIGEST_AT="06:00:00"; WEEKLY_AT="07:00:00"; PATCHTUE_AT="07:30:00"; MAILBOX_AT="07:00:00"
 APPOWNERS_AT="07:15:00"; APPSCAN_AT="07:30:00"; DOMAINS_AT="08:00:00"; VMSCAN_AT="08:00:00"; SUPPLIER_AT="07:45:00"
 VMSCAN_DAY="Mon"
-if [ -r "$CONF_DIR/fleet.env" ]; then
+if [ -n "$(settings_files)" ]; then
   # cfgval, not a grep pipeline - see the comment on cfgval for what the grep
   # version did to a real install. An absent key must read as empty here: every
   # one of these is optional and falls back to the default set just above.
@@ -1183,7 +1223,7 @@ fi
 # meant to reproduce. The layout set here is restored afterwards, so a stale
 # FLEET_HOME in fleet.env cannot point a hand run at different files.
 LOADENV='_h="\$FLEET_HOME" _c="\$FLEET_CODE" _e="\$FLEET_ENV" _f="\$FLEET_FEEDS"
-set -a; if [ -r "\$FLEET_ENV" ]; then . "\$FLEET_ENV"; fi; set +a
+set -a; if [ -r "\$FLEET_ENV" ]; then . "\$FLEET_ENV"; fi; for f in \${FLEET_ENV_FILES:-}; do if [ -r "\$f" ]; then . "\$f"; fi; done; set +a
 if [ -n "\${CREDENTIALS_DIRECTORY:-}" ]; then for f in "\$CREDENTIALS_DIRECTORY"/*; do n="\${f##*/}"; case "\$n" in *[!A-Z0-9_]*|[!A-Z]*) continue ;; esac; [ -f "\$f" ] && unset "\$n"; done; fi
 export FLEET_HOME="\$_h" FLEET_CODE="\$_c" FLEET_ENV="\$_e" FLEET_FEEDS="\$_f" HOME="\$_h"
 exec "\$@"'
@@ -1200,6 +1240,26 @@ if [ "\$cmd" = fleet-owners ]; then
   exec env -i PATH=/usr/bin:/bin FLEET_GROUP=$FLEET_GROUP SUDO_USER="\${SUDO_USER:-}" \\
        /usr/bin/python3 -I "\$target" "\$@"
 fi
+# SETTINGS PER LANE (step 3, RUNBOOK 11o). A runner gets exactly the fleet.d
+# files its unit loads, read from the installed unit's FLEET_ENV_FILES line;
+# any other command (a check, a probe) gets every file. fleet.env is still
+# sourced first while it exists.
+FLEET_ENV_FILES=""
+case "\$cmd" in
+  run-*)
+    for u in $UNIT_DIR/cti-agent-*.service; do
+      if grep -q "^ExecStart=$CODE_DIR/bin/\$cmd\\b" "\$u" 2>/dev/null; then
+        FLEET_ENV_FILES="\$(sed -n 's/^Environment="FLEET_ENV_FILES=\\(.*\\)"\$/\\1/p' "\$u" | head -1)"
+        break
+      fi
+    done ;;
+esac
+if [ -z "\$FLEET_ENV_FILES" ]; then
+  for f in $CONF_DIR/fleet.d/00-core.env $CONF_DIR/fleet.d/*.env; do
+    case " \$FLEET_ENV_FILES " in *" \$f "*) ;; *) if [ -f "\$f" ]; then FLEET_ENV_FILES="\$FLEET_ENV_FILES \$f"; fi ;; esac
+  done
+fi
+export FLEET_ENV_FILES
 # SECRETS AS CREDENTIALS (step 2 of splitting fleet.env, RUNBOOK 11n). Once a
 # secret this command needs is stored in /etc/credstore.encrypted, the hand
 # run becomes a transient systemd unit with the grants its timer has
@@ -1241,13 +1301,14 @@ if [ "\$use_creds" = 1 ] && command -v systemd-run >/dev/null 2>&1; then
        --unit="\$unit" --description="manual: \$cmd (by \${SUDO_USER:-root})" \\
        --setenv=FLEET_HOME=$STATE_DIR --setenv=FLEET_CODE=$CODE_DIR --setenv=FLEET_ENV=$CONF_DIR/fleet.env \\
        --setenv=FLEET_FEEDS=$CONF_DIR/feeds.txt --setenv=HOME=$STATE_DIR --setenv=SUDO_USER="\${SUDO_USER:-}" \\
+       --setenv=FLEET_ENV_FILES="\$FLEET_ENV_FILES" \\
        "\${props[@]}" "\${run[@]}" "\$target" "\$@" || rc=\$?
   exit "\$rc"
 fi
 case "\$cmd" in
-  *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
+  *.py) exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_ENV_FILES,FLEET_FEEDS,HOME \\
               /bin/bash -c "\$LOADENV" cti-agent /usr/bin/python3 "\$target" "\$@" ;;
-  *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_FEEDS,HOME \\
+  *)    exec sudo -u $FLEET_USER --preserve-env=FLEET_HOME,FLEET_CODE,FLEET_ENV,FLEET_ENV_FILES,FLEET_FEEDS,HOME \\
               /bin/bash -c "\$LOADENV" cti-agent "\$target" "\$@" ;;
 esac
 WRAP
@@ -1289,6 +1350,7 @@ VERSIONEOF
 fi
 
 bold "Verification"
+# Settings: fleet.env, or the per-lane files it was split into.
 # A path that cannot work is not a warning. The previous run reported three
 # wrong paths, printed "Installed", and the next command failed on the first
 # of them - so the install said success about a box that could not run.
@@ -1301,7 +1363,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/lanes/enrich.py" "$CONF_DIR/fleet.env"; do
+         "$CODE_DIR/lanes/enrich.py"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 
@@ -1342,7 +1404,7 @@ if [ "$MODE" != dryrun ]; then
   # nothing in its HOME or config dir that would steer a beat. As root, -w
   # is always true, so this must run as $FLEET_USER.
   if audit_out="$(sudo -u "$FLEET_USER" env HOME="$STATE_DIR" FLEET_HOME="$STATE_DIR" \
-        FLEET_CODE="$CODE_DIR" FLEET_ENV="$CONF_DIR/fleet.env" \
+        FLEET_CODE="$CODE_DIR" FLEET_ENV="$CONF_DIR/fleet.env" FLEET_ENV_FILES="$(split_settings_files)" \
         "$CODE_DIR/bin/run-checkin" --audit 2>&1)"; then
     ok "run-checkin --audit: orchestrator files root-owned, no steering files"
   else
@@ -1356,37 +1418,46 @@ if [ "$MODE" != dryrun ]; then
   # while systemd reads it as init_t and a mislabelled file denies only the
   # latter. Testing the easy one and shipping is how a box passes install and
   # then fails every timer.
-  if [ "$MODE" != dryrun ] && command -v matchpathcon >/dev/null 2>&1; then
-    if matchpathcon -V "$CONF_DIR/fleet.env" >/dev/null 2>&1; then
-      ok "fleet.env SELinux label matches policy"
+  # Every settings file: fleet.env, or the fleet.d files it was split into.
+  if [ -z "$(settings_files)" ] && [ "$MODE" != dryrun ]; then
+    bad "no settings: neither $CONF_DIR/fleet.env nor $CONF_DIR/fleet.d/00-core.env exists"
+    FAIL=1
+  fi
+  for envf in $(settings_files); do
+    envn="${envf#"$CONF_DIR"/}"
+    if [ "$MODE" != dryrun ] && command -v matchpathcon >/dev/null 2>&1; then
+      if matchpathcon -V "$envf" >/dev/null 2>&1; then
+        ok "$envn SELinux label matches policy"
+      else
+        bad "$envn has the wrong SELinux label - systemd will be denied"
+        info "$(matchpathcon -V "$envf" 2>&1 | head -1)"
+        info "fix: sudo restorecon -RFv $CONF_DIR"
+        FAIL=1
+      fi
+    fi
+    if sudo -u "$FLEET_USER" test -r "$envf"; then
+      ok "$FLEET_USER can read $envn"
     else
-      bad "fleet.env has the wrong SELinux label - systemd will be denied"
-      info "$(matchpathcon -V "$CONF_DIR/fleet.env" 2>&1 | head -1)"
-      info "fix: sudo restorecon -RFv $CONF_DIR"
+      envmode="$(stat -c '%a %U:%G' "$envf")"
+      bad "$FLEET_USER cannot read $envf (it is $envmode)"
+      info "root can read it regardless of the mode, which is why this is the"
+      info "first thing to notice. Fix:"
+      info "    sudo chown root:$FLEET_GROUP $envf"
+      info "    sudo chmod 0640 $envf"
       FAIL=1
     fi
-  fi
-  if sudo -u "$FLEET_USER" test -r "$CONF_DIR/fleet.env"; then
-    ok "$FLEET_USER can read fleet.env"
-  else
-    envmode="$(stat -c '%a %U:%G' "$CONF_DIR/fleet.env")"
-    bad "$FLEET_USER cannot read $CONF_DIR/fleet.env (it is $envmode)"
-    info "root can read it regardless of the mode, which is why this is the"
-    info "first thing to notice. Fix:"
-    info "    sudo chown root:$FLEET_GROUP $CONF_DIR/fleet.env"
-    info "    sudo chmod 0640 $CONF_DIR/fleet.env"
-    FAIL=1
-  fi
-  # Test the world bits, not the number. The previous check compared an octal
-  # mode as a decimal integer, so 0604 - which grants world read - sorted below
-  # 640 and passed. Anything other than 0 in the last digit is a finding.
-  envmode="$(stat -c %a "$CONF_DIR/fleet.env")"
-  if [ "${envmode: -1}" = 0 ]; then
-    ok "fleet.env is not world-readable (mode $envmode)"
-  else
-    bad "fleet.env is world-accessible (mode $envmode) - it holds the client secret"
-    FAIL=1
-  fi
+    # Test the world bits, not the number. The previous check compared an
+    # octal mode as a decimal integer, so 0604 - which grants world read -
+    # sorted below 640 and passed. Anything other than 0 in the last digit is
+    # a finding.
+    envmode="$(stat -c %a "$envf")"
+    if [ "${envmode: -1}" = 0 ]; then
+      ok "$envn is not world-readable (mode $envmode)"
+    else
+      bad "$envn is world-accessible (mode $envmode)"
+      FAIL=1
+    fi
+  done
   for u in cti-agent-digest cti-agent-checkin cti-agent-scout cti-agent-weekly \
          cti-agent-patchtuesday; do
     if systemd-analyze verify "$UNIT_DIR/$u.service" 2>&1 | grep -q .; then

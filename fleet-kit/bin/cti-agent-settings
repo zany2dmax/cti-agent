@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""cti-agent-settings - split fleet.env into core plus one file per lane.
+
+    sudo cti-agent-settings status            split or not; which files, how many settings each
+    sudo cti-agent-settings split --dry-run   which setting would go to which file (names only)
+    sudo cti-agent-settings split --for-real  write /etc/cti-agent/fleet.d/ and move fleet.env aside
+
+STEP 3 OF SPLITTING fleet.env (BACKLOG, RUNBOOK 11o). Every unit loaded all of
+fleet.env, so every lane saw every other lane's recipients and switches. After
+the split:
+
+  /etc/cti-agent/fleet.d/00-core.env   what several lanes read (the mailbox,
+                                       the operator, paths, the scanner, ...)
+  /etc/cti-agent/fleet.d/<lane>.env    what only that lane reads (supplier,
+                                       vmscan, domains, digest, checkin, ...)
+
+Each unit loads core and its own file (the check-in loads every file: its job
+is to run every lane's checks). Which file a setting belongs in is
+settings.manifest's `file:`, generated from the code and kept in step by a
+test. The files stay plain text: edit them as you edited fleet.env.
+
+SECRETS ARE NOT SPLIT. They and their logins live in systemd credentials
+(step 2). split refuses while any is still in fleet.env: move them first with
+`sudo cti-agent-secrets import`, check the lanes, delete their lines.
+
+WHAT IT KEEPS. Each setting line exactly as written, with the comment lines
+directly above it; a helper other settings use as $NAME (a team list, say)
+goes before them in their file, or into core when settings in several files
+use it. A setting no code reads goes into core and is named, so nothing is
+lost. fleet.env is moved aside, not deleted: fleet.env.pre-split-<time>,
+root-only, so the old file is there to go back to.
+
+IT NEVER PRINTS A VALUE. Root only: it writes /etc/cti-agent.
+"""
+import argparse
+import datetime
+import os
+import pathlib
+import re
+import sys
+import tempfile
+
+CONF = pathlib.Path(os.environ.get("CTI_CONF_DIR", "/etc/cti-agent"))
+CODE = pathlib.Path(os.environ.get("FLEET_CODE", "/opt/cti-agent"))
+KEY_RE = re.compile(r"^(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$")
+REF_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def open_quote(value):
+    """The quote a bash value leaves open at the end of its line, or "": a
+    double-quoted part honours backslash escapes, a single-quoted part does
+    not, and an unquoted # after a space starts a comment."""
+    q, i, prev = "", 0, " "
+    while i < len(value):
+        c = value[i]
+        if q == '"':
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                q = ""
+        elif q == "'":
+            if c == "'":
+                q = ""
+        elif c in ("'", '"'):
+            q = c
+        elif c == "\\":
+            i += 1
+        elif c == "#" and prev.isspace():
+            break
+        prev = c
+        i += 1
+    return q
+
+
+def closes_quote(line, q):
+    """Whether a continuation line closes quote q (escape-aware for ")."""
+    i = 0
+    while i < len(line):
+        if q == '"' and line[i] == "\\":
+            i += 2
+            continue
+        if line[i] == q:
+            return True
+        i += 1
+    return False
+
+
+def manifest():
+    """{key: {"file": core|lane|None, "moved": secret or login}}."""
+    out, cur = {}, None
+    for line in (CODE / "settings.manifest").read_text(encoding="utf-8").splitlines():
+        field, _, value = line.partition(":")
+        field, value = field.strip(), value.strip()
+        if field == "key":
+            cur = out.setdefault(value, {"file": None, "moved": False})
+        elif cur is not None and field == "file":
+            cur["file"] = value
+        elif cur is not None and field in ("secret", "credential") and value == "yes":
+            cur["moved"] = True
+    return out
+
+
+def entries(text):
+    """[(key, value, lines)] - each setting with the comment lines directly
+    above it and any lines its value runs on to; the order of the file."""
+    out, comments = [], []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        s = raw.strip()
+        if not s:
+            comments = []
+            i += 1
+            continue
+        if s.startswith("#"):
+            comments.append(raw)
+            i += 1
+            continue
+        m = KEY_RE.match(s)
+        if not m:
+            comments = []
+            i += 1
+            continue
+        key, value = m.group(1), m.group(2).strip()
+        block = comments + [raw]
+        comments = []
+        # A quoted value that runs on, or a trailing backslash, takes the
+        # following lines with it: they are part of the value.
+        q = open_quote(value)
+        if q:
+            while i + 1 < len(lines):
+                i += 1
+                # A line that looks like a setting inside an open quote means
+                # the quoting is not what it seems; refuse rather than guess.
+                if KEY_RE.match(lines[i].strip()) and not closes_quote(lines[i], q):
+                    raise ValueError(f"cannot tell where {key}'s value ends (an unmatched {q})")
+                block.append(lines[i])
+                if closes_quote(lines[i], q):
+                    break
+        else:
+            while block[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                block.append(lines[i])
+        out.append((key, value, block))
+        i += 1
+    return out
+
+
+def plan(text, man):
+    """Decide each setting's file. Returns (files {name: [blocks]}, notes {...})."""
+    items = entries(text)
+    keys_in_order = [k for k, _v, _b in items]
+    # The last line for a key wins, as when bash sources the file.
+    last = {k: idx for idx, (k, _v, _b) in enumerate(items)}
+    moved = sorted({k for k, v, _b in items if man.get(k, {}).get("moved") and v not in ("", '""', "''")})
+    refs = {}
+    for k, v, _b in items:
+        if not v.startswith("'"):
+            for name in REF_RE.findall(v):
+                refs.setdefault(name, set()).add(k)
+    target = {}
+    for k in keys_in_order:
+        f = man.get(k, {}).get("file")
+        if f:
+            target[k] = "00-core.env" if f == "core" else f"{f}.env"
+    helpers, unknown = [], []
+    for k in dict.fromkeys(keys_in_order):
+        if k in target or man.get(k, {}).get("moved"):
+            continue
+        users = {target.get(u, "00-core.env") for u in refs.get(k, ())}
+        if users:
+            helpers.append(k)
+            target[k] = users.pop() if len(users) == 1 else "00-core.env"
+        else:
+            unknown.append(k)
+            target[k] = "00-core.env"
+    # A setting that uses $NAME from another lane's file would expand to
+    # nothing: that lane's unit never loads the other file. Only core is
+    # loaded by everyone.
+    cross = []
+    for name, users in refs.items():
+        src = target.get(name)
+        for u in users:
+            dst = target.get(u)
+            if src and dst and src != dst and src != "00-core.env":
+                cross.append(f"{u} ({dst}) uses ${name} ({src})")
+    files = {}
+    for idx, (k, _v, block) in enumerate(items):
+        if idx != last[k] or man.get(k, {}).get("moved"):
+            continue  # an earlier duplicate, or a secret/login (credentials)
+        files.setdefault(target[k], []).append((k in helpers, k, block))
+    # Helpers first in each file, so the settings after them can use them.
+    for name in files:
+        files[name].sort(key=lambda t: 0 if t[0] else 1)
+    dropped = sorted({k for idx, (k, _v, _b) in enumerate(items) if idx != last[k]})
+    return files, {"moved": moved, "helpers": helpers, "unknown": unknown, "duplicates": dropped,
+                   "cross": sorted(set(cross))}
+
+
+def write_file(path, header, blocks, gid):
+    fd, tmp = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(header)
+            for _h, _k, block in blocks:
+                f.write("\n" + "\n".join(block) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o640)
+        if gid is not None:
+            os.chown(tmp, 0, gid)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def lane_of(name):
+    return "core" if name == "00-core.env" else name[:-len(".env")]
+
+
+def cmd_status(out):
+    d = CONF / "fleet.d"
+    env = CONF / "fleet.env"
+    files = sorted(d.glob("*.env")) if d.is_dir() else []
+    if not files:
+        print(f"not split: the settings are in {env}" if env.is_file() else "no settings found", file=out)
+        return 0
+    print(f"split into {d}:", file=out)
+    for f in files:
+        n = sum(1 for k, _v, _b in entries(f.read_text(encoding="utf-8", errors="replace")))
+        print(f"  {f.name:<22} {n} setting(s)", file=out)
+    if env.is_file():
+        print(f"{env} still exists: every unit loads it first, so the split does not separate the lanes yet."
+              " Move it aside once the lanes' dry runs pass.", file=out)
+    return 0
+
+
+def cmd_split(dry, out, err):
+    env = CONF / "fleet.env"
+    d = CONF / "fleet.d"
+    if d.is_dir() and any(d.glob("*.env")):
+        print(f"cti-agent-settings: {d} already holds settings files - already split", file=err)
+        return 1
+    if not env.is_file():
+        print(f"cti-agent-settings: no {env} to split", file=err)
+        return 1
+    try:
+        man = manifest()
+    except OSError:
+        print(f"cti-agent-settings: cannot read {CODE / 'settings.manifest'}", file=err)
+        return 1
+    text = env.read_bytes().decode("utf-8", errors="replace")
+    try:
+        files, notes = plan(text, man)
+    except ValueError as e:
+        print(f"cti-agent-settings: {e} - fix the quoting in fleet.env, then split", file=err)
+        return 1
+    if notes["moved"]:
+        print("cti-agent-settings: secrets or their logins are still in fleet.env: " + " ".join(notes["moved"]), file=err)
+        print("  They go into systemd credentials, not the split: sudo cti-agent-secrets import, run the", file=err)
+        print("  lanes' dry runs, delete their lines from fleet.env, then split. (RUNBOOK 11n)", file=err)
+        return 1
+    if notes["cross"]:
+        print("cti-agent-settings: these settings use $NAME from another lane's file, which their lane", file=err)
+        print("  does not load, so they would expand to nothing:", file=err)
+        for c in notes["cross"]:
+            print("    " + c, file=err)
+        print("  Write the value out, or use a helper (a name no code reads), which goes to core. Then split.", file=err)
+        return 1
+    for name in sorted(files, key=lambda n: (n != "00-core.env", n)):
+        keys = [k for _h, k, _b in files[name]]
+        print(f"{'would write' if dry else 'writing'} fleet.d/{name}: {len(keys)} setting(s)", file=out)
+        print("  " + " ".join(keys), file=out)
+    if notes["helpers"]:
+        print("helpers (used by other settings as $NAME, placed before them): " + " ".join(notes["helpers"]), file=out)
+    if notes["unknown"]:
+        print("no code reads these; kept in 00-core.env: " + " ".join(notes["unknown"]), file=out)
+    if notes["duplicates"]:
+        print("set more than once in fleet.env; only the last line kept: " + " ".join(notes["duplicates"]), file=out)
+    if dry:
+        print("\nDRY RUN - nothing written. split --for-real writes these and moves fleet.env aside.", file=out)
+        return 0
+    try:
+        gid = os.stat(env).st_gid if os.geteuid() == 0 else None
+    except OSError:
+        gid = None
+    # Written into a new folder and renamed into place in one step, so a
+    # failure part way leaves no half-split fleet.d behind.
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    final, d = d, CONF / f".fleet.d.new-{stamp}"
+    d.mkdir(mode=0o750)
+    if gid is not None:
+        os.chown(d, 0, gid)
+        os.chmod(d, 0o750)
+    for name, blocks in files.items():
+        lane = lane_of(name)
+        header = (f"# fleet.d/{name} - "
+                  + ("the settings several lanes read; every unit loads it first.\n" if lane == "core"
+                     else f"settings only the {lane} lane reads; its unit loads 00-core.env, then this.\n")
+                  + f"# Split from fleet.env on {stamp} by cti-agent-settings (RUNBOOK 11o). Secrets are\n"
+                  + "# not here: they are systemd credentials (sudo cti-agent-secrets status).\n")
+        write_file(d / name, header, blocks, gid)
+    if final.is_dir():
+        final.rmdir()  # empty, checked above
+    os.replace(d, final)
+    d = final
+    aside = CONF / f"fleet.env.pre-split-{stamp}"
+    os.replace(env, aside)
+    os.chmod(aside, 0o600)
+    if gid is not None:
+        os.chown(aside, 0, 0)
+    print(f"\nwrote {len(files)} file(s) in {d}; fleet.env moved aside to {aside.name} (root-only).", file=out)
+    print("Next: sudo cti-agent fleet-config check, then each lane's dry run. To go back:", file=out)
+    print(f"  sudo mv {aside} {env} && sudo rm -r {d}", file=out)
+    return 0
+
+
+def main(argv=None, out=sys.stdout, err=sys.stderr):
+    ap = argparse.ArgumentParser(prog="cti-agent-settings",
+                                 description="Split fleet.env into core plus one file per lane. Never prints a value.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status", help="split or not; which files, how many settings each")
+    sp = sub.add_parser("split", help="write fleet.d/ and move fleet.env aside")
+    mode = sp.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="say which setting goes where; write nothing")
+    mode.add_argument("--for-real", action="store_true", help="write the files and move fleet.env aside")
+    a = ap.parse_args(argv)
+    if os.geteuid() != 0 and "CTI_CONF_DIR" not in os.environ:
+        print("cti-agent-settings: run it as root - sudo cti-agent-settings ...", file=err)
+        return 2
+    if a.cmd == "status":
+        return cmd_status(out)
+    return cmd_split(a.dry_run, out, err)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

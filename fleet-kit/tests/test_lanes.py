@@ -4310,9 +4310,14 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             for tool in ("sudo", "systemd-run"):
                 (fake / tool).write_text(f'#!/bin/sh\necho "{tool}"\nfor a; do echo "$a"; done\n')
                 (fake / tool).chmod(0o755)
+            units = d / "units"
+            units.mkdir()
+            (units / "cti-agent-jira.service").write_text(
+                f'ExecStart={code}/bin/cti-jira --for-real\n'
+                'Environment="FLEET_ENV_FILES=/etc/x/00-core.env /etc/x/jira.env"\n')
             render = subprocess.run(
                 ["bash", "-c", f'CODE_DIR="{code}" STATE_DIR="{state}" CONF_DIR="{d}" CREDSTORE_DIR="{store}" '
-                 f'FLEET_USER=ctiagent FLEET_GROUP=ctiagent; cat <<WRAP\n{body}WRAP\n'],
+                 f'UNIT_DIR="{units}" FLEET_USER=ctiagent FLEET_GROUP=ctiagent; cat <<WRAP\n{body}WRAP\n'],
                 capture_output=True, text=True, check=True)
             wrapper = d / "cti-agent"
             wrapper.write_text(render.stdout)
@@ -4333,6 +4338,8 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                          "--pipe", "--wait", "--expand-environment=no", f"{code}/bin/cti-jira", "--check"):
                 self.assertIn(want, lines, want)
             self.assertTrue(any(l.startswith("--description=manual: cti-jira (by operator)") for l in lines))
+            # Not a runner, so every settings file (there are none here).
+            self.assertIn("--setenv=FLEET_ENV_FILES=", lines)
             self.assertNotIn("secret-value-x", r.stdout)
             r = run("fleet-db", "recent")
             self.assertEqual(r.stdout.splitlines()[0], "sudo", "a command that needs no secret keeps the old path")
@@ -6869,6 +6876,169 @@ class SecretsAsCredentials(unittest.TestCase):
         self.assertIn("auth-ok", r.stdout, r.stderr)
         self.assertIn("child=tok", r.stdout)
         self.assertIn("runner=unset", r.stdout)
+
+
+
+class SettingsPerLane(unittest.TestCase):
+    """Step 3 of splitting fleet.env: core plus one plain file per lane, each
+    unit loading core and its own. The promises: no value printed, nothing
+    lost, no secret split into a file, no setting left expanding to nothing,
+    and every unit and hand run loading the right files."""
+
+    TOOL = KIT / "bin" / "cti-agent-settings"
+    CONFIG = KIT / "fleet" / "bin" / "fleet-config"
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.conf = self.tmp / "conf"
+        self.conf.mkdir()
+        self.code = self.tmp / "code"
+        self.code.mkdir()
+        (self.code / "settings.manifest").write_text(
+            "key: GRAPH_MAILBOX\nreaders: cti-agent\nfile: core\n\n"
+            "key: DOM_TO\nreaders: run-domains\nfile: domains\n\n"
+            "key: DOM_ALLOW_TO\nreaders: run-domains\nfile: domains\n\n"
+            "key: SUPPLIER_TO\nreaders: run-supplier\nfile: supplier\n\n"
+            "key: CLIENT_SECRET\nreaders: cti-agent\nsecret: yes\n\n"
+            "key: CLIENT_ID\nreaders: cti-agent\ncredential: yes\n\n")
+        self.env = {"PATH": os.environ["PATH"], "CTI_CONF_DIR": str(self.conf), "FLEET_CODE": str(self.code),
+                    "CTI_CREDSTORE_LIST": str(self.tmp / "none")}
+
+    def tool(self, *args):
+        return subprocess.run([sys.executable, str(self.TOOL), *args], env=self.env,
+                              capture_output=True, text=True, check=False)
+
+    def config(self, *args):
+        return subprocess.run([sys.executable, str(self.CONFIG), *args], env=self.env,
+                              capture_output=True, text=True, check=False)
+
+    def test_a_split_keeps_every_line_and_prints_no_value(self):
+        (self.conf / "fleet.env").write_text(
+            "# The mailbox the fleet reads.\nGRAPH_MAILBOX=mailbox-value-1\n\n"
+            "TEAM=team-value-2\n# Domains recipients.\nDOM_TO=dom-value-3,$TEAM\n"
+            "SUPPLIER_TO=$TEAM\nDOM_ALLOW_TO=$DOM_TO\nODD_LEFTOVER=x\n")
+        r = self.tool("split", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.conf / "fleet.d").exists(), "a dry run wrote something")
+        r = self.tool("split", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for v in ("mailbox-value-1", "team-value-2", "dom-value-3"):
+            self.assertNotIn(v, r.stdout + r.stderr)
+        d = self.conf / "fleet.d"
+        core, dom, sup = ((d / n).read_text() for n in ("00-core.env", "domains.env", "supplier.env"))
+        self.assertIn("# The mailbox the fleet reads.\nGRAPH_MAILBOX=mailbox-value-1", core, "comment kept")
+        self.assertIn("TEAM=team-value-2", core, "a helper two lane files use goes to core")
+        self.assertIn("ODD_LEFTOVER=x", core, "a setting no code reads is kept in core, not lost")
+        self.assertIn("# Domains recipients.\nDOM_TO=dom-value-3,$TEAM", dom)
+        self.assertIn("DOM_ALLOW_TO=$DOM_TO", dom, "a reference within one lane file is fine")
+        self.assertIn("SUPPLIER_TO=$TEAM", sup)
+        self.assertFalse((self.conf / "fleet.env").exists())
+        aside = list(self.conf.glob("fleet.env.pre-split-*"))
+        self.assertEqual(len(aside), 1)
+        self.assertEqual(oct(aside[0].stat().st_mode & 0o777), "0o600")
+        self.assertIn("already split", self.tool("split", "--for-real").stderr)
+        r = self.config("check", "--json")
+        j = json.loads(r.stdout)
+        self.assertEqual(j["misplaced"], [])
+        self.assertEqual(j["late_references"], [])
+
+    def test_secrets_and_logins_are_never_split_into_a_file(self):
+        (self.conf / "fleet.env").write_text("GRAPH_MAILBOX=m\nCLIENT_SECRET=s3cr3t-value\nCLIENT_ID=app\n")
+        r = self.tool("split", "--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("CLIENT_ID CLIENT_SECRET", r.stderr)
+        self.assertNotIn("s3cr3t-value", r.stdout + r.stderr)
+        self.assertFalse((self.conf / "fleet.d").exists())
+
+    def test_a_reference_across_lane_files_is_refused(self):
+        (self.conf / "fleet.env").write_text("DOM_TO=a@example.test\nSUPPLIER_TO=$DOM_TO\n")
+        r = self.tool("split", "--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("SUPPLIER_TO (supplier.env) uses $DOM_TO (domains.env)", r.stderr)
+
+    def test_split_needs_a_mode(self):
+        (self.conf / "fleet.env").write_text("GRAPH_MAILBOX=m\n")
+        self.assertEqual(self.tool("split").returncode, 2)
+
+    def test_fleet_config_finds_misplaced_and_cross_lane_settings(self):
+        d = self.conf / "fleet.d"
+        d.mkdir()
+        (d / "00-core.env").write_text("GRAPH_MAILBOX=m\nDOM_TO=wrong-file\n")
+        (d / "domains.env").write_text("DOM_ALLOW_TO=x\n")
+        (d / "supplier.env").write_text("SUPPLIER_TO=$DOM_ALLOW_TO\nGRAPH_MAILBOX=again\n")
+        r = self.config("check", "--json")
+        self.assertEqual(r.returncode, 1)
+        j = json.loads(r.stdout)
+        self.assertIn({"key": "DOM_TO", "in": "00-core.env", "belongs_in": "domains.env"}, j["misplaced"])
+        self.assertTrue(any(x["refers_to"] == "DOM_ALLOW_TO" and "does not load" in x["why"]
+                            for x in j["late_references"]), j["late_references"])
+        self.assertEqual(j["duplicates"]["GRAPH_MAILBOX"], ["00-core.env:1", "supplier.env:2"])
+
+    def test_every_unit_loads_core_and_its_own_file_and_the_checkin_all(self):
+        units = KIT / "fleet" / "systemd-fedora"
+        for u in sorted(units.glob("*.service")):
+            text = u.read_text()
+            with self.subTest(unit=u.name):
+                m = re.search(r'(?m)^Environment="FLEET_ENV_FILES=(.*)"$', text)
+                self.assertIsNotNone(m)
+                files = m.group(1).split()
+                self.assertEqual(files[0], "/etc/cti-agent/fleet.d/00-core.env")
+                for f in files:
+                    self.assertIn(f"EnvironmentFile=-{f}", text)
+                self.assertIn("EnvironmentFile=-/etc/cti-agent/fleet.env", text)
+                self.assertNotIn("EnvironmentFile=/etc/cti-agent/fleet.env\n", text)
+        checkin = (units / "cti-agent-checkin.service").read_text()
+        for lane in ("supplier", "vmscan", "domains", "digest"):
+            self.assertIn(f"fleet.d/{lane}.env", checkin)
+        vmscan = (units / "cti-agent-vmscan.service").read_text()
+        self.assertNotIn("fleet.d/supplier.env", vmscan)
+
+    def test_the_mailers_default_path_settings_are_in_core(self):
+        """cti-mailer reads these whenever a runner sends without --lane -
+        the digest and Patch Tuesday both - so they cannot sit in one lane's
+        file."""
+        text = (KIT / "fleet" / "settings.manifest").read_text()
+        for k in ("DIGEST_TO", "DIGEST_CC", "DIGEST_CC_FROM_ALLOW_TO", "VM_ALLOW_TO", "FLEET_ALLOW_TO"):
+            block = text.split("key: " + k + "\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("file: core", block, k)
+
+    def test_a_lane_files_recipients_are_sent_with_that_lanes_flag(self):
+        """A lane's own recipient settings are read by cti-mailer only for its
+        --lane, so the runner that sends must pass it."""
+        text = (KIT / "fleet" / "settings.manifest").read_text()
+        flags = {"DOM_": ("domains", "run-domains", "dom"), "VMSCAN_": ("vmscan", "run-vmscan", "vmscan"),
+                 "SUPPLIER_": ("supplier", "run-supplier", "supplier"),
+                 "WAS_OWNER_CC": ("appowners", "run-appowners", "owner")}
+        for prefix, (lane, runner, flag) in flags.items():
+            keys = re.findall(r"(?m)^key: (" + re.escape(prefix) + r"\S*)\n(?:[^\n]+\n)*?file: " + lane + r"$", text)
+            if keys:
+                with self.subTest(lane=lane):
+                    r = (KIT / "fleet" / "bin" / runner).read_text()
+                    self.assertRegex(r, r"--lane[ =]" + flag + r"\b")
+
+    def test_an_unmatched_quote_is_refused_not_guessed(self):
+        (self.conf / "fleet.env").write_text('GRAPH_MAILBOX="he said \\"hi\\" ok"\nDOM_TO="open\nSUPPLIER_TO=x\n')
+        r = self.tool("split", "--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot tell where DOM_TO", r.stderr)
+        self.assertTrue((self.conf / "fleet.env").exists())
+        self.assertFalse((self.conf / "fleet.d").exists())
+
+    def test_an_escaped_quote_and_a_comment_do_not_swallow_the_next_line(self):
+        (self.conf / "fleet.env").write_text(
+            'GRAPH_MAILBOX="he said \\"hi\\""\nDOM_TO=a@x.test # a "quoted" note\nSUPPLIER_TO=y\n')
+        r = self.tool("split", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("SUPPLIER_TO=y", (self.conf / "fleet.d" / "supplier.env").read_text())
+
+    def test_every_runner_sources_its_lane_files_after_fleet_env(self):
+        for f in sorted((KIT / "fleet" / "bin").glob("run-*")):
+            with self.subTest(runner=f.name):
+                t = f.read_text()
+                i, j = t.index('. "$FLEET_ENV"'), t.index("for _f in ${FLEET_ENV_FILES:-}; do")
+                self.assertLess(i, j)
+                self.assertLess(j, t.index("\nset +a\n"))
 
 
 if __name__ == "__main__":

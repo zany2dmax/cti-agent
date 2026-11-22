@@ -50,6 +50,11 @@ _inj_feeds="${FLEET_FEEDS:-}"
 set -a
 # shellcheck source=/dev/null
 [ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+# The per-lane settings files (step 3, RUNBOOK 11o): core, then this lane's.
+for _f in ${FLEET_ENV_FILES:-}; do
+  # shellcheck source=/dev/null
+  if [ -f "$_f" ]; then . "$_f"; fi
+done
 set +a
 # Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
 fleet_secrets_from_credentials

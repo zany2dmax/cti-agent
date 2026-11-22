@@ -46,6 +46,45 @@ def stored_names():
 # $NAME and ${NAME} inside a value: bash expands them when it sources the file.
 REF_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 
+def open_quote(value):
+    """The quote a bash value leaves open at the end of its line, or "": a
+    double-quoted part honours backslash escapes, a single-quoted part does
+    not, and an unquoted # after a space starts a comment."""
+    q, i, prev = "", 0, " "
+    while i < len(value):
+        c = value[i]
+        if q == '"':
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                q = ""
+        elif q == "'":
+            if c == "'":
+                q = ""
+        elif c in ("'", '"'):
+            q = c
+        elif c == "\\":
+            i += 1
+        elif c == "#" and prev.isspace():
+            break
+        prev = c
+        i += 1
+    return q
+
+
+def closes_quote(line, q):
+    """Whether a continuation line closes quote q (escape-aware for ")."""
+    i = 0
+    while i < len(line):
+        if q == '"' and line[i] == "\\":
+            i += 2
+            continue
+        if line[i] == q:
+            return True
+        i += 1
+    return False
+
+
 
 def manifest_path():
     code = os.environ.get("FLEET_CODE", "").strip()
@@ -95,11 +134,11 @@ def parse_env(text):
     printed as an unknown setting."""
     values, lines_of, bad = {}, {}, []
     refs = []  # (line, referencing key, referenced name)
-    open_quote, cont = None, False
+    quote, cont = None, False
     for n, raw in enumerate(text.splitlines(), 1):
-        if open_quote:
-            if raw.count(open_quote) % 2 == 1:
-                open_quote = None
+        if quote:
+            if closes_quote(raw, quote):
+                quote = None
             continue
         if cont:
             cont = raw.endswith("\\")
@@ -114,8 +153,8 @@ def parse_env(text):
             bad.append(n)
             continue
         v = value.strip()
-        if v[:1] in ("'", '"') and v.count(v[0]) % 2 == 1:
-            open_quote = v[0]  # runs on to a later line
+        if open_quote(v):
+            quote = open_quote(v)  # runs on to a later line
         elif v.endswith("\\"):
             cont = True
         values[key] = unquote(value)
@@ -139,35 +178,92 @@ def required_now(rule, values, manifest):
     return have.lower() == want.lower(), f"required because {k}={want}"
 
 
-def check(env_path, manifest):
-    try:
-        # errors="replace": a byte that is not UTF-8 must not end in a
-        # traceback that quotes it and its position inside a secret.
-        text = pathlib.Path(env_path).read_bytes().decode("utf-8", errors="replace")
-    except OSError as e:
-        return {"error": f"cannot read {env_path}: {e.strerror}"}
-    values, dups, bad, refs, lines_of = parse_env(text)
+CONF_DIR = pathlib.Path(os.environ.get("CTI_CONF_DIR", "/etc/cti-agent"))
+
+
+def default_files():
+    """Every settings file, in load order: fleet.env (only before the split,
+    RUNBOOK 11o), then fleet.d/00-core.env and the lane files."""
+    out = []
+    if (CONF_DIR / "fleet.env").is_file():
+        out.append(CONF_DIR / "fleet.env")
+    d = CONF_DIR / "fleet.d"
+    if (d / "00-core.env").is_file():
+        out.append(d / "00-core.env")
+    if d.is_dir():
+        out += sorted(p for p in d.glob("*.env") if p.name != "00-core.env" and p.is_file())
+    return out
+
+
+def expected_file(entry):
+    f = entry.get("file")
+    if not f:
+        return None
+    return "00-core.env" if f == "core" else f"{f}.env"
+
+
+def check(paths, manifest):
+    """Check one settings file, or every file of a split. Positions are line
+    numbers for one file and "file:line" for several."""
+    paths = [pathlib.Path(p) for p in paths]
+    multi = len(paths) > 1
+    values, dups, bad, refs, first, last_file = {}, {}, [], [], {}, {}
+    for fi, path in enumerate(paths):
+        try:
+            # errors="replace": a byte that is not UTF-8 must not end in a
+            # traceback that quotes it and its position inside a secret.
+            text = path.read_bytes().decode("utf-8", errors="replace")
+        except OSError as e:
+            return {"error": f"cannot read {path}: {e.strerror}"}
+        vals, _d, b, rs, lines_of = parse_env(text)
+        label = (lambda n, name=path.name: f"{name}:{n}") if multi else (lambda n: n)
+        for k, v in vals.items():
+            values[k] = v  # a later file wins, as when the files are sourced in order
+            last_file[k] = path
+        for k, ns in lines_of.items():
+            dups.setdefault(k, []).extend(label(n) for n in ns)
+            first.setdefault(k, (fi, min(ns)))
+        bad += [label(n) for n in b]
+        refs += [((fi, n), label(n), key, name) for n, key, name in rs]
+    dups = {k: ls for k, ls in dups.items() if len(ls) > 1}
     known = set(manifest)
     # A key other settings refer to ($EY_TEAM in several address lists, say)
     # is a helper: no code reads it, and it is not a typo.
     used_by = {}
-    for _n, key, name in refs:
+    for _pos, _label, key, name in refs:
         used_by.setdefault(name, set()).add(key)
     helpers = [{"key": k, "used_by": len(used_by[k])} for k in sorted(set(values) - known) if k in used_by]
-    # Bash reads the file top to bottom: a reference to a key not set above
-    # the line that uses it expands to nothing, silently. Names the
+    # Bash reads top to bottom, file after file: a reference to a key not set
+    # before the line that uses it expands to nothing, silently. Names the
     # environment always has (HOME, USER and the like) are not flagged.
     env_names = {"HOME", "USER", "LOGNAME", "PATH", "HOSTNAME", "SHELL", "PWD"}
     late = []
-    for n, key, name in refs:
-        first = min(lines_of.get(name, [10 ** 9]))
-        if name not in env_names and first > n:
-            late.append({"line": n, "key": key, "refers_to": name,
-                         "why": "set below this line" if name in values else "not set in this file"})
+    for pos, lab, key, name in refs:
+        if name in env_names:
+            continue
+        if first.get(name, (10 ** 9, 0)) > pos:
+            late.append({"line": lab, "key": key, "refers_to": name,
+                         "why": "set below this line" if name in values else "not set in these files"})
     unknown = []
     for k in sorted(set(values) - known - set(used_by)):
         near = difflib.get_close_matches(k, known, n=1, cutoff=0.8)
         unknown.append({"key": k, "did_you_mean": near[0] if near else None})
+    # After the split each lane loads core and its own file only, so $NAME
+    # set in another lane's file expands to nothing for it.
+    defined_in = {k: p.name for k, p in last_file.items()}
+    for _pos, lab, key, name in refs:
+        src, dst = defined_in.get(name), defined_in.get(key)
+        if (multi and src and dst and src != dst and src != "00-core.env"
+                and last_file[key].parent.name == "fleet.d" and last_file[name].parent.name == "fleet.d"):
+            late.append({"line": lab, "key": key, "refers_to": name,
+                         "why": f"set in {src}, which the lane reading {dst} does not load"})
+    # After the split, a setting in the wrong file is seen by the wrong lanes,
+    # or not by the lane that needs it.
+    misplaced = []
+    for k, path in sorted(last_file.items()):
+        want = expected_file(manifest.get(k, {}))
+        if path.parent.name == "fleet.d" and want and path.name != want:
+            misplaced.append({"key": k, "in": path.name, "belongs_in": want})
     at_default, empty, missing = [], [], []
     listed = stored_names()
     in_store = {k for k, e in manifest.items() if (e["secret"] or e["credential"]) and k in listed}
@@ -190,14 +286,15 @@ def check(env_path, manifest):
     secrets = [{"key": k, "readers": manifest[k]["readers"]}
                for k in sorted(values) if k in manifest and manifest[k]["secret"] and values[k] != ""]
     return {
-        "file": str(env_path),
+        "file": " ".join(str(p) for p in paths),
         "settings": len(values),
         "unknown": unknown,
         "missing": missing,
-        "duplicates": {k: ns for k, ns in sorted(dups.items())},
+        "duplicates": {k: ls for k, ls in sorted(dups.items())},
         "unparsed_lines": bad,
         "helpers": helpers,
         "late_references": late,
+        "misplaced": misplaced,
         "at_default": at_default,
         "empty": empty,
         "secrets_set": secrets,
@@ -214,7 +311,7 @@ def print_check(r, out):
     p = lambda s="": print(s, file=out)  # noqa: E731
     p(f"{r['file']}: {r['settings']} settings")
     problems = (len(r["unknown"]) + len(r["missing"]) + len(r["duplicates"])
-                + len(r["unparsed_lines"]) + len(r["late_references"]))
+                + len(r["unparsed_lines"]) + len(r["late_references"]) + len(r["misplaced"]))
     if r["missing"]:
         p(f"\nMISSING - required, not set: {len(r['missing'])}")
         for m in r["missing"]:
@@ -227,11 +324,15 @@ def print_check(r, out):
     if r["duplicates"]:
         p(f"\nSET MORE THAN ONCE - the last one wins: {len(r['duplicates'])}")
         for k, ns in r["duplicates"].items():
-            p(f"  {k}  (lines {', '.join(map(str, ns))})")
+            p(f"  {k}  ({', '.join(map(str, ns))})")
+    if r["misplaced"]:
+        p(f"\nIN THE WRONG FILE - the lanes that need it will not see it, or others will: {len(r['misplaced'])}")
+        for m in r["misplaced"]:
+            p(f"  {m['key']}  (in {m['in']}, belongs in {m['belongs_in']})")
     if r["late_references"]:
         p(f"\nREFERENCES THAT EXPAND TO NOTHING - bash reads top to bottom: {len(r['late_references'])}")
         for x in r["late_references"]:
-            p(f"  line {x['line']}: {x['key']} uses ${x['refers_to']}, {x['why']}")
+            p(f"  at {x['line']}: {x['key']} uses ${x['refers_to']}, {x['why']}")
     if r["unparsed_lines"]:
         p(f"\nNOT A SETTING - lines that are not KEY=value: {', '.join(map(str, r['unparsed_lines']))}")
     if r["helpers"]:
@@ -266,7 +367,7 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
     ap = argparse.ArgumentParser(prog="fleet-config", description="fleet.env, checked against what the code reads. Never prints a value.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="check fleet.env against the settings the code reads")
-    c.add_argument("--env", help="the file to check (default: $FLEET_ENV or /etc/cti-agent/fleet.env)")
+    c.add_argument("--env", help="check one file (default: every settings file - fleet.env, or the fleet.d files it was split into)")
     c.add_argument("--json", action="store_true", help="print the result as JSON")
     ls = sub.add_parser("list", help="every setting the code reads, and which programs read it")
     ls.add_argument("--secrets", action="store_true", help="only the secrets")
@@ -308,8 +409,11 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
             print(f"{r['key']:<34} {flags:<36} {', '.join(r['readers'])}", file=out)
         return 0
 
-    env = a.env or os.environ.get("FLEET_ENV", "").strip() or "/etc/cti-agent/fleet.env"
-    r = check(env, manifest)
+    paths = [a.env] if a.env else default_files()
+    if not paths:
+        print(f"fleet-config: no settings in {CONF_DIR} (neither fleet.env nor fleet.d/00-core.env)", file=err)
+        return 1
+    r = check(paths, manifest)
     if "error" in r:
         print("fleet-config: " + r["error"], file=err)
         return 1
@@ -319,7 +423,7 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
     else:
         print_check(r, out)
     return 1 if (r["unknown"] or r["missing"] or r["duplicates"] or r["unparsed_lines"]
-                 or r["late_references"]) else 0
+                 or r["late_references"] or r["misplaced"]) else 0
 
 
 if __name__ == "__main__":

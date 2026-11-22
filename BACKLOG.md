@@ -290,8 +290,10 @@ is real, not before. Finished work moves out of this file into
      `internal/fleetenv` (and its twins in `mailer.py` and the shell runners)
      reads the credential and falls back to the environment during the move.
      Start with the check-in, then one lane at a time
-  3. **Settings split per lane**: `/etc/cti-agent/fleet.d/00-core.env` plus one
-     file per lane; each unit loads core and its own. Goes with step 2
+  3. **Settings split per lane**: built (Unreleased, RUNBOOK §11o) with
+     `cti-agent-settings split`. Left: core is large, because the "could
+     read" check sends anything a shared program names to core. Narrowing
+     it needs per-function reads, the same work as narrowing the grants
   4. **1Password as the source of truth for secrets**: one field per secret
      instead of a pasted copy of the whole file, and a committed `fleet.env.tpl`
      of `op://` references rendered with `op inject` on the operator's Mac at

@@ -58,10 +58,14 @@ map step 2 of the split grants credentials from.
 .SH OPTIONS
 .TP
 .BI \-\-env " FILE"
-The file to check. Default:
-.BR $FLEET_ENV ,
-else
-.IR /etc/cti\-agent/fleet.env .
+Check one file. Default: every settings file \-
+.I /etc/cti\-agent/fleet.env
+if it exists, then
+.I fleet.d/00\-core.env
+and the lane files it was split into. After a split it also reports a
+setting in the wrong file, and a
+.B $NAME
+set in a lane file the referring lane does not load.
 .TP
 .B \-\-json
 Print JSON.

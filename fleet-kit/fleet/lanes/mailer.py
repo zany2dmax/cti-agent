@@ -116,8 +116,13 @@ def load_env():
     /var/lib/cti-agent and config in /etc/cti-agent, so the two are not
     always the same directory.
     """
-    path = os.environ.get("FLEET_ENV") or os.path.join(FLEET_HOME, "fleet.env")
-    if os.path.exists(path):
+    # The per-lane files (step 3) first, last one first, since setdefault keeps
+    # what is already set; then fleet.env, which exists only before the split.
+    paths = list(reversed(os.environ.get("FLEET_ENV_FILES", "").split()))
+    paths.append(os.environ.get("FLEET_ENV") or os.path.join(FLEET_HOME, "fleet.env"))
+    for path in paths:
+        if not os.path.exists(path):
+            continue
         with open(path) as f:
             for line in f:
                 line = line.strip()

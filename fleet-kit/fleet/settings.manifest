@@ -4,7 +4,8 @@
 # `code-default` (only when every reader states the same one),
 # `default-conflict` and `empty-differs` (an empty value means something other
 # than unset, so it is a setting, not a removable line) come from the code
-# and are rewritten.
+# and are rewritten. So are `file:` - which /etc/cti-agent/fleet.d file the
+# setting lives in - and `file-why:` when it went to core instead of its lane.
 # Kept by hand, and preserved on --write:
 #   secret:    yes - a secret; it lives in a systemd credential, not fleet.env
 #   credential: yes - not a secret, but the login half of one (a client ID, a
@@ -14,6 +15,8 @@
 #   default:   VALUE - what the code uses when the key is unset; a setting
 #              equal to it can be removed. Overrides code-default when both
 #              are present, for defaults the scanner cannot see
+#   lane:      the lane file the setting belongs in, overriding the name rules
+#              (LANE_RULES); `file:` below is where it actually goes
 #   note:      one line for a person
 # task check fails when this file is out of date with the code: run
 # scripts/settings-manifest --write and review the diff.
@@ -31,75 +34,95 @@ secret: yes
 key: APPSCAN_OWNERS_FILE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-mailer cti-vmscan
+file: core
 
 key: APPSCAN_REPORT_PROVIDER
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-mailer cti-vmscan
+file: core
+file-why: wanted appscan, also read by the appowners, digest, domains, vmscan lane(s)
 
 key: APPSCAN_WEBSITES_FILE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-mailer cti-vmscan
+file: core
 
 key: AUDIT_DIR
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-alert cti-appscan cti-audit cti-jira cti-mailbox cti-mailer cti-supplier cti-vmscan run-mailbox-cleanup
+file: core
 
 key: AUDIT_RETAIN_DAYS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appscan cti-audit cti-jira cti-mailbox cti-mailer cti-supplier cti-vmscan installer run-mailbox-cleanup
 code-default: 120
+file: core
 
 key: AUDIT_SYSLOG_ADDR
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-alert cti-appscan cti-audit cti-jira cti-mailbox cti-mailer cti-supplier cti-vmscan
+file: core
 
 key: AUDIT_SYSLOG_PROTO
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-alert cti-appscan cti-audit cti-jira cti-mailbox cti-mailer cti-supplier cti-vmscan
+file: core
 
 key: CHECKIN_MAX_ALERTS
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: checkin-bash-guard
+file: checkin
 
 key: CHECKIN_MAX_BASH
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: checkin-bash-guard run-checkin
+file: checkin
 
 key: CHECKIN_MAX_BOARD_GROWTH
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: run-checkin
 code-default: 8
+file: checkin
 
 key: CHECKIN_MAX_BOARD_WRITES
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: checkin-bash-guard
+file: checkin
 
 key: CHECKIN_MAX_DB_WRITES
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: checkin-bash-guard
+file: checkin
 
 key: CHECKIN_MODEL
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: run-checkin
+file: checkin
 
 key: CHECKIN_TRACE_DAYS
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: fleet-trace run-checkin
 code-default: 14
+file: core
+file-why: wanted checkin, also read by the supplier lane(s)
 
 key: CHECKIN_TRACE_KEEP
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: fleet-trace run-checkin
 code-default: minimal
+file: core
+file-why: wanted checkin, also read by the supplier lane(s)
 
 key: CHECKIN_TRACE_MAX_MB
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: run-checkin
 code-default: 20
+file: checkin
 
 key: CLAUDE_BIN
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: cti-agent cti-triage installer model-lane.sh run-checkin run-supplier
+file: core
 
 key: CLAUDE_CODE_OAUTH_TOKEN
 section: 7. CLAUDE CODE - the heartbeat lane only
@@ -109,6 +132,7 @@ secret: yes
 key: CLAUDE_CONFIG_DIR
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: model-lane.sh run-checkin
+file: core
 
 key: CLIENT_ID
 section: 1. MICROSOFT GRAPH - required
@@ -125,77 +149,104 @@ required: always
 key: CTI_AGENT_DIR
 section: 3. PATHS - re-check these on every box
 readers: installer run-digest
+file: core
 
 key: CTI_REPLY_MAILBOX
 section: 1. MICROSOFT GRAPH - required
 readers: cti-mailer mailer.py
+file: core
 
 key: DIGEST_CC
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer mailer.py
+file: core
+lane: core
+note: cti-mailer reads it on its default path, which run-patchtuesday uses as well as the digest
 
 key: DIGEST_CC_FROM_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer mailer.py
+file: core
+lane: core
+note: cti-mailer reads it on its default path, which run-patchtuesday uses as well as the digest
 
 key: DIGEST_SKIP_SUBJECTS
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 empty-differs: yes
+file: core
+file-why: wanted digest, also read by the appowners, appscan, domains, mailbox, patchtuesday, supplier, vmscan lane(s)
 
 key: DIGEST_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-alert cti-mailer dev-run mailer.py run-patchtuesday
+file: core
 required: always
 note: the daily digest has no recipient without it
 
 key: DOMAINS_ALLOW_PRIVATE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: DOMAINS_DKIM_SELECTORS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: DOMAINS_DMARC_RUA
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
+file: domains
 
 key: DOMAINS_DNS_SERVERS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
+file: domains
 
 key: DOMAINS_FILE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains run-domains
+file: domains
 
 key: DOMAINS_GATEWAY_DAYS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
+file: domains
 
 key: DOMAINS_MAIL_GATEWAY
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
+file: domains
 
 key: DOMAINS_SMTP
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: DOMAINS_SMTP_PORT
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
+file: domains
 
 key: DOMAINS_SPF_VENDORS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: DOM_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-mailer installer run-domains
+file: domains
 
 key: DOM_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-mailer installer run-domains
+file: domains
 
 key: FALCON_BASE_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -215,148 +266,185 @@ secret: yes
 key: FLEET_ALLOW_TO
 section: not in fleet.env.example
 readers: cti-mailer dev-run mailer.py
+file: core
+lane: core
+note: cti-mailer reads it on its default path, which run-patchtuesday uses as well as the digest
 
 key: FLEET_APPOWNERS_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: FLEET_APPSCAN_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: FLEET_ATTRIBUTION
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan mailer.py
+file: core
 
 key: FLEET_BUDGET_BACKOFF_BASE_HOURS
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_BUDGET_BACKOFF_MAX_HOURS
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_BUDGET_DAILY_BEATS
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_BUDGET_FILE
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_BUDGET_WINDOW_BEATS
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_BUDGET_WINDOW_HOURS
 section: 8. QUOTA CEILINGS - matters most with option B, C or D
 readers: cti-budget
+file: checkin
 
 key: FLEET_CODE
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan enrich.py fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan enrich.py fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+file: core
 
 key: FLEET_DEV_EMAIL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-alert cti-jira cti-mailbox cti-mailer cti-supplier fleet-mode.sh run-appowners run-appscan run-digest run-domains run-patchtuesday run-supplier run-vmscan
+file: core
 
 key: FLEET_DIGEST_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: FLEET_DOMAINS_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: FLEET_ENV
 section: 3. PATHS - re-check these on every box
 readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer mailer.py model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 default-conflict: '/etc/cti-agent/fleet.env' | 'fleet.env'
+file: core
 
 key: FLEET_FEEDS
 section: 3. PATHS - re-check these on every box
 readers: cti-agent cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan installer run-checkin run-digest scout.py
+file: core
 
 key: FLEET_GROUP
 section: not in fleet.env.example
 readers: fleet-owners installer
+file: core
 
 key: FLEET_HOME
 section: 3. PATHS - re-check these on every box
 readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-checkin-verdict cti-domains cti-falcon cti-jira cti-kev cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan dev-run enrich.py fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer mailer.py model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan scout.py
+file: core
 
 key: FLEET_LOCK_WAIT_SECONDS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: fleet-mode.sh
 code-default: 600
+file: core
 
 key: FLEET_MAILBOX_BACKLOG_THRESHOLD
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: run-mailbox-cleanup
+file: mailbox
 
 key: FLEET_MAILBOX_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: cti-agent-mailbox.timer installer
+file: mailbox
 
 key: FLEET_OPERATOR_EMAIL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-alert cti-mailer dev-run mailer.py run-checkin
+file: core
 required: always
 note: cti-alert refuses to run without it
 
 key: FLEET_ORG
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan mailer.py
+file: core
 
 key: FLEET_OWNERS_DIR
 section: not in fleet.env.example
 readers: fleet-owners
 code-default: /etc/cti-agent
+file: core
 
 key: FLEET_OWNERS_WRAPPER
 section: not in fleet.env.example
 readers: fleet-owners
 code-default: /usr/local/bin/cti-agent
+file: core
 
 key: FLEET_PATCHTUESDAY_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: FLEET_PROCESSED_LOG
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-appscan cti-mailbox cti-supplier cti-vmscan run-digest
+file: core
 
 key: FLEET_REPO_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan mailer.py
+file: core
 
 key: FLEET_SUPPLIER_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: cti-agent-supplier.timer installer
+file: core
 
 key: FLEET_TIMEZONE
 section: 4b. SCHEDULE TIMEZONE
 readers: cti-agent-mailbox.timer cti-agent-supplier.timer cti-agent-vmscan.timer cti-mailbox installer
+file: core
 
 key: FLEET_UNAUTHENTICATED_SENDERS
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-alert cti-appscan cti-mailbox cti-mailer cti-supplier cti-vmscan
+file: core
 
 key: FLEET_USER_AGENT
 section: 6. ENRICHMENT
 readers: cti-agent cti-domains cti-falcon cti-jira cti-patchtuesday cti-triage enrich.py scout.py
+file: core
 
 key: FLEET_VMSCAN_DAY
 section: 4b. SCHEDULE TIMEZONE
 readers: cti-agent-vmscan.timer installer
+file: core
 
 key: FLEET_VMSCAN_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: cti-agent-vmscan.timer installer
+file: core
 
 key: FLEET_WEEKLY_TIME
 section: 4b. SCHEDULE TIMEZONE
 readers: installer
+file: core
 
 key: GODADDY_PAT
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -367,25 +455,30 @@ key: GRAPH_FOLDER
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-alert cti-appreport cti-appscan cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-vmscan dev-run
 code-default: inbox
+file: core
 
 key: GRAPH_LOOKBACK_HOURS
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run fleet-db run-digest
 code-default: 24
+file: core
 
 key: GRAPH_MAILBOX
 section: 1. MICROSOFT GRAPH - required
 readers: cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-triage cti-vmscan dev-run enrich.py mailer.py run-appscan run-digest scout.py
+file: core
 required: always
 note: no default on purpose: an unconfigured install must fail
 
 key: JIRA_ALLOW_CLOSE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
 
 key: JIRA_ALLOW_CREATE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan installer run-vmscan
+file: core
 
 key: JIRA_API_TOKEN
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -400,6 +493,7 @@ credential: yes
 key: JIRA_CLOSE_TRANSITION
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
 
 key: JIRA_CLOUD_ID
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -409,10 +503,14 @@ credential: yes
 key: JIRA_DOMAINS_ISSUE_TYPE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted domains, also read by the appowners, appscan, digest, mailbox, patchtuesday, supplier, vmscan lane(s)
 
 key: JIRA_DOMAINS_PROJECT_KEY
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted domains, also read by the appowners, appscan, digest, mailbox, patchtuesday, supplier, vmscan lane(s)
 
 key: JIRA_EMAIL
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
@@ -422,76 +520,104 @@ credential: yes
 key: JIRA_ISSUE_TYPE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
 
 key: JIRA_PROJECT_KEY
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan run-vmscan
+file: core
 
 key: JIRA_TRUSTED_REPORTERS
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
 
 key: JIRA_VMSCAN_ISSUE_TYPE
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted vmscan, also read by the appowners, appscan, digest, domains, mailbox, patchtuesday, supplier lane(s)
 
 key: JIRA_VMSCAN_PROJECT_KEY
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan run-vmscan
+file: core
+file-why: wanted vmscan, also read by the appowners, appscan, digest, domains, mailbox, patchtuesday, supplier lane(s)
 
 key: LOOKUP_PROVIDER
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run installer
 code-default: qualys
+file: core
 
 key: MAILBOX_DIGEST_SENDERS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_FEED_SENDERS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_LOOKBACK_HOURS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: 336
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_MIN_AGE_HOURS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: 48
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_SELF_MIN_AGE_HOURS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_STALE_DAYS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: 30
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_STALE_FOLDER
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: Unhandled
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_STALE_MAX
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: 200
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: MAILBOX_TEAM_SENDERS
 section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+file-why: wanted mailbox, also read by the appowners, appscan, digest, domains, patchtuesday, supplier, vmscan lane(s)
 
 key: NETNOTES_FILE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
+file: vmscan
 
 key: NETRULES_FILE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
+file: vmscan
 
 key: NVD_API_KEY
 section: 6. ENRICHMENT
@@ -501,6 +627,8 @@ secret: yes
 key: OWNER_ALLOW_DOMAINS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-mailer cti-vmscan fleet-owners run-appowners
+file: core
+file-why: wanted appowners, also read by the appscan, digest, domains, vmscan lane(s)
 
 key: POD_API_TOKEN
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -515,10 +643,14 @@ credential: yes
 key: PROOFPOINT_POD_IPS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: PROOFPOINT_POD_TENANT
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira
+file: core
+file-why: wanted domains, also read by the appscan, digest, vmscan lane(s)
 
 key: QUALYS_BASE_URL
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
@@ -529,11 +661,13 @@ required: if LOOKUP_PROVIDER=qualys
 key: QUALYS_KB_CACHE
 section: 3. PATHS - re-check these on every box
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run installer
+file: core
 
 key: QUALYS_KB_MAX_AGE_HOURS
 section: 3. PATHS - re-check these on every box
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
 code-default: 168
+file: core
 
 key: QUALYS_PASSWORD
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
@@ -544,10 +678,12 @@ required: if LOOKUP_PROVIDER=qualys
 key: QUALYS_RL_MAX_WAIT
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-vmscan
+file: core
 
 key: QUALYS_RL_RESERVE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-vmscan
+file: core
 
 key: QUALYS_USERNAME
 section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
@@ -558,11 +694,13 @@ required: if LOOKUP_PROVIDER=qualys
 key: REPORT_HOSTNAMES
 section: 5. REPORT CONTENT
 readers: brief.py cti-agent dev-run
+file: core
 
 key: REPORT_PATH
 section: 3. PATHS - re-check these on every box
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run installer run-digest
 code-default: ./cti-agent-report.md
+file: core
 
 key: REPORT_REDACTION_SALT
 section: 5. REPORT CONTENT
@@ -572,101 +710,126 @@ secret: yes
 key: SUBNETS_DRIVE_ID
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer cti-vmscan mailer.py
+file: vmscan
 
 key: SUBNETS_ITEM_ID
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
+file: vmscan
 
 key: SUBNETS_SHEET
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
+file: vmscan
 
 key: SUPPLIER_ADDRESS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent-supplier.timer cti-supplier installer run-supplier
+file: supplier
 
 key: SUPPLIER_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-supplier
+file: supplier
 
 key: SUPPLIER_BOARD_NAME
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_BOARD_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_FOLDER
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_FORM_TYPES
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_HOLD_PHRASES
 section: not in fleet.env.example
 readers: cti-supplier
 empty-differs: yes
+file: supplier
 
 key: SUPPLIER_INTERNAL_DOMAINS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_JIRA_PROJECT
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan run-supplier
+file: core
+file-why: wanted supplier, also read by the appowners, appscan, digest, domains, mailbox, patchtuesday, vmscan lane(s)
 
 key: SUPPLIER_JIRA_STATUS
 section: not in fleet.env.example
 readers: cti-supplier
 empty-differs: yes
+file: supplier
 
 key: SUPPLIER_JIRA_TYPE
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_MEANING
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_MODEL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: run-supplier
+file: supplier
 
 key: SUPPLIER_OWNER_EMAIL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_QUESTION
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_SEEN_FILE
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_TECH_TERMS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
 empty-differs: yes
+file: supplier
 
 key: SUPPLIER_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-supplier
+file: supplier
 
 key: SUPPLIER_TPRM
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_UNSURE_TEXT
 section: not in fleet.env.example
 readers: cti-supplier
+file: supplier
 
 key: SUPPLIER_WINDOW_DAYS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-supplier
+file: supplier
 
 key: TENANT_ID
 section: 1. MICROSOFT GRAPH - required
@@ -677,69 +840,94 @@ required: always
 key: TRIAGE_BLIND_SPOTS
 section: not in fleet.env.example
 readers: cti-triage
+file: digest
 
 key: TRIAGE_ENABLED
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: brief.py cti-agent cti-triage run-digest
+file: core
+file-why: wanted digest, also read by the mailbox lane(s)
 
 key: TRIAGE_JUDGE_INSTRUCTIONS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-triage
+file: digest
 
 key: TRIAGE_JUDGE_MODEL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-triage
+file: digest
 
 key: TRIAGE_MAX_PER_RUN
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-triage run-digest
+file: core
+file-why: wanted digest, also read by the mailbox lane(s)
 
 key: TRIAGE_MODEL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-triage installer
+file: core
+file-why: wanted digest, also read by the mailbox lane(s)
 
 key: TRIAGE_READER_INSTRUCTIONS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-triage
+file: digest
 
 key: TRIAGE_SENDERS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: brief.py cti-agent cti-triage run-digest
+file: core
+file-why: wanted digest, also read by the mailbox lane(s)
 
 key: VMSCAN_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
+file: vmscan
 
 key: VMSCAN_SCANS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-jira cti-vmscan
+file: core
+file-why: wanted vmscan, also read by the appscan, digest, domains lane(s)
 
 key: VMSCAN_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
+file: vmscan
 
 key: VM_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-supplier cti-vmscan dev-run mailer.py run-vmscan
+file: core
+file-why: wanted digest, also read by the appowners, appscan, domains, mailbox, patchtuesday, supplier, vmscan lane(s)
 
 key: WAS_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appscan cti-mailer installer run-appscan
+file: core
+file-why: wanted appscan, also read by the appowners lane(s)
 
 key: WAS_ATTACH_REPORT
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: installer run-appscan
 code-default: 0
+file: appscan
 
 key: WAS_OWNER_CC
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer
+file: appowners
 
 key: WAS_TICKETS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: run-appscan
 code-default: 0
+file: appscan
 
 key: WAS_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appscan cti-mailer installer run-appscan
+file: core
+file-why: wanted appscan, also read by the appowners lane(s)

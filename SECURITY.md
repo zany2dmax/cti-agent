@@ -192,6 +192,11 @@ marked `credential: yes` and moves with it, so a lane that doesn't use a
 system holds none of its login. `TENANT_ID` is discoverable from the domain
 anyway; the gain is that each lane sees only the systems it uses.
 
+**Settings, too.** After the split (RUNBOOK §11o), each unit loads only
+`fleet.d/00-core.env` and its own lane's file. A lane no longer sees another
+lane's recipients or switches. These files hold no secret, and stay plain
+text.
+
 **Limits.** The grants are generated as "could read", so wider than needed:
 a runner gets the secrets of every program it calls. Until a secret's line is
 deleted from `fleet.env`, the unit's own starting environment still holds it

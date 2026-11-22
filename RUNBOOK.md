@@ -33,6 +33,7 @@ document assumes you have decided to run it.
 - [11l. The audit trail](#11l-the-audit-trail)
 - [11m. What is in fleet.env](#11m-what-is-in-fleetenv)
 - [11n. Moving secrets into systemd credentials](#11n-moving-secrets-into-systemd-credentials)
+- [11o. Settings per lane](#11o-settings-per-lane)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -3180,6 +3181,78 @@ than strictly needed. A program counts as reading a secret if it could, such
 as `cti-mailer`'s `--check` table naming the model token, and a runner gets
 the secrets of every program it calls. Wider is safe: a lane never lacks a
 secret it needs. Narrowing the lists is later work.
+
+---
+
+## 11o. Settings per lane
+
+Step 3 of splitting `fleet.env`. With the secrets and their logins in systemd
+credentials (11n), `fleet.env` holds only ordinary settings: recipients,
+allowlists, paths, schedules and switches. Every unit still loads all of
+them. After the split:
+
+```
+/etc/cti-agent/fleet.d/00-core.env     what several lanes read
+/etc/cti-agent/fleet.d/<lane>.env      what only that lane reads
+```
+
+- **Units.** Each unit loads core, then its own file. The check-in loads every
+  file, because its job is to run every lane's checks.
+- **Hand runs.** A hand run of a runner loads exactly its unit's files. Any
+  other hand run loads them all.
+- **Plain files.** They stay plain text: edit them as you edited `fleet.env`.
+
+**Which file a setting goes in** is `file:` in `settings.manifest`, generated
+from the code:
+- **The intent** comes from a rule on the name (`SUPPLIER_*` to supplier,
+  `DOM_*` and `DOMAINS_*` to domains, `CHECKIN_*` to checkin, and so on), or a
+  hand-kept `lane:`.
+- **The check:** a setting stays in its lane's file only if no program outside
+  that lane could read it. Otherwise it goes to core, and `file-why:` says why.
+
+Core is large, because programs that every lane runs read many settings. The
+lane files hold what truly belongs to one lane.
+
+**Nothing changes until you split.** Every unit loads `fleet.env` first while
+it exists.
+
+### The split
+
+1. **Secrets and logins first.** The split refuses while any secret or login
+   is still in `fleet.env` (11n).
+2. **See the plan.** It shows key names only:
+   ```bash
+   sudo cti-agent-settings split --dry-run
+   ```
+   It refuses if a setting uses `$NAME` from another lane's file, because that
+   lane never loads the other file and the value would be empty. Write the
+   value out, or use a helper (a name no code reads, like `EY_TEAM`), which
+   goes to core.
+3. **Split.**
+   ```bash
+   sudo cti-agent-settings split --for-real
+   ```
+   This writes `fleet.d/`, keeping every setting line and the comments above
+   it. A helper goes before the settings that use it, and a setting no code
+   reads goes to core and is named. `fleet.env` is moved aside to
+   `fleet.env.pre-split-<time>`, root-only.
+4. **Check.**
+   ```bash
+   sudo cti-agent fleet-config check
+   ```
+   It checks every file. Two headings matter after a split: `IN THE WRONG
+   FILE` (a setting the right lane won't see), and `REFERENCES THAT EXPAND TO
+   NOTHING` (a `$NAME` its lane doesn't load).
+5. **Run each lane's dry run** (as in 11n), then let a day of timers run.
+
+**Editing afterwards.** Edit the file the setting belongs in.
+`fleet-config check` flags one put in the wrong file. A new setting's file is
+in `settings.manifest` (`file:`).
+
+**Going back.** The split tool prints the exact commands: move the
+`pre-split` file back to `fleet.env` and remove `fleet.d`.
+
+**Status.** `sudo cti-agent-settings status`.
 
 ---
 

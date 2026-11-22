@@ -83,3 +83,24 @@ func TestASymlinkIsNotACredential(t *testing.T) {
 		t.Fatal("a symlink counted as a credential")
 	}
 }
+
+func TestLoadReadsTheLaneFilesAndTheLaterOneWins(t *testing.T) {
+	d := t.TempDir()
+	core, lane := filepath.Join(d, "00-core.env"), filepath.Join(d, "vmscan.env")
+	if err := os.WriteFile(core, []byte("GRAPH_FOLDER=Inbox\nVMSCAN_TO=core@example.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lane, []byte("VMSCAN_TO=lane@example.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_ENV", filepath.Join(d, "missing.env"))
+	t.Setenv("FLEET_ENV_FILES", core+" "+lane)
+	for _, k := range []string{"GRAPH_FOLDER", "VMSCAN_TO"} {
+		t.Setenv(k, "")
+		_ = os.Unsetenv(k)
+	}
+	Load()
+	if os.Getenv("GRAPH_FOLDER") != "Inbox" || os.Getenv("VMSCAN_TO") != "lane@example.test" {
+		t.Fatalf("GRAPH_FOLDER=%q VMSCAN_TO=%q", os.Getenv("GRAPH_FOLDER"), os.Getenv("VMSCAN_TO"))
+	}
+}
