@@ -7,6 +7,20 @@ threat-intel digest every morning, then each other lane in turn.
 Read [README.md](README.md) first if you want to know *what* it is; this
 document assumes you have decided to run it.
 
+**It follows standard *IX naming, locations and configuration wherever it
+can**:
+- **Layout:** the Filesystem Hierarchy Standard (code in `/opt`, config in
+  `/etc`, state in `/var/lib`, logs in `/var/log` and the systemd journal).
+- **Running:** systemd units, timers and credentials for scheduling and
+  secrets, and a system account with no login shell.
+- **Commands:** a man page for every command, bash and zsh tab completion,
+  `sudo` for anything privileged, and long options with exit status 0 for
+  done, 1 for failed and 2 for bad usage.
+
+Nothing needs a custom SELinux policy. The [table below](#where-it-lives)
+lists every location.
+
+- [Where it lives](#where-it-lives)
 - [Before you start](#before-you-start)
 - [1. Microsoft Entra app registration](#1-microsoft-entra-app-registration)
 - [2. Qualys API access](#2-qualys-api-access)
@@ -38,6 +52,29 @@ document assumes you have decided to run it.
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
 - [15. When something breaks](#15-when-something-breaks)
+
+---
+
+## Where it lives
+
+Every path the installer uses is a standard one, so it is where a Linux admin
+would look. The installer prints the same list under **Layout**.
+
+| What | Where | Standard |
+|---|---|---|
+| Code | `/opt/cti-agent` (root-owned, read-only to the service) | FHS add-on software |
+| Settings | `/etc/cti-agent/fleet.env`, or `/etc/cti-agent/fleet.d/` once split per lane (11o) | FHS host config |
+| Secrets | `/etc/credstore.encrypted/NAME` (11n) | systemd credentials (`systemd-creds`) |
+| State | `/var/lib/cti-agent` | FHS variable state, systemd `StateDirectory=` |
+| Run output | the systemd journal: `journalctl -u 'cti-agent-*'`; hand runs `-u 'cti-manual-*'` | journald |
+| Audit trail | `/var/log/cti-agent` (11l), RFC 5424 syslog lines; optionally forwarded to a syslog server | FHS logs, systemd `LogsDirectory=` |
+| Units and timers | `/etc/systemd/system/cti-agent-*.service` and `.timer` | systemd |
+| Hand-run wrapper | `/usr/local/bin/cti-agent` | FHS local programs |
+| Root tools | `/usr/local/sbin/cti-agent-update`, `cti-agent-secrets`, `cti-agent-settings` | FHS local admin programs |
+| Man pages | `/usr/local/share/man/man1` (`man -k cti`) | man(1), FHS |
+| Tab completion | `/usr/share/bash-completion/completions`, `/usr/share/zsh/site-functions` | bash-completion, zsh |
+| Service account | `ctiagent`, a system account with no login shell, home = the state directory | useradd `--system` |
+| Temporary files | private to each run (`PrivateTmp=`), removed when it ends | systemd |
 
 ---
 

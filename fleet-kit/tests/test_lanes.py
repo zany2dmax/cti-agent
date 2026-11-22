@@ -7077,6 +7077,33 @@ class SbinTools(unittest.TestCase):
                 with self.subTest(tool=t, word=w):
                     self.assertIn(w, page)
 
+    STANDARD_PATHS = ("/opt/cti-agent", "/etc/cti-agent", "/var/lib/cti-agent", "/var/log/cti-agent",
+                      "/etc/credstore.encrypted", "/etc/systemd/system", "/usr/local/bin/cti-agent",
+                      "/usr/local/sbin", "/usr/local/share/man/man1", "/usr/share/bash-completion/completions",
+                      "/usr/share/zsh/site-functions", "journal")
+
+    def test_every_standard_location_is_listed_in_all_three_places(self):
+        """The installer's Layout output, the RUNBOOK's "Where it lives" table
+        and the kit README's path table each list every standard location the
+        install uses - so a new one cannot be added without saying so."""
+        inst = (KIT / "install-fedora.sh").read_text()
+        layout = inst[inst.index('bold "Layout"'):inst.index('bold "Installing code"')]
+        consts = dict(re.findall(r"(?m)^([A-Z_]+)=(\S+)", inst))
+        for k, v in consts.items():
+            layout = layout.replace("$" + k, v)
+        runbook = (self.REPO / "RUNBOOK.md").read_text()
+        table = runbook[runbook.index("## Where it lives"):runbook.index("## Before you start")]
+        kit = (KIT / "README.md").read_text()
+        kit_table = kit[kit.index("| Path | Holds | Ownership |"):kit.index("All standard *IX locations")]
+        preflight = inst[inst.index('bold "Preflight"'):inst.index('bold "Service account')]
+        for p in self.STANDARD_PATHS:
+            for name, text in (("installer Layout", layout), ("RUNBOOK table", table), ("kit README", kit_table)):
+                with self.subTest(path=p, where=name):
+                    self.assertIn(p, text)
+        for p in ("/opt", "/etc", "/var/lib", "/var/log", "journal"):
+            self.assertIn(p, preflight, "Preflight names it")
+        self.assertIn("standard *IX naming, locations and configuration", runbook[:3000])
+
     def test_completions_offer_exactly_the_tools_subcommands_and_flags(self):
         for t in self.TOOLS:
             src = (KIT / "bin" / t).read_text()

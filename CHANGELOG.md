@@ -39,6 +39,18 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Every standard location is named.**
+  - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code
+    `/opt`, config `/etc`, state `/var/lib`, and logs `/var/log` plus the
+    systemd journal, with their SELinux types, whatever the SELinux mode.
+  - **Layout:** it lists every location the install uses, with owner and
+    mode: the man pages (`/usr/local/share/man/man1`), the wrapper, the root
+    tools, units and timers, tab completion and the credential store.
+  - **Docs:** the RUNBOOK opens with how the fleet follows standard *IX
+    naming, locations and configuration, and a "Where it lives" table. The
+    kit README's path table matches.
+  - **A test** keeps the three lists in step.
+
 - `fleet-config check` and `fleet-config list`: step 1 of splitting
   `fleet.env`. `check` reads the file and reports:
   - required settings that are missing;

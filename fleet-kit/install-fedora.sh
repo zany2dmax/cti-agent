@@ -79,6 +79,7 @@ CODE_DIR=/opt/cti-agent
 CONF_DIR=/etc/cti-agent
 STATE_DIR=/var/lib/cti-agent
 LOG_DIR=/var/log/cti-agent   # the audit trail (cti-audit(1)); systemd units also create it
+MAN_DIR=/usr/local/share/man/man1   # every command's man page
 UNIT_DIR=/etc/systemd/system
 FLEET_USER=ctiagent
 FLEET_GROUP=ctiagent
@@ -317,11 +318,15 @@ fi
 # it, but report the mode so a later denial is not a surprise.
 SEMODE=disabled
 command -v getenforce >/dev/null && SEMODE=$(getenforce 2>/dev/null || echo disabled)
+# Standard *IX locations (the FHS) throughout, so the default SELinux policy
+# fits without a custom module and anyone who knows Linux knows where to look.
+info "standard locations: code in /opt (usr_t), config in /etc (etc_t),"
+info "  state in /var/lib (var_lib_t), logs in /var/log (var_log_t) and the systemd"
+info "  journal (journalctl -u 'cti-agent-*'); the full list is under Layout below"
 case "$SEMODE" in
   Enforcing)
     ok "SELinux: Enforcing"
-    info "state lives in /var/lib (var_lib_t), config in /etc (etc_t), code in"
-    info "/opt - all standard locations, so no custom policy should be needed."
+    info "all standard locations, so no custom policy should be needed."
     info "If a run fails with an inexplicable permission error:"
     info "    sudo ausearch -m avc -ts recent"
     ;;
@@ -357,6 +362,16 @@ info "$STATE_DIR  state  ($FLEET_USER:$FLEET_GROUP 0750)"
 # cti-agent cti-jira ...) can write its events before any timer has fired.
 run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" "$LOG_DIR"
 info "$LOG_DIR  audit trail  ($FLEET_USER:$FLEET_GROUP 0750, RFC 5424 syslog lines, kept AUDIT_RETAIN_DAYS=120 days)"
+# Everything else lives where a Linux admin would look for it. Listed here so
+# the install says so, and RUNBOOK "Where it lives" has the same table.
+info "the systemd journal  every run's output (journalctl -u 'cti-agent-*'; hand runs: -u 'cti-manual-*')"
+info "$CONF_DIR/fleet.env  settings, or $CONF_DIR/fleet.d/ once split per lane (root:$FLEET_GROUP 0640)"
+info "$CREDSTORE_DIR  secrets as systemd credentials (root-only; systemd-creds, TPM-bound where present)"
+info "$UNIT_DIR/cti-agent-*  units and timers (root:root 0644)"
+info "/usr/local/bin/cti-agent  the wrapper for hand runs (root:root 0755)"
+info "/usr/local/sbin/cti-agent-{update,secrets,settings}  root tools, run with sudo (root:root 0755)"
+info "$MAN_DIR  a man page for every command (root:root 0644; man -k cti)"
+info "/usr/share/bash-completion/completions, /usr/share/zsh/site-functions  tab completion (root:root 0644)"
 
 bold "Installing code"
 # Everything in fleet/bin, not a hand-written list.
@@ -967,7 +982,6 @@ fi
 # default MANPATH on Fedora, so nothing needs configuring.
 bold "Man pages"
 MAN_SRC="$SRC/../man/man1"
-MAN_DIR=/usr/local/share/man/man1
 if [ -d "$MAN_SRC" ]; then
   run install -d -m 0755 "$MAN_DIR"
   n=0

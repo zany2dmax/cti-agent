@@ -750,8 +750,19 @@ keeps the code out of the service account's reach:
 | Path | Holds | Ownership |
 |---|---|---|
 | `/opt/cti-agent` | code | `root:root` `0755` — read-only to the service |
-| `/etc/cti-agent` | config; `fleet.env`, `feeds.txt` | `root:ctiagent` `0750`, secrets `0640` |
+| `/etc/cti-agent` | config: `fleet.env` (or `fleet.d/`, once split per lane), `feeds.txt` | `root:ctiagent` `0750`, files `0640` |
+| `/etc/credstore.encrypted` | secrets and their logins, as systemd credentials | root-only; encrypted to the machine |
 | `/var/lib/cti-agent` | state: findings db, reports, caches, `.claude` | created and chowned by systemd `StateDirectory` |
+| `/var/log/cti-agent` | the audit trail, RFC 5424 syslog lines | `ctiagent:ctiagent` `0750`, systemd `LogsDirectory` |
+| the systemd journal | every run's output: `journalctl -u 'cti-agent-*'`, hand runs `-u 'cti-manual-*'` | journald |
+| `/etc/systemd/system/cti-agent-*` | units and timers | `root:root` `0644` |
+| `/usr/local/bin/cti-agent` | the wrapper for hand runs | `root:root` `0755` |
+| `/usr/local/sbin/cti-agent-update`, `-secrets`, `-settings` | root tools, run with `sudo` | `root:root` `0755` |
+| `/usr/local/share/man/man1` | a man page for every command | `root:root` `0644` |
+| `/usr/share/bash-completion/completions`, `/usr/share/zsh/site-functions` | tab completion | `root:root` `0644` |
+
+All standard *IX locations (FHS, systemd, man, bash-completion), so the
+default SELinux policy fits with no custom module.
 
 Because nothing lives under `/home`, the units set `ProtectHome=yes` and hide
 it entirely — stricter than a punch-through into `/home`, and less likely to break. They also
