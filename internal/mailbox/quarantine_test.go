@@ -121,3 +121,14 @@ func TestADigestHoldingFleetMailStaysForTheOperator(t *testing.T) {
 		t.Errorf("an unreadable digest stays: %s %q", d["unread"].Action, d["unread"].Reason)
 	}
 }
+
+func TestScannerSender(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"noreply@notify.qualys.com": true, "x@qualys.net": true, "Qualys <a@qualys.com>": true,
+		"a@notqualys.com": false, "a@qualys.com.evil.example": false, "news@intel.example": false, "": false,
+	} {
+		if got := ScannerSender(addr); got != want {
+			t.Errorf("%q: %v, want %v", addr, got, want)
+		}
+	}
+}

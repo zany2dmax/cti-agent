@@ -85,6 +85,15 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `sudo cti-agent-secrets import`, run each lane's dry run, then delete the
   secrets' lines from `fleet.env`. Needs systemd 254 or later.
 
+### Fixed
+
+- **Advisory triage no longer reads Qualys scan results.** A WAS or VM scan
+  notice is full of host names and IPs, so it passed the threat-intel content
+  check, and the reader spent a call on each one to find nothing (four a day
+  on the test box). Mail from the scanner's own domains (qualys.com,
+  qualys.net) is now left out before triage, and ingest logs how many it
+  left out. A Qualys address put on `TRIAGE_SENDERS` by name is still read.
+
 ### Removed
 
 - `FLEET_OPERATOR` from `fleet.env.example` and the README. The README said

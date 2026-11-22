@@ -109,6 +109,7 @@ func main() {
 	var skippedSubjects []string
 	var advisories []triage.Advisory
 	unverifiedIntel := 0
+	scannerMail := 0 // Qualys notices kept out of triage, logged below
 	intel := triageSenders(cfg.MailboxFeedSenders)
 	for _, msg := range messages {
 		// Never read our own report back in.
@@ -174,20 +175,15 @@ func main() {
 		// requests, W9 and ACH threads, replies, auto-replies - is never sent
 		// to a model. Saved here because only this run has the body before
 		// the cleanup lane may archive it.
-		if *advisoriesOut != "" && !msg.IsAutoReply() && !mailbox.AutoReplySubject(msg.Subject) {
-			listed := intelSource(msg, intel)
-			// Content decides, but only for a sender the receiving server
-			// vouched for (or internal mail): a forged From with a CVE in it
-			// must not reach a third-party model on the strength of markers
-			// alone. SenderAuthenticated, not VouchedFor, for the same reason
-			// teamSource uses it: the bypass list is for feeds behind a gateway.
-			markers := !listed && len(triage.IntelMarkers(text)) > 0
-			if markers && !senderVouched(msg) {
-				unverifiedIntel++ // counted and logged below, never silent
-			}
-			if listed || (markers && senderVouched(msg)) {
+		if *advisoriesOut != "" {
+			switch save, listed, skip := triagePick(msg, text, intel); {
+			case save:
 				advisories = append(advisories, triage.NewAdvisory(msg.ID, msg.ReceivedDateTime,
 					msg.From, msg.Subject, listed, msg.BodyText))
+			case skip == skipScanner:
+				scannerMail++
+			case skip == skipUnverified:
+				unverifiedIntel++ // counted and logged below, never silent
 			}
 		}
 		subjects = append(subjects, report.ScannedEmail{
@@ -362,6 +358,9 @@ func main() {
 	// Not fatal: a failure costs today's advisory triage, never the CVE
 	// digest. run-digest sees no file and says triage had nothing to read.
 	if *advisoriesOut != "" {
+		if scannerMail > 0 {
+			log.Printf("advisories: %d scanner notice(s) (Qualys) not saved for triage - scan results, not threat intel", scannerMail)
+		}
 		if unverifiedIntel > 0 {
 			log.Printf("advisories: %d message(s) that look like threat intel were NOT saved for triage because "+
 				"their sender was not authenticated (a feed behind a gateway that hides the sender: list its domain "+
@@ -549,6 +548,45 @@ func senderVouched(msg graph.Message) bool {
 	}
 	ok, _ := msg.VouchedFor()
 	return ok
+}
+
+// Why triagePick left a message out, when the reason is worth a log line.
+const (
+	skipNone       = ""
+	skipScanner    = "scanner"    // the scanner's own mail: scan results, not intel
+	skipUnverified = "unverified" // looks like intel, sender not authenticated
+)
+
+// triagePick decides whether advisory triage reads a message. text is its
+// subject and body.
+//
+//   - Never an auto-reply, by header or subject.
+//   - An authenticated sender on TRIAGE_SENDERS: always (listed).
+//   - The scanner's own mail (Qualys WAS and VM scan results, notices): never
+//     on its content - it is full of host names and IPs and other lanes read
+//     it. Only a Qualys address put on TRIAGE_SENDERS by name is triaged.
+//   - Anyone else: when it holds a CVE, ATT&CK ID, defanged indicator or
+//     link, public IP or file hash (triage.IntelMarkers), and the receiving
+//     server vouched for the sender (or it is internal mail): a forged From
+//     with a CVE in it must not reach a third-party model on markers alone
+//     (senderVouched).
+func triagePick(msg graph.Message, text string, intel []string) (save, listed bool, skip string) {
+	if msg.IsAutoReply() || mailbox.AutoReplySubject(msg.Subject) {
+		return false, false, skipNone
+	}
+	if intelSource(msg, intel) {
+		return true, true, skipNone
+	}
+	if mailbox.ScannerSender(msg.From) {
+		return false, false, skipScanner
+	}
+	if len(triage.IntelMarkers(text)) == 0 {
+		return false, false, skipNone
+	}
+	if !senderVouched(msg) {
+		return false, false, skipUnverified
+	}
+	return true, false, skipNone
 }
 
 // maxAskedPerMessage is the most CVEs one message can ask about.

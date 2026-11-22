@@ -175,7 +175,10 @@ without CVEs; and any from an authenticated sender on
 (default
 .BR MAILBOX_FEED_SENDERS ),
 whatever it holds. Never auto-replies, by header or subject, nor its own
-mail. Written
+mail, nor the scanner's (Qualys scan results and notices, counted in the
+log) unless a Qualys address is on
+.B TRIAGE_SENDERS
+by name. Written
 0600, for
 .BR "cti\-triage \-\-batch" .
 Bodies are capped at 256 KiB and the file at 100 messages. run-digest

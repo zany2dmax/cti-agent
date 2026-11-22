@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"testing"
@@ -130,5 +131,38 @@ func TestAnUnvouchedFeedSenderIsReportedOncePerSender(t *testing.T) {
 	}
 	if !strings.Contains(out, graph.UnauthenticatedSendersEnv) {
 		t.Errorf("the line should say what to set:\n%s", out)
+	}
+}
+
+// The scanner's own mail is scan results, not threat intel: a Qualys WAS
+// notice is full of host names and IPs, and the reader spent a call on each
+// one to find nothing. Only a Qualys address listed on TRIAGE_SENDERS is read.
+func TestTriagePickLeavesScannerMailOut(t *testing.T) {
+	pass := "dmarc=pass action=none header.from=%s;compauth=pass"
+	was := graph.Message{From: "noreply@notify.qualys.com", Subject: "CR Web Application Scan Results: Example (18 Nov 2026)",
+		AuthenticationResults: fmt.Sprintf(pass, "notify.qualys.com")}
+	body := was.Subject + "\nTarget 203.0.113.50 scanned, 4 vulnerabilities, see CVE-2026-1234."
+	if save, _, skip := triagePick(was, body, nil); save || skip != skipScanner {
+		t.Fatalf("scan notice: save=%v skip=%q", save, skip)
+	}
+	if save, listed, _ := triagePick(was, body, []string{"noreply@notify.qualys.com"}); !save || !listed {
+		t.Fatal("a Qualys address listed on TRIAGE_SENDERS by name was not read")
+	}
+
+	feed := graph.Message{From: "news@intel.example", Subject: "Campaign update", AuthenticationResults: fmt.Sprintf(pass, "intel.example")}
+	if save, _, _ := triagePick(feed, "C2 at evil[.]example", nil); !save {
+		t.Fatal("authenticated mail with an indicator was not read")
+	}
+	if save, _, _ := triagePick(feed, "Our webinar is on Tuesday.", nil); save {
+		t.Fatal("mail with no markers was read")
+	}
+	forged := graph.Message{From: "news@intel.example", AuthenticationResults: "dmarc=fail header.from=intel.example;compauth=fail"}
+	if save, _, skip := triagePick(forged, "C2 at evil[.]example", nil); save || skip != skipUnverified {
+		t.Fatalf("forged sender: save=%v skip=%q", save, skip)
+	}
+	ooo := feed
+	ooo.Subject = "Automatic reply: Campaign update"
+	if save, _, _ := triagePick(ooo, "C2 at evil[.]example", nil); save {
+		t.Fatal("an auto-reply was read")
 	}
 }

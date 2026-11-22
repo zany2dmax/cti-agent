@@ -121,6 +121,13 @@ var builtInFleetDomains = []string{"qualys.net", "qualys.com"}
 // - "name@example.com" for that address exactly, "@example.com" for that
 // domain exactly.
 func FleetSender(addr string, feed []string) bool {
+	return ScannerSender(addr) || SenderIn(addr, feed)
+}
+
+// ScannerSender reports whether addr is the scanner's own: a Qualys domain or
+// a subdomain of one. Its mail is scan results and notices, which other
+// lanes read; it is not threat intel.
+func ScannerSender(addr string) bool {
 	addr = strings.ToLower(bareAddress(addr))
 	at := strings.LastIndex(addr, "@")
 	if at <= 0 {
@@ -132,7 +139,7 @@ func FleetSender(addr string, feed []string) bool {
 			return true
 		}
 	}
-	return SenderIn(addr, feed)
+	return false
 }
 
 // SenderIn reports whether addr is on list: "name@example.com" exactly, or

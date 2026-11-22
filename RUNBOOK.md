@@ -2939,7 +2939,10 @@ What the daily does with it:
    anything from an authenticated sender on `TRIAGE_SENDERS` (default:
    `MAILBOX_FEED_SENDERS`), even prose with none of those. Supplier
    requests, W9 and ACH threads and auto-replies hold none and never reach
-   a model.
+   a model. Neither does the scanner's own mail (Qualys WAS and VM scan
+   results), though it's full of host names and IPs: ingest logs how many
+   it left out. A Qualys address listed on `TRIAGE_SENDERS` by name is the
+   one exception.
 2. **Step 2c** runs `cti-triage --batch` on it. The reader lists each
    message's items and their CVEs. Items naming a CVE are left to the CVE
    report and listed as such. The rest go through Falcon and the judge. A message where the reader finds
