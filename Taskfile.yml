@@ -273,7 +273,7 @@ tasks:
         govulncheck ./...
 
   # ── Python and shell analysis ──────────────────────────────────────────────
-  # The fleet's lanes are standard-library Python plus bash runners. These are
+  # The fleet's Python is the SQLite tools and fleet-config, plus bash runners. These are
   # the counterparts of staticcheck/golangci-lint, gosec and (for shell) nothing
   # the Go side had. All three run on the dev machine only; nothing is installed
   # on the production box. Settings live in pyproject.toml.
@@ -291,7 +291,7 @@ tasks:
           echo "ruff not installed:  brew install ruff   (or: pipx install ruff)" >&2
           exit 1
         fi
-        files="fleet-kit/fleet/lanes fleet-kit/tests"
+        files="fleet-kit/tests"
         for f in fleet-kit/fleet/bin/*; do
           [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then files="$files $f"; fi
@@ -315,7 +315,7 @@ tasks:
           echo "  (then run: pipx ensurepath, and open a new terminal)" >&2
           exit 1
         fi
-        files="fleet-kit/fleet/lanes"
+        files=""
         for f in fleet-kit/fleet/bin/*; do
           [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then files="$files $f"; fi
@@ -598,7 +598,7 @@ tasks:
         set -e
         # Every Python script in bin/ by shebang, so checkin-bash-guard (which
         # had no .py name and was not in a hand-written list) is parsed too.
-        pyfiles="$(ls fleet-kit/fleet/lanes/*.py)"
+        pyfiles=""
         for f in fleet-kit/fleet/bin/*; do
           [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then pyfiles="$pyfiles $f"; fi
@@ -692,6 +692,7 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/fleet-trace ./cmd/fleet-trace
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-enrich ./cmd/cti-enrich
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-brief ./cmd/cti-brief
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-scout ./cmd/cti-scout
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-podprobe ./cmd/cti-podprobe
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-falcon ./cmd/cti-falcon
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-triage ./cmd/cti-triage

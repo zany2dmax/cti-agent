@@ -302,7 +302,7 @@ def grants(scanned, kept):
     """{program: sorted secrets} - what it reads itself, plus what every
     program it starts or sources by path reads, followed transitively. A
     program is "started by path" when its name appears after a "/"
-    ($FLEET_CODE/bin/cti-mailer, lanes/scout.py, share/model-lane.sh), which
+    ($FLEET_CODE/bin/cti-mailer, bin/cti-scout, share/model-lane.sh), which
     a mention in prose does not match."""
     secrets = {k for k, h in kept.items() if h.get("secret") == "yes" or h.get("credential") == "yes"}
     reads = {}

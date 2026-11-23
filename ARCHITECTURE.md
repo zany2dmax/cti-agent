@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty-five binaries, and the project layout.
+surprise you, the twenty-six binaries, and the project layout.
 
 ---
 
@@ -377,7 +377,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 
 ---
 
-## The twenty-five binaries
+## The twenty-six binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -401,6 +401,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `checkin-bash-guard` | Claude Code, before every Bash call a beat makes (PreToolUse hook) | Refuses shell syntax, holds each granted command to its argument table, and counts the beat's calls against its limits (PrimeSec 39260, Scenarios 223 and 224). Exit 2 blocks the call; any failure blocks it too. Replaced the Python script of the same name |
 | `fleet-trace` | `run-checkin` (tee), `run-supplier` (unwrap), by hand (show, list) | Keeps each beat's trace (allowlisted, untrusted content replaced by size and hash), prints its timeline to the journal, writes the plain text cti-budget reads, records model cost. Replaced the Python script of the same name, writing byte-identical traces |
 | `cti-enrich` | `run-digest`, between ingest and brief; by hand | The @enrich lane: NVD CVSS and CPE products, FIRST EPSS and the CISA KEV catalog (cached in `state/`), then the Sev5-Sev1 bands with a rationale, the KEV deadline rollup and novelty. Writes the enriched file and `products.json`; reads and writes `memory.db` only through `fleet-db`. Replaced the Python `enrich.py` |
+| `cti-scout` | `cti-agent-scout.timer`, every four hours; by hand | The @scout lane: polls the advisory feeds (RSS, RDF and Atom, https only) for CVE IDs, sets aside those `fleet-db scout known` already has, writes the new ones and records every mention through `fleet-db scout record`. Holds no SQL. Replaced the Python `scout.py`, flag for flag |
 | `cti-brief` | `run-digest`, after cti-jira and triage; by hand | The @brief lane: renders the enriched file as the daily or weekly digest (HTML, text and subject), with the ticket map, held CVEs, product names and advisory report from beside it. Sends nothing. Replaced the Python `brief.py`, byte for byte |
 | `cti-sanitize` | `fleet-board`, `fleet-journal` and `fleet-db`, inside a beat only | Cleans what the heartbeat reads (Scenario-222): strips control, bidi and zero-width characters, cuts over-long lines and output over 64 KB, logs each change to the journal as `cti-sanitize`. A filter over `internal/sanitize`; a wrapper prints nothing if it is missing |
 | `cti-lock` | every runner, through `fleet_lock` in `share/fleet-mode.sh` | Takes the lane lock: flock(2) on the descriptor the runner holds open, so the kernel releases it however the run ends; writes who holds it. Waits up to the runner's limit (75 when still busy). Replaced a python3 snippet |
@@ -411,14 +412,14 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty-five are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-six are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty-five into bin/
+task build              # all twenty-six into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -459,6 +460,7 @@ cmd/cti-checkin-check/         run-checkin's file checks: guard wired, steering 
 cmd/checkin-bash-guard/        the heartbeat's Bash hook: syntax, argument table, per-beat limits
 cmd/fleet-trace/               beat traces, the journal timeline, model cost
 cmd/cti-brief/                 the @brief lane: the digest email, from the enriched file
+cmd/cti-scout/                 the @scout lane: advisory feeds to new CVE IDs
 cmd/cti-enrich/                the @enrich lane: NVD, EPSS and KEV, then the Sev5-Sev1 bands
 cmd/cti-sanitize/              the heartbeat wrappers' output cleaner, a filter over internal/sanitize
 cmd/cti-lock/                  the runners' lane lock (flock on the descriptor fleet-mode.sh opens)
@@ -529,12 +531,11 @@ man/man1/                      a man page for every operator command
 
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
-fleet-kit/fleet/lanes/         scout
+fleet-kit/fleet/lanes/         feeds.txt, the feed list cti-scout polls (no code)
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-appscan,
                                run-appowners, run-vmscan, run-supplier, run-domains,
                                run-mailbox-cleanup, fleet-board, fleet-db, fleet-owners,
-                               fleet-journal, fleet-timers, fleet-trace, fleet-config,
-                               checkin-bash-guard
+                               fleet-journal, fleet-timers, fleet-config
 fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shares),
                                fleet-mode.sh, the CLI's usage and tab completion
 fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions

@@ -301,7 +301,8 @@ fi
 command -v systemctl >/dev/null || { bad "systemd not found"; bail 1; }
 ok "systemd $(systemctl --version | head -1 | awk '{print $2}')"
 
-# Dependencies. Python is the lanes; Go builds the agent. dnf is only used if
+# Dependencies. Python runs the SQLite tools (fleet-db, fleet-owners) and the
+# root tools; Go builds every lane. dnf is only used if
 # something is missing, so an air-gapped box with them preinstalled still works.
 MISSING=()
 command -v python3 >/dev/null || MISSING+=(python3)
@@ -350,7 +351,7 @@ fi
 
 # ───────────────────────────────────────────────────────────── layout ────────
 bold "Layout"
-run install -d -m 0755 -o root -g root "$CODE_DIR" "$CODE_DIR/bin" "$CODE_DIR/lanes" "$CODE_DIR/share"
+run install -d -m 0755 -o root -g root "$CODE_DIR" "$CODE_DIR/bin" "$CODE_DIR/share"
 run install -d -m 0750 -o root -g "$FLEET_GROUP" "$CONF_DIR"
 run install -d -m 0750 -o "$FLEET_USER" -g "$FLEET_GROUP" \
     "$STATE_DIR" "$STATE_DIR/state" "$STATE_DIR/reports" "$STATE_DIR/archive"
@@ -389,9 +390,6 @@ for f in "$SRC"/fleet/bin/*; do
   run install -m 0755 -o root -g root "$f" "$CODE_DIR/bin/$(basename "$f")"
   info "bin/$(basename "$f")"
 done
-# The one Python lane left (the others are Go binaries, built below).
-run install -m 0755 -o root -g root "$SRC/fleet/lanes/scout.py" "$CODE_DIR/lanes/scout.py"
-info "lanes/scout.py"
 # Retired files. An update installs over the old tree and never deletes, so a
 # file the repo no longer ships stays on the box, and the cti-agent wrapper
 # still runs anything in lanes/. Removed after 1.7.2:
@@ -400,16 +398,23 @@ info "lanes/scout.py"
 #   enrich.py      - replaced by cti-enrich (Go)
 #   brief.py       - replaced by cti-brief (Go), with the email-tokens.json
 #                    copy only it read (the Go lanes embed internal/emailkit's)
+#   scout.py       - replaced by cti-scout (Go), the last Python lane; lanes/
+#                    itself goes once it is empty
 # Take them, and their man pages, off the box.
 for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1" \
          "$CODE_DIR/bin/fleet-sanitize" "$MAN_DIR/fleet-sanitize.1" \
          "$CODE_DIR/lanes/enrich.py" "$MAN_DIR/enrich.py.1" \
-         "$CODE_DIR/lanes/brief.py" "$MAN_DIR/brief.py.1" "$CODE_DIR/lanes/email-tokens.json"; do
+         "$CODE_DIR/lanes/brief.py" "$MAN_DIR/brief.py.1" "$CODE_DIR/lanes/email-tokens.json" \
+         "$CODE_DIR/lanes/scout.py" "$MAN_DIR/scout.py.1"; do
   if [ -e "$f" ]; then
     run rm -f "$f"
     info "removed $f (retired)"
   fi
 done
+if [ -d "$CODE_DIR/lanes" ]; then
+  run rm -rf "$CODE_DIR/lanes/__pycache__"
+  if run rmdir "$CODE_DIR/lanes" 2>/dev/null; then info "removed $CODE_DIR/lanes (retired)"; fi
+fi
 # The supplier-request lane's standing instructions: the system prompt of the
 # no-tools model that judges each request. Root-owned like the code, so the
 # service account cannot rewrite what its own model is told. Data, not code: 0644.
@@ -932,6 +937,13 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-brief"
   ok "built $CODE_DIR/bin/cti-brief"
 
+  # The @scout lane: polls the advisory feeds for CVE IDs the fleet has not
+  # seen. cti-agent-scout.timer runs it every four hours. It reads and writes
+  # memory.db through fleet-db, so it holds no SQL itself.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-scout" ./cmd/cti-scout )
+  chmod 0755 "$CODE_DIR/bin/cti-scout"
+  ok "built $CODE_DIR/bin/cti-scout"
+
   # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
   # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-podprobe" ./cmd/cti-podprobe )
@@ -1288,21 +1300,19 @@ fi
 # account with fleet.env loaded - every secret printed - and ../../bin/bash
 # was a shell as an account that is meant to have none. A name is letters,
 # digits, dots and dashes with no slash, and it must be a regular file this
-# installer put in bin/ (or lanes/ for the .py lanes): not a symlink.
+# installer put in bin/: not a symlink. (There is no lanes/ any more: the
+# last Python lane, scout.py, is the Go cti-scout.)
 case "\$cmd" in
   *[!a-z0-9.-]*|.*|'') echo "cti-agent: '\$cmd' is not a fleet command" >&2; exit 2 ;;
 esac
-case "\$cmd" in
-  *.py) target="$CODE_DIR/lanes/\$cmd" ;;
-  *)    target="$CODE_DIR/bin/\$cmd" ;;
-esac
+target="$CODE_DIR/bin/\$cmd"
 if [ ! -f "\$target" ] || [ -L "\$target" ]; then
   echo "cti-agent: '\$cmd' is not a fleet command (no \$target)" >&2
   exit 2
 fi
 # fleet.env is loaded as $FLEET_USER, the way every runner loads it, before
 # the command starts. Without this a hand run saw only the five layout
-# variables: cti-kev, the Python lanes, fleet-db and cti-budget ran on their
+# variables: cti-kev, the lanes, fleet-db and cti-budget ran on their
 # built-in defaults, and a hand run could disagree with the timer it was
 # meant to reproduce. The layout set here is restored afterwards, so a stale
 # FLEET_HOME in fleet.env cannot point a hand run at different files.
@@ -1447,7 +1457,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock" "$CODE_DIR/bin/cti-checkin-check" \
+         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-scout" "$CODE_DIR/bin/cti-lock" "$CODE_DIR/bin/cti-checkin-check" \
          "$CODE_DIR/bin/checkin-bash-guard" "$CODE_DIR/bin/fleet-trace"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done

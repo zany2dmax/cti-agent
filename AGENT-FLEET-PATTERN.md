@@ -40,7 +40,7 @@ what you refuse to let it do.
 | Primitive | In this fleet | Why it exists |
 |---|---|---|
 | **Orchestrator** | `/checkin`, a Claude session every 2h | Judgment. Decides what matters, what to chase, what to say nothing about |
-| **Executor lanes** | `cti-enrich`, `cti-brief`, `scout.py`, the Go agent | Deterministic work. Each does one thing and cannot talk to a human |
+| **Executor lanes** | `cti-enrich`, `cti-brief`, `cti-scout`, the Go agent | Deterministic work. Each does one thing and cannot talk to a human |
 | **Heartbeat** | `cti-agent-checkin.timer` | Turns a program into a presence. It wakes up whether or not you asked |
 | **Message board** | `board.md`, append-only, lock-safe | How parts that never run at the same time talk to each other |
 | **Persistent memory** | `state/memory.db` (SQLite) | Continuity. Without it, every beat is a stranger starting over |

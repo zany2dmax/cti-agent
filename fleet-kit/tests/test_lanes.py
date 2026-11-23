@@ -12,8 +12,6 @@ mailer's gate is Go now (internal/mailer, cmd/cti-mailer) and tested there.
 import contextlib
 import datetime
 import fcntl
-import importlib.util
-import io
 import json
 import os
 import pathlib
@@ -26,8 +24,6 @@ import tempfile
 import time
 import unicodedata
 import unittest
-import urllib.error
-import urllib.request
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 LANES = KIT / "fleet" / "lanes"
@@ -48,25 +44,6 @@ def _go_helpers_on_path():
 # A test that sets its own PATH copies these into its runner's bin/ instead.
 # The guard and fleet-trace are the ones the box runs (cmd/), built here.
 CTI_LOCK, CTI_CHECKIN_CHECK, GUARD_BIN, FLEET_TRACE_BIN = _go_helpers_on_path()
-
-
-@contextlib.contextmanager
-def quiet():
-    """Lanes log to stdout/stderr by design. Swallow it during tests so a real
-    failure is not buried in progress output."""
-    with contextlib.redirect_stdout(io.StringIO()), \
-            contextlib.redirect_stderr(io.StringIO()):
-        yield
-
-
-def load(name):
-    """Import a lane by path - they are scripts, not an installed package."""
-    spec = importlib.util.spec_from_file_location(name, LANES / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 
 
 class DigestSendLedger(unittest.TestCase):
@@ -557,89 +534,13 @@ class DeadFeedsAreNamedAsDead(unittest.TestCase):
     log and reads as though the diagnosis is already done.
 
     Microsoft advisory coverage was dark for four days as a result.
+
+    The parser is cti-scout's now, and so are its tests (cmd/cti-scout:
+    TestMSRCBlogPageIsNotAFeed, the golden corpus, TestFetch): an HTML page is
+    NOT A FEED, a BOM is not HTML, malformed XML still says so, a feed that
+    declares entities is refused, and only https is fetched. What stays here is
+    the feed list.
     """
-
-    def setUp(self):
-        self.scout = load("scout")
-
-    def test_an_html_page_is_not_called_malformed_xml(self):
-        html = (b"<!DOCTYPE html>\n<html lang=\"en-us\"><head><title>Blog MSRC"
-                b"</title></head><body><h1>MSRC Blog</h1></body></html>")
-        self.assertTrue(self.scout.looks_like_html(html))
-
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            items = self.scout.parse_feed(html, "https://example.invalid/feed")
-        log = err.getvalue()
-
-        self.assertEqual(items, [])
-        self.assertIn("NOT A FEED", log)
-        self.assertIn("feeds.txt", log,
-                      "the message must say where to go and fix it")
-        self.assertNotIn("mismatched tag", log,
-                         "an XML parser error for an HTML page is the bug")
-
-    def test_a_byte_order_mark_does_not_make_a_feed_look_like_html(self):
-        # The MSRC Update Guide RSS is served with a UTF-8 BOM. A naive
-        # startswith check against the raw bytes sees the BOM first and can
-        # misfile a perfectly good feed, which would swap one silent blind
-        # spot for another.
-        feed = ("\ufeff<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-                "<rss version=\"2.0\"><channel><item>"
-                "<title>Chromium: CVE-2026-1 Type Confusion</title>"
-                "<link>https://example.invalid/v/CVE-2026-1</link>"
-                "<pubDate>Sun, 04 Oct 2026 02:13:15 -0700</pubDate>"
-                "</item></channel></rss>").encode("utf-8")
-
-        self.assertFalse(self.scout.looks_like_html(feed))
-        with quiet():
-            items = self.scout.parse_feed(feed, "https://example.invalid/rss")
-        self.assertEqual(len(items), 1)
-        self.assertIn("CVE-2026-1", items[0]["title"])
-
-    def test_genuinely_malformed_xml_still_says_malformed(self):
-        # The new branch must not swallow the case it was built beside.
-        bad = b"<?xml version='1.0'?><rss><channel><item></channel></rss>"
-        self.assertFalse(self.scout.looks_like_html(bad))
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.scout.parse_feed(bad, "https://example.invalid/f")
-        self.assertIn("malformed XML", err.getvalue())
-
-    def test_a_feed_that_declares_entities_is_refused(self):
-        # XML-bomb and external-entity attacks both need an <!ENTITY>; a real
-        # feed has none. A bare DOCTYPE (RSS 0.91) is still parsed.
-        bomb = (b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY a "aaaa">]>'
-                b"<rss><channel><item><title>&a;</title></item></channel></rss>")
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            items = self.scout.parse_feed(bomb, "https://example.invalid/f")
-        self.assertEqual(items, [])
-        self.assertIn("entities", err.getvalue())
-
-        plain = (b'<?xml version="1.0"?><!DOCTYPE rss PUBLIC "-//Netscape//DTD RSS 0.91//EN" '
-                 b'"http://my.netscape.com/publish/formats/rss-0.91.dtd">'
-                 b"<rss><channel><item><title>CVE-2026-9 patched</title>"
-                 b"<link>https://example.invalid/x</link></item></channel></rss>")
-        with quiet():
-            self.assertEqual(len(self.scout.parse_feed(plain, "https://example.invalid/f")), 1)
-
-    def test_only_https_urls_are_fetched(self):
-        # urlopen also opens file:// and ftp://: a pasted feeds.txt line must
-        # not read a local file into the report. A plain http:// feed can be
-        # altered in transit, so it is refused too (Prime guardrail "TLS for
-        # Data Transit").
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertIsNone(self.scout.fetch("file:///etc/passwd"))
-            self.assertIsNone(self.scout.fetch("ftp://example.invalid/feed"))
-            self.assertIsNone(self.scout.fetch("http://example.invalid/feed"))
-        self.assertIn("not an https URL", err.getvalue())
-        self.assertEqual(err.getvalue().count("FEED FAIL"), 3)
-
-    def test_a_redirect_to_plain_http_is_refused(self):
-        handler = self.scout._HTTPSOnlyRedirect()
-        req = urllib.request.Request("https://example.invalid/feed")
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {},
-                                     "http://example.invalid/feed")
-        cm.exception.close()
 
     def test_the_dead_msrc_blog_feed_is_no_longer_polled(self):
         # Belt and braces: the URL is commented out in feeds.txt, and a future
@@ -1124,7 +1025,8 @@ class TestFileShape(unittest.TestCase):
         """A timer pointing at nothing fires and fails, or fires and does nothing.
 
         Each .timer must name a .service that exists, and that service's
-        ExecStart must point at a runner that is actually in the kit.
+        ExecStart must point at a runner that is actually in the kit, or at a
+        Go command in cmd/ that the installer builds (cti-scout).
         """
         root = pathlib.Path(__file__).resolve().parents[2]
         units = root / "fleet-kit" / "fleet" / "systemd-fedora"
@@ -1138,19 +1040,21 @@ class TestFileShape(unittest.TestCase):
             if not m:
                 problems.append(f"{service.name} has no ExecStart")
                 continue
-            # Every token, not just the first: cti-agent-scout runs
-            # "/usr/bin/python3 /opt/cti-agent/lanes/scout.py", where the
-            # thing that must exist is the argument, not the interpreter.
+            # Every token, not just the first: a unit that ran an interpreter
+            # ("/usr/bin/python3 .../scout.py", until cti-scout) names the
+            # thing that must exist as an argument, not the program.
             kit = root / "fleet-kit" / "fleet"
+            inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
             found = any(
-                (kit / sub / pathlib.Path(tok).name).exists()
+                (kit / "bin" / pathlib.Path(tok).name).exists()
+                or ((root / "cmd" / pathlib.Path(tok).name).is_dir()
+                    and f"./cmd/{pathlib.Path(tok).name} )" in inst)
                 for tok in m.group(1).split()
-                for sub in ("bin", "lanes")
             )
             if not found:
                 problems.append(
                     f"{service.name} runs {m.group(1)!r}, none of which is in "
-                    f"fleet/bin/ or fleet/lanes/")
+                    f"fleet/bin/ or a Go command the installer builds")
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
     # ── the orchestrator's grant, and what its instructions say ─────────────
@@ -2498,7 +2402,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         """`sudo cti-agent ../../../usr/bin/env` joined the argument onto bin/
         and ran env as the service account with fleet.env loaded, printing
         every secret; ../../bin/bash was a shell. The wrapper now takes a name
-        that is a regular file in bin/ (or lanes/ for .py) and nothing else."""
+        that is a regular file in bin/ and nothing else."""
         root = pathlib.Path(__file__).resolve().parents[2]
         inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
         body = inst[inst.index("replace_file /usr/local/bin/cti-agent 0755 <<WRAP\n") + len("replace_file /usr/local/bin/cti-agent 0755 <<WRAP\n"):]
@@ -2509,7 +2413,6 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             for p in (code / "bin", code / "lanes", state, fake):
                 p.mkdir(parents=True)
             (code / "bin" / "fleet-db").write_text("#!/bin/sh\n")
-            (code / "lanes" / "scout.py").write_text("")
             (code / "bin" / "linked").symlink_to("/usr/bin/env")
             (fake / "sudo").write_text('#!/bin/sh\nfor a; do echo "$a"; done\n')
             (fake / "sudo").chmod(0o755)
@@ -2535,12 +2438,12 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             r = run("fleet-db", "recent")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn(f"{code}/bin/fleet-db", r.stdout.splitlines())
-            r = run("scout.py", "--days", "1")
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn(f"{code}/lanes/scout.py", r.stdout.splitlines())
+            # There is no lanes/ to run from: a .py there (left by an old
+            # install) is not a fleet command.
+            (code / "lanes" / "scout.py").write_text("")
             for cmd in ("../../../../usr/bin/env", "../../../../bin/bash", "/usr/bin/env",
                         "fleet-db/../../../x", "..", ".hidden", "Fleet-DB", "env",
-                        "linked", "nope", "x.py", "../lanes/scout.py", "fleet-db\nid"):
+                        "linked", "nope", "x.py", "scout.py", "../lanes/scout.py", "fleet-db\nid"):
                 with self.subTest(refused=cmd):
                     r = run(cmd, "-c", "id")
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -2918,14 +2821,6 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 words += [w for w in label.split("|") if w.startswith("--")]
             with self.subTest(runner=script.name):
                 self._assert_documented(script.name, [w[2:] for w in words])
-
-    def test_every_lane_argument_is_in_its_man_page(self):
-        root = pathlib.Path(__file__).resolve().parents[2]
-        arg = re.compile(r"add_argument\(\s*\"--([a-z][a-z0-9-]*)\"")
-        for lane in ("scout.py",):
-            src = (root / "fleet-kit" / "fleet" / "lanes" / lane).read_text(encoding="utf-8")
-            with self.subTest(lane=lane):
-                self._assert_documented(lane, arg.findall(src))
 
     def test_every_fleet_tool_subcommand_is_in_its_man_page(self):
         root = pathlib.Path(__file__).resolve().parents[2]
@@ -4039,35 +3934,6 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
-class TestUserAgent(unittest.TestCase):
-    """The agent names a contact from GRAPH_MAILBOX, never a hardcoded one,
-    and scout.py builds it the same way as internal/useragent, which
-    cti-enrich and the other Go fetchers use."""
-
-    CASES = [
-        ({}, "p/1.0"),
-        ({"GRAPH_MAILBOX": "fleet@example.com"}, "p/1.0 (+mailto:fleet@example.com)"),
-        ({"FLEET_USER_AGENT": "cti-agent-fleet/1.0", "GRAPH_MAILBOX": "fleet@example.com"},
-         "cti-agent-fleet/1.0 (+mailto:fleet@example.com)"),
-        ({"FLEET_USER_AGENT": "acme/2 (+https://acme.example)", "GRAPH_MAILBOX": "fleet@example.com"},
-         "acme/2 (+https://acme.example)"),
-        ({"GRAPH_MAILBOX": "fleet@example.com) evil ("}, "p/1.0"),
-        ({"GRAPH_MAILBOX": "fleet@example.com\r\nX-Evil: 1"}, "p/1.0"),
-        ({"FLEET_USER_AGENT": "a\r\nX-Evil: 1"}, "p/1.0"),
-    ]
-
-    def test_the_python_lane(self):
-        scout = load("scout")
-        for lane in (scout,):
-            for env, want in self.CASES:
-                with self.subTest(lane=lane.__name__, env=env):
-                    self.assertEqual(lane.user_agent("p/1.0", env), want)
-
-    def test_no_address_in_the_lanes(self):
-        for name in ("scout",):
-            src = (LANES / f"{name}.py").read_text()
-            self.assertNotRegex(src, r"mailto:[A-Za-z0-9]", name)
-
 class ModelLaneLibrary(unittest.TestCase):
     """share/model-lane.sh, the rules every model lane shares (HARNESS H4),
     called directly - each runner's tests cover how it uses them."""
@@ -4862,29 +4728,22 @@ class AuditTrailUnits(unittest.TestCase):
                          "a unit was added or removed: decide whether it writes the audit trail")
 
 
-class TlsFloor(unittest.TestCase):
-    """Every lane that makes an outbound request negotiates TLS 1.2 or better,
-    and the lanes that carry a credential refuse a redirect to plain http.
-    (Prime guardrails "TLS Version Requirement" and "FIPS" are different
-    findings: this is only the version floor.)"""
+class NoPythonLane(unittest.TestCase):
+    """Python is for SQLite (fleet-db, fleet-owners) and the root tools, not
+    for the lanes. scout.py was the last one; it is cti-scout. A lane that
+    came back as Python would bring its own HTTP, TLS and file-mode code,
+    outside the Go gates and internal/httpx's floor."""
 
-    def test_each_lane_context_has_a_tls_12_floor(self):
-        import ssl
-        for name in ("scout",):
-            ctx = load(name).tls_context()
-            self.assertGreaterEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2, name)
-            self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED, name)
-            self.assertTrue(ctx.check_hostname, name)
+    def test_no_unit_runs_an_interpreter(self):
+        for unit in sorted((KIT / "fleet" / "systemd-fedora").glob("*.service")):
+            for line in unit.read_text(encoding="utf-8").splitlines():
+                if line.startswith(("ExecStart=", "ExecStartPre=", "ExecStop=")):
+                    with self.subTest(unit=unit.name):
+                        self.assertNotRegex(line, r"python|\.py\b", line)
 
-    def test_no_lane_builds_its_own_unfloored_context(self):
-        for name in ("scout",):
-            src = (LANES / f"{name}.py").read_text()
-            for ln, line in enumerate(src.splitlines(), 1):
-                if "create_default_context" in line:
-                    # Only inside tls_context(), which sets minimum_version on
-                    # the next line.
-                    nxt = src.splitlines()[ln]
-                    self.assertIn("minimum_version", nxt, f"{name}.py:{ln}")
+    def test_there_is_no_lane_code(self):
+        self.assertEqual(sorted(p.name for p in LANES.iterdir() if p.is_file()), ["feeds.txt"],
+                         "fleet-kit/fleet/lanes holds the feed list and no code")
 
 class FleetConfig(unittest.TestCase):
     """fleet-config check reads fleet.env, which holds secrets, so the one

@@ -61,6 +61,10 @@ fleet-db \- the fleet's SQLite memory: findings, digests sent, tasks, notes and 
 .RI [ kind ]
 .RB [ \-\-hours ]
 .br
+.B fleet\-db scout known
+.br
+.B fleet\-db scout record
+.br
 .B fleet\-db vacuum
 .PP
 .B sudo cti\-agent fleet\-db
@@ -86,6 +90,9 @@ by
 by
 .B cti\-jira
 .RB ( note ),
+by
+.B cti\-scout
+.RB ( scout ),
 and by the orchestrator heartbeat, whose tool allowlist grants only
 .BR recent ,
 .BR findings ,
@@ -364,6 +371,26 @@ otherwise print
 .B no
 and exit 1.
 .TP
+.B scout known
+Print every CVE already known, from the
+.B findings
+and
+.B scout_items
+tables, upper case, sorted, one per line.
+.B cti\-scout
+reads it before it polls, so it reports only CVEs the fleet has not seen.
+.TP
+.B scout record
+Read a JSON array of feed mentions on standard input, each
+.BR "{cve, feed, title, link, published}" ,
+and add each to
+.B scout_items
+(one row per CVE and feed; an existing row is left alone). A row that is
+refused (a CVE id that is not one, a missing feed, text past its size) is
+skipped and named on standard error, and the exit status is 3; the rest are
+written. Prints
+.BR "recorded \fIN\fB scout items" .
+.TP
 .B vacuum
 Compact the database. Prints
 .BR vacuumed .
@@ -398,7 +425,9 @@ companions. Tables:
 .BR findings ,
 .B scout_items
 (written by
-.BR scout.py ),
+.BR "scout record" ,
+for
+.BR cti\-scout ),
 .BR digests .
 .TP
 .I /opt/cti\-agent/bin/fleet\-db
@@ -431,6 +460,8 @@ on standard error and no row is written.
 .TP
 .B 3
 .B finding upsert
+or
+.B scout record
 skipped one or more rows (each is named on standard error); every valid row was
 written.
 .SH EXAMPLES
@@ -463,7 +494,7 @@ sudo cti\-agent fleet\-db rollup \-\-days 7 | less
 .SH SEE ALSO
 .BR fleet\-board (1),
 .BR cti\-enrich (1),
-.BR scout.py (1),
+.BR cti\-scout (1),
 .BR cti\-brief (1),
 .BR run\-digest (1),
 .BR cti\-agent (1),

@@ -51,10 +51,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   matches. The daily's section is unchanged.
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
-  SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
-  and the lane not yet ported (`scout.py`). No runner, and nothing the
-  heartbeat runs, is Python. Four moves so far; what each
-  replaced is under Removed below.
+  SQLite (`fleet-db`, `fleet-owners`) and for tools a person runs by hand.
+  No lane, no runner, and nothing the heartbeat runs, is Python. What each
+  move replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
     the Python wrote. Its SQLite reads and writes go through `fleet-db`.
@@ -108,6 +107,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     - **One change:** where the Python `show` crashed with a traceback on a
       malformed event, Go stops at the same line with a message.
     - The installer builds both over the old scripts.
+  - **`cti-scout`** is the @scout lane, in place of `scout.py`, the last
+    Python lane. Same flags, the same output file, log lines and recorded
+    rows, held to what the Python did with the same feeds: 49 dates (RFC 822
+    and ISO 8601, ported rule for rule), 17 feed bodies (RSS 2.0, RDF, Atom,
+    CDATA, a BOM, Latin-1, a DOCTYPE, an entity bomb, HTML pages, malformed
+    XML), 42 HTML escapes, 25 CVE strings and five whole runs. Its SQLite goes
+    through two new `fleet-db` subcommands, `scout known` and `scout record`,
+    so `fleet-db` is the only program that opens `memory.db`.
 
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code
@@ -140,6 +147,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   run `sudo cti-agent fleet-config check` to see what can go.
 
 ### Security
+
+- **Five programs stop getting `QUALYS_BASE_URL` they never read.**
+  `scripts/settings-manifest` counts a setting named anywhere in a package,
+  comments included, and `internal/httpx` named it in an example. So every
+  program on `httpx` looked like a reader: `cti-alert`, `cti-domains`,
+  `cti-enrich`, `cti-falcon` and `cti-triage` in `credentials.map`, and
+  `cti-agent-alert@.service` imported it as a credential. The comment no
+  longer names it, and the grants are what the code reads.
 
 - **Secrets can move out of `fleet.env` into systemd credentials** (step 2
   of the split, RUNBOOK §11n). Today every unit's environment holds every
@@ -226,6 +241,31 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   first while it exists.
 
 ### Removed
+
+- **The Python `scout.py` lane, and `lanes/` with it.** `cti-scout` (Go)
+  replaces it in `cti-agent-scout.service` and the scout skill, with the same
+  flags. `fleet-kit/fleet/lanes/` now holds only `feeds.txt`.
+  - **On the box:** an update builds `bin/cti-scout`, points the unit at it,
+    and deletes `lanes/scout.py`, its man page (now `cti-scout(1)`) and the
+    empty `/opt/cti-agent/lanes`. The `cti-agent` wrapper no longer runs
+    `NAME.py` from `lanes/`: every command is in `bin/`.
+  - **Behaviour changes:**
+    - The output is written 0600 and atomically; before, it got the unit's
+      umask (also 0600, from `UMask=0077`).
+    - A feed declaring an encoding other than UTF-8, ISO-8859-1, US-ASCII or
+      windows-1252 is refused as malformed (Python's codecs read any). A
+      malformed feed's message is worded by Go's XML parser, not expat.
+    - `fleet-db scout record` refuses a CVE id with more than 19 digits in its
+      sequence number, as every `fleet-db` write does; the feed's mention is
+      still in the output.
+    - A failed record is one line, `db record failed: ...`, with the reason
+      per row from `fleet-db`; the output is still written, as before.
+    - It loads `fleet.env` itself, as the other Go lanes do.
+  - **Tests:** the Python suite's feed-safety, user-agent and TLS-floor tests
+    for `scout.py` moved to `cmd/cti-scout` (with `internal/useragent` and
+    `internal/httpx`, which have their own). A new test fails if a unit runs
+    an interpreter or `lanes/` holds code again.
+  - **`internal/pyjson`** gained `indent`, for `json.dump(..., indent=2)`.
 
 - `FLEET_OPERATOR` from `fleet.env.example` and the README. The README said
   the orchestrator's prompt used it, but nothing has read it. The scan that

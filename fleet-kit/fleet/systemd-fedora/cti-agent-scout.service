@@ -13,10 +13,10 @@ User=ctiagent
 Group=ctiagent
 
 # 0077, so a lane that writes with a bare open() cannot land a world- or
-# group-readable file. The Python lane (scout.py) does exactly that:
-# no chmod, no umask in the code, so under systemd's default 0022 the digest
-# HTML and enriched-*.json - which carries host names - were 0644. The Go
-# commands set 0600 explicitly and are unaffected; this closes the rest.
+# group-readable file. Under systemd's default 0022 the Python lanes' digest
+# HTML and enriched-*.json - which carries host names - were 0644. Every lane
+# is Go now and sets 0600 itself; this stays as the floor for the runners and
+# for anything added later.
 UMask=0077
 
 # FHS layout. Nothing lives under /home, which is what lets ProtectHome=yes
@@ -53,7 +53,7 @@ Environment=FLEET_FEEDS=/etc/cti-agent/feeds.txt
 # One missing from /etc/credstore.encrypted is skipped, not an error.
 # (this unit reads no secret)
 # END credentials
-ExecStart=/usr/bin/python3 /opt/cti-agent/lanes/scout.py --feeds /etc/cti-agent/feeds.txt --out /var/lib/cti-agent/state/scout-latest.json --days 3
+ExecStart=/opt/cti-agent/bin/cti-scout --feeds /etc/cti-agent/feeds.txt --out /var/lib/cti-agent/state/scout-latest.json --days 3
 TimeoutStartSec=900
 Nice=15
 

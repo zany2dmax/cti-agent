@@ -6,7 +6,7 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 # /scout-sweep
 
 > **Operator-attended playbook.** Not runnable on the unattended heartbeat:
-> `scout.py` and `cti-enrich` are not on the orchestrator's grant (see
+> `cti-scout` and `cti-enrich` are not on the orchestrator's grant (see
 > `CLAUDE.md`, *What a beat can run*), and they do not need to be -
 > `cti-agent-scout.timer` runs the sweep itself every four hours. On a beat,
 > read what it found with `fleet-db recent` and the journal. In a session with
@@ -15,7 +15,7 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 Part of the threat-intel lane; runs every 4 hours. The mailbox is reactive — this lane is how you find things
 before a vendor newsletter gets around to telling you.
 
-1. `python3 $FLEET_CODE/lanes/scout.py --out $FLEET_HOME/state/scout-$(date +%F).json`
+1. `$FLEET_CODE/bin/cti-scout --out $FLEET_HOME/state/scout-$(date +%F).json`
    Polls the feeds in `$FLEET_FEEDS`, extracts CVEs, dedupes against
    `scout_items` in memory so you only surface genuinely new IDs.
 

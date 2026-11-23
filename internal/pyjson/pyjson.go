@@ -129,20 +129,46 @@ func decodeValue(dec *json.Decoder) (any, error) {
 	return t, nil
 }
 
-// Options are json.dumps's: sort_keys and ensure_ascii.
+// Options are json.dumps's: sort_keys, ensure_ascii and indent (0 is none:
+// one line).
 type Options struct {
 	SortKeys    bool
 	EnsureASCII bool
+	Indent      int
 }
 
-// Dumps is json.dumps(v) with Python's separators (", " and ": ").
+// Dumps is json.dumps(v) with Python's separators: ", " and ": " on one
+// line, or "," and ": " with a newline and Indent spaces per level.
 func Dumps(v any, o Options) string {
 	var b strings.Builder
-	dump(&b, v, o)
+	dump(&b, v, o, 0)
 	return b.String()
 }
 
-func dump(b *strings.Builder, v any, o Options) {
+// sep writes what goes before item i of a list or object at this depth, and
+// end what closes one that was not empty.
+func sep(b *strings.Builder, i int, o Options, depth int) {
+	if o.Indent <= 0 {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		return
+	}
+	if i > 0 {
+		b.WriteByte(',')
+	}
+	b.WriteByte('\n')
+	b.WriteString(strings.Repeat(" ", o.Indent*(depth+1)))
+}
+
+func end(b *strings.Builder, o Options, depth int) {
+	if o.Indent > 0 {
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat(" ", o.Indent*depth))
+	}
+}
+
+func dump(b *strings.Builder, v any, o Options, depth int) {
 	switch x := v.(type) {
 	case nil:
 		b.WriteString("null")
@@ -163,10 +189,11 @@ func dump(b *strings.Builder, v any, o Options) {
 	case []any:
 		b.WriteByte('[')
 		for i, e := range x {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			dump(b, e, o)
+			sep(b, i, o, depth)
+			dump(b, e, o, depth+1)
+		}
+		if len(x) > 0 {
+			end(b, o, depth)
 		}
 		b.WriteByte(']')
 	case []string:
@@ -174,7 +201,7 @@ func dump(b *strings.Builder, v any, o Options) {
 		for i, s := range x {
 			l[i] = s
 		}
-		dump(b, l, o)
+		dump(b, l, o, depth)
 	case *Object:
 		keys := append([]string(nil), x.Keys...)
 		if o.SortKeys {
@@ -182,12 +209,13 @@ func dump(b *strings.Builder, v any, o Options) {
 		}
 		b.WriteByte('{')
 		for i, k := range keys {
-			if i > 0 {
-				b.WriteString(", ")
-			}
+			sep(b, i, o, depth)
 			quote(b, k, o.EnsureASCII)
 			b.WriteString(": ")
-			dump(b, x.Vals[k], o)
+			dump(b, x.Vals[k], o, depth+1)
+		}
+		if len(keys) > 0 {
+			end(b, o, depth)
 		}
 		b.WriteByte('}')
 	default:

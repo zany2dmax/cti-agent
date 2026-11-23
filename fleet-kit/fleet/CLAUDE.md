@@ -310,7 +310,7 @@ the board.
 | Handle | Runs | When (timer) | Sends to |
 |---|---|---|---|
 | `@ingest`, `@enrich`, `@brief` | `$FLEET_CODE/bin/run-digest`: `cti-agent`, `cti-enrich`, `cti-brief` (all Go) | Daily 06:00 (`cti-agent-digest.timer`), Monday weekly (`cti-agent-weekly.timer`) | `$DIGEST_TO` |
-| `@scout` | `$FLEET_CODE/lanes/scout.py` | Every 4 hours (`cti-agent-scout.timer`) | nobody: feeds the digest |
+| `@scout` | `$FLEET_CODE/bin/cti-scout` | Every 4 hours (`cti-agent-scout.timer`) | nobody: feeds the digest |
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly, by hand (`cti-agent-patchtuesday.timer` is off on purpose) | `$DIGEST_TO` |
 | `@appscan` | `$FLEET_CODE/bin/run-appscan` | Fridays (`cti-agent-appscan.timer`) | `$WAS_TO` |
 | `@appowners` | `$FLEET_CODE/bin/run-appowners` | Daily 07:15 (`cti-agent-appowners.timer`) | each application's owners and watchers |

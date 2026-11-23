@@ -3,7 +3,7 @@
 // Every command that sends a credential (Graph, Jira, Qualys, Falcon,
 // GoDaddy) used to build its own http.Client from the defaults. That left two
 // gaps: no TLS floor, and nothing stopping a mistyped or hostile base URL
-// (QUALYS_BASE_URL=http://..., a redirect that downgrades) from carrying a
+// (a scanner base URL in fleet.env set to http://..., a redirect that downgrades) from carrying a
 // Basic or Bearer credential over plaintext HTTP. This package closes both in
 // one place:
 //

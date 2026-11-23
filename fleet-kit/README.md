@@ -63,7 +63,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 │
 ├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
 ├── @enrich   cti-enrich (Go)         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
-├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
+├── @scout    bin/cti-scout           advisory feeds → CVEs the mailbox missed
 ├── @brief    cti-brief (Go)          enriched JSON → HTML digest
 ├── @jira     cti-jira (Go)           KEV/Sev5/CVSS 9.0+/QDS 91+ tickets, daily re-check, lock-down ticket
 ├── @ptuesday cti-patchtuesday (Go)   Microsoft release + scanner → monthly synopsis
@@ -1247,7 +1247,7 @@ pseudonym and breaks continuity with older digests.
 
 ### 7. Claude Code — the heartbeat lane only
 
-The digest, weekly and scout lanes are stdlib Python and need none of this.
+The digest, weekly and scout lanes are Go binaries and need none of this.
 **Only `run-checkin` calls `claude`, so an unset token costs you the heartbeat,
 never the morning email.**
 
@@ -1955,8 +1955,7 @@ fleet-kit/
     │   └── run-checkin            resolves the claude binary, audits, fires one beat
     ├── checkin-settings.json      root-owned --settings for the beat (one Bash guard hook, deny rules)
     ├── lanes/
-    │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
-    │   └── feeds.txt              feed list — trim to your estate
+    │   └── feeds.txt              feed list for cti-scout — trim to your estate
     ├── skills/
     │   ├── checkin/SKILL.md       the heartbeat's brain
     │   ├── cti-digest/SKILL.md    full pipeline on demand

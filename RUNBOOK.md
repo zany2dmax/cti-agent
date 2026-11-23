@@ -84,7 +84,7 @@ would look. The installer prints the same list under **Layout**.
 |---|---|---|
 | Go 1.23+ | builds the fourteen binaries | stdlib only; `go.mod` has no dependencies |
 | [Task](https://taskfile.dev) | every build, test and gate target | `task --list` shows all of them |
-| Python 3.9+ | the enrich, scout, brief and mailer lanes | stdlib only |
+| Python 3.9+ | the SQLite tools (`fleet-db`, `fleet-owners`), `fleet-config` and the root tools; no lane | stdlib only |
 | A shared M365 mailbox | where the CTI advisories arrive | the agent reads it; it never replies |
 | An Entra app registration | daemon auth to Graph | [section 1](#1-microsoft-entra-app-registration) |
 | Qualys API credentials | presence in the estate | [section 2](#2-qualys-api-access) — or run `LOOKUP_PROVIDER=none` to skip |

@@ -392,14 +392,14 @@ A generated report pairs exploitability with named machines. Treat it as such.
 - Mailed only to addresses on an allowlist.
 - Carries a "do not commit" banner when it contains real hostnames.
 
-**The remaining Python lane relies on the unit's umask.** `scout.py` writes
-its output with a bare `open(path, "w")` and no `chmod`. (The Go lanes that
-replaced `enrich.py` and `brief.py` write `enriched-*.json`, the caches and
-the digest HTML and text — all of which carry host names — 0600 themselves.)
-Every service unit now sets `UMask=0077`, so the scout's files land `0600`
-too. Run a lane outside systemd
-and it inherits your shell's umask instead, which is worth remembering when
-replaying by hand.
+**Every lane writes its files 0600 itself.** The last Python lane,
+`scout.py`, wrote with a bare `open(path, "w")` and relied on the unit's
+umask; `cti-scout`, which replaced it, writes 0600 like the Go lanes that
+replaced `enrich.py` and `brief.py` (`enriched-*.json`, the caches and the
+digest HTML and text, all of which carry host names). Every service unit
+still sets `UMask=0077`, as a floor for the runners and for anything added
+later. Run a runner outside systemd and it inherits your shell's umask
+instead, which is worth remembering when replaying by hand.
 
 **The AppSec report is the same kind of document for our web estate.** It names
 which applications have open Urgent findings, and for new ones the vulnerable
@@ -716,12 +716,12 @@ call itself is a control, not a detail.
   for the same reason; the Proofpoint log stream (`internal/podlog`) dials TLS
   itself for a WebSocket and forces TLS 1.2 even on a config a caller
   supplies.
-- **Python lanes:** `scout`, `enrich` and the mailer use a context with TLS
-  1.2 as the floor and certificate and hostname checks on. `scout` refuses
-  `http://` feeds; `scout` and `enrich` refuse a redirect to plain http. The
-  mailer follows **no** redirect: urllib copies the `Authorization` header to
-  whatever host a redirect names, so a Graph redirect would otherwise hand
-  over the bearer token. The Go mailer (`cti-mailer`) is the only mailer.
+- **No Python lane is left.** `scout`, `enrich` and the mailer were Python
+  and are Go now (`cti-scout`, `cti-enrich`, `cti-mailer`), on `httpx` like
+  every other client: TLS 1.2 as the floor, https only, and a redirect to
+  plain http refused. `cti-scout` also refuses a feed URL that is not https
+  before any request, so a `file://` or `http://` line in `feeds.txt` reads
+  nothing.
 - **What this does not claim:** it is a version floor and an https-only rule.
   It is not FIPS 140-3 validation (that is a property of the host's crypto
   module and mode, not of this code), and it does not pin certificates. Go's
@@ -1282,10 +1282,10 @@ driver in its standard library and Go does not.**
 
 `memory.db` is SQLite. It holds the findings table with `first_seen` (which is
 what makes "new since last run" a fact rather than a guess), the digests table
-(which is what stops a duplicate send), and the scout backlog. Two
-components open it: `scout.py` and `fleet-db`. `cti-enrich` reads and
-writes the findings through `fleet-db` (`findings`, `finding upsert`), so it
-holds no SQL.
+(which is what stops a duplicate send), and the scout backlog. One
+component opens it: `fleet-db`. `cti-enrich` reads and writes the findings
+through it (`findings`, `finding upsert`) and `cti-scout` the scout backlog
+(`scout known`, `scout record`), so neither holds SQL.
 
 Go's standard library has `database/sql` but **no driver**. Writing those
 three in Go would mean adding one of:
@@ -1304,13 +1304,12 @@ of consistency rather than for any security benefit.
 So the rule going forward is: **anything that needs SQLite is Python;
 everything else is Go**, because Go is the language the gates cover.
 
-The current code does not fully match that rule, and it is worth being exact
-about where:
+The code now matches that rule. Where each component stands:
 
 | Component | SQLite? | Language | Matches the rule |
 |---|---|---|---|
 | `cti-enrich` | no (through `fleet-db`) | Go | yes |
-| `scout.py` | yes | Python | yes |
+| `cti-scout` | no (through `fleet-db`) | Go | yes |
 | `fleet-db` | yes | Python | yes |
 | `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |
 | `cti-brief` | no | Go | yes |

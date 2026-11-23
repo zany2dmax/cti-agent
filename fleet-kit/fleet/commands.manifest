@@ -374,6 +374,7 @@ sub: sent | record a digest as delivered
 sub: note | record who is handling a finding
 sub: was-sent | exit 0 if a digest already went out
 sub: last-sent | when the newest digest of a kind went out (--hours: how long ago)
+sub: scout | the CVEs already known, or record feed mentions (cti-scout)
 sub: vacuum | compact the database
 
 command: fleet-journal
@@ -498,7 +499,7 @@ flag: --dry-run | render and print the subject, send and record nothing
 flag: --for-real | send the report and record the notices as used
 flag: --to-dev | test send to FLEET_DEV_EMAIL only
 
-command: scout.py
+command: cti-scout
 about: Poll the CTI feeds for new CVE IDs
 runs: local
 flag: --out FILE | output path

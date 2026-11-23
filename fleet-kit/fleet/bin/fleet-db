@@ -13,6 +13,10 @@
   fleet-db was-sent <date> <kind>     exit 0 if a digest already went out
   fleet-db last-sent <kind> [--hours] when the newest digest of a kind went out, or
                                       how many whole hours ago, rounded up (exit 1: never)
+  fleet-db scout known                every CVE already seen (findings and scout items),
+                                      upper case, one per line
+  fleet-db scout record               record feed mentions: a JSON array of
+                                      {cve, feed, title, link, published} on stdin
   fleet-db vacuum
 
 Every command that writes checks its arguments first (see "WHAT IS CHECKED"
@@ -52,6 +56,9 @@ MAX_MAIL_BODY = 400         # mirrors checkin-bash-guard (MAX_BOARD_MESSAGE)
 MAX_TASK_TITLE = 200
 MAX_NOTE = 1000
 MAX_COUNT = 10_000_000
+MAX_SCOUT_TITLE = 300       # cti-scout cuts a title to 300 characters
+MAX_SCOUT_LINK = 4000
+MAX_SCOUT_FEED = 2000
 
 ID_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z")
 NUM_ID_RX = re.compile(r"[0-9]{1,9}\Z")
@@ -269,6 +276,26 @@ def migrate(c):
             print(f"migrate: remapped {n} finding(s) from P1-P4 to Sev5-Sev1",
                   file=sys.stderr)
     c.commit()
+
+
+def validate_scout_item(r):
+    """One feed mention for scout_items, or Invalid."""
+    if not isinstance(r, dict):
+        raise Invalid("a scout item is a JSON object")
+    cve = v_match("cve", r.get("cve"), CVE_RX, "a CVE id")
+    out = {"cve": cve}
+    for k, limit, need in (("feed", MAX_SCOUT_FEED, True), ("title", MAX_SCOUT_TITLE, False),
+                           ("link", MAX_SCOUT_LINK, False), ("published", 64, False)):
+        v = r.get(k)
+        if v is None and not need:
+            out[k] = None
+            continue
+        if not isinstance(v, str) or (need and not v.strip()):
+            raise Invalid(f"{k} must be text")
+        if len(v) > limit:
+            raise Invalid(f"{k} is too long ({len(v)} characters, at most {limit})")
+        out[k] = v
+    return out
 
 
 def main(argv):
@@ -615,6 +642,53 @@ def _main(argv):
         secs = (datetime.now(timezone.utc) - t).total_seconds()
         print(max(0, -(-int(secs) // 3600)))  # whole hours, rounded up
         return 0
+
+    elif cmd == "scout":
+        # cti-scout's two uses of this database. It asks before it polls which
+        # CVEs are already known, so it reports only the new ones, and after it
+        # polls it records what it found. The SQL lives here, as the rest does.
+        sub = args[0] if args else ""
+        if sub == "known":
+            # Fixed statements, not built from names: nothing here can carry input.
+            seen = set()
+            for query in ("SELECT cve FROM findings WHERE cve IS NOT NULL",
+                          "SELECT cve FROM scout_items WHERE cve IS NOT NULL"):
+                for (cve,) in c.execute(query):
+                    seen.add(str(cve).upper())
+            for cve in sorted(seen):
+                print(cve)
+        elif sub == "record":
+            try:
+                rows = json.loads(sys.stdin.read())
+            except ValueError:
+                raise Invalid("scout record takes a JSON array on stdin") from None
+            if not isinstance(rows, list):
+                raise Invalid("scout record takes a JSON array on stdin")
+            # Not all-or-nothing, as `finding upsert`: a row that fails is
+            # skipped and named, the rest are written. A feed's text is kept as
+            # the feed gave it (a title can hold a newline); only its size and
+            # type are checked.
+            good, skipped = [], 0
+            for i, r in enumerate(rows):
+                try:
+                    good.append(validate_scout_item(r))
+                except Invalid as e:
+                    skipped += 1
+                    print(f"fleet-db: scout item {i + 1} skipped: {e}", file=sys.stderr)
+            ts = now()
+            n = 0
+            for r in good:
+                cur = c.execute(
+                    "INSERT OR IGNORE INTO scout_items(cve,feed,title,link,published,correlated,ts) "
+                    "VALUES(?,?,?,?,?,0,?)",
+                    (r["cve"], r["feed"], r["title"], r["link"], r["published"], ts))
+                n += cur.rowcount or 0
+            c.commit()
+            print(f"recorded {n} scout items" + (f" ({skipped} skipped, see above)" if skipped else ""))
+            if skipped:
+                return 3
+        else:
+            raise Invalid("scout takes known or record")
 
     elif cmd == "vacuum":
         c.execute("VACUUM")
