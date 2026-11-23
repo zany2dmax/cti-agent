@@ -2555,6 +2555,11 @@ whole file, and the release carries the version's **SBOM**
 (`cti-agent-1.6.7.cdx.json`, CycloneDX 1.5) as a downloadable file. Only the
 highest version is marked **Latest**.
 
+A **release candidate** is the version with `-rcN`, lowercase (`2.0-rc1`),
+with its own CHANGELOG heading (`## 2.0-rc1 — YYYY-MM-DD`). Its release is
+marked **Pre-release** and never takes Latest. The final version gets its
+own heading and tag.
+
 ### The steps
 
 On the Mac, in `~/code/cti-agent`, clean and on `main`:

@@ -3,6 +3,7 @@
 #
 #   scripts/release-notes.sh 1.6.6              # from ./CHANGELOG.md
 #   scripts/release-notes.sh v1.5.1 path/CHANGELOG.md
+#   scripts/release-notes.sh 2.0-rc1           # a release candidate
 #
 # The GitHub release for a tag uses this as its notes
 # (.github/workflows/release.yml), so the release page says exactly what the
@@ -22,9 +23,10 @@ fi
 ver="${1#v}"
 file="${2:-CHANGELOG.md}"
 
-# The version is matched as a literal string, never as a pattern.
-if ! printf '%s' "$ver" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}$'; then
-  echo "release-notes.sh: '$1' is not a version like 1.6.6 or v1.5.1" >&2
+# The version is matched as a literal string, never as a pattern. A release
+# candidate is the version and -rcN (2.0-rc1), with its own heading.
+if ! printf '%s' "$ver" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}(-rc[0-9]+)?$'; then
+  echo "release-notes.sh: '$1' is not a version like 1.6.6, v1.5.1 or 2.0-rc1" >&2
   exit 2
 fi
 [ -r "$file" ] || { echo "release-notes.sh: cannot read $file" >&2; exit 2; }

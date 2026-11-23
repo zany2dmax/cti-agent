@@ -212,14 +212,19 @@ class ReleaseNotesAndWorkflow(unittest.TestCase):
                 self.assertEqual(r.stdout, "")
                 self.assertIn("date its heading", r.stderr)
 
+    def test_a_release_candidate_gets_its_own_section(self):
+        text = self.LOG.replace("## 1.6.10", "## 2.0-rc1 \u2014 2026-12-02\n\ncandidate\n\n---\n\n## 1.6.10")
+        self.assertEqual(self.notes("2.0-rc1", text).stdout, "candidate\n")
+        self.assertEqual(self.notes("2.0", text).returncode, 1, "2.0 must not match the 2.0-rc1 heading")
+
     def test_something_that_is_not_a_version_is_refused(self):
-        for ver in ("1.6.*", "Unreleased", "1.6.1; rm -rf /", ""):
+        for ver in ("1.6.*", "Unreleased", "1.6.1; rm -rf /", "", "2.0-rc", "2.0-RC1", "2.0-rc1x"):
             with self.subTest(ver=ver):
                 self.assertEqual(self.notes(ver).returncode, 2)
 
     def test_every_tagged_version_in_the_real_changelog_has_notes(self):
         text = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        versions = re.findall(r"^## (\d+(?:\.\d+){1,2}) ", text, flags=re.M)
+        versions = re.findall(r"^## (\d+(?:\.\d+){1,2}(?:-rc\d+)?) ", text, flags=re.M)
         self.assertIn("1.0", versions)
         for v in versions:
             with self.subTest(version=v):
@@ -338,6 +343,8 @@ echo "gh stub: unhandled: $*" >&2; exit 9
         create = [c for c in self.calls() if c.startswith("gh release create")]
         self.assertEqual(len(create), 1, self.calls())
         self.assertIn(f"cti-agent-{self.TAG}.cdx.json", create[0], "the SBOM must be the release's asset")
+        if "-rc" not in self.TAG:
+            self.assertNotIn("--prerelease", create[0], "a final version is not a pre-release")
         sbom = self.runner / f"cti-agent-{self.TAG}.cdx.json"
         bom = json.loads(sbom.read_text())
         self.assertEqual((bom["bomFormat"], bom["specVersion"]), ("CycloneDX", "1.5"))
@@ -391,6 +398,22 @@ echo "gh stub: unhandled: $*" >&2; exit 9
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("no-dependency rule", r.stdout + r.stderr)
         self.assertFalse([c for c in self.calls() if c.startswith(("gh release create", "gh release upload"))], self.calls())
+
+
+
+class ReleaseWorkflowForACandidate(ReleaseWorkflowMakesTheSbom):
+    """The same workflow for a release candidate tag: every test above, and
+    the Release is a pre-release that never takes the Latest badge."""
+
+    TAG = "9.9.9-rc1"
+
+    def test_a_candidate_is_a_prerelease_and_never_latest(self):
+        r = self.run_workflow(self.repo())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        create = [c for c in self.calls() if c.startswith("gh release create")]
+        self.assertEqual(len(create), 1, self.calls())
+        self.assertIn("--prerelease", create[0])
+        self.assertIn("--latest=false", create[0])
 
 
 class RemediationNote(unittest.TestCase):

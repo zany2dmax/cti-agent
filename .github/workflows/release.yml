@@ -72,8 +72,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT" = workflow_dispatch ]; then tag="$INPUT_TAG"; else tag="$PUSHED_TAG"; fi
-          if ! printf '%s' "$tag" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,2}$'; then
-            echo "::error::'$tag' is not a release tag (1.6.7, v1.7); nothing made"
+          if ! printf '%s' "$tag" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,2}(-rc[0-9]+)?$'; then
+            echo "::error::'$tag' is not a release tag (1.6.7, v1.7, 2.0-rc1); nothing made"
             exit 1
           fi
 
@@ -138,12 +138,16 @@ jobs:
             "$sbom_name" >> "$RUNNER_TEMP/notes.md"
 
           # "Latest" only for the highest version: a backfill of an old tag
-          # must not take the badge from the current one.
+          # must not take the badge from the current one. A release candidate
+          # (-rcN) is a pre-release and never Latest, so the newest is picked
+          # from final versions only.
           newest="$(gh api "repos/$REPO/tags" --paginate -q '.[].name' \
-            | grep -E '^v?[0-9]+(\.[0-9]+){1,2}$' | sed 's/^v//' | sort -V | tail -1)"
+            | { grep -E '^v?[0-9]+(\.[0-9]+){1,2}$' || true; } | sed 's/^v//' | sort -V | tail -1)"
           latest=false
           [ "${tag#v}" = "$newest" ] && latest=true
+          pre=()
+          case "$tag" in *-rc[0-9]*) pre=(--prerelease); latest=false ;; esac
 
-          gh release create "$tag" --repo "$REPO" --verify-tag \
+          gh release create "$tag" --repo "$REPO" --verify-tag ${pre[@]+"${pre[@]}"} \
             --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest="$latest" "$sbom"
           echo "Release $tag made with $sbom_name (latest: $latest)"

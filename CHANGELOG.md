@@ -35,7 +35,47 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 2.0-rc1 — 2026-11-23
+
+A release candidate. It runs for a week on the box before 2.0 final, to find
+anything the move from Python to Go, or the move of secrets and settings out
+of `fleet.env`, left behind.
+
+**Upgrade:** `sudo cti-agent-update --for-real`. **Nothing is required for
+this candidate:** a box that keeps everything in `fleet.env` still works.
+
+**2.0 final will require what this candidate makes optional**, so do it during
+the candidate's week:
+
+1. **Every secret and login in systemd credentials**, and none left in
+   `fleet.env` (RUNBOOK §11n):
+   `sudo cti-agent-secrets import --dry-run`, then `import`, each lane's dry
+   run, then delete the lines. Needs **systemd 254 or later**.
+2. **Settings split per lane** (RUNBOOK §11o):
+   `sudo cti-agent-settings split --dry-run`, then `--for-real`, then
+   `sudo cti-agent fleet-config check` with no problems.
+
+2.0 final removes the `fleet.env` fallback for secrets. A box that hasn't done
+step 1 would stop sending mail and stop reaching every API, so the plan is
+for 2.0's installer to refuse to upgrade until `cti-agent-secrets status`
+shows every needed credential stored.
+
+**In this candidate:**
+- **No lane, runner or heartbeat step is Python.** The mailer, scout,
+  enrich, brief, the heartbeat's output cleaner and the digest runner are Go
+  or shell. Python on the box is left for SQLite (`fleet-db`,
+  `fleet-owners`) and tools a person runs by hand.
+- **Secrets move into systemd credentials**, and each unit is granted only
+  the ones its programs read. Hand runs go through `systemd-run`.
+- **Settings move into per-lane files**: `fleet.d/00-core.env` plus one file
+  per lane, each unit loading core and its own. `fleet-config check` reports
+  what's set, unread, misplaced or secret.
+- **New root tools**: `cti-agent-secrets` and `cti-agent-settings`, each with a
+  man page and tab completion. The installer lists every standard *IX
+  location it uses.
+- **The Weekly Brief has FLEET ADVISORIES**, rolled up from the dailies.
+- **Security and correctness fixes** listed below, among them the hold alert
+  that said a lane had stopped when it hadn't.
 
 ### Added
 
@@ -152,6 +192,35 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   167 settings and marks 11 as secrets. RUNBOOK §11m. **Upgrade:** nothing;
   run `sudo cti-agent fleet-config check` to see what can go.
 
+- **Release candidates.** A tag like `2.0-rc1` gets its GitHub release as a
+  **pre-release** that never takes the Latest badge (RUNBOOK §11i).
+  `release-notes.sh` and the release workflow accept `-rcN`.
+
+- **Settings per lane** (step 3 of the split, RUNBOOK §11o).
+  - **`cti-agent-settings split`** (root, `--dry-run` or `--for-real`) splits
+    what's left of `fleet.env` into `fleet.d/00-core.env` plus one plain file
+    per lane. It keeps every line and its comments, places helpers, keeps
+    unread settings in core and names them, and moves `fleet.env` aside. It
+    refuses while a secret or login is still in the file, or when a setting
+    would use `$NAME` from a lane file its lane never loads.
+  - **Units and runners:** each unit loads core and its own file (the check-in
+    loads all), through generated `EnvironmentFile=` lines and
+    `FLEET_ENV_FILES`. Runners, `fleetenv.Load` and `mailer.py` read the same
+    list.
+  - **Hand runs** of a runner load exactly its unit's files. Other hand runs
+    load them all.
+  - **Placement:** each setting's file is generated into `settings.manifest`
+    (`file:`). It stays in its lane's file only if no other lane could read
+    it.
+  - **`fleet-config check`** reads every file and flags a setting in the wrong
+    file and a `$NAME` its lane doesn't load.
+  - **The installer** keeps a split `fleet.d/` (it never recreates
+    `fleet.env` over it) and checks the owner, mode and SELinux label of
+    every file.
+
+  **Upgrade:** nothing changes until you split. Every unit loads `fleet.env`
+  first while it exists.
+
 ### Security
 
 - **Five programs stop getting `QUALYS_BASE_URL` they never read.**
@@ -220,31 +289,6 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   on the test box). Mail from the scanner's own domains (qualys.com,
   qualys.net) is now left out before triage, and ingest logs how many it
   left out. A Qualys address put on `TRIAGE_SENDERS` by name is still read.
-
-- **Settings per lane** (step 3 of the split, RUNBOOK §11o).
-  - **`cti-agent-settings split`** (root, `--dry-run` or `--for-real`) splits
-    what's left of `fleet.env` into `fleet.d/00-core.env` plus one plain file
-    per lane. It keeps every line and its comments, places helpers, keeps
-    unread settings in core and names them, and moves `fleet.env` aside. It
-    refuses while a secret or login is still in the file, or when a setting
-    would use `$NAME` from a lane file its lane never loads.
-  - **Units and runners:** each unit loads core and its own file (the check-in
-    loads all), through generated `EnvironmentFile=` lines and
-    `FLEET_ENV_FILES`. Runners, `fleetenv.Load` and `mailer.py` read the same
-    list.
-  - **Hand runs** of a runner load exactly its unit's files. Other hand runs
-    load them all.
-  - **Placement:** each setting's file is generated into `settings.manifest`
-    (`file:`). It stays in its lane's file only if no other lane could read
-    it.
-  - **`fleet-config check`** reads every file and flags a setting in the wrong
-    file and a `$NAME` its lane doesn't load.
-  - **The installer** keeps a split `fleet.d/` (it never recreates
-    `fleet.env` over it) and checks the owner, mode and SELinux label of
-    every file.
-
-  **Upgrade:** nothing changes until you split. Every unit loads `fleet.env`
-  first while it exists.
 
 ### Removed
 
