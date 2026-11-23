@@ -35,6 +35,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The 2.0-rc1 update stopped at `checkin-bash-guard`.** The installer
+  builds it, and `fleet-trace`, over the Python scripts of the same names
+  that 1.7.2 left in `bin/`. `go build` will not write over a file it did not
+  build ("already exists and is not an object file"), so the update stopped
+  there with the box partly installed. The installer now removes a script
+  named after a Go command before the builds; a built binary, and any script
+  no Go command replaces, is left alone.
+  **Upgrade:** `sudo cti-agent-update --for-real`. On a box the 2.0-rc1
+  update stopped on, the same command finishes it.
+
 ## 2.0-rc1 — 2026-11-23
 
 A release candidate. It runs for a week on the box before 2.0 final, to find

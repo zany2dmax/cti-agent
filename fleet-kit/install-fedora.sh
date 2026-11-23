@@ -861,6 +861,21 @@ if [ "$MODE" != dryrun ]; then
 fi
 
 if [ "$MODE" != dryrun ]; then
+  # A Go command that took over a script's name (checkin-bash-guard and
+  # fleet-trace were Python until 2.0) finds the old script in bin/, and
+  # `go build -o` refuses to write over a file that is not a program it
+  # built: "already exists and is not an object file". The 2.0-rc1 update
+  # stopped here. A script named after a Go command is the old version, so
+  # it goes before the build; a compiled binary is left for go build to
+  # replace.
+  for d in "$AGENT_SRC"/cmd/*/; do
+    name="$(basename "$d")"
+    old="$CODE_DIR/bin/$name"
+    if [ -f "$old" ] && [ "$(head -c 2 "$old")" = '#!' ]; then
+      rm -f "$old"
+      info "removed the old script $old (now the Go $name)"
+    fi
+  done
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$AGENT_SRC/cti-agent" ./cmd/cti-agent )
   chmod 0755 "$AGENT_SRC/cti-agent"
   ok "built $AGENT_SRC/cti-agent"
@@ -894,7 +909,7 @@ if [ "$MODE" != dryrun ]; then
 
   # The heartbeat's Bash guard (the PreToolUse hook checkin-settings.json
   # names at this path) and its trace recorder, Go after 1.7.2; the Python
-  # scripts of the same names are replaced in place. run-checkin refuses a
+  # scripts of the same names were removed above. run-checkin refuses a
   # beat whose guard does not refuse a redirect.
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/checkin-bash-guard" ./cmd/checkin-bash-guard )
   chmod 0755 "$CODE_DIR/bin/checkin-bash-guard"

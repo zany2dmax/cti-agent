@@ -791,6 +791,33 @@ class TestFileShape(unittest.TestCase):
                 f"a top-level {kw.strip()} appears after unittest.main() - "
                 "it will never run under `python3 test_lanes.py`")
 
+    def test_an_update_removes_a_script_a_go_command_now_replaces(self):
+        """The 2.0-rc1 update stopped at the checkin-bash-guard build: the old
+        Python script was still in bin/, and go build will not write over a
+        file it did not build. The installer removes a script named after a Go
+        command first, and leaves a built binary and any other script alone."""
+        root = pathlib.Path(__file__).resolve().parents[2]
+        inst = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
+        start = inst.index('  for d in "$AGENT_SRC"/cmd/*/; do\n')
+        loop = inst[start:inst.index("\n  done\n", start) + len("\n  done\n")]
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            src, code = d / "src", d / "code"
+            for c in ("checkin-bash-guard", "fleet-trace", "cti-scout"):
+                (src / "cmd" / c).mkdir(parents=True)
+            (code / "bin").mkdir(parents=True)
+            (code / "bin" / "checkin-bash-guard").write_text("#!/usr/bin/python3\nprint(1)\n")
+            (code / "bin" / "fleet-trace").write_bytes(b"\x7fELF\x02\x01")
+            (code / "bin" / "run-digest").write_text("#!/bin/bash\n")
+            r = subprocess.run(["bash", "-c", 'info() { echo "$*"; }\n' + loop],
+                               env={"PATH": "/usr/bin:/bin", "AGENT_SRC": str(src), "CODE_DIR": str(code)},
+                               capture_output=True, text=True, check=False)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse((code / "bin" / "checkin-bash-guard").exists(), "the old script is still there")
+            self.assertTrue((code / "bin" / "fleet-trace").exists(), "a built binary was removed")
+            self.assertTrue((code / "bin" / "run-digest").exists(), "a script with no Go command was removed")
+            self.assertIn("removed the old script", r.stdout)
+
     def test_every_command_is_built_by_the_installer_and_the_taskfile(self):
         """A command nobody builds is a command nobody has.
 
