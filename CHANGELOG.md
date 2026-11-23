@@ -44,6 +44,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   and `task test` fails on any non-ASCII character in `CHEATSHEET.md` or
   `docs/*.md`, the files the PDF tasks render, instead of waiting for
   someone to build a PDF.
+- **`task clean:all` removes a Qualys KB cache left at the repo root**
+  (`qualys_kb_cache.json` and its `.titles.json`), which a `cti-agent` run by
+  hand writes there. `task clean` still removes only build output.
 
 ## 2.0-rc2 — 2026-11-23
 

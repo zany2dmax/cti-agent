@@ -257,7 +257,7 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task ship` | fmt, build, all tests, lint, scan, gosec, govulncheck, **then** push. Task stops at the first failure, so the push cannot outrun a red gate — which it did once, when `task test` and `git push` were separate lines in the same paste |
 | `task man:lint` | Every man page in `man/man1/` renders without warnings (mandoc or groff). The drift test that every flag is documented runs with the lane tests |
 | `task cheatsheet:pdf` | Render `CHEATSHEET.md` to `CHEATSHEET.pdf` (needs `pandoc` and `pdflatex`) |
-| `task clean` / `task clean:all` | Build artifacts / also local state |
+| `task clean` / `task clean:all` | Build artifacts / also local state and a Qualys KB cache left at the repo root |
 
 ### Production — Fedora/RHEL layout
 
