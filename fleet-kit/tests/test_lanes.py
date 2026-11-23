@@ -3510,20 +3510,51 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
     def _bin(self, name):
         return pathlib.Path(__file__).resolve().parents[1] / "fleet" / "bin" / name
 
-    def test_fleet_sanitize_cleans_by_the_same_cases_as_the_go_twin(self):
-        """Scenario-222. internal/sanitize (Go) and fleet-sanitize (Python) read
-        one file of cases, so the two cannot drift."""
-        cases = json.loads((pathlib.Path(__file__).resolve().parents[2] / "internal" / "sanitize"
-                            / "testdata" / "sanitize-cases.json").read_text(encoding="utf-8"))
-        self.assertGreaterEqual(len(cases), 10)
-        for c in cases:
-            with self.subTest(c["name"]):
-                r = subprocess.run([sys.executable, "-I", str(self._bin("fleet-sanitize")),
-                                    "--source", "test"], input=c["input"].encode("utf-8"),
-                                   capture_output=True, check=False)
-                self.assertEqual(r.returncode, 0, r.stderr)
-                self.assertEqual(r.stdout.decode("utf-8"), c["output"])
-                self.assertEqual(r.stderr, b"", "the cleaner must never write to stderr: that goes to the model")
+    def _wrapper_bin(self, d, with_cleaner=True):
+        """A bin directory holding fleet-board and fleet-db beside a cti-sanitize
+        built from this checkout, the way the installer lays them out: the
+        wrappers find the cleaner beside themselves."""
+        d = pathlib.Path(d) / "bin"
+        d.mkdir()
+        for name in ("fleet-board", "fleet-db"):
+            shutil.copy(self._bin(name), d / name)
+        if with_cleaner:
+            root = pathlib.Path(__file__).resolve().parents[2]
+            b = subprocess.run(["go", "build", "-o", str(d / "cti-sanitize"), "./cmd/cti-sanitize"],
+                               cwd=root, capture_output=True, text=True, check=False)
+            self.assertEqual(b.returncode, 0, b.stderr)
+        return d
+
+    def test_the_cleaner_is_go_and_the_wrappers_call_it(self):
+        """Scenario-222. The Python fleet-sanitize kept a second copy of
+        internal/sanitize's rules; cti-sanitize is the package itself, and
+        cmd/cti-sanitize's tests run the shared cases through it."""
+        self.assertFalse(self._bin("fleet-sanitize").exists())
+        for name in ("fleet-board", "fleet-journal", "fleet-db"):
+            src = self._bin(name).read_text(encoding="utf-8")
+            with self.subTest(name):
+                self.assertIn("cti-sanitize", src)
+                self.assertNotIn("fleet-sanitize", src)
+
+    def test_a_beat_without_the_cleaner_reads_nothing(self):
+        """Raw output is not an option inside a beat: a missing cleaner means
+        the beat gets no board and no memory, and says why on stderr."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            (pathlib.Path(home) / "board.md").write_text(
+                "[2026-11-10 09:00] @scout -> @you INFO id=x1 ok \x1b[2J\n", encoding="utf-8")
+            d = self._wrapper_bin(home, with_cleaner=False)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
+            env.update({"FLEET_HOME": home, "CHECKIN_BEAT_ID": "b-1"})
+            r = subprocess.run(["/bin/bash", str(d / "fleet-board"), "read"],
+                               capture_output=True, text=True, check=False, env=env)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(r.stdout, "")
+            self.assertIn("cti-sanitize is missing", r.stderr)
+            r = subprocess.run(["/usr/bin/python3", "-sE", str(d / "fleet-db"), "recent"],
+                               capture_output=True, text=True, check=False, env=env)
+            self.assertEqual((r.returncode, r.stdout), (2, ""))
+            self.assertIn("cti-sanitize is missing", r.stderr)
 
     def test_a_beat_reads_the_board_and_memory_cleaned_and_a_lane_reads_them_raw(self):
         import tempfile
@@ -3534,9 +3565,10 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
             env.update({"FLEET_HOME": home})
             beat = dict(env, CHECKIN_BEAT_ID="b-1")
+            d = self._wrapper_bin(home)
 
             def board_read(e):
-                return subprocess.run(["/bin/bash", str(self._bin("fleet-board")), "read"],
+                return subprocess.run(["/bin/bash", str(d / "fleet-board"), "read"],
                                       capture_output=True, text=True, check=False, env=e)
             raw, clean = board_read(env), board_read(beat)
             self.assertIn("\x1b", raw.stdout)
@@ -3548,7 +3580,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             # fleet-db now refuses control characters on write, so the hostile
             # text is put in the way another writer could have: straight into
             # the table. The cleaning on read is a second line, not the first.
-            subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "init"],
+            subprocess.run(["/usr/bin/python3", "-sE", str(d / "fleet-db"), "init"],
                            check=True, env=env, capture_output=True)
             import sqlite3
             db = sqlite3.connect(os.path.join(env["FLEET_HOME"], "state", "memory.db"))
@@ -3558,7 +3590,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             db.close()
 
             def db_recent(e):
-                return subprocess.run(["/usr/bin/python3", "-sE", str(self._bin("fleet-db")), "recent"],
+                return subprocess.run(["/usr/bin/python3", "-sE", str(d / "fleet-db"), "recent"],
                                       capture_output=True, text=True, check=False, env=e)
             self.assertIn("\x1b", db_recent(env).stdout)
             r = db_recent(beat)

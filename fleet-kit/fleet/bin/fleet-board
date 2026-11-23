@@ -29,9 +29,9 @@ LOCK_TIMEOUT="${LOCK_TIMEOUT:-10}"
 # If the cleaner is missing the beat gets nothing rather than raw text.
 beat_clean() {
   if [ -n "${CHECKIN_BEAT_ID:-}" ]; then
-    local san; san="$(dirname "$0")/fleet-sanitize"
-    [ -x "$san" ] || { echo "fleet-board: fleet-sanitize is missing" >&2; return 2; }
-    /usr/bin/python3 -I "$san" --source fleet-board
+    local san; san="$(dirname "$0")/cti-sanitize"
+    [ -x "$san" ] || { echo "fleet-board: cti-sanitize is missing" >&2; return 2; }
+    "$san" --source fleet-board
   else
     cat
   fi

@@ -161,6 +161,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   - `settings-manifest` still lists `FLEET_ALLOW_TO`. Go reads it through a
     constant, which the scan can't see; `mailer.py` was the only file that
     named it.
+- **The Python `fleet-sanitize`.** The heartbeat's output cleaner is now
+  `cti-sanitize`, built from `internal/sanitize`, the package `cti-alert`,
+  `cti-kev`, `cti-mailbox` and `cti-patchtuesday` already used. That leaves one
+  implementation of the Scenario-222 rules, not a Go copy and a Python copy
+  held together by a shared test file.
+  - **Callers:** `fleet-board`, `fleet-journal` and `fleet-db` run it beside
+    themselves, as before, and still print nothing if it's missing.
+  - **On the box:** an update builds `cti-sanitize` and deletes the old
+    `bin/fleet-sanitize` and its man page.
+  - **Behaviour:** the same apart from two things. `--source` keeps only ASCII
+    letters and digits (Python also kept other Unicode letters). Input past
+    16 MB is read and dropped, since output is cut at 64 KB anyway.
+  - **Tests:** `cmd/cti-sanitize` runs the shared cases end to end. The Python
+    suite now runs `fleet-board` and `fleet-db` beside a freshly built
+    `cti-sanitize`, and checks that a beat with no cleaner reads nothing.
 
 ---
 

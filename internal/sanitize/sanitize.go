@@ -24,8 +24,10 @@
 //     back into the model), with the first 80 printable characters so an
 //     operator can see what the attempt looked like.
 //
-// The Python twin is fleet-kit/fleet/bin/fleet-sanitize. Both read the same
-// cases from testdata/sanitize-cases.json, so they cannot drift.
+// cmd/cti-sanitize is this package as a filter, for the shell and Python
+// wrappers (fleet-board, fleet-journal, fleet-db). It replaced the Python
+// fleet-sanitize, so there is one implementation; its tests run the same
+// cases from testdata/sanitize-cases.json end to end.
 package sanitize
 
 import (

@@ -395,9 +395,12 @@ for f in enrich.py scout.py brief.py; do
 done
 # Retired files. An update installs over the old tree and never deletes, so a
 # file the repo no longer ships stays on the box, and the cti-agent wrapper
-# still runs anything in lanes/. mailer.py was replaced by cti-mailer in 1.6.6
-# and removed after 1.7.2: take it, and its man page, off the box.
-for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1"; do
+# still runs anything in lanes/. Removed after 1.7.2:
+#   mailer.py      - replaced by cti-mailer in 1.6.6
+#   fleet-sanitize - replaced by cti-sanitize (Go)
+# Take them, and their man pages, off the box.
+for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1" \
+         "$CODE_DIR/bin/fleet-sanitize" "$MAN_DIR/fleet-sanitize.1"; do
   if [ -e "$f" ]; then
     run rm -f "$f"
     info "removed $f (retired)"
@@ -884,6 +887,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-checkin-verdict" ./cmd/cti-checkin-verdict )
   chmod 0755 "$CODE_DIR/bin/cti-checkin-verdict"
   ok "built $CODE_DIR/bin/cti-checkin-verdict"
+
+  # The heartbeat's output cleaner (Scenario-222). fleet-board, fleet-journal
+  # and fleet-db pipe what a beat reads through it, and print nothing if it
+  # is missing, so a beat without it reads no board, journal or memory.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-sanitize" ./cmd/cti-sanitize )
+  chmod 0755 "$CODE_DIR/bin/cti-sanitize"
+  ok "built $CODE_DIR/bin/cti-sanitize"
 
   # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
   # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
@@ -1395,7 +1405,7 @@ FAIL=0
 [ "${PATHFAIL:-0}" = 0 ] || { FAIL=1; bad "config paths above must be fixed"; }
 [ "${TZFAIL:-0}" = 0 ]   || { FAIL=1; bad "schedule timezone above must be fixed"; }
 for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
-         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" "$CODE_DIR/bin/cti-triage" \
+         "$CODE_DIR/bin/cti-kev" "$CODE_DIR/bin/cti-sanitize" "$CODE_DIR/bin/cti-podprobe" "$CODE_DIR/bin/cti-falcon" "$CODE_DIR/bin/cti-triage" \
          "$CODE_DIR/bin/cti-patchtuesday" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \

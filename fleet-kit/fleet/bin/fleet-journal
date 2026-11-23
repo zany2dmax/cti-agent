@@ -84,9 +84,9 @@ for u in ${units[@]+"${units[@]}"}; do args+=("--unit=$u"); done
 # reads it (Scenario-222). Anywhere else the output is untouched. If the
 # cleaner is missing the beat gets nothing rather than raw text.
 if [ -n "${CHECKIN_BEAT_ID:-}" ]; then
-  SANITIZER="$(dirname "$0")/fleet-sanitize"
-  [ -x "$SANITIZER" ] || { echo "fleet-journal: fleet-sanitize is missing" >&2; exit 2; }
-  "$JOURNALCTL" "${args[@]}" | /usr/bin/python3 -I "$SANITIZER" --source fleet-journal
+  SANITIZER="$(dirname "$0")/cti-sanitize"
+  [ -x "$SANITIZER" ] || { echo "fleet-journal: cti-sanitize is missing" >&2; exit 2; }
+  "$JOURNALCTL" "${args[@]}" | "$SANITIZER" --source fleet-journal
   exit "${PIPESTATUS[0]}"
 fi
 exec "$JOURNALCTL" "${args[@]}"

@@ -630,14 +630,14 @@ def beat_main(argv):
     """Inside a heartbeat (CHECKIN_BEAT_ID, set by run-checkin) everything this
     prints is cleaned before the model reads it: memories, findings and mail
     hold text from advisories and feeds (Scenario-222). The output is captured,
-    passed through fleet-sanitize and written; if that cannot run the beat gets
+    passed through cti-sanitize and written; if that cannot run the beat gets
     nothing. Outside a beat main() runs as it always did, so the lanes that
     parse this output are untouched."""
     import io
     import subprocess
-    san = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet-sanitize")
+    san = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cti-sanitize")
     if not os.access(san, os.X_OK):
-        print("fleet-db: fleet-sanitize is missing", file=sys.stderr)
+        print("fleet-db: cti-sanitize is missing", file=sys.stderr)
         return 2
     real, buf = sys.stdout, io.StringIO()
     sys.stdout = buf
@@ -645,11 +645,11 @@ def beat_main(argv):
         code = main(argv)
     finally:
         sys.stdout = real
-    # Bandit B603 is suppressed on the next line: a fixed interpreter in isolated
-    # mode, the root-owned fleet-sanitize beside this file, fixed arguments, no
-    # shell - nothing a caller chooses. (Bandit reads every word after its marker
+    # Bandit B603 is suppressed on the next line: the root-owned cti-sanitize
+    # binary beside this file, fixed arguments, no shell - nothing a caller
+    # chooses. (Bandit reads every word after its marker
     # as a test id, so the reason lives here, not after it.)
-    r = subprocess.run(["/usr/bin/python3", "-I", san, "--source", "fleet-db"],  # nosec B603
+    r = subprocess.run([san, "--source", "fleet-db"],  # nosec B603
                        input=buf.getvalue().encode("utf-8", "replace"),
                        capture_output=True, check=False)
     if r.returncode != 0:

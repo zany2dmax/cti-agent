@@ -1001,9 +1001,10 @@ design review 39260, Scenarios 222 to 224).
   the guard read them differently). A test fails when `run-checkin`'s grant and
   the table differ.
 - *Sanitizing (222).* Inside a heartbeat only (`CHECKIN_BEAT_ID` set),
-  `fleet-journal`, `fleet-board read` and `tail`, all of `fleet-db`, `cti-kev`,
-  `cti-mailbox`, `cti-patchtuesday` and `cti-alert` pass their output through
-  `fleet-sanitize` (`internal/sanitize`): control characters (not newline or
+  `fleet-journal`, `fleet-board read` and `tail`, and all of `fleet-db` pipe
+  their output through `cti-sanitize`; `cti-kev`, `cti-mailbox`,
+  `cti-patchtuesday` and `cti-alert` clean their own with the same Go package,
+  `internal/sanitize`. One implementation: control characters (not newline or
   tab), C1 controls, every Unicode format character (bidi, zero-width, tag
   characters), line and paragraph separators and the Hangul fillers are
   removed, lines over 1024
