@@ -39,6 +39,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The 1.7 brochure and release announcement are in the repo**, as
+  `docs/fleet-brochure-1.7.md` and `docs/release-1.7-announcement.md`.
+  `task docs:pdf` renders each Markdown file in `docs/` to a PDF beside it,
+  with the same pandoc toolchain and preamble as `task cheatsheet:pdf`. The
+  PDFs are generated and gitignored.
+
 - **The Weekly Brief has FLEET ADVISORIES.** Until now advisory triage was
   only in the dailies, so a reader of the Monday brief alone never saw a
   Wednesday sighting. The weekly now rolls up the daily triage reports

@@ -66,6 +66,40 @@ tasks:
           --syntax-highlighting=tango
         echo "  ok  CHEATSHEET.pdf"
 
+  docs:pdf:
+    desc: Build the release brochure and announcement PDFs from docs/*.md (needs pandoc and pdflatex)
+    # The same toolchain and preamble as cheatsheet:pdf, and the same rule:
+    # the Markdown is the source, the PDFs are generated and gitignored, and
+    # the Markdown must stay plain ASCII for pdflatex. One PDF per Markdown
+    # file in docs/, written beside it, so a new release's documents need no
+    # change here.
+    sources:
+      - docs/*.md
+      - scripts/cheatsheet-header.tex
+    generates:
+      - docs/*.pdf
+    cmds:
+      - |
+        for tool in pandoc pdflatex; do
+          command -v "$tool" >/dev/null 2>&1 || { echo "$tool is not installed (see the comment on cheatsheet:pdf in Taskfile.yml)" >&2; exit 1; }
+        done
+        kpsewhich fvextra.sty >/dev/null 2>&1 || { echo "LaTeX package fvextra is missing: sudo tlmgr install fvextra etoolbox framed" >&2; exit 1; }
+        for md in docs/*.md; do
+          [ -f "$md" ] || continue
+          if LC_ALL=C grep -n '[^[:print:][:space:]]' "$md" >/dev/null; then
+            echo "$md has non-ASCII characters; pdflatex will fail on them:" >&2
+            LC_ALL=C grep -n '[^[:print:][:space:]]' "$md" | head -5 >&2; exit 1
+          fi
+          pdf="${md%.md}.pdf"
+          # A list straight after a line of text, as GitHub renders it, and
+          # column widths from each table's separator line.
+          pandoc "$md" -f markdown+lists_without_preceding_blankline -o "$pdf" --pdf-engine=pdflatex \
+            -H scripts/cheatsheet-header.tex -V geometry:margin=0.8in \
+            -V fontsize=11pt -V colorlinks=true -V linkcolor=blue \
+            --syntax-highlighting=tango
+          echo "  ok  $pdf"
+        done
+
   fmt:check:
     desc: Fail if anything is unformatted, rather than silently reformatting it
     # WHY ship USES THIS AND NOT fmt
