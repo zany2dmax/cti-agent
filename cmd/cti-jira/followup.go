@@ -9,6 +9,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/jira"
+	"github.com/zany2dmax/cti-agent/internal/product"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup"
 )
@@ -75,6 +76,10 @@ func cveFromLabels(labels []string) string {
 func findingFromLookup(cve string, res vulnlookup.Result) jira.Finding {
 	f := jira.Finding{CVE: cve}
 	applyLookup(&f, res)
+	// The product from the scanner's titles for the QIDs on our hosts, for
+	// the retitle that follows a comment. Ranked below CISA KEV and NVD, so it
+	// never replaces a name the digest took from either.
+	f.Product, f.ProductSource = product.For("", "", nil, res.Titles, res.Source)
 	return f
 }
 

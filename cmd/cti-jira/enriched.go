@@ -27,20 +27,22 @@ import (
 // a failed run - the daily security email must not depend on this lane being
 // happy with the data.
 type enrichedRow struct {
-	CVE       string `json:"cve"`
-	CVSS      any    `json:"cvss"` // number in the JSON, printed as text
-	KEV       any    `json:"kev"`  // 1/0, sometimes true/false
-	KEVDue    string `json:"kev_due"`
-	KEVName   string `json:"kev_name"`
-	Product   string `json:"product"`  // "Google Chrome"; "" when not identified
-	Priority  string `json:"priority"` // "Sev5".."Sev1"
-	QIDs      string `json:"qids"`     // comma-separated
-	HostCount int    `json:"host_count"`
-	QDS       int    `json:"qualys_score"` // the morning report's max QDS
-	Status    string `json:"status"`
-	Published string `json:"published"`
-	LastSeen  string `json:"last_seen"`
-	Desc      string `json:"description"`
+	CVE     string `json:"cve"`
+	CVSS    any    `json:"cvss"` // number in the JSON, printed as text
+	KEV     any    `json:"kev"`  // 1/0, sometimes true/false
+	KEVDue  string `json:"kev_due"`
+	KEVName string `json:"kev_name"`
+	Product string `json:"product"` // "Google Chrome"; "" when not identified
+	// ProductSource is where Product came from: "CISA KEV", "NVD", "Qualys".
+	ProductSource string `json:"product_source"`
+	Priority      string `json:"priority"` // "Sev5".."Sev1"
+	QIDs          string `json:"qids"`     // comma-separated
+	HostCount     int    `json:"host_count"`
+	QDS           int    `json:"qualys_score"` // the morning report's max QDS
+	Status        string `json:"status"`
+	Published     string `json:"published"`
+	LastSeen      string `json:"last_seen"`
+	Desc          string `json:"description"`
 	// MailSource is "trusted", "unverified" or "" (not judged: an older
 	// report, or a CVE that came from somewhere other than the mailbox).
 	MailSource string `json:"mail_source"`
@@ -138,15 +140,16 @@ func splitQIDs(s string) []string {
 // toFinding converts a row, WITHOUT host names - those come from the scanner.
 func (r enrichedRow) toFinding() jira.Finding {
 	f := jira.Finding{
-		CVE:       strings.TrimSpace(r.CVE),
-		QIDs:      splitQIDs(r.QIDs),
-		KEV:       truthy(r.KEV),
-		Severity:  severity(r.Priority),
-		CVSS:      asText(r.CVSS),
-		Title:     strings.TrimSpace(r.KEVName),
-		Product:   strings.TrimSpace(r.Product),
-		QDS:       r.QDS,
-		HostCount: r.HostCount,
+		CVE:           strings.TrimSpace(r.CVE),
+		QIDs:          splitQIDs(r.QIDs),
+		KEV:           truthy(r.KEV),
+		Severity:      severity(r.Priority),
+		CVSS:          asText(r.CVSS),
+		Title:         strings.TrimSpace(r.KEVName),
+		Product:       strings.TrimSpace(r.Product),
+		ProductSource: strings.TrimSpace(r.ProductSource),
+		QDS:           r.QDS,
+		HostCount:     r.HostCount,
 		// Only the exact word. "" (not judged) labels nothing.
 		UnverifiedSource: strings.EqualFold(strings.TrimSpace(r.MailSource), "unverified"),
 	}

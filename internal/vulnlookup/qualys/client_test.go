@@ -509,8 +509,38 @@ func TestAFailedTitlesRebuildKeepsAFreshCacheFresh(t *testing.T) {
 }
 
 func TestTitlesAreCappedPerCVE(t *testing.T) {
-	c := &Client{kbTitles: KBTitles{1: "a", 2: "b", 3: "c", 4: "d"}}
-	if got := c.titlesFor([]int{1, 2, 3, 4}); len(got) != maxTitlesPerCVE {
+	c := &Client{kbTitles: KBTitles{}}
+	var qids []int
+	for q := 1; q <= maxTitlesPerCVE+2; q++ {
+		c.kbTitles[q] = fmt.Sprintf("t%d", q)
+		qids = append(qids, q)
+	}
+	if got := c.titlesFor(qids); len(got) != maxTitlesPerCVE {
 		t.Errorf("titlesFor = %q", got)
+	}
+}
+
+// CR-26125: the lowest-numbered QIDs were Amazon Linux advisories with no
+// hosts here, and they named a Java runtime CVE on Windows and Linux. The
+// titles come from the QIDs with detections, most hosts first.
+func TestTitlesComeFromTheQIDsOnOurHosts(t *testing.T) {
+	c := &Client{kbTitles: KBTitles{
+		364736:  "Amazon Linux Security Advisory for java-17-amazon-corretto : ALAS2026-1",
+		364750:  "Amazon Linux Security Advisory for java-21-amazon-corretto : ALAS2026-2",
+		389494:  "Oracle Enterprise Linux Security Update for java-21-openjdk (ELSA-2026-1)",
+		6057627: "Oracle Java SE Critical Patch Update - October 2026",
+		6301130: "Amazon Corretto Multiple Vulnerabilities (Windows)",
+	}}
+	qids := []int{364736, 364750, 389494, 6057627, 6301130}
+	hosts := map[int]int{6057627: 180, 6301130: 61, 389494: 2}
+	got := c.titlesByHosts(qids, func(q int) int { return hosts[q] })
+	want := []string{c.kbTitles[6057627], c.kbTitles[6301130], c.kbTitles[389494]}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("titles = %q, want the detected QIDs, most hosts first: %q", got, want)
+	}
+	// Nothing detected (NOT_PRESENT): every QID's title, in QID order.
+	got = c.titlesByHosts(qids, func(int) int { return 0 })
+	if len(got) != 5 || got[0] != c.kbTitles[364736] {
+		t.Errorf("no detections: titles = %q", got)
 	}
 }

@@ -142,5 +142,12 @@ func storedState(ctx context.Context, c *jira.Client, key, cve string) (*jira.Ex
 func previewUpdate(ctx context.Context, c *jira.Client, issue jira.Issue,
 	f jira.Finding, now time.Time) string {
 	prev, _ := storedState(ctx, c, issue.Key, f.CVE)
-	return planUpdate(issue, prev, f, now).describe(f)
+	plan := planUpdate(issue, prev, f, now)
+	s := plan.describe(f)
+	if plan.kind == planComment {
+		if title, _ := jira.Retitle(issue.Fields.Summary, prev, f); title != "" {
+			s += "; WOULD RETITLE: " + safelog.Line(title)
+		}
+	}
+	return s
 }

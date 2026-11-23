@@ -98,9 +98,36 @@ type KBTitles map[int]string
 func titlesPath(cachePath string) string { return cachePath + ".titles.json" }
 
 // maxTitlesPerCVE bounds the titles one lookup carries. A cumulative update
-// can map to dozens of QIDs with near-identical titles; three is enough to
-// say what the product is.
-const maxTitlesPerCVE = 3
+// can map to dozens of QIDs with near-identical titles. The digest and the
+// ticket title name up to three products and count the rest ("+5 more"), so
+// this carries enough for that count to say the CVE reaches further than the
+// names shown.
+const maxTitlesPerCVE = 8
+
+// titlesByHosts is the titles of the QIDs that have detections here, the
+// QID on most hosts first (ties in QID order); with none detected, every
+// QID's, in QID order.
+//
+// The titles name the product a finding is about when NVD and CISA KEV do
+// not, and they become the ticket's title. They were taken in QID number
+// order from every QID the CVE maps to, detected or not, so a Java runtime
+// CVE on 241 Windows and Linux hosts was filed as
+// "java-17-amazon-corretto (Amazon Linux), ..." - the lowest-numbered QIDs
+// were Amazon Linux advisories - and IT, with nothing in AWS, set it aside
+// (CR-26125, 2026-11-19). The product is the one on our machines.
+func (c *Client) titlesByHosts(qids []int, hostsOf func(int) int) []string {
+	var hit []int
+	for _, q := range qids {
+		if hostsOf(q) > 0 {
+			hit = append(hit, q)
+		}
+	}
+	if len(hit) == 0 {
+		return c.titlesFor(qids)
+	}
+	sort.SliceStable(hit, func(i, j int) bool { return hostsOf(hit[i]) > hostsOf(hit[j]) })
+	return c.titlesFor(hit)
+}
 
 // titlesFor returns the titles of these QIDs, in QID order, without repeats.
 func (c *Client) titlesFor(qids []int) []string {
@@ -244,6 +271,7 @@ func (c *Client) LookupCVE(ctx context.Context, cve string) (vulnlookup.Result, 
 		res.HostCount = largestSingleQID
 	}
 	res.HostCountIsFloor = truncated
+	res.Titles = c.titlesByHosts(qids, func(q int) int { return detections[q].HostCount })
 	return res, nil
 }
 

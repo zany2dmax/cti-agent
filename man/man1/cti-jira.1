@@ -182,6 +182,17 @@ comment. Detections returning after an all-clear are reported at once.
 .TP
 .B Anything else
 Including a shrinking count: recorded, no comment.
+.PP
+With every comment about the exposure, the ticket's title is brought up to
+date too: the product, and the host count. The rest of the title
+.RB ( [OVERDUE] ,
+CISA KEV, CVSS, QDS) is kept. The product comes from CISA KEV, NVD or the
+scanner's titles for the QIDs on our hosts, most hosts first, and a name from
+the scanner never replaces one from KEV or NVD. The exposure state records
+the title the fleet wrote, so a ticket a person has renamed in Jira keeps
+its title. The dry run says
+.B WOULD RETITLE
+with the new title.
 .SS The follow-up
 .B \-\-follow\-up
 starts from Jira rather than from the mail: every ticket in

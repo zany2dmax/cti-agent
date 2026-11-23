@@ -266,6 +266,32 @@ shows every needed credential stored.
 
 ### Fixed
 
+- **A ticket's title named products the CVE has no hosts on, and never
+  changed.** CR-26125, a Java runtime CVE on Windows and Linux servers and
+  workstations, was filed as "java-17-amazon-corretto (Amazon Linux), ..." and
+  IT, with nothing in AWS, set it aside. NVD had no product data for the CVE
+  yet, so the name came from the scanner's titles: the first three in QID
+  number order, from every QID the CVE maps to, whether or not anything here
+  has it. The lowest numbers were Amazon Linux advisories.
+  - **The titles come from the QIDs on our hosts,** most hosts first. With
+    nothing detected, every QID's title, in order, as before. Up to eight are
+    carried, so a name that is one of several says "+N more".
+  - **The title follows the exposure comment.** When `cti-jira` comments that
+    a ticket's exposure changed, it also brings the title's product and host
+    count up to date, keeping the rest. A scanner-title name never replaces
+    one from CISA KEV or NVD. The exposure state now records the title the
+    fleet wrote, so a ticket a person renamed in Jira is not renamed back;
+    one filed before this is retitled only while its title is in the fleet's
+    format. The dry run prints `WOULD RETITLE`. A retitle is audited as
+    `jira.summary.set`.
+  - **`internal/product`** holds the product naming that was in
+    `internal/enrich`, so `cti-jira` can name a ticket from the scanner's
+    titles without importing the enrich lane (and being counted as reading
+    its settings).
+  - **Upgrade:** nothing. CR-26125 is retitled with its next exposure
+    comment. To fix it sooner, rename it in Jira; the fleet leaves a renamed
+    title alone unless it still reads "CVE - product - N hosts".
+
 - **The application-owner hold alert said the lane had stopped when it
   hadn't.** When one owner's report was held back (22 Nov 2026: a scan that
   never finished), the email read "CTI fleet on hold … stopped itself on

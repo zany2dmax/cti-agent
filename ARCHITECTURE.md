@@ -495,6 +495,7 @@ internal/budget/               rolling-window and daily ceilings, backoff
 internal/enrich/               NVD, EPSS and KEV clients and caches, the Sev5-Sev1 scoring, product names
 internal/pyfmt/                values written as the Python lanes wrote them (10.0, None, repr), so the Go ports match
 internal/pyjson/               JSON with its key order kept, written as Python's json.dumps did (fleet-trace)
+internal/product/              what a CVE is about: CISA KEV, NVD CPE, or the scanner's titles
 internal/kev/                  deadline bands, present-only filtering
 internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest

@@ -50,9 +50,13 @@ type Finding struct {
 	CVSS     string
 	Title    string
 	// Product is what the CVE is about - "Google Chrome", "PHP" - from the
-	// CISA KEV catalog or NVD's CPE data, named by cti-enrich. Empty when
-	// neither source had one; nothing guesses it.
+	// CISA KEV catalog, NVD's CPE data, or failing both the scanner's titles
+	// for the QIDs on our hosts, named by cti-enrich. Empty when none had one.
 	Product string
+	// ProductSource is where Product came from: "CISA KEV", "NVD", or the
+	// scanner ("Qualys"). A retitle never swaps a name for one from a weaker
+	// source.
+	ProductSource string
 	// QDS is the highest Qualys Detection Score among the CVE's detections,
 	// 0 when unknown. Above HighQDS it earns a ticket on its own.
 	QDS       int
@@ -222,14 +226,7 @@ func Summary(f Finding, now time.Time) string {
 		b.WriteString(" - ")
 	}
 
-	hosts := fmt.Sprintf("%d host", f.Count())
-	if f.Count() != 1 {
-		hosts += "s"
-	}
-	if f.HostFloor() {
-		hosts = "at least " + hosts
-	}
-	b.WriteString(hosts)
+	b.WriteString(hostPhrase(f))
 
 	if f.KEV {
 		b.WriteString(", CISA KEV")

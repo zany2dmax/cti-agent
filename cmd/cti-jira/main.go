@@ -489,6 +489,7 @@ func doTestTicket(ctx context.Context, c *jira.Client, cfg config.Config, forRea
 	// already reported hosts nobody has seen.
 	st := jira.StateFrom(f, res.Key, now)
 	st.LastReportedAt = now // the description and CSV are the first report
+	st.Summary = summary    // the title the fleet wrote, so a person's rename is left alone
 	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
 		// Not fatal. The ticket is filed and that was the point; a missing
 		// state record costs one skipped drift comparison next run, which
@@ -551,6 +552,7 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		// clock is left where it was.
 		if found {
 			st.LastReportedAt = prev.LastReportedAt
+			st.Summary, st.ProductSource = prev.Summary, prev.ProductSource
 		}
 		if err := c.SetProperty(ctx, key, jira.PropertyKey, st); err != nil {
 			logf("WARNING: could not record state on %s: %s", key, safelog.Line(err.Error()))
@@ -617,10 +619,27 @@ func updateExisting(ctx context.Context, c *jira.Client, issue jira.Issue,
 		}
 	}
 
+	// The title follows the comment: the product on our hosts and today's
+	// count, or IT reads a three-day-old title over the comment (CR-26125).
+	st := jira.StateFrom(f, key, now)
+	if found {
+		st.Summary, st.ProductSource = prev.Summary, prev.ProductSource
+	}
+	if title, why := jira.Retitle(issue.Fields.Summary, prev, f); title != "" {
+		if err := c.SetSummary(ctx, key, title); err != nil {
+			logf("WARNING: commented on %s but could not retitle it: %s", key, safelog.Line(err.Error()))
+		} else {
+			logf("retitled %s: %s", key, safelog.Line(title))
+			outcome += "; retitled"
+			st.Summary, st.ProductSource = title, f.ProductSource
+		}
+	} else {
+		logf("title of %s left as it is: %s", key, why)
+	}
+
 	// State last. If this fails the comment has still gone out, and the next
 	// run re-reports the same drift - noisy, but never silent. The opposite
 	// ordering would record hosts as reported that nobody was told about.
-	st := jira.StateFrom(f, key, now)
 	st.LastReportedAt = now
 	if found {
 		st.ClosedButDetectedAt = prev.ClosedButDetectedAt
@@ -873,10 +892,11 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 
 	csvName := jira.CSVName(f.CVE, now)
+	summary := jira.Summary(f, now)
 	res, err := c.CreateIssue(ctx, jira.IssueRequest{
 		ProjectKey:  cfg.JiraProjectKey,
 		IssueType:   cfg.JiraIssueType,
-		Summary:     jira.Summary(f, now),
+		Summary:     summary,
 		Description: jira.Description(f, now, csvName),
 		Labels:      jira.Labels(f),
 	})
@@ -893,6 +913,7 @@ func fileOrUpdate(ctx context.Context, c *jira.Client, cfg config.Config,
 	}
 	st := jira.StateFrom(f, res.Key, now)
 	st.LastReportedAt = now // the description and CSV are the first report
+	st.Summary = summary
 	if err := c.SetProperty(ctx, res.Key, jira.PropertyKey, st); err != nil {
 		logf("WARNING: could not record exposure state on %s: %s",
 			res.Key, safelog.Line(err.Error()))

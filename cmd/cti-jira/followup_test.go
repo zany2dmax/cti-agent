@@ -26,12 +26,13 @@ type fakeJira struct {
 	state    map[string]jira.ExposureState // by issue key
 	comments map[string][]string
 	propPuts map[string]int
+	titles   map[string]string // summary PUTs, by issue key
 }
 
 func newFakeJira(t *testing.T, issues ...map[string]any) (*fakeJira, *jira.Client) {
 	t.Helper()
 	fj := &fakeJira{issues: issues, state: map[string]jira.ExposureState{},
-		comments: map[string][]string{}, propPuts: map[string]int{}}
+		comments: map[string][]string{}, propPuts: map[string]int{}, titles: map[string]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fj.mu.Lock()
 		defer fj.mu.Unlock()
@@ -67,6 +68,15 @@ func newFakeJira(t *testing.T, issues ...map[string]any) (*fakeJira, *jira.Clien
 			_, _ = io.WriteString(w, `{}`)
 		case strings.HasSuffix(p, "/attachments"):
 			_, _ = io.WriteString(w, `[]`)
+		case r.Method == http.MethodPut && strings.Count(strings.TrimPrefix(p, "/rest/api/2/issue/"), "/") == 0:
+			var e struct {
+				Fields struct {
+					Summary string `json:"summary"`
+				} `json:"fields"`
+			}
+			_ = json.Unmarshal(body, &e)
+			fj.titles[strings.TrimPrefix(p, "/rest/api/2/issue/")] = e.Fields.Summary
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, p)
 			w.WriteHeader(http.StatusNotFound)
@@ -797,5 +807,59 @@ func TestSupplierItemsAndUnknownFleetTicketsAreListed(t *testing.T) {
 	}
 	if len(sc.calls) != 0 {
 		t.Errorf("neither is about a CVE, yet the scanner was asked: %v", sc.calls)
+	}
+}
+
+// CR-26125: filed as three Amazon Linux package names on 106 hosts. When the
+// follow-up comments that the exposure grew, the title follows: the products
+// the scanner's titles name for the QIDs on our hosts, and today's count. A
+// ticket a person renamed is left alone.
+func TestTheTitleFollowsTheExposureComment(t *testing.T) {
+	const cve = "CVE-2026-114938"
+	filed := cve + " - java-17-amazon-corretto (Amazon Linux), java-21-amazon-corretto (Amazon Linux) - 2 hosts, QDS 95"
+	mine := ticket("SEC-7", cve, "indeterminate")
+	mine["fields"].(map[string]any)["summary"] = filed
+	theirs := ticket("SEC-8", "CVE-2026-114939", "indeterminate")
+	theirs["fields"].(map[string]any)["summary"] = "CVE-2026-114939 - Java on the build servers - 2 hosts, QDS 95"
+	fj, c := newFakeJira(t, mine, theirs)
+	previously(fj, "SEC-7", cve, "host-a", "host-b")
+	previously(fj, "SEC-8", "CVE-2026-114939", "host-a", "host-b")
+	st := fj.state["SEC-8"]
+	st.Summary = "CVE-2026-114939 - Oracle Java SE - 2 hosts, QDS 95" // what the fleet wrote; a person renamed it
+	fj.state["SEC-8"] = st
+
+	titles := []string{"Oracle Java SE Critical Patch Update - October 2026", "Amazon Corretto Multiple Vulnerabilities (Windows)"}
+	sc := &scanner{answers: map[string]vulnlookup.Result{
+		cve: {CVE: cve, Status: vulnlookup.StatusPresent, Source: "qualys", Titles: titles,
+			HostCount: 3, Hosts: []string{"host-a", "host-b", "host-c"}, ExternalIDs: []string{"6057627"}},
+		"CVE-2026-114939": {CVE: "CVE-2026-114939", Status: vulnlookup.StatusPresent, Source: "qualys", Titles: titles,
+			HostCount: 3, Hosts: []string{"host-a", "host-b", "host-c"}, ExternalIDs: []string{"6057627"}},
+	}}
+
+	followUp(context.Background(), c, testCfg, sc.look, map[string]bool{}, time.Now(), true)
+
+	if len(fj.comments["SEC-7"]) != 1 {
+		t.Fatalf("SEC-7 comments = %q, want the exposure comment", fj.comments["SEC-7"])
+	}
+	want := cve + " - Oracle Java SE, Amazon Corretto - 3 hosts, QDS 95"
+	if got := fj.titles["SEC-7"]; got != want {
+		t.Errorf("SEC-7 retitled to %q, want %q", got, want)
+	}
+	if got := fj.state["SEC-7"].Summary; got != want {
+		t.Errorf("SEC-7 stored title = %q: the next run cannot tell its own title from a person's", got)
+	}
+	if got, ok := fj.titles["SEC-8"]; ok {
+		t.Errorf("SEC-8 was renamed in Jira and the fleet retitled it anyway: %q", got)
+	}
+	if len(fj.comments["SEC-8"]) != 1 {
+		t.Errorf("SEC-8 still gets its comment: %q", fj.comments["SEC-8"])
+	}
+
+	// The dry run says it would retitle, and changes nothing.
+	fj2, c2 := newFakeJira(t, mine)
+	previously(fj2, "SEC-7", cve, "host-a", "host-b")
+	refs := followUp(context.Background(), c2, testCfg, sc.look, map[string]bool{}, time.Now(), false)
+	if !strings.Contains(refs[cve].Outcome, "WOULD RETITLE: "+want) || len(fj2.titles) != 0 {
+		t.Errorf("dry run outcome = %q, titles = %v", refs[cve].Outcome, fj2.titles)
 	}
 }

@@ -69,6 +69,13 @@ type ExposureState struct {
 	// the noise: a host that missed one scan dropped out of the stored set,
 	// and when the next scan saw it again it was announced as newly affected.
 	LastReportedAt time.Time `json:"last_reported_at,omitempty"`
+
+	// Summary is the title the fleet last wrote on the ticket, and
+	// ProductSource where that title's product came from. A ticket whose
+	// title is no longer Summary was renamed by a person and is not retitled
+	// (see Retitle). Empty on state written before titles were kept.
+	Summary       string `json:"summary,omitempty"`
+	ProductSource string `json:"product_source,omitempty"`
 }
 
 // HostsHashOf fingerprints a host set, order-independently.
@@ -100,6 +107,8 @@ func StateFrom(f Finding, ticketKey string, now time.Time) ExposureState {
 		QIDs:      sortedCopy(f.QIDs),
 		UpdatedAt: now,
 		TicketKey: ticketKey,
+		// Summary is set by the caller that knows what the title is.
+		ProductSource: f.ProductSource,
 	}
 	// An EMPTY list is kept too, when the count is also zero: "no hosts" is a
 	// measurement, and treating it as "too large to store" made a comeback
