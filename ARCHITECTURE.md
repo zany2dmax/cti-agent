@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty-two binaries, and the project layout.
+surprise you, the twenty-three binaries, and the project layout.
 
 ---
 
@@ -377,7 +377,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 
 ---
 
-## The twenty-two binaries
+## The twenty-three binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -397,6 +397,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-triage` | `run-digest`, daily, when `TRIAGE_ENABLED=1` (`--batch`); by hand | Advisory triage. A no-tools reader model lists each advisory's vendors, products, versions and ATT&CK techniques (`cti-subjects/2`); code removes what the advisory does not support; the rest is looked up in Falcon (installed apps and how many hosts are below the fixed version, hosts that saw each indicator, alerts naming each technique in 30 days). A no-tools judge rates each subject likely, possible, unlikely or unknown from those facts alone, citing them; code drops invented facts, corrects unsupported verdicts and prints sightings first. Writes the FLEET ADVISORIES section and the day's model cost; a failure costs the section, never the digest. `--facts-file`, `--judgement-file` and `--show-judge-input` replay a run without paying |
 | `cti-falcon` | by hand | The CrowdStrike Falcon API client's own command. `--check` makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts), prints counts and revokes its token. `--find-app NAME` and `--new-apps DAYS` read Falcon Discover: installed applications with host, version and platform counts, and applications first seen in the window (with host type, exposure, criticality and Falcon's suspicious flag). Never prints a host name or ID. Follows no redirects, and only to a published Falcon API host. `cti-triage` uses the same client (`internal/falcon`) |
 | `cti-checkin-verdict` | `run-checkin`, after each beat | Checks the `cti-checkin/1` verdict the beat ends with: strict parsing, then against the counts `checkin-bash-guard` kept (alerts, board and memory writes), which the model cannot change. Saves it in `state/verdicts/`; a missing, invalid or contradicted verdict is one INFO board line a day for each kind |
+| `cti-checkin-check` | `run-checkin`, around each beat | The runner's file checks: the beat's settings run checkin-bash-guard as the Bash hook with hooks on (else no beat), no Claude Code config file sets a risky key (steering audit), and which limits the guard enforced (trips). Replaced three python3 heredocs |
 | `cti-enrich` | `run-digest`, between ingest and brief; by hand | The @enrich lane: NVD CVSS and CPE products, FIRST EPSS and the CISA KEV catalog (cached in `state/`), then the Sev5-Sev1 bands with a rationale, the KEV deadline rollup and novelty. Writes the enriched file and `products.json`; reads and writes `memory.db` only through `fleet-db`. Replaced the Python `enrich.py` |
 | `cti-brief` | `run-digest`, after cti-jira and triage; by hand | The @brief lane: renders the enriched file as the daily or weekly digest (HTML, text and subject), with the ticket map, held CVEs, product names and advisory report from beside it. Sends nothing. Replaced the Python `brief.py`, byte for byte |
 | `cti-sanitize` | `fleet-board`, `fleet-journal` and `fleet-db`, inside a beat only | Cleans what the heartbeat reads (Scenario-222): strips control, bidi and zero-width characters, cuts over-long lines and output over 64 KB, logs each change to the journal as `cti-sanitize`. A filter over `internal/sanitize`; a wrapper prints nothing if it is missing |
@@ -408,14 +409,14 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty-two are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-three are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty-two into bin/
+task build              # all twenty-three into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -452,6 +453,7 @@ cmd/cti-appreport/             the scanner's own per-application report, for the
 cmd/cti-triage/                advisory triage: reader, Falcon lookups, judge, FLEET ADVISORIES
 cmd/cti-falcon/                the CrowdStrike Falcon client's check, and app inventory from Discover
 cmd/cti-checkin-verdict/       checks each heartbeat's cti-checkin/1 verdict against the guard's counts
+cmd/cti-checkin-check/         run-checkin's file checks: guard wired, steering audit, trips
 cmd/cti-brief/                 the @brief lane: the digest email, from the enriched file
 cmd/cti-enrich/                the @enrich lane: NVD, EPSS and KEV, then the Sev5-Sev1 bands
 cmd/cti-sanitize/              the heartbeat wrappers' output cleaner, a filter over internal/sanitize

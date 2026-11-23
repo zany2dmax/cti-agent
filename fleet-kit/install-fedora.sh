@@ -894,6 +894,13 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-lock"
   ok "built $CODE_DIR/bin/cti-lock"
 
+  # run-checkin's file checks: the beat's settings run the guard, no config
+  # file can steer it, which limits it hit. run-checkin refuses a beat
+  # without it.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-checkin-check" ./cmd/cti-checkin-check )
+  chmod 0755 "$CODE_DIR/bin/cti-checkin-check"
+  ok "built $CODE_DIR/bin/cti-checkin-check"
+
   # The heartbeat's output cleaner (Scenario-222). fleet-board, fleet-journal
   # and fleet-db pipe what a beat reads through it, and print nothing if it
   # is missing, so a beat without it reads no board, journal or memory.
@@ -1429,7 +1436,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock"; do
+         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock" "$CODE_DIR/bin/cti-checkin-check"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 

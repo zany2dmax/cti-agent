@@ -21,6 +21,7 @@ NOT_A_COMMAND = {
     "checkin-bash-guard",  # the heartbeat's PreToolUse hook, run by Claude Code
     "cti-sanitize",        # the heartbeat wrappers' output cleaner, a filter not a command
     "cti-lock",            # the runners' lane lock, called by fleet-mode.sh, not a command
+    "cti-checkin-check",   # run-checkin's file checks around a beat, not a command
 }
 
 GO_FLAG = re.compile(

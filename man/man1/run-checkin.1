@@ -107,9 +107,12 @@ account, does not. The runner also refuses (exit 1) when
 the
 .I checkin
 .I SKILL.md
-the settings file or the hook
+the settings file, the hook
 .I $FLEET_CODE/bin/checkin\-bash\-guard
-is missing, or when the settings do not parse to
+or
+.BR cti\-checkin\-check (1),
+which makes this check, the steering audit and the trip count, is missing,
+or when the settings do not parse to
 .B disableAllHooks
 false with a Bash PreToolUse command hook at that path, or when piping a
 redirect payload through the guard does not exit 2

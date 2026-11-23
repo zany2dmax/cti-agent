@@ -41,8 +41,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
   SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
-  the lane not yet ported (`scout.py`), and for three inline heredocs left in
-  `run-checkin`. Four moves so far; what each
+  the lane not yet ported (`scout.py`), and for the beat's Bash guard and
+  trace (`checkin-bash-guard`, `fleet-trace`). No runner runs Python. Four moves so far; what each
   replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
@@ -72,8 +72,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     - The lane lock is taken by **`cti-lock`** (Go): flock(2) on the
       descriptor the runner holds open, as the python3 snippet did. A runner
       that can't find it does not start; the installer builds it first.
-    - A test fails if any runner or shared shell file other than
-      `run-checkin` (named as the known gap) runs Python.
+    - A test fails if any runner or shared shell file runs Python.
+  - **`run-checkin` runs no Python.** Its three heredocs are now
+    **`cti-checkin-check`** (Go): the check that the beat's settings run
+    checkin-bash-guard as the Bash hook, the steering audit of Claude Code's
+    own config files, and the list of limits the guard enforced. The output
+    matched the Python's, file for file, on settings, symlinked, broken and
+    nested config files and counter files. The one change: a counter file
+    whose `tripped` isn't a list is reported as unreadable, instead of being
+    read character by character. A beat without the helper doesn't start.
+    (checkin-bash-guard itself is still a Python script.)
 
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code

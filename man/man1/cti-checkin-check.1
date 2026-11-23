@@ -1,0 +1,81 @@
+.TH CTI-CHECKIN-CHECK 1 "2026-11-22" "cti-agent 1.7" "CTI Fleet Manual"
+.SH NAME
+cti-checkin-check \- run-checkin's file checks around a heartbeat
+.SH SYNOPSIS
+.B cti\-checkin\-check
+.BI \-\-guard\-wired " SETTINGS"
+.BI \-\-guard " PATH"
+.br
+.B cti\-checkin\-check \-\-steering
+.IR FILE ...
+.br
+.B cti\-checkin\-check
+.BI \-\-tripped " COUNTS"
+.SH DESCRIPTION
+.B cti\-checkin\-check
+makes the three checks
+.BR run\-checkin (1)
+needs around a beat. It reads and reports, and changes nothing. It is not
+an operator command. It replaced three python3 heredocs in the runner; the
+rules are the same.
+.SH OPTIONS
+Exactly one of the three:
+.TP
+.BI \-\-guard\-wired " SETTINGS" " \-\-guard" " PATH"
+Before a beat: the root-owned
+.I SETTINGS
+file must run
+.I PATH
+(checkin\-bash\-guard) as the Bash PreToolUse hook, with
+.B disableAllHooks
+present and false. A hook whose command does not exist fails open, so the
+path must be this box's own. Exit 0 when it does, 1 when it does not or
+the file cannot be read; run\-checkin then refuses the beat.
+.TP
+.BI \-\-steering " FILE" ...
+Before a beat: Claude Code's own config files in the service account's
+reach (its settings.json and .claude.json). One line per file that cannot
+be read as a JSON object, and per risky key set at the top level or under
+any
+.B projects
+entry: hooks, permissions, mcpServers, enabledMcpjsonServers,
+enableAllProjectMcpServers, env, apiKeyHelper, awsAuthRefresh,
+awsCredentialExport, otelHeadersHelper, statusLine, enabledPlugins,
+extraKnownMarketplaces, allowedTools. A key set to null, false, 0, an empty
+string, list or object sets nothing. A file that does not exist is skipped,
+and one reached twice through a link is read once. Nothing printed means
+clean; on Linux, any line refuses the beat.
+.TP
+.BI \-\-tripped " COUNTS"
+After a beat: the limits checkin\-bash\-guard enforced, from its counter
+file, as
+.BR "limit reached for bash, alert" ;
+nothing when it enforced none. Exit 1 when the file cannot be read or its
+.B tripped
+is not a list, which run\-checkin reports as an anomaly.
+.SH EXIT STATUS
+.TP
+.B 0
+Checked (and for \-\-guard\-wired, wired).
+.TP
+.B 1
+Not wired, or the counter file could not be read.
+.TP
+.B 2
+Bad arguments: give exactly one of the three.
+.SH EXAMPLES
+What run\-checkin runs before a beat:
+.PP
+.EX
+cti\-checkin\-check \-\-guard\-wired /opt/cti\-agent/checkin\-settings.json \e
+  \-\-guard /opt/cti\-agent/bin/checkin\-bash\-guard
+cti\-checkin\-check \-\-steering ~/.claude/settings.json ~/.claude.json
+.EE
+.SH FILES
+.TP
+.I /opt/cti\-agent/bin/cti\-checkin\-check
+The helper, root-owned. run\-checkin refuses a beat without it.
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR checkin\-bash\-guard (1),
+.BR cti\-checkin\-verdict (1)

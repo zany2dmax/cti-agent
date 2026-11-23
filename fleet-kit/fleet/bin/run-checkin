@@ -123,6 +123,9 @@ else
 fi
 CHECKIN_SETTINGS="$FLEET_CODE/checkin-settings.json"
 CLAUDE_CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# The settings check, the steering audit and the trip count (Go; it replaced
+# three python3 heredocs here). Root-owned in bin/ like the rest.
+CHECK="$FLEET_CODE/bin/cti-checkin-check"
 
 if [ "$FLEET_OS" != "macos" ]; then
   SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
@@ -138,7 +141,7 @@ if [ "$FLEET_OS" != "macos" ]; then
   # Missing is a refusal too: a box upgraded without re-running the installer
   # has no orchestrator dir, and a beat there would run with no instructions.
   for p in "$AGENT_DIR/CLAUDE.md" "$AGENT_DIR/.claude/skills/checkin/SKILL.md" \
-           "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard"; do
+           "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard" "$CHECK"; do
     if [ ! -f "$p" ]; then
       echo "run-checkin: REFUSING to start: $p is missing." >&2
       echo "  Re-run install-fedora.sh --for-real; it installs the orchestrator's" >&2
@@ -151,16 +154,7 @@ if [ "$FLEET_OS" != "macos" ]; then
   # the guard at this box's own code path, which the check above has just
   # found present and root-owned.
   # Parsed, not grepped: hooks on, and a Bash PreToolUse hook that runs it.
-  if ! /usr/bin/python3 -I - "$CHECKIN_SETTINGS" "$FLEET_CODE/bin/checkin-bash-guard" <<'PY'
-import json, sys
-s = json.load(open(sys.argv[1], encoding="utf-8"))
-ok = s.get("disableAllHooks") is False and any(
-    m.get("matcher") == "Bash" and any(h.get("type") == "command" and h.get("command") == sys.argv[2]
-                                       for h in m.get("hooks", []))
-    for m in s.get("hooks", {}).get("PreToolUse", []))
-sys.exit(0 if ok else 1)
-PY
-  then
+  if ! "$CHECK" --guard-wired "$CHECKIN_SETTINGS" --guard "$FLEET_CODE/bin/checkin-bash-guard"; then
     echo "run-checkin: REFUSING to start: $CHECKIN_SETTINGS does not run" >&2
     echo "  $FLEET_CODE/bin/checkin-bash-guard as its Bash PreToolUse hook." >&2
     exit 1
@@ -172,7 +166,7 @@ PY
     | "$FLEET_CODE/bin/checkin-bash-guard" >/dev/null 2>&1 || guard_rc=$?
   if [ "$guard_rc" -ne 2 ]; then
     echo "run-checkin: REFUSING to start: checkin-bash-guard let a redirect" >&2
-    echo "  through (exit $guard_rc, want 2). Is /usr/bin/python3 installed?" >&2
+    echo "  through (exit $guard_rc, want 2). Is the interpreter on its first line installed?" >&2
     exit 1
   fi
 else
@@ -209,39 +203,13 @@ steering_problems() {
       echo "$p: present, and nothing in this fleet installs it"
     fi
   done
-  # -I: isolated mode, so nothing in the cwd or the environment picks the
-  # modules this imports.
-  python3 -I - "$CLAUDE_CFG/settings.json" "$HOME/.claude.json" \
-      "$CLAUDE_CFG/.claude.json" <<'PY'
-import json, os, sys
-RISKY = ("hooks", "permissions", "mcpServers", "enabledMcpjsonServers",
-         "enableAllProjectMcpServers", "env", "apiKeyHelper", "awsAuthRefresh",
-         "awsCredentialExport", "otelHeadersHelper", "statusLine",
-         "enabledPlugins", "extraKnownMarketplaces", "allowedTools")
-seen = set()
-for path in sys.argv[1:]:
-    real = os.path.realpath(path)
-    if real in seen or not os.path.lexists(path):
-        continue
-    seen.add(real)
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        print(f"{path}: cannot be read as JSON ({e.__class__.__name__})")
-        continue
-    if not isinstance(data, dict):
-        print(f"{path}: not a JSON object")
-        continue
-    scopes = [("", data)]
-    projects = data.get("projects")
-    if isinstance(projects, dict):
-        scopes += [(f"projects[{k}].", v) for k, v in projects.items() if isinstance(v, dict)]
-    for where, d in scopes:
-        for key in RISKY:
-            if d.get(key) not in (None, False, [], {}, ""):
-                print(f"{path}: {where}{key} is set")
-PY
+  # Claude Code's own config files: one line per risky key set in them.
+  # Missing, the audit cannot run, and that refuses the beat on Linux.
+  if [ ! -x "$CHECK" ]; then
+    echo "$CHECK: missing, so the config files cannot be audited"
+    return 0
+  fi
+  "$CHECK" --steering "$CLAUDE_CFG/settings.json" "$HOME/.claude.json" "$CLAUDE_CFG/.claude.json"
 }
 
 STEERING="$(steering_problems 2>&1)" || STEERING="${STEERING:-steering audit failed to run}"
@@ -641,17 +609,7 @@ echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
 anomaly=""
 counts_file="$BEAT_COUNTS_DIR/$CHECKIN_BEAT_ID.json"
 if [ -f "$counts_file" ]; then
-  anomaly="$(/usr/bin/python3 -I - "$counts_file" <<'PY' 2>/dev/null || echo "the beat's counter file could not be read"
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    t = [x for x in (d.get("tripped") or []) if isinstance(x, str)]
-    if t:
-        print("limit reached for " + ", ".join(t))
-except Exception:
-    print("the beat's counter file could not be read")
-PY
-)"
+  anomaly="$("$CHECK" --tripped "$counts_file" 2>/dev/null || echo "the beat's counter file could not be read")"
 fi
 # A beat that finished but left no counts file means the guard could not keep
 # its counter (and so refused every call): that is not a quiet beat.

@@ -38,15 +38,15 @@ def _go_helpers_on_path():
     """cti-lock, which every runner's fleet_lock calls, built from this
     checkout and put on PATH: in a test the runners' bin/ holds stubs."""
     d = tempfile.mkdtemp(prefix="cti-test-bin-")
-    exe = os.path.join(d, "cti-lock")
-    subprocess.run(["go", "build", "-o", exe, "./cmd/cti-lock"],
-                   cwd=KIT.parent, check=True, capture_output=True)
+    for name in ("cti-lock", "cti-checkin-check"):
+        subprocess.run(["go", "build", "-o", os.path.join(d, name), f"./cmd/{name}"],
+                       cwd=KIT.parent, check=True, capture_output=True)
     os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-    return exe
+    return os.path.join(d, "cti-lock"), os.path.join(d, "cti-checkin-check")
 
 
-# A test that sets its own PATH copies this into its runner's bin/ instead.
-CTI_LOCK = _go_helpers_on_path()
+# A test that sets its own PATH copies these into its runner's bin/ instead.
+CTI_LOCK, CTI_CHECKIN_CHECK = _go_helpers_on_path()
 
 
 @contextlib.contextmanager
@@ -1275,6 +1275,8 @@ class TestFileShape(unittest.TestCase):
         for name in ("fleet-board", "fleet-db", "fleet-journal", "cti-alert") + (
                 ("cti-budget",) if trace else ()):
             (code / "bin" / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
+        # The real checks (settings, steering, trips), built from this checkout.
+        shutil.copy(CTI_CHECKIN_CHECK, code / "bin" / "cti-checkin-check")
         if trace:
             shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
                         code / "bin" / "fleet-trace")
@@ -3697,10 +3699,9 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"fleet-db sent {day} 0 0 0 0 0 unknown daily", calls)
 
-    # run-checkin still runs Python in three heredocs (the settings check, the
-    # Claude config merge, the beat's counter file). Listed here so the gap
-    # is named; remove it from this set when they move.
-    PYTHON_STILL_IN = {"run-checkin"}
+    # A runner allowed to run Python, named so the gap is visible. Empty:
+    # run-checkin's three heredocs moved to cti-checkin-check.
+    PYTHON_STILL_IN = set()
 
     def test_no_runner_or_shared_library_runs_python(self):
         """The runners call the fleet's commands; Python is for fleet-db,
