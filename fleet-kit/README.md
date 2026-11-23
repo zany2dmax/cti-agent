@@ -62,7 +62,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 │     each lane, and each lane's runner sends its own report
 │
 ├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
-├── @enrich   lanes/enrich.py         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
+├── @enrich   cti-enrich (Go)         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
 ├── @brief    lanes/brief.py          enriched JSON → HTML digest
 ├── @jira     cti-jira (Go)           KEV/Sev5/CVSS 9.0+/QDS 91+ tickets, daily re-check, lock-down ticket
@@ -152,7 +152,7 @@ membership comes from NVD's `cisaExploitAdd` field, with CISA's catalog feed
 layered on for the remediation due date and ransomware association — so if the
 catalog fetch fails, KEV detection degrades but doesn't disappear.
 
-Thresholds live in `enrich.py::prioritize()`. They are opinions, not physics —
+Thresholds live in `internal/enrich/score.go` (`prioritize`). They are opinions, not physics —
 tune them to your estate and your patch cadence.
 
 ---
@@ -318,7 +318,7 @@ period. It works without a key — it is just slow enough to be annoying, and
 slow enough that a 06:00 timer might still be running when you check your
 phone.
 
-`enrich.py` prints which mode it is in: `set NVD_API_KEY to go 10x faster`
+`cti-enrich` prints which mode it is in: `set NVD_API_KEY to go 10x faster`
 appears when the key is missing.
 
 EPSS and the CISA KEV catalog need no key and no registration.
@@ -1955,7 +1955,6 @@ fleet-kit/
     │   └── run-checkin            resolves the claude binary, audits, fires one beat
     ├── checkin-settings.json      root-owned --settings for the beat (one Bash guard hook, deny rules)
     ├── lanes/
-    │   ├── enrich.py              NVD + EPSS + KEV → Sev5–Sev1, with caching
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
     │   ├── brief.py               HTML + plain-text digest renderer
     │   └── feeds.txt              feed list — trim to your estate
@@ -2125,7 +2124,7 @@ The fleet guide's advice applies here: don't stand up every lane on day one.
 
 **Week 1 — pipeline only.** Install, run `run-digest daily --dry-run` by hand,
 read the HTML yourself. Confirm the Sev5/Sev4 calls match your judgment. Tune the
-thresholds in `enrich.py::prioritize()` before anyone else sees the output. A
+thresholds in `internal/enrich/score.go` before anyone else sees the output. A
 digest that cries wolf in week one gets filtered forever.
 
 **Week 2 — auto-send.** Enable `cti-agent-digest.timer`. Only the daily. Leave
@@ -2183,10 +2182,10 @@ back by another route.
 
 Both remove parsing fragility from the fleet.
 
-**1. Emit JSON alongside markdown.** `enrich.py` parses the markdown report
+**1. Emit JSON alongside markdown.** `cti-enrich` parses the markdown report
 table, which works, but it's a regex contract that breaks the day a column is
 added. A `REPORT_JSON_PATH` env var writing `[]vulnlookup.Result` straight out
-of `main.go` would be roughly 15 lines in `internal/report/`, and `enrich.py`
+of `main.go` would be roughly 15 lines in `internal/report/`, and `cti-enrich`
 would read it directly instead.
 
 **2. Port the mailer to Go.** Done: `cmd/cti-mailer` is the port, and every

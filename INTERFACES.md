@@ -366,7 +366,7 @@ of a file. The file stays the default and the fallback.
 
 ### 3.7 Advisory and exploit feeds
 
-CISA KEV is fetched in the Python `enrich.py` lane (`KEV_FEED`), the Go
+CISA KEV is fetched by `cti-enrich` (`internal/enrich`, `KEVFeed`), the
 `internal/kev` package only handles deadlines, and Patch Tuesday reads the
 Qualys blog, BleepingComputer and MSRC through `patchtuesday.Source`, which is
 a data struct and not an interface. New features are Go, so any new feed
@@ -479,7 +479,7 @@ of a file. The file stays the default and the fallback.
 
 ### 3.7 Advisory and exploit feeds
 
-CISA KEV is fetched in the Python `enrich.py` lane (`KEV_FEED`), the Go
+CISA KEV is fetched by `cti-enrich` (`internal/enrich`, `KEVFeed`), the
 `internal/kev` package only handles deadlines, and Patch Tuesday reads the
 Qualys blog, BleepingComputer and MSRC through `patchtuesday.Source`, which is
 a data struct and not an interface. New features are Go, so any new feed

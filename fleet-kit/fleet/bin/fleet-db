@@ -414,7 +414,7 @@ def _main(argv):
         # a CVE with a ticket open against it was reported as ignored forever.
         #
         # Deliberately NOT part of the `finding` upsert: that runs every night
-        # from enrich.py and would overwrite the note with null on each pass.
+        # from cti-enrich and would overwrite the note with null on each pass.
         # The column is excluded from its SET list for the same reason.
         if not args:
             raise Invalid("note takes a CVE id and the text")
@@ -507,7 +507,7 @@ def _main(argv):
             fs = (r.get("first_seen") or "").replace("T", " ")[:19]
             r["is_new"] = bool(fs and fs >= first_cut)
 
-        # Every band present, zero or not, the same shape enrich.py writes.
+        # Every band present, zero or not, the same shape cti-enrich writes.
         # It used to hold only the bands that had findings, so a week with no
         # Sev5 had no "Sev5" key and run-digest's log step died with KeyError
         # AFTER the weekly had been sent - which left the send unrecorded, and

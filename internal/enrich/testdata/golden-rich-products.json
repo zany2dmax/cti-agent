@@ -1,0 +1,14 @@
+{
+ "CVE-2008-4250": "Microsoft Windows Xp",
+ "CVE-2017-0144": "Microsoft SMBv1",
+ "CVE-2018-9999": "Apple Safari",
+ "CVE-2020-1472": "Microsoft Netlogon",
+ "CVE-2021-44228": "Apache Log4j2",
+ "CVE-2022-0492": "Linux Kernel",
+ "CVE-2023-35636": "Oracle Java SE",
+ "CVE-2026-31337": "Widget Server",
+ "CVE-2026-45659": "Linux Kernel, Apple macOS, Nodejs Node.js +2 more",
+ "CVE-2026-49975": "Acme Router",
+ "CVE-2026-60001": "Acme",
+ "CVE-2026-9110": "Google Chrome, PHP"
+}

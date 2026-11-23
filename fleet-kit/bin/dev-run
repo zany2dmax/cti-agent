@@ -78,6 +78,15 @@ mailer() {
   "$bin" "$@"
 }
 
+# The enrich lane, cti-enrich, built from this checkout the same way. It finds
+# fleet-db through FLEET_CODE, which here is the checkout's fleet-kit/fleet.
+enricher() {
+  local bin="$FLEET_HOME/cti-enrich-dev"
+  ( cd "$REPO" && go build -o "$bin" ./cmd/cti-enrich ) >&2 \
+    || { bad "go build ./cmd/cti-enrich failed - fix the compile error above"; return 1; }
+  FLEET_CODE="$KIT/fleet" "$bin" "$@"
+}
+
 mkdir -p "$FLEET_HOME"/{state,reports,logs}
 
 # Load the Go agent's .env - the same file it already uses. No duplicate config.
@@ -242,7 +251,7 @@ stage_enrich() {
   bold "Enrich  (NVD + EPSS + KEV)"
   [ -s "$RAW" ] || { bad "no $RAW - run ingest first"; return 1; }
   [ -n "${NVD_API_KEY:-}" ] || info "no NVD_API_KEY: throttled to 5 req/30s, so this may take minutes"
-  python3 "$KIT/fleet/lanes/enrich.py" --report "$RAW" --out "$ENRICHED" \
+  enricher --report "$RAW" --out "$ENRICHED" \
     2>&1 | sed 's/^\[enrich\] /    /'
   [ -s "$ENRICHED" ] || { bad "enrich produced nothing"; return 1; }
   python3 - "$ENRICHED" <<'PY'

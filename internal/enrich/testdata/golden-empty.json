@@ -1,0 +1,27 @@
+{
+ "source_meta": {},
+ "counts": {
+  "Sev5": 0,
+  "Sev4": 0,
+  "Sev3": 0,
+  "Sev2": 0,
+  "Sev1": 0
+ },
+ "total": 0,
+ "degraded": [],
+ "kev_deadlines": {
+  "overdue": 0,
+  "due_within_14d": 0,
+  "worst_overdue_days": 0,
+  "ransomware_present": 0,
+  "overdue_cves": []
+ },
+ "email_subjects": [],
+ "novelty": {
+  "new": 0,
+  "seen_before": 0,
+  "undetermined": 0,
+  "new_cves": []
+ },
+ "findings": []
+}

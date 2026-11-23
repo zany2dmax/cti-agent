@@ -389,7 +389,7 @@ for f in "$SRC"/fleet/bin/*; do
   run install -m 0755 -o root -g root "$f" "$CODE_DIR/bin/$(basename "$f")"
   info "bin/$(basename "$f")"
 done
-for f in enrich.py scout.py brief.py; do
+for f in scout.py brief.py; do
   run install -m 0755 -o root -g root "$SRC/fleet/lanes/$f" "$CODE_DIR/lanes/$f"
   info "lanes/$f"
 done
@@ -398,9 +398,11 @@ done
 # still runs anything in lanes/. Removed after 1.7.2:
 #   mailer.py      - replaced by cti-mailer in 1.6.6
 #   fleet-sanitize - replaced by cti-sanitize (Go)
+#   enrich.py      - replaced by cti-enrich (Go)
 # Take them, and their man pages, off the box.
 for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1" \
-         "$CODE_DIR/bin/fleet-sanitize" "$MAN_DIR/fleet-sanitize.1"; do
+         "$CODE_DIR/bin/fleet-sanitize" "$MAN_DIR/fleet-sanitize.1" \
+         "$CODE_DIR/lanes/enrich.py" "$MAN_DIR/enrich.py.1"; do
   if [ -e "$f" ]; then
     run rm -f "$f"
     info "removed $f (retired)"
@@ -894,6 +896,13 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-sanitize" ./cmd/cti-sanitize )
   chmod 0755 "$CODE_DIR/bin/cti-sanitize"
   ok "built $CODE_DIR/bin/cti-sanitize"
+
+  # The @enrich lane: NVD, EPSS and CISA KEV, then the Sev5-Sev1 bands.
+  # run-digest runs it between ingest and brief. It writes memory.db through
+  # fleet-db, so it holds no SQL itself.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-enrich" ./cmd/cti-enrich )
+  chmod 0755 "$CODE_DIR/bin/cti-enrich"
+  ok "built $CODE_DIR/bin/cti-enrich"
 
   # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
   # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
@@ -1410,7 +1419,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/lanes/enrich.py"; do
+         "$CODE_DIR/bin/cti-enrich"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 

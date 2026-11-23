@@ -80,7 +80,7 @@ and checks
 before sending again; the weekly digest is built from
 .BR rollup ),
 by
-.B enrich.py
+.B cti\-enrich
 (which upserts every enriched finding through
 .BR finding ),
 by
@@ -278,7 +278,7 @@ own calendar day is counted correctly. Both may be given.
 .TP
 .BR rollup " [\fB\-\-days\fR \fIN\fR]"
 Print, on standard output, a JSON document in the shape
-.B enrich.py
+.B cti\-enrich
 writes, built from stored findings rather than from a mailbox read: every
 finding updated or first seen in the last
 .I N
@@ -462,7 +462,7 @@ sudo cti\-agent fleet\-db rollup \-\-days 7 | less
 .EE
 .SH SEE ALSO
 .BR fleet\-board (1),
-.BR enrich.py (1),
+.BR cti\-enrich (1),
 .BR scout.py (1),
 .BR brief.py (1),
 .BR run\-digest (1),

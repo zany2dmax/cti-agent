@@ -332,7 +332,7 @@ def qids_cell(f):
 
 
 def product_label(f):
-    """What a finding is about - Google Chrome, PHP - as enrich.py named it.
+    """What a finding is about - Google Chrome, PHP - as cti-enrich named it.
 
     None when the finding predates the product field (an old rollup row), so
     the card renders as it always did; "" when enrich looked and found no
@@ -359,7 +359,7 @@ def product_html(f):
 def products_by_cve(data):
     """cve -> product name, for rows that are not today's findings.
 
-    Today's findings win; the product map enrich.py keeps beside the enriched
+    Today's findings win; the product map cti-enrich keeps beside the enriched
     file fills in the rest (every KEV entry, and every CVE enriched before),
     so a ticket for a CVE not in today's mail still says what it is about.
     """
@@ -1212,7 +1212,7 @@ def _ticket_map(enriched_path):
 
 
 def load_products(enriched_path):
-    """The cve -> product map enrich.py keeps beside the enriched file.
+    """The cve -> product map cti-enrich keeps beside the enriched file.
 
     Missing or unreadable is silent: it costs a product name in FLEET
     TICKETS, and the digest renders without it.
@@ -1372,7 +1372,7 @@ def main():
     data.setdefault("total", len(data["findings"]))
     data.setdefault("generated", datetime.now(timezone.utc).isoformat(timespec="seconds"))
     # Underscore-prefixed: renderer state, not part of the enriched
-    # contract that enrich.py owns.
+    # contract that cti-enrich owns.
     data["_tickets"] = load_tickets(args.enriched)
     data["_tickets_listed_only"] = bool(_ticket_map(args.enriched).get("listed_only"))
     data["_held"] = load_held(args.enriched)

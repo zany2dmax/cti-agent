@@ -52,7 +52,7 @@ broke. Read them as reference, not as a recipe.
 
 2. **Enrich.** Layer on NVD CVSS, EPSS, KEV; compute priority.
    ```
-   python3 $FLEET_CODE/lanes/enrich.py \
+   $FLEET_CODE/bin/cti-enrich \
      --report $FLEET_HOME/reports/raw-$(date +%F).md \
      --out $FLEET_HOME/state/enriched-$(date +%F).json
    ```

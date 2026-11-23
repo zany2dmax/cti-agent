@@ -50,7 +50,7 @@ type Finding struct {
 	CVSS     string
 	Title    string
 	// Product is what the CVE is about - "Google Chrome", "PHP" - from the
-	// CISA KEV catalog or NVD's CPE data, named by enrich.py. Empty when
+	// CISA KEV catalog or NVD's CPE data, named by cti-enrich. Empty when
 	// neither source had one; nothing guesses it.
 	Product string
 	// QDS is the highest Qualys Detection Score among the CVE's detections,

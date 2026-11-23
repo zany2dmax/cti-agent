@@ -1,26 +1,23 @@
-.TH ENRICH.PY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-ENRICH 1 "2026-11-22" "cti-agent 1.7" "CTI Fleet Manual"
 .SH NAME
-enrich.py \- the @enrich lane: add NVD, EPSS and CISA KEV context to CVEs and assign Sev5\(enSev1
+cti-enrich \- the @enrich lane: add NVD, EPSS and CISA KEV context to CVEs and assign Sev5\(enSev1
 .SH SYNOPSIS
-.B enrich.py
+.B cti\-enrich
 .BI \-\-report " FILE"
 .BI \-\-out " FILE"
 .RB [ \-\-no\-db ]
 .RB [ \-\-skip\-nvd ]
 .br
-.B enrich.py
+.B cti\-enrich
 .BI \-\-cves " LIST"
 .BI \-\-out " FILE"
 .RB [ \-\-no\-db ]
 .RB [ \-\-skip\-nvd ]
 .PP
-.B sudo cti\-agent enrich.py
-.I options
-.br
-.B python3 $FLEET_CODE/lanes/enrich.py
+.B sudo cti\-agent cti\-enrich
 .I options
 .SH DESCRIPTION
-.B enrich.py
+.B cti\-enrich
 takes the CVEs the Go agent found, or an explicit list, adds the context that
 decides whether anyone should care, and writes one JSON file that
 .BR brief.py (1)
@@ -30,7 +27,11 @@ and
 .BR cti\-kev (1)
 read. It is run by
 .BR run\-digest (1)
-on every daily digest, between the mailbox ingest and the render.
+on every daily digest, between the mailbox ingest and the render. It
+replaced the Python
+.BR enrich.py ,
+flag for flag and file for file: the same keys, bands and rationale text
+(the Go tests hold it to golden files that Python wrote).
 .PP
 For each CVE it fetches:
 .TP
@@ -91,8 +92,8 @@ use),
 .B is_new
 and
 .BR first_seen ,
-read from
-.I memory.db
+asked of
+.B fleet\-db findings
 before the upsert: true when the findings table has never seen the CVE,
 null when there is no database to ask. Within a band, findings are sorted
 by host count, then days overdue, then EPSS.
@@ -109,13 +110,16 @@ Unless
 is given and there is at least one finding, every row is then upserted into
 .I memory.db
 by running
-.B fleet\-db finding upsert
-with the same Python interpreter. A failed upsert is logged; the JSON is
+.BR "fleet\-db finding upsert" .
+This binary holds no SQL: everything it reads from or writes to
+.I memory.db
+goes through
+.BR fleet\-db (1). A failed upsert is logged; the JSON is
 already written. When
 .B fleet\-db
 cannot be found, a WARNING names every path tried.
 .PP
-.B enrich.py
+.B cti\-enrich
 sends no mail and does not read the mailbox or the scanner. Progress goes to
 standard error, prefixed
 .BR [enrich] .
@@ -157,26 +161,17 @@ Novelty is still read from it if it exists.
 Do not query NVD: EPSS and KEV only, much faster. Findings have no CVSS or
 description, and NVD is not reported as degraded.
 .SH ENVIRONMENT
-.B enrich.py
-reads only its process environment and does not load
+.B cti\-enrich
+loads
 .I fleet.env
-itself.
-.B run\-digest
-sources it first, and so does
-.B sudo cti\-agent enrich.py
-(the wrapper loads it), so
-.B NVD_API_KEY
-and
-.B FLEET_USER_AGENT
-from
-.I fleet.env
-apply to a hand run too. Run directly, without the wrapper, they are unset
-unless exported.
+itself, as the other Go commands do; anything already in the environment
+wins.
 .TP
 .B NVD_API_KEY
 NVD API key, sent as the
 .B apiKey
-header. Unset: 6.5 seconds between NVD requests instead of 0.7, roughly
+header. A secret: read from its systemd credential when the unit provides
+one, else from the environment. Unset: 6.5 seconds between NVD requests instead of 0.7, roughly
 ten times slower.
 .I fleet.env
 section 6, ENRICHMENT.
@@ -201,10 +196,7 @@ Where
 .B bin/fleet\-db
 is looked for first, then
 .IR $FLEET_HOME/bin/fleet\-db ,
-then the
-.I bin
-directory beside this lane's own
-.IR lanes .
+then the directory this binary is in.
 Set by the units and the wrapper.
 .SH FILES
 .TP
@@ -219,14 +211,17 @@ written by
 .BR run\-digest .
 .TP
 .I /var/lib/cti\-agent/state/nvd\-cache.json
-NVD results, trusted for 7 days, rewritten whenever a CVE was fetched.
+NVD results, trusted for 7 days, rewritten whenever a CVE was fetched. The
+caches, the enriched file and
+.I products.json
+beside it are written 0600.
 .TP
 .I /var/lib/cti\-agent/state/kev\-cache.json
 The KEV catalog, trusted for 12 hours. Delete either cache to force a
 refetch.
 .TP
 .I /var/lib/cti\-agent/state/memory.db
-Read for novelty (read-only), written through
+Read for novelty and written, both through
 .BR fleet\-db (1).
 .TP
 .I /opt/cti\-agent/bin/fleet\-db
@@ -238,8 +233,7 @@ The JSON was written, including when sources were degraded, there were no
 CVEs, or the database upsert failed or was skipped.
 .TP
 .B 1
-The report could not be read or the output could not be written (Python
-traceback).
+The report could not be read or the output could not be written.
 .TP
 .B 2
 Bad arguments: neither or both of
@@ -252,7 +246,7 @@ or no
 Re-enrich today's report without touching the findings database:
 .PP
 .EX
-sudo cti\-agent enrich.py \-\-no\-db \e
+sudo cti\-agent cti\-enrich \-\-no\-db \e
   \-\-report /var/lib/cti\-agent/reports/raw\-$(date +%F).md \e
   \-\-out /var/lib/cti\-agent/state/enriched\-test.json
 .EE
@@ -260,7 +254,7 @@ sudo cti\-agent enrich.py \-\-no\-db \e
 Score two CVEs quickly, without NVD:
 .PP
 .EX
-sudo cti\-agent enrich.py \-\-skip\-nvd \-\-no\-db \e
+sudo cti\-agent cti\-enrich \-\-skip\-nvd \-\-no\-db \e
   \-\-cves CVE\-2026\-1234,CVE\-2026\-5678 \e
   \-\-out /var/lib/cti\-agent/state/enriched\-test.json
 .EE

@@ -103,8 +103,8 @@ what to check, in order.
 .TP
 .B enrich
 Runs
-.BR enrich.py (1)
-on today's report into
+.BR cti\-enrich (1),
+built from the checkout, on today's report into
 .IR .fleet\-local/state/enriched\-YYYY\-MM\-DD.json ,
 which also upserts the findings into
 .IR .fleet\-local/state/memory.db ,
@@ -246,7 +246,7 @@ Default:\~\fI$FLEET_HOME/state/qualys_kb_cache.json\fR.
 .TP
 .B NVD_API_KEY
 Passed to
-.BR enrich.py ;
+.BR cti\-enrich ;
 unset, the enrich stage warns that it may take minutes.
 .TP
 .B DIGEST_TO
@@ -331,7 +331,7 @@ Widen the window when nothing was extracted:
 GRAPH_LOOKBACK_HOURS=168 fleet\-kit/bin/dev\-run ingest
 .EE
 .SH SEE ALSO
-.BR enrich.py (1),
+.BR cti\-enrich (1),
 .BR brief.py (1),
 .BR cti\-mailer (1),
 .BR fleet\-db (1),

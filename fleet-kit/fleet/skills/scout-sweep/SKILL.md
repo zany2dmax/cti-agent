@@ -6,7 +6,7 @@ description: Poll vendor advisories and CTI feeds for CVEs the mailbox did not c
 # /scout-sweep
 
 > **Operator-attended playbook.** Not runnable on the unattended heartbeat:
-> `scout.py` and `enrich.py` are not on the orchestrator's grant (see
+> `scout.py` and `cti-enrich` are not on the orchestrator's grant (see
 > `CLAUDE.md`, *What a beat can run*), and they do not need to be -
 > `cti-agent-scout.timer` runs the sweep itself every four hours. On a beat,
 > read what it found with `fleet-db recent` and the journal. In a session with
@@ -22,7 +22,7 @@ before a vendor newsletter gets around to telling you.
 2. Take the new CVE IDs and run them through the same lookup path the mailbox
    CVEs take, so presence is still decided by the scanner and nothing else:
    ```
-   python3 $FLEET_CODE/lanes/enrich.py --cves CVE-2026-1234,CVE-2026-5678 \
+   $FLEET_CODE/bin/cti-enrich --cves CVE-2026-1234,CVE-2026-5678 \
      --out $FLEET_HOME/state/scout-enriched-$(date +%F).json
    ```
 

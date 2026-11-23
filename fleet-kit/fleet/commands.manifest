@@ -31,7 +31,7 @@
 command: brief.py
 about: Render the CTI digest from an enriched file
 runs: local
-flag: --enriched FILE | enriched JSON from enrich.py
+flag: --enriched FILE | enriched JSON from cti-enrich
 flag: --daily | the daily digest
 flag: --weekly | the weekly digest
 flag: --subject-only | print the subject line only
@@ -137,6 +137,15 @@ flag: --text-out STRING | write the plain-text version here
 flag: --ticket-slot | leave a slot beside the DNS changes for --stamp-ticket to fill with the lock-down ticket
 flag: --timeout DURATION | per-request web timeout (default 10s)
 flag: --websites-out STRING | write the domains with a live website of their own (not landers, parked pages, redirects or domains marked landing) as JSON, for the AppSec lane's coverage check
+
+command: cti-enrich
+about: Enrich CVEs with NVD, EPSS and KEV, and band them Sev5-Sev1
+runs: local
+flag: --report FILE | markdown report from cti-agent
+flag: --cves LIST | comma-separated CVE list (scout lane)
+flag: --out FILE | output JSON path
+flag: --no-db | skip the upsert into the memory database
+flag: --skip-nvd | EPSS and KEV only (fast)
 
 command: cti-falcon
 about: CrowdStrike Falcon: check the API client, find installed apps, list apps new to the estate
@@ -324,14 +333,6 @@ flag: --commit-seen FILE | record a --seen-out file in the processed log the mai
 flag: --ticket-slot | leave a slot after the network team's sections for --stamp-ticket to fill with the spreadsheet ticket
 flag: --stamp-ticket FILE | fill the ticket slot in the --out and --text-out reports already written, from this cti-jira --vmscan-fixes --ref-out file (missing or unreadable: the line says the status is unavailable); then exit
 
-command: enrich.py
-about: Enrich CVEs with NVD, EPSS and KEV
-runs: local
-flag: --report FILE | markdown report from cti-agent
-flag: --cves LIST | comma-separated CVE list (scout lane)
-flag: --out FILE | output JSON path
-flag: --no-db | skip the SQLite upsert
-flag: --skip-nvd | EPSS and KEV only (fast)
 
 command: fleet-board
 about: The append-only message board between the agents and the operator

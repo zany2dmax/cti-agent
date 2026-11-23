@@ -19,9 +19,9 @@ import (
 
 // enrichedRow mirrors one finding in the digest's enriched JSON.
 //
-// Only the fields this lane needs. Deliberately NOT a shared type with the
-// Python side: enrich.py owns that file's shape, and pinning it in Go would
-// make a harmless new column in the digest a compile error here.
+// Only the fields this lane needs. Deliberately NOT internal/enrich's
+// Finding: cti-enrich owns that file's shape, and decoding only what this
+// lane reads keeps a new column in the digest from mattering here.
 //
 // Every field is read defensively. A missing one means a smaller ticket, not
 // a failed run - the daily security email must not depend on this lane being

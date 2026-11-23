@@ -1,0 +1,338 @@
+[
+{
+"in": {
+"cpe_products": [
+[
+"php",
+"php"
+]
+]
+},
+"out": [
+"PHP",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"google",
+"chrome"
+]
+]
+},
+"out": [
+"Google Chrome",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"apple",
+"macos"
+]
+]
+},
+"out": [
+"Apple macOS",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"apple",
+"iphone_os"
+],
+[
+"apple",
+"ipados"
+]
+]
+},
+"out": [
+"Apple iOS, Apple iPadOS",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"v",
+"p0"
+],
+[
+"v",
+"p1"
+],
+[
+"v",
+"p2"
+],
+[
+"v",
+"p3"
+],
+[
+"v",
+"p4"
+]
+]
+},
+"out": [
+"V P0, V P1, V P2 +2 more",
+"NVD"
+]
+},
+{
+"in": {
+"kev_vendor": "Google",
+"kev_product": "Chromium V8",
+"cpe_products": [
+[
+"google",
+"chrome"
+]
+]
+},
+"out": [
+"Google Chromium V8",
+"CISA KEV"
+]
+},
+{
+"in": {
+"kev_vendor": "Microsoft",
+"kev_product": "Microsoft Exchange Server"
+},
+"out": [
+"Microsoft Exchange Server",
+"CISA KEV"
+]
+},
+{
+"in": {
+"kev_vendor": "",
+"kev_product": "Thing"
+},
+"out": [
+"Thing",
+"CISA KEV"
+]
+},
+{
+"in": {
+"kev_vendor": "Acme",
+"kev_product": ""
+},
+"out": [
+"Acme",
+"CISA KEV"
+]
+},
+{
+"in": {
+"kev_vendor": null,
+"kev_product": null
+},
+"out": [
+"",
+""
+]
+},
+{
+"in": {
+"description": "A flaw in Google Chrome."
+},
+"out": [
+"",
+""
+]
+},
+{
+"in": {
+"provider": "qualys",
+"detection_titles": [
+"Apple Safari Prior to 18.1 Multiple Vulnerabilities",
+"Apple Safari Prior to 18.0 Multiple Vulnerabilities"
+]
+},
+"out": [
+"Apple Safari",
+"Qualys"
+]
+},
+{
+"in": {
+"provider": "CrowdStrike",
+"detection_titles": [
+"Acme Widget Remote Code Execution"
+]
+},
+"out": [
+"Acme Widget",
+"CrowdStrike"
+]
+},
+{
+"in": {
+"provider": "",
+"detection_titles": [
+"Acme Widget Remote Code Execution"
+]
+},
+"out": [
+"Acme Widget",
+"scanner"
+]
+},
+{
+"in": {
+"provider": "qualys",
+"detection_titles": [
+"November 2026 Cumulative Update"
+]
+},
+"out": [
+"",
+""
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"openssl",
+"openssl"
+],
+[
+"oracle",
+"jdk"
+],
+[
+"vmware",
+"esxi"
+],
+[
+"cisco",
+"ios_xe"
+],
+[
+"f5",
+"big-ip_access_policy_manager"
+]
+]
+},
+"out": [
+"Openssl, Oracle JDK, Vmware ESXI +2 more",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"microsoft",
+"sql_server"
+],
+[
+"microsoft",
+"windows_10_22h2"
+]
+]
+},
+"out": [
+"Microsoft SQL Server, Microsoft Windows 10 22h2",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"a"
+],
+[
+"b",
+"c",
+"d"
+],
+"x",
+[
+"e",
+"f"
+]
+]
+},
+"out": [
+"E F",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"apache",
+"http_server"
+],
+[
+"apache",
+"http_server"
+]
+]
+},
+"out": [
+"Apache HTTP Server",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"node.js",
+"node.js"
+]
+]
+},
+"out": [
+"Node.js",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"mac_os_x",
+"x"
+]
+],
+"provider": "qualys"
+},
+"out": [
+"macOS X",
+"NVD"
+]
+},
+{
+"in": {
+"cpe_products": [
+[
+"ui",
+"ssl_vpn"
+]
+]
+},
+"out": [
+"UI SSL VPN",
+"NVD"
+]
+}
+]

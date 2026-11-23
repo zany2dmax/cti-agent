@@ -284,7 +284,7 @@ func TestNothingHeldAddsNothingToTheReport(t *testing.T) {
 	}
 }
 
-// The detection titles follow Reason, so enrich.py can name the
+// The detection titles follow Reason, so cti-enrich can name the
 // product a finding is about, and a pipe or semicolon in a title cannot
 // split a cell or a title.
 func TestDetectionTitlesFollowReason(t *testing.T) {

@@ -1,0 +1,50 @@
+{
+ "today": "2026-11-22",
+ "nvd": {
+  "CVE-2021-44228": {"cvss": 10.0, "cvss_severity": "CRITICAL", "description": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP.", "kev_nvd": true, "vuln_status": "Analyzed", "published": "2021-12-10T10:15:09.143", "cpe_products": [["apache", "log4j"]]},
+  "CVE-2020-1472": {"cvss": 10.0, "cvss_severity": "CRITICAL", "description": "Netlogon elevation of privilege.", "kev_nvd": true, "vuln_status": "Modified", "published": "2020-08-17T19:15:13.287", "cpe_products": [["microsoft", "windows_server_2019"], ["microsoft", "windows_server_2016"]]},
+  "CVE-2025-33073": {"cvss": 8.8, "cvss_severity": "HIGH", "description": "SMB client.", "kev_nvd": false, "vuln_status": "Analyzed", "published": "2025-06-10T17:15:00", "cpe_products": []},
+  "CVE-2026-9110": {"cvss": 7.8, "cvss_severity": "HIGH", "description": null, "kev_nvd": false, "vuln_status": "Awaiting Analysis", "published": "2026-10-01T00:00:00", "cpe_products": []},
+  "CVE-2026-45659": {"cvss": 5.5, "cvss_severity": "MEDIUM", "description": "Kernel bug.", "kev_nvd": false, "vuln_status": "Analyzed", "published": "2026-09-01T00:00:00", "cpe_products": [["linux", "linux_kernel"], ["apple", "macos"], ["nodejs", "node.js"], ["php", "php"], ["openssh", "ssh_server"]]},
+  "CVE-2023-35636": {"cvss": 6.5, "cvss_severity": "MEDIUM", "description": "Outlook.", "kev_nvd": false, "vuln_status": "Analyzed", "published": "2023-12-12T18:15:00", "cpe_products": []},
+  "CVE-2008-4250": {"cvss": 10.0, "cvss_severity": "HIGH", "description": "Server service.", "kev_nvd": false, "vuln_status": "Analyzed", "published": "2008-10-23T22:00:00", "cpe_products": [["microsoft", "windows_xp"]]},
+  "CVE-2022-0492": {"cvss": 7.8, "cvss_severity": "HIGH", "description": "cgroups.", "kev_nvd": true, "vuln_status": "Analyzed", "published": "2022-03-03T19:15:00", "cpe_products": [["linux", "linux_kernel"]]},
+  "CVE-2026-49975": {"cvss": 9.9, "cvss_severity": "CRITICAL", "description": "x", "kev_nvd": true, "vuln_status": "Received", "published": "2026-11-01T00:00:00", "cpe_products": []},
+  "CVE-2026-0826": {"cvss": 9.8, "cvss_severity": "CRITICAL", "description": "y", "kev_nvd": false, "vuln_status": "Received", "published": "2026-11-01T00:00:00", "cpe_products": []},
+  "CVE-2026-8206": {"cvss": 4.3, "cvss_severity": "MEDIUM", "description": "z", "kev_nvd": false, "vuln_status": "Received", "published": "2026-11-01T00:00:00", "cpe_products": []},
+  "CVE-2026-1234567": {"cvss": null, "cvss_severity": null, "description": null, "kev_nvd": false, "vuln_status": null, "published": null, "cpe_products": []},
+  "CVE-2026-60001": {"cvss": 7.0, "cvss_severity": "HIGH", "description": "legacy", "kev_nvd": true, "vuln_status": "Analyzed", "published": "2026-01-01T00:00:00", "cpe_products": [["acme", "*"], ["-", "thing"], ["acme", "widget_ui"]]},
+  "CVE-2019-0001": {"cvss": 5.0, "cvss_severity": "MEDIUM", "description": "old cached entry", "kev_nvd": false, "vuln_status": "Analyzed", "published": "2019-01-01T00:00:00", "cpe_products": []}
+ },
+ "epss": {
+  "CVE-2021-44228": {"epss": 0.99999, "epss_pct": 1.0, "epss_date": "2026-11-21"},
+  "CVE-2020-1472": {"epss": 0.994, "epss_pct": 0.999, "epss_date": "2026-11-21"},
+  "CVE-2025-33073": {"epss": 0.21, "epss_pct": 0.95, "epss_date": "2026-11-21"},
+  "CVE-2026-9110": {"epss": 0.04, "epss_pct": 0.8, "epss_date": "2026-11-21"},
+  "CVE-2026-45659": {"epss": 0.0009, "epss_pct": 0.3, "epss_date": "2026-11-21"},
+  "CVE-2023-35636": {"epss": 0.125, "epss_pct": 0.9, "epss_date": "2026-11-21"},
+  "CVE-2008-4250": {"epss": 0.944, "epss_pct": 0.99, "epss_date": "2026-11-21"},
+  "CVE-2022-0492": {"epss": 0.002, "epss_pct": 0.5, "epss_date": "2026-11-21"},
+  "CVE-2026-49975": {"epss": 0.78, "epss_pct": 0.98, "epss_date": "2026-11-21"},
+  "CVE-2026-0826": {"epss": 0.006, "epss_pct": 0.6, "epss_date": "2026-11-21"},
+  "CVE-2026-8206": {"epss": 0.0002, "epss_pct": 0.01, "epss_date": "2026-11-21"},
+  "CVE-2026-31337": {"epss": 0.505, "epss_pct": 0.97, "epss_date": "2026-11-21"},
+  "CVE-2026-60003": {"epss": 0.1, "epss_pct": 0.9, "epss_date": "2026-11-21"}
+ },
+ "kev": {
+  "CVE-2021-44228": {"kev_added": "2021-12-10", "kev_due": "2021-12-24", "ransomware": "Known", "kev_name": "Apache Log4j2 RCE", "kev_action": "Apply updates.", "kev_vendor": "Apache", "kev_product": "Log4j2"},
+  "CVE-2020-1472": {"kev_added": "2021-11-03", "kev_due": "2026-11-22", "ransomware": "Known", "kev_name": "Netlogon", "kev_action": "Apply updates.", "kev_vendor": "Microsoft", "kev_product": "Netlogon"},
+  "CVE-2022-0492": {"kev_added": "2024-01-01", "kev_due": "2024-01-22", "ransomware": "Unknown", "kev_name": "cgroups", "kev_action": "Patch.", "kev_vendor": "Linux", "kev_product": "Kernel"},
+  "CVE-2026-49975": {"kev_added": "2026-11-10", "kev_due": "2026-12-01", "ransomware": "Unknown", "kev_name": "x", "kev_action": "Patch.", "kev_vendor": "Acme", "kev_product": "Acme Router"},
+  "CVE-2026-60003": {"kev_added": "2026-11-10", "kev_due": "2026-11-30", "ransomware": null, "kev_name": null, "kev_action": null, "kev_vendor": null, "kev_product": null},
+  "CVE-2026-31337": {"kev_added": "2026-11-01", "kev_due": "2027-03-01", "ransomware": "Unknown", "kev_name": "w", "kev_action": "Patch.", "kev_vendor": "", "kev_product": "Widget  Server"},
+  "CVE-2026-60001": {"kev_added": "2026-11-01", "kev_due": "not-a-date", "ransomware": "Known", "kev_name": "l", "kev_action": "Patch.", "kev_vendor": "Acme", "kev_product": ""},
+  "CVE-2018-9999": {"kev_added": "2019-01-01", "kev_due": "2019-02-01", "ransomware": "Unknown", "kev_name": "old", "kev_action": "Patch.", "kev_vendor": "Apple", "kev_product": "Safari"}
+ },
+ "first_seen": {
+  "CVE-2021-44228": "2026-10-01T06:00:00+00:00",
+  "CVE-2008-4250": "2026-11-01T06:00:00+00:00",
+  "CVE-2026-60001": "2026-11-20T06:00:00+00:00"
+ },
+ "products_before": {"CVE-2017-0144": "Microsoft SMBv1", "CVE-2021-44228": "stale name"}
+}

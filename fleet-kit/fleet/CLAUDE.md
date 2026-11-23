@@ -309,7 +309,7 @@ the board.
 
 | Handle | Runs | When (timer) | Sends to |
 |---|---|---|---|
-| `@ingest`, `@enrich`, `@brief` | `$FLEET_CODE/bin/run-digest`: `cti-agent` (Go), `lanes/enrich.py`, `lanes/brief.py` | Daily 06:00 (`cti-agent-digest.timer`), Monday weekly (`cti-agent-weekly.timer`) | `$DIGEST_TO` |
+| `@ingest`, `@enrich`, `@brief` | `$FLEET_CODE/bin/run-digest`: `cti-agent` (Go), `cti-enrich` (Go), `lanes/brief.py` | Daily 06:00 (`cti-agent-digest.timer`), Monday weekly (`cti-agent-weekly.timer`) | `$DIGEST_TO` |
 | `@scout` | `$FLEET_CODE/lanes/scout.py` | Every 4 hours (`cti-agent-scout.timer`) | nobody: feeds the digest |
 | `@patchtuesday` | `$FLEET_CODE/bin/run-patchtuesday` | Monthly, by hand (`cti-agent-patchtuesday.timer` is off on purpose) | `$DIGEST_TO` |
 | `@appscan` | `$FLEET_CODE/bin/run-appscan` | Fridays (`cti-agent-appscan.timer`) | `$WAS_TO` |
@@ -322,7 +322,7 @@ the board.
 ### What to know about each
 
 **The digest** (`@ingest`, `@enrich`, `@brief`). `cti-agent` reads the CTI
-mailbox, extracts CVEs and looks them up in the scanner; `enrich.py` adds NVD
+mailbox, extracts CVEs and looks them up in the scanner; `cti-enrich` adds NVD
 CVSS, EPSS and CISA KEV and computes Sev5 to Sev1; `brief.py` renders the
 daily and the weekly. The daily holds back a Patch Tuesday release's CVEs, on
 evidence: only when that month's release manifest

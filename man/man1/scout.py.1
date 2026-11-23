@@ -81,7 +81,7 @@ Default:\~\fB3\fR.
 .B \-\-print\-new
 Also print the new CVEs on standard output, comma-separated on one line
 (an empty line when there are none), ready for
-.BR "enrich.py \-\-cves" .
+.BR "cti\-enrich \-\-cves" .
 .TP
 .B \-\-no\-db
 Do not open
@@ -172,7 +172,7 @@ python3 fleet\-kit/fleet/lanes/scout.py \-\-no\-db \e
   \-\-feeds /tmp/feeds.txt \-\-out /tmp/scout.json
 .EE
 .SH SEE ALSO
-.BR enrich.py (1),
+.BR cti\-enrich (1),
 .BR fleet\-db (1),
 .BR fleet\-board (1),
 .BR cti\-agent (1)

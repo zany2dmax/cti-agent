@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-// CatalogFile is the CISA KEV catalog enrich.py keeps, refreshed every 12
+// CatalogFile is the CISA KEV catalog cti-enrich keeps, refreshed every 12
 // hours on every digest run: {"fetched": "...", "data": {"CVE-...": {...}}}.
 const CatalogFile = "kev-cache.json"
 
-// LoadCatalog returns the set of CVEs on CISA KEV, from the copy enrich.py
+// LoadCatalog returns the set of CVEs on CISA KEV, from the copy cti-enrich
 // keeps under $FLEET_HOME/state.
 //
 // The catalog only ever grows, so an old copy is still right about every

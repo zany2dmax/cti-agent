@@ -90,7 +90,7 @@ beside it, mode 0600, so the weekly can link tickets; with no daily map the
 weekly renders without links.
 .TP
 .B 2. Enrich (daily)
-.B python3 lanes/enrich.py \-\-report
+.B bin/cti\-enrich \-\-report
 .I raw
 .B \-\-out
 .IR state/enriched\-DATE.json :
@@ -403,7 +403,7 @@ the raw report, the enriched file, the digest and its own
 .IR processed\-messages.json ,
 so the ingest records nothing in the real processed-message log (mailbox
 cleanup's authority to archive), and
-.B enrich.py
+.B cti\-enrich
 runs with
 .B \-\-no\-db
 so
@@ -496,13 +496,13 @@ journalctl \-u cti\-agent\-digest.service \-n 50
 .BR run\-mailbox\-cleanup (1),
 .BR cti\-agent (1)
 .PP
-The lanes
-.IR lanes/enrich.py ,
-and
+The lane
 .I lanes/brief.py
 under
 .IR /opt/cti\-agent ,
-and the mailer
+and the binaries
+.I bin/cti\-enrich
+and
 .IR bin/cti\-mailer .
 .PP
 RUNBOOK.md sections 9, 11a and 12; fleet\-kit/README.md, "Schedule".

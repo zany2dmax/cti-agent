@@ -51,212 +51,11 @@ def load(name):
     return mod
 
 
-enrich = load("enrich")
 brief = load("brief")
-
-
-REPORT = """# CTI / CVE Daily Report
-
-- Mailbox: `security@example.com`
-- Lookback since: `2026-09-01T19:10:47-04:00`
-- Emails inspected: `312`
-- Lookup provider: `qualys`
-- Generated: `2026-09-02T19:14:44-04:00`
-
-| CVE | Status | Provider | External IDs | Host Count | Max Score | Last Seen | Sample Hosts / Reason |
-|---|---|---|---|---:|---:|---|---|
-| CVE-2021-44228 | PRESENT | qualys | 376160 | 12 | 100 | 2026-09-01T22:00:00Z | h1, h2 |
-| CVE-2020-1472 | PRESENT | qualys | 91668,91680 | 4 | 100 | 2026-06-03T19:10:28Z | h3 |
-| CVE-2025-33073 | PRESENT | qualys | 92272 | 40 | 95 | 2026-06-03T22:53:25Z | h4 |
-| CVE-2026-9110 | PRESENT | qualys | 288802 | 379 | 65 | 2026-06-03T23:12:38Z | h5 |
-| CVE-2026-45659 | PRESENT | qualys | 110525 | 186 | 65 | 2026-06-03T23:10:22Z | h6, h6 |
-| CVE-2023-35636 | PRESENT | qualys | 92089 | 4 | 37 | 2026-06-03T22:08:29Z | h7 |
-| CVE-2008-4250 | NOT_PRESENT | qualys | 1225 | 0 | 0 |  |  |
-| CVE-2022-0492 | NOT_PRESENT | qualys | 159639 | 0 | 0 |  |  |
-| CVE-2026-49975 | UNKNOWN | qualys |  | 0 | 0 |  | No mapping found |
-| CVE-2026-0826 | UNKNOWN | qualys |  | 0 | 0 |  | No mapping found |
-| CVE-2026-8206 | UNKNOWN | qualys |  | 0 | 0 |  | No mapping found |
-"""
-
-# cve -> (cvss, epss, on_kev)
-FIXTURES = {
-    "CVE-2021-44228": (10.0, 0.99999, True),
-    "CVE-2020-1472": (10.0, 0.994, True),
-    "CVE-2025-33073": (8.8, 0.21, False),
-    "CVE-2026-9110": (7.8, 0.04, False),
-    "CVE-2026-45659": (5.5, 0.0009, False),
-    "CVE-2023-35636": (6.5, 0.003, False),
-    "CVE-2008-4250": (9.3, 0.944, False),
-    "CVE-2022-0492": (8.8, 0.002, True),
-    "CVE-2026-49975": (9.9, 0.78, True),
-    "CVE-2026-0826": (9.8, 0.006, False),
-    "CVE-2026-8206": (4.3, 0.0002, False),
-}
-
-
-def stub_enrichment():
-    """Replace the three network fetchers with fixtures."""
-    enrich.fetch_nvd = lambda cves: {
-        c: {"cvss": FIXTURES[c][0], "cvss_severity": "HIGH",
-            "description": f"Stub for {c}.", "kev_nvd": FIXTURES[c][2],
-            "vuln_status": "Analyzed", "published": "2026-01-01T00:00:00"}
-        for c in cves if c in FIXTURES}
-    enrich.fetch_epss = lambda cves: {
-        c: {"epss": FIXTURES[c][1], "epss_pct": 0.9, "epss_date": "2026-09-01"}
-        for c in cves if c in FIXTURES}
-    enrich.fetch_kev = lambda: {
-        c: {"kev_added": "2021-12-10", "kev_due": "2021-12-24",
-            "ransomware": "Known", "kev_name": c, "kev_action": "Patch."}
-        for c, v in FIXTURES.items() if v[2]}
-
-
-class ReportParsing(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "raw.md")
-        with open(self.path, "w") as f:
-            f.write(REPORT)
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_parses_every_row(self):
-        f = enrich.parse_report(self.path)
-        self.assertEqual(len(f), 11)
-
-    def test_header_and_separator_rows_are_skipped(self):
-        for cve in enrich.parse_report(self.path):
-            self.assertRegex(cve, r"^CVE-\d{4}-\d{4,}$")
-
-    def test_fields_are_typed(self):
-        row = enrich.parse_report(self.path)["CVE-2026-9110"]
-        self.assertEqual(row["status"], "PRESENT")
-        self.assertEqual(row["host_count"], 379)
-        self.assertEqual(row["qualys_score"], 65)
-        self.assertIsInstance(row["host_count"], int)
-
-    def test_blank_numeric_cells_become_zero(self):
-        row = enrich.parse_report(self.path)["CVE-2026-49975"]
-        self.assertEqual(row["host_count"], 0)
-        self.assertEqual(row["qualys_score"], 0)
-
-    def test_metadata_is_extracted(self):
-        meta = enrich.parse_meta(self.path)
-        self.assertEqual(meta["mailbox"], "security@example.com")
-        self.assertEqual(meta["emails"], "312")
-        self.assertEqual(meta["provider"], "qualys")
-
-    def test_missing_file_does_not_raise_for_metadata(self):
-        self.assertEqual(enrich.parse_meta("/nonexistent/x.md"), {})
-
-
-class Prioritize(unittest.TestCase):
-    """The truth table. These are the calls a human acts on, so they are
-    asserted individually rather than by counting buckets."""
-
-    def score(self, cve):
-        row = {"cve": cve, "status": "UNKNOWN", "host_count": 0, "qualys_score": 0}
-        return row
-
-    def build(self):
-        stub_enrichment()
-        tmp = tempfile.TemporaryDirectory()
-        raw = os.path.join(tmp.name, "raw.md")
-        out = os.path.join(tmp.name, "enriched.json")
-        with open(raw, "w") as f:
-            f.write(REPORT)
-        sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
-        with quiet():
-            enrich.main()
-        with open(out) as fh:
-            data = json.load(fh)
-        tmp.cleanup()
-        return {f["cve"]: f["priority"] for f in data["findings"]}, data
-
-    def test_truth_table(self):
-        pri, _ = self.build()
-        expected = {
-            # Sev5: present AND actively exploited -> today
-            "CVE-2021-44228": ("Sev5", "present, KEV, EPSS 100%"),
-            "CVE-2020-1472":  ("Sev5", "present, KEV, EPSS 99%"),
-            "CVE-2025-33073": ("Sev5", "present, EPSS 21% (over the 10% bar)"),
-            # Sev4: present, nobody exploiting it -> this patch cycle,
-            # regardless of CVSS
-            "CVE-2026-9110":  ("Sev4", "present on 379 hosts"),
-            "CVE-2026-45659": ("Sev4", "present on 186 hosts, CVSS only 5.5"),
-            "CVE-2023-35636": ("Sev4", "present on 4 hosts, CVSS 6.5"),
-            # Sev3: exploited AND we cannot say whether we are exposed. Above
-            # Sev4 deliberately - unbounded risk plus a blind spot beats
-            # bounded scheduled work.
-            "CVE-2026-49975": ("Sev3", "UNKNOWN + KEV + EPSS 78%"),
-            # Sev2: exploited but the scanner checked and found nothing, or a
-            # critical it could not check -> verify coverage
-            "CVE-2008-4250":  ("Sev2", "EPSS 94% but NOT_PRESENT"),
-            "CVE-2022-0492":  ("Sev2", "KEV but NOT_PRESENT"),
-            "CVE-2026-0826":  ("Sev2", "UNKNOWN + CVSS 9.8 = coverage gap"),
-            # Sev1: nothing to act on
-            "CVE-2026-8206":  ("Sev1", "UNKNOWN, CVSS 4.3, no exploitation"),
-        }
-        for cve, (want, why) in expected.items():
-            with self.subTest(cve=cve, rationale=why):
-                self.assertEqual(pri[cve], want, f"{cve}: {why}")
-
-    def test_present_never_ranks_below_not_present(self):
-        """The regression that motivated the current thresholds."""
-        pri, _ = self.build()
-        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
-        present_worst = max(order[pri[c]] for c in
-                            ("CVE-2026-45659", "CVE-2023-35636", "CVE-2026-9110"))
-        absent_best = min(order[pri[c]] for c in ("CVE-2008-4250", "CVE-2022-0492"))
-        self.assertLess(present_worst, absent_best,
-                        "a PRESENT finding ranked at or below a NOT_PRESENT one")
-
-    def test_unknown_with_critical_cvss_is_not_sev1(self):
-        pri, _ = self.build()
-        self.assertNotEqual(pri["CVE-2026-0826"], "Sev1",
-                            "UNKNOWN means we did not look, not that we are clean")
-
-    def test_sorted_by_priority_then_host_count(self):
-        _, data = self.build()
-        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
-        keys = [(order[f["priority"]], -(f["host_count"] or 0))
-                for f in data["findings"]]
-        self.assertEqual(keys, sorted(keys), "findings are not ordered for triage")
-
-    def test_counts_match_findings(self):
-        _, data = self.build()
-        for p in ("Sev5", "Sev4", "Sev3", "Sev1"):
-            self.assertEqual(
-                data["counts"][p],
-                sum(1 for f in data["findings"] if f["priority"] == p))
-        self.assertEqual(data["total"], len(data["findings"]))
-
-    def test_rationale_is_always_populated(self):
-        _, data = self.build()
-        for f in data["findings"]:
-            self.assertTrue(f["rationale"], f"{f['cve']} has no rationale")
 
 
 class Degradation(unittest.TestCase):
     """A digest that hides its own gaps is worse than no digest."""
-
-    def test_all_sources_down_is_reported_not_hidden(self):
-        enrich.fetch_nvd = lambda cves: {}
-        enrich.fetch_epss = lambda cves: {}
-        enrich.fetch_kev = lambda: {}
-        with tempfile.TemporaryDirectory() as tmp:
-            raw, out = os.path.join(tmp, "r.md"), os.path.join(tmp, "e.json")
-            with open(raw, "w") as f:
-                f.write(REPORT)
-            sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
-            with quiet():
-                enrich.main()
-            with open(out) as fh:
-                data = json.load(fh)
-        self.assertIn("EPSS", data["degraded"])
-        self.assertIn("KEV catalog", data["degraded"])
-        # Presence still comes from the scanner, so PRESENT rows stay actionable.
-        self.assertGreater(data["counts"]["Sev4"], 0)
 
     def test_degraded_banner_reaches_the_digest(self):
         data = {"generated": "2026-09-02T00:00:00+00:00", "source_meta": {},
@@ -269,16 +68,11 @@ class Degradation(unittest.TestCase):
 
 class BriefRendering(unittest.TestCase):
     def enriched(self):
-        stub_enrichment()
-        with tempfile.TemporaryDirectory() as tmp:
-            raw, out = os.path.join(tmp, "r.md"), os.path.join(tmp, "e.json")
-            with open(raw, "w") as f:
-                f.write(REPORT)
-            sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
-            with quiet():
-                enrich.main()
-            with open(out) as fh:
-                return json.load(fh)
+        """An enriched file as cti-enrich writes it: eleven findings across
+        every band, written by the Python enrich.py before it was replaced
+        (internal/enrich holds the Go lane to the same output)."""
+        path = pathlib.Path(__file__).resolve().parent / "testdata" / "enriched-sample.json"
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def test_subject_leads_with_sev5(self):
         d = self.enriched()
@@ -330,17 +124,6 @@ class BriefRendering(unittest.TestCase):
         d["findings"] = [dict(x, asked=False) for x in d["findings"]]
         self.assertNotIn("Asked about", brief.render(d, "daily"))
         self.assertNotIn("Asked about", brief.render_text(d, "daily"))
-
-    def test_the_report_asked_column_is_read(self):
-        base = "| CVE-2026-00%02d | UNKNOWN | qualys | | 0 | 0 | | | r | | unverified |%s\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "raw.md")
-            with open(path, "w") as fh:
-                for i, cell in enumerate([" asked |", "  |", " Asked |", " maybe |", ""]):
-                    fh.write(base % (i + 1, cell))
-            got = enrich.parse_report(path)
-        self.assertEqual([got["CVE-2026-00%02d" % i]["asked"] for i in range(1, 6)],
-                         [True, False, True, False, False])
 
     def test_sev1_is_a_count_not_a_list_in_either_digest(self):
         """Awareness items get a number and no prose.
@@ -568,20 +351,6 @@ class BandLabelsDoNotOverclaim(unittest.TestCase):
             label = brief.PRI[band][2].lower()
             self.assertNotIn("confirmed present", label, band)
 
-    def test_scoring_cannot_put_an_unknown_row_in_sev4(self):
-        # Stronger than checking the wording: if the scoring itself can never
-        # place an unverified finding in the confirmed-present band, the
-        # heading cannot lie no matter how it is worded later.
-        for kev, epss, cvss in [(1, 0.9, 9.9), (0, 0.6, 9.9), (0, 0.0, 9.5),
-                                (0, 0.0, 2.0), (1, 0.0, 0.0)]:
-            f = {"status": "UNKNOWN", "host_count": 0, "kev": kev,
-                 "epss": epss, "cvss": cvss}
-            band, _ = enrich.prioritize(f)
-            self.assertNotEqual(band, "Sev4",
-                                f"UNKNOWN reached Sev4 with kev={kev} epss={epss}")
-            self.assertNotEqual(band, "Sev5",
-                                f"UNKNOWN reached Sev5 with kev={kev} epss={epss}")
-
     def test_the_scale_is_monotonic(self):
         # A severity number has to mean what it says: Sev4 outranks Sev3, and
         # no amount of reasoning in a comment changes that. An earlier draft
@@ -591,23 +360,6 @@ class BandLabelsDoNotOverclaim(unittest.TestCase):
         order = {p: i for i, p in enumerate(brief.SEV_ORDER)}
         for higher, lower in zip(brief.SEV_ORDER, brief.SEV_ORDER[1:]):
             self.assertLess(order[higher], order[lower])
-
-    def test_unverified_sits_mid_scale_not_at_the_floor(self):
-        # Below confirmed presence, because a coverage gap may turn out to be
-        # nothing. Well above awareness, because it may turn out to be
-        # everything - that is the reason the old P2 band was split at all.
-        unverified, _ = enrich.prioritize(
-            {"status": "UNKNOWN", "host_count": 0, "kev": 1, "epss": 0.9})
-        present_quiet, _ = enrich.prioritize(
-            {"status": "PRESENT", "host_count": 300, "kev": 0, "epss": 0.001,
-             "cvss": 7.0})
-        noise, _ = enrich.prioritize(
-            {"status": "UNKNOWN", "host_count": 0, "kev": 0, "epss": 0.0001,
-             "cvss": 4.0})
-        order = {p: i for i, p in enumerate(brief.SEV_ORDER)}
-        self.assertEqual(unverified, "Sev3")
-        self.assertGreater(order[unverified], order[present_quiet])
-        self.assertLess(order[unverified], order[noise])
 
     def test_sev3_explains_why_it_exists(self):
         d = self.data([self.unknown("CVE-1", pri="Sev3")], Sev3=1)
@@ -649,108 +401,6 @@ class BandLabelsDoNotOverclaim(unittest.TestCase):
         for band, (_, _, label) in brief.PRI.items():
             for p in ("P1", "P2", "P3", "P4"):
                 self.assertNotIn(p, label, f"{band} label mentions {p}")
-
-
-class KevDeadlines(unittest.TestCase):
-    """CISA publishes a due date with every KEV entry. It is the only date in
-    this system that somebody outside the company set, which makes it the most
-    useful one in a patching argument - and the easiest to misuse."""
-
-    TODAY = datetime.date(2026, 9, 15)
-
-    def days(self, due):
-        return enrich.kev_days_left({"kev_due": due}, self.TODAY)
-
-    def test_sign_convention(self):
-        self.assertEqual(self.days("2026-09-01"), -14, "past dates are negative")
-        self.assertEqual(self.days("2026-09-15"), 0, "today is zero")
-        self.assertEqual(self.days("2026-09-20"), 5, "future dates are positive")
-
-    def test_absent_is_not_zero(self):
-        # "No deadline" and "due today" are opposite facts. Collapsing them
-        # into 0 would report every non-KEV finding as due today.
-        for due in ("", "   ", None, "not-a-date", "2026-13-45"):
-            self.assertIsNone(self.days(due), f"{due!r} should have no deadline")
-
-    def test_rationale_states_the_deadline_only_when_present(self):
-        overdue = {"status": "PRESENT", "host_count": 3, "kev": 1,
-                   "kev_due": "2026-09-01"}
-        _, why = enrich.prioritize(overdue, self.TODAY)
-        self.assertIn("PASSED 14d ago", why)
-
-        # The same deadline on something not in the estate is not an
-        # obligation, and saying "OVERDUE" about it teaches people to
-        # discount the word.
-        elsewhere = {"status": "NOT_PRESENT", "host_count": 0, "kev": 1,
-                     "kev_due": "2026-09-01"}
-        _, why = enrich.prioritize(elsewhere, self.TODAY)
-        self.assertNotIn("PASSED", why)
-        self.assertIn("not detected here", why)
-
-    def test_due_today_is_not_reported_as_overdue(self):
-        f = {"status": "PRESENT", "host_count": 1, "kev": 1, "kev_due": "2026-09-15"}
-        _, why = enrich.prioritize(f, self.TODAY)
-        self.assertIn("TODAY", why)
-        self.assertNotIn("PASSED", why)
-
-    def test_deadline_does_not_change_the_priority(self):
-        # A deadline is an obligation about a risk, not a change to it. If it
-        # moved findings between bands, the same CVE would be P1 one week and
-        # P2 the next with nothing about the environment having changed.
-        base = {"status": "PRESENT", "host_count": 1, "kev": 1}
-        for due in (None, "2026-09-01", "2026-09-15", "2027-01-01"):
-            f = dict(base)
-            if due:
-                f["kev_due"] = due
-            p, _ = enrich.prioritize(f, self.TODAY)
-            self.assertEqual(p, "Sev5", f"due={due} changed the band")
-
-    def test_host_count_still_outranks_lateness(self):
-        # The regression guard. An earlier cut sorted by lateness first, which
-        # pushed a 40-host P1 below a 4-host P1 - the same inversion as the
-        # CVSS-gated P2 bug this scoring exists to prevent.
-        stub_enrichment()
-        tmp = tempfile.TemporaryDirectory()
-        raw = os.path.join(tmp.name, "raw.md")
-        out = os.path.join(tmp.name, "enriched.json")
-        with open(raw, "w") as f:
-            f.write(REPORT)
-        sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
-        with quiet():
-            enrich.main()
-        with open(out) as fh:
-            data = json.load(fh)
-        tmp.cleanup()
-
-        order = {"Sev5": 0, "Sev4": 1, "Sev3": 2, "Sev2": 3, "Sev1": 4}
-        keys = [(order[f["priority"]], -(f.get("host_count") or 0))
-                for f in data["findings"]]
-        self.assertEqual(keys, sorted(keys),
-                         "lateness must not reorder ahead of blast radius")
-
-    def test_summary_counts_only_what_is_present(self):
-        rows = [
-            {"cve": "A", "status": "PRESENT", "host_count": 2,
-             "kev_days_left": -5, "ransomware": "Known"},
-            {"cve": "B", "status": "PRESENT", "host_count": 1, "kev_days_left": 3},
-            {"cve": "C", "status": "PRESENT", "host_count": 1, "kev_days_left": 90},
-            {"cve": "D", "status": "NOT_PRESENT", "host_count": 0,
-             "kev_days_left": -100, "ransomware": "Known"},
-            {"cve": "E", "status": "UNKNOWN", "host_count": 0, "kev_days_left": -7},
-            {"cve": "F", "status": "PRESENT", "host_count": 5, "kev_days_left": None},
-        ]
-        s = enrich.kev_summary(rows)
-        self.assertEqual(s["overdue"], 1, "only A is overdue and present")
-        self.assertEqual(s["overdue_cves"], ["A"])
-        self.assertEqual(s["due_within_14d"], 1)
-        self.assertEqual(s["worst_overdue_days"], 5)
-        self.assertEqual(s["ransomware_present"], 1, "D is not in the estate")
-
-    def test_empty_summary_is_all_zeroes_not_an_error(self):
-        s = enrich.kev_summary([])
-        self.assertEqual(s["overdue"], 0)
-        self.assertEqual(s["worst_overdue_days"], 0)
-        self.assertEqual(s["overdue_cves"], [])
 
 
 class KevInTheDigest(unittest.TestCase):
@@ -1505,125 +1155,15 @@ class ProductName(unittest.TestCase):
     data second, and never guessed.
     """
 
-    NVD = {"configurations": [{"nodes": [{"cpeMatch": [
-        {"vulnerable": True, "criteria": "cpe:2.3:a:google:chrome:*:*:*:*:*:*:*:*"},
-        {"vulnerable": False, "criteria": "cpe:2.3:o:microsoft:windows:-:*:*:*:*:*:*:*"},
-        {"vulnerable": True, "criteria": "cpe:2.3:a:google:chrome:*:*:*:*:*:*:*:*"},
-        {"vulnerable": True, "criteria": "cpe:2.3:a:nodejs:node\\.js:*:*:*:*:*:*:*:*"},
-        {"vulnerable": True, "criteria": "not-a-cpe"},
-    ]}]}]}
-
-    def test_only_vulnerable_cpes_count_once_each(self):
-        self.assertEqual(enrich.cpe_products(self.NVD),
-                         [["google", "chrome"], ["nodejs", "node.js"]])
-
-    def test_no_configuration_is_no_products(self):
-        self.assertEqual(enrich.cpe_products({}), [])
-
-    def test_names_read_like_names(self):
-        self.assertEqual(enrich.product_for({"cpe_products": [["php", "php"]]}), ("PHP", "NVD"))
-        self.assertEqual(enrich.product_for({"cpe_products": [["google", "chrome"]]}),
-                         ("Google Chrome", "NVD"))
-        self.assertEqual(enrich.product_for({"cpe_products": [["apple", "macos"]]}),
-                         ("Apple macOS", "NVD"))
-        self.assertEqual(enrich.product_name("Microsoft", "Microsoft Exchange Server"),
-                         "Microsoft Exchange Server")
-
-    def test_kev_wins_over_nvd(self):
-        f = {"kev_vendor": "Google", "kev_product": "Chromium V8",
-             "cpe_products": [["google", "chrome"]]}
-        self.assertEqual(enrich.product_for(f), ("Google Chromium V8", "CISA KEV"))
-
-    def test_a_long_list_is_cut_and_says_so(self):
-        f = {"cpe_products": [["v", f"p{i}"] for i in range(5)]}
-        name, _ = enrich.product_for(f)
-        self.assertTrue(name.endswith("+2 more"), name)
-
-    def test_nothing_known_is_empty_not_guessed(self):
-        self.assertEqual(enrich.product_for({"description": "A flaw in Google Chrome."}), ("", ""))
-
-    def test_the_map_keeps_kev_and_findings_and_merges(self):
+    def test_brief_reads_the_product_map_beside_the_enriched_file(self):
+        # cti-enrich writes it (internal/enrich SaveProducts, tested there).
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "products.json")
-            enrich.save_products([{"cve": "CVE-2026-1", "product": "PHP"}],
-                                 {"CVE-2026-2": {"kev_vendor": "Apple", "kev_product": "Safari"}}, path)
-            enrich.save_products([{"cve": "CVE-2026-3", "product": "Node.js"}], {}, path)
+            with open(os.path.join(tmp, "products.json"), "w") as f:
+                json.dump({"fetched": "2026-11-22T06:00:00.000000+00:00", "data": {
+                    "CVE-2026-1": "PHP", "CVE-2026-2": "Apple Safari", "CVE-2026-3": "Node.js"}}, f)
             got = brief.load_products(os.path.join(tmp, "enriched-x.json"))
         self.assertEqual(got, {"CVE-2026-1": "PHP", "CVE-2026-2": "Apple Safari",
                                "CVE-2026-3": "Node.js"})
-
-    def test_enrich_writes_product_on_every_finding(self):
-        stub_enrichment()
-        with tempfile.TemporaryDirectory() as tmp:
-            raw, out = os.path.join(tmp, "r.md"), os.path.join(tmp, "e.json")
-            with open(raw, "w") as f:
-                f.write(REPORT)
-            sys.argv = ["enrich.py", "--report", raw, "--out", out, "--no-db"]
-            with quiet():
-                enrich.main()
-            with open(out) as fh:
-                d = json.load(fh)
-        self.assertTrue(all("product" in f for f in d["findings"]))
-
-    TITLES = {
-        "Google Chrome Prior to 131.0.6778.69 Multiple Vulnerabilities": "Google Chrome",
-        "PHP Multiple Vulnerabilities (8.3.14)": "PHP",
-        "Red Hat Update for kernel (RHSA-2026:1234)": "kernel (Red Hat)",
-        "Microsoft Windows Security Update for November 2026": "Microsoft Windows",
-        "Oracle Java SE Critical Patch Update - October 2026": "Oracle Java SE",
-        "Microsoft Exchange Server Remote Code Execution Vulnerability": "Microsoft Exchange Server",
-        "November 2026 Cumulative Update": "",
-        "": "",
-    }
-
-    def test_a_scanner_title_is_cut_to_the_product(self):
-        for title, want in self.TITLES.items():
-            with self.subTest(title=title):
-                self.assertEqual(enrich.product_from_title(title), want)
-
-    def test_scanner_titles_are_the_last_resort(self):
-        f = {"provider": "qualys", "detection_titles": [
-            "Apple Safari Prior to 18.1 Multiple Vulnerabilities",
-            "Apple Safari Prior to 18.0 Multiple Vulnerabilities"]}
-        self.assertEqual(enrich.product_for(f), ("Apple Safari", "Qualys"))
-        f["cpe_products"] = [["apple", "webkit"]]
-        self.assertEqual(enrich.product_for(f), ("Apple Webkit", "NVD"))
-
-    def test_the_report_titles_column_is_read(self):
-        row = ("| CVE-2026-0007 | PRESENT | qualys | 1,2 | 3 | 90 | 2026-11-01 | host-a | "
-               "a \\| b | Google Chrome Prior to 1.0 Multiple Vulnerabilities ; PHP Multiple "
-               "Vulnerabilities (8.3) |\n")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "raw.md")
-            with open(path, "w") as fh:
-                fh.write(row)
-            got = enrich.parse_report(path)["CVE-2026-0007"]
-        self.assertEqual(got["provider_reason"], "a | b")
-        self.assertEqual(got["detection_titles"], [
-            "Google Chrome Prior to 1.0 Multiple Vulnerabilities", "PHP Multiple Vulnerabilities (8.3)"])
-        self.assertEqual(enrich.product_for(got), ("Google Chrome, PHP", "Qualys"))
-
-    def test_an_old_report_has_no_titles(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "raw.md")
-            with open(path, "w") as fh:
-                fh.write(REPORT)
-            got = enrich.parse_report(path)
-        self.assertTrue(all(f["detection_titles"] == [] for f in got.values()))
-        self.assertTrue(all(f["mail_source"] == "" for f in got.values()))
-
-    def test_the_report_mail_source_column_is_read(self):
-        """PrimeSec 10786589: whether a trusted sender mentioned the CVE.
-        Only the agent's two words count; anything else is unknown."""
-        base = "| CVE-2026-00%02d | PRESENT | qualys | 1 | 3 | 90 | 2026-11-01 | host-a | | t | %s |\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "raw.md")
-            with open(path, "w") as fh:
-                for i, cell in enumerate(["trusted", "unverified", "Unverified", "", "maybe"]):
-                    fh.write(base % (i + 1, cell))
-            got = enrich.parse_report(path)
-        self.assertEqual([got["CVE-2026-00%02d" % i]["mail_source"] for i in range(1, 6)],
-                         ["trusted", "unverified", "unverified", "", ""])
 
     def finding(self, **kw):
         f = {"cve": "CVE-2026-9", "priority": "Sev5", "status": "PRESENT",
@@ -1760,7 +1300,7 @@ class RemediationNote(unittest.TestCase):
         self.assertIn("https://x/browse/CR-1234", row["remediation_note"])
 
     def test_the_nightly_upsert_does_not_clobber_the_note(self):
-        # enrich.py re-upserts every finding each night. If that wiped the
+        # cti-enrich re-upserts every finding each night. If that wiped the
         # note, the orchestrator would resume nagging about ticketed work the
         # following morning and nobody would know why.
         self.run_db("note", "CVE-2026-85046", "CR-1234")
@@ -2054,11 +1594,18 @@ class WeeklyRollsUpStoredFindings(unittest.TestCase):
         self.assertEqual(kev["overdue"], 1, kev)
         self.assertEqual(kev["overdue_cves"], ["CVE-A"])
         self.assertEqual(kev["due_within_14d"], 1)
-        # The same answer the daily's own summary gives for the same rows.
-        rows = [dict(f, kev_days_left=enrich.kev_days_left(f)) for f in d["findings"]]
-        daily = enrich.kev_summary(rows)
-        for k in ("overdue", "due_within_14d", "worst_overdue_days", "overdue_cves"):
-            self.assertEqual(kev[k], daily[k], k)
+        # The same answer the daily gives for the same rows: the rule in
+        # internal/enrich kevSummary, restated here so fleet-db cannot drift
+        # from it. Present (with hosts) and dated rows only.
+        today = now.date()
+        days = {f["cve"]: (datetime.fromisoformat(f["kev_due"][:10]).date() - today).days
+                for f in d["findings"] if f.get("kev_due")
+                and f.get("status") == "PRESENT" and (f.get("host_count") or 0) > 0}
+        overdue = sorted(c for c, n in days.items() if n < 0)
+        self.assertEqual(kev["overdue"], len(overdue))
+        self.assertEqual(sorted(kev["overdue_cves"]), overdue)
+        self.assertEqual(kev["due_within_14d"], sum(1 for n in days.values() if 0 <= n <= 14))
+        self.assertEqual(kev["worst_overdue_days"], max([-n for n in days.values() if n < 0], default=0))
 
     def test_the_rendered_weekly_states_its_provenance(self):
         d = self.rollup()
@@ -4247,7 +3794,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
     def test_every_lane_argument_is_in_its_man_page(self):
         root = pathlib.Path(__file__).resolve().parents[2]
         arg = re.compile(r"add_argument\(\s*\"--([a-z][a-z0-9-]*)\"")
-        for lane in ("enrich.py", "scout.py", "brief.py"):
+        for lane in ("scout.py", "brief.py"):
             src = (root / "fleet-kit" / "fleet" / "lanes" / lane).read_text(encoding="utf-8")
             with self.subTest(lane=lane):
                 self._assert_documented(lane, arg.findall(src))
@@ -4540,7 +4087,7 @@ class RunnersToDev(unittest.TestCase):
     none of the side effects a real send has."""
 
     BIN = ("cti-mailer", "cti-alert", "cti-jira", "cti-domains", "cti-appscan", "cti-appreport",
-           "cti-patchtuesday", "fleet-db", "fleet-board")
+           "cti-patchtuesday", "cti-enrich", "fleet-db", "fleet-board")
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -4553,8 +4100,7 @@ class RunnersToDev(unittest.TestCase):
             p = self.code / "bin" / name
             p.write_text(_STUB)
             p.chmod(0o755)
-        for name in ("enrich.py", "brief.py"):
-            (self.code / "lanes" / name).write_text(_LANE_STUB)
+        (self.code / "lanes" / "brief.py").write_text(_LANE_STUB)
         agent = root / "agent"
         agent.mkdir()
         (agent / "cti-agent").write_text(
@@ -4990,7 +4536,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 self.assertEqual(agent, [f"cti-agent processed={out}/processed-messages.json "
                                          f"report={out}/raw-{day}.md"],
                                  "the rehearsal's ingest wrote the real processed-message log")
-                enrich_ = [c for c in calls if c.startswith("enrich.py ")]
+                enrich_ = [c for c in calls if c.startswith("cti-enrich ")]
                 self.assertIn("--no-db", enrich_[0], "the rehearsal upserted into memory.db")
                 self.assertIn(f"--out {out}/enriched-{day}.json", enrich_[0])
                 self.assertIn(f"--enriched {out}/enriched-{day}.json", [c for c in calls if c.startswith("brief.py ")][0])
@@ -5007,7 +4553,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         r, calls = self.run_lane("run-digest", "daily", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"cti-agent processed= report={self.home}/reports/raw-{day}.md", calls)
-        enrich_ = [c for c in calls if c.startswith("enrich.py ")]
+        enrich_ = [c for c in calls if c.startswith("cti-enrich ")]
         self.assertNotIn("--no-db", enrich_[0])
         self.assertIn(f"--out {self.home}/state/enriched-{day}.json", enrich_[0])
         self.assertFalse((self.home / "dryrun").exists())
@@ -5242,7 +4788,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                     self.assertTrue(sends and "--for-real" in sends[-1], calls)
 
     def test_a_failed_dry_digest_says_dry_run_on_the_board(self):
-        (self.code / "lanes" / "enrich.py").write_text("import sys\nsys.exit(1)\n")
+        (self.code / "bin" / "cti-enrich").write_text("#!/usr/bin/env bash\nexit 1\n")
         r, calls = self.run_lane("run-digest", "daily", "--dry-run")
         self.assertEqual(r.returncode, 1)
         board = [c for c in calls if c.startswith("fleet-board post")]
@@ -5305,7 +4851,8 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
 
 class TestUserAgent(unittest.TestCase):
     """The agent names a contact from GRAPH_MAILBOX, never a hardcoded one,
-    and the two lanes that fetch build it the same way as internal/useragent."""
+    and scout.py builds it the same way as internal/useragent, which
+    cti-enrich and the other Go fetchers use."""
 
     CASES = [
         ({}, "p/1.0"),
@@ -5319,15 +4866,15 @@ class TestUserAgent(unittest.TestCase):
         ({"FLEET_USER_AGENT": "a\r\nX-Evil: 1"}, "p/1.0"),
     ]
 
-    def test_both_lanes(self):
+    def test_the_python_lane(self):
         scout = load("scout")
-        for lane in (enrich, scout):
+        for lane in (scout,):
             for env, want in self.CASES:
                 with self.subTest(lane=lane.__name__, env=env):
                     self.assertEqual(lane.user_agent("p/1.0", env), want)
 
     def test_no_address_in_the_lanes(self):
-        for name in ("enrich", "scout"):
+        for name in ("scout",):
             src = (LANES / f"{name}.py").read_text()
             self.assertNotRegex(src, r"mailto:[A-Za-z0-9]", name)
 
@@ -6130,14 +5677,14 @@ class TlsFloor(unittest.TestCase):
 
     def test_each_lane_context_has_a_tls_12_floor(self):
         import ssl
-        for name in ("scout", "enrich"):
+        for name in ("scout",):
             ctx = load(name).tls_context()
             self.assertGreaterEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2, name)
             self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED, name)
             self.assertTrue(ctx.check_hostname, name)
 
     def test_no_lane_builds_its_own_unfloored_context(self):
-        for name in ("scout", "enrich", "brief"):
+        for name in ("scout", "brief"):
             src = (LANES / f"{name}.py").read_text()
             for ln, line in enumerate(src.splitlines(), 1):
                 if "create_default_context" in line:
@@ -6145,17 +5692,6 @@ class TlsFloor(unittest.TestCase):
                     # the next line.
                     nxt = src.splitlines()[ln]
                     self.assertIn("minimum_version", nxt, f"{name}.py:{ln}")
-
-    def test_enrich_refuses_a_redirect_to_plain_http(self):
-        # The NVD API key rides on these requests.
-        handler = load("enrich")._HTTPSOnlyRedirect()
-        req = urllib.request.Request("https://services.nvd.nist.gov/x")
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            handler.redirect_request(req, io.BytesIO(b""), 302, "Found", {},
-                                     "http://services.nvd.nist.gov/x")
-        cm.exception.close()
-
-
 
 class FleetConfig(unittest.TestCase):
     """fleet-config check reads fleet.env, which holds secrets, so the one

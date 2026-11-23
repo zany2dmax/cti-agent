@@ -22,7 +22,7 @@ brief.py \- the @brief lane: render enriched findings as the daily or weekly CTI
 .SH DESCRIPTION
 .B brief.py
 turns the JSON written by
-.BR enrich.py (1),
+.BR cti\-enrich (1),
 or by
 .B fleet\-db rollup
 for the weekly, into the email the security team reads: an HTML page built
@@ -214,7 +214,7 @@ python3 /opt/cti\-agent/lanes/brief.py \-\-weekly \-\-subject\-only \e
   \-\-enriched /tmp/week.json
 .EE
 .SH SEE ALSO
-.BR enrich.py (1),
+.BR cti\-enrich (1),
 .BR fleet\-db (1),
 .BR cti\-mailer (1),
 .BR run\-digest (1),

@@ -1030,7 +1030,7 @@ sent, the daily holds that release's Microsoft CVEs back (they are in the
 monthly email), and a held CVE is not looked up, so it can never be ticketed.
 CVEs on CISA KEV are the exception: they are reported, looked up and ticketed
 every day, including one CISA adds to KEV after the synopsis went out. The KEV
-list is the catalog `enrich.py` keeps in `state/kev-cache.json`; if it cannot be
+list is the catalog `cti-enrich` keeps in `state/kev-cache.json`; if it cannot be
 read, the daily holds as before and logs a WARNING. The Patch Tuesday lane
 itself files no tickets.
 

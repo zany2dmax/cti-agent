@@ -392,9 +392,10 @@ A generated report pairs exploitability with named machines. Treat it as such.
 - Mailed only to addresses on an allowlist.
 - Carries a "do not commit" banner when it contains real hostnames.
 
-**The Python lanes rely on the unit's umask.** `brief.py` and `enrich.py`
-write the digest HTML, the digest text and `enriched-*.json` — which carries
-host names — with a bare `open(path, "w")` and no `chmod`. Every service unit
+**The Python lanes rely on the unit's umask.** `brief.py` writes the digest
+HTML and the digest text with a bare `open(path, "w")` and no `chmod`.
+(`cti-enrich`, which replaced `enrich.py`, writes `enriched-*.json` — which
+carries host names — and its caches 0600 itself.) Every service unit
 now sets `UMask=0077`, so those land `0600` too. Run a lane outside systemd
 and it inherits your shell's umask instead, which is worth remembering when
 replaying by hand.
@@ -808,7 +809,7 @@ A dry run or test send of `run-digest`, `run-appscan`, `run-domains`,
 nothing a real run reads. Its files go under
 `$FLEET_HOME/dryrun/<lane>/`; the digest's ingest writes its own
 processed-message log there (so a rehearsal never licenses mailbox cleanup to
-archive mail) and `enrich.py` runs with `--no-db` (so `memory.db`, and the next
+archive mail) and `cti-enrich` runs with `--no-db` (so `memory.db`, and the next
 digest's "new" flags, are untouched); the supplier rehearsal's request text is
 removed when it ends. Each lane also takes a lock (`state/locks/<lane>.lock`,
 `flock(2)`): a rehearsal refuses (exit 75) while any run of the lane is active,
@@ -1280,8 +1281,10 @@ driver in its standard library and Go does not.**
 
 `memory.db` is SQLite. It holds the findings table with `first_seen` (which is
 what makes "new since last run" a fact rather than a guess), the digests table
-(which is what stops a duplicate send), and the scout backlog. Three
-components need it: `enrich.py`, `scout.py` and `fleet-db`.
+(which is what stops a duplicate send), and the scout backlog. Two
+components open it: `scout.py` and `fleet-db`. `cti-enrich` reads and
+writes the findings through `fleet-db` (`findings`, `finding upsert`), so it
+holds no SQL.
 
 Go's standard library has `database/sql` but **no driver**. Writing those
 three in Go would mean adding one of:
@@ -1305,7 +1308,7 @@ about where:
 
 | Component | SQLite? | Language | Matches the rule |
 |---|---|---|---|
-| `enrich.py` | yes | Python | yes |
+| `cti-enrich` | no (through `fleet-db`) | Go | yes |
 | `scout.py` | yes | Python | yes |
 | `fleet-db` | yes | Python | yes |
 | `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |

@@ -1,0 +1,104 @@
+{
+ "source_meta": {
+  "mailbox": "security@example.com",
+  "since": "2026-09-01T19:10:47-04:00",
+  "emails": "312",
+  "provider": "qualys",
+  "generated": "2026-09-02T19:14:44-04:00"
+ },
+ "counts": {
+  "Sev5": 0,
+  "Sev4": 1,
+  "Sev3": 0,
+  "Sev2": 0,
+  "Sev1": 2
+ },
+ "total": 3,
+ "degraded": [
+  "NVD",
+  "EPSS",
+  "KEV catalog"
+ ],
+ "kev_deadlines": {
+  "overdue": 0,
+  "due_within_14d": 0,
+  "worst_overdue_days": 0,
+  "ransomware_present": 0,
+  "overdue_cves": []
+ },
+ "email_subjects": [],
+ "novelty": {
+  "new": 0,
+  "seen_before": 0,
+  "undetermined": 3,
+  "new_cves": []
+ },
+ "findings": [
+  {
+   "cve": "CVE-2021-44228",
+   "status": "PRESENT",
+   "provider": "qualys",
+   "qids": "376160",
+   "host_count": 12,
+   "qualys_score": 100,
+   "last_seen": "2026-09-01T22:00:00Z",
+   "sample_hosts": "h1, h2",
+   "provider_reason": "",
+   "detection_titles": [],
+   "mail_source": "",
+   "asked": false,
+   "kev": 0,
+   "kev_days_left": null,
+   "priority": "Sev4",
+   "rationale": "PRESENT on 12 host(s)",
+   "product": "",
+   "product_source": "",
+   "is_new": null,
+   "first_seen": null
+  },
+  {
+   "cve": "CVE-2008-4250",
+   "status": "NOT_PRESENT",
+   "provider": "qualys",
+   "qids": "1225",
+   "host_count": 0,
+   "qualys_score": 0,
+   "last_seen": "",
+   "sample_hosts": "",
+   "provider_reason": "",
+   "detection_titles": [],
+   "mail_source": "",
+   "asked": false,
+   "kev": 0,
+   "kev_days_left": null,
+   "priority": "Sev1",
+   "rationale": "not detected in Qualys",
+   "product": "",
+   "product_source": "",
+   "is_new": null,
+   "first_seen": null
+  },
+  {
+   "cve": "CVE-2026-49975",
+   "status": "UNKNOWN",
+   "provider": "qualys",
+   "qids": "",
+   "host_count": 0,
+   "qualys_score": 0,
+   "last_seen": "",
+   "sample_hosts": "",
+   "provider_reason": "No mapping found",
+   "detection_titles": [],
+   "mail_source": "",
+   "asked": false,
+   "kev": 0,
+   "kev_days_left": null,
+   "priority": "Sev1",
+   "rationale": "no Qualys QID mapping - coverage unverified",
+   "product": "",
+   "product_source": "",
+   "is_new": null,
+   "first_seen": null
+  }
+ ]
+}

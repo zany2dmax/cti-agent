@@ -39,7 +39,7 @@ config.local.yaml
 # Not output: the owners snapshot both languages' tests read, made from the
 # invented fleet-kit/tests/testdata/app-owners-sample.txt. No real names.
 !internal/appscan/testdata/owners-snapshot.json
-# Not output: the cases both sanitisers (Go and Python) are tested against.
+# Not output: the cases internal/sanitize and cti-sanitize are tested against.
 !internal/sanitize/testdata/sanitize-cases.json
 # Not output: the email palette. internal/emailkit embeds the first (a clean
 # clone does not build without it) and brief.py reads the second.
@@ -126,3 +126,10 @@ app-owners.txt
 
 # go-task checksum cache
 .task/
+
+# Not output: cti-enrich's golden files and inputs, written once by the Python
+# enrich.py it replaced, and the enriched file brief.py's tests render. Invented
+# hosts (h1, h2...) and example.com addresses only; listed last, after
+# enriched-*.json, so these lines win.
+!internal/enrich/testdata/*.json
+!fleet-kit/tests/testdata/enriched-sample.json

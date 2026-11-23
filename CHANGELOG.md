@@ -176,6 +176,30 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   - **Tests:** `cmd/cti-sanitize` runs the shared cases end to end. The Python
     suite now runs `fleet-board` and `fleet-db` beside a freshly built
     `cti-sanitize`, and checks that a beat with no cleaner reads nothing.
+- **The Python `enrich.py` lane.** `cti-enrich` (Go, `internal/enrich`)
+  replaces it in `run-digest`, `dev-run` and the digest and scout skills, with
+  the same flags. It produces the same enriched file: the same findings, keys
+  and key order, bands, rationale text, product names, novelty and counts.
+  - **Proof:** before the Python was deleted, it was run on fixed inputs to
+    write golden files (`internal/enrich/testdata`). The Go tests are held to
+    them: four whole runs (rich, legacy and degraded, `--cves --skip-nvd`,
+    empty), 4,064 scoring cases, 39 scanner titles and 22 product lookups.
+  - **No SQL.** Novelty is read through `fleet-db findings` and the upsert
+    still goes through `fleet-db finding upsert`, so all SQLite stays in
+    `fleet-db`. With no `memory.db` yet, novelty is unknown, as before.
+  - **On the box:** an update builds `bin/cti-enrich` and deletes
+    `lanes/enrich.py` and its man page. The caches (`nvd-cache.json`,
+    `kev-cache.json`, `products.json`) keep their format; existing ones are
+    read as they are.
+  - **Behaviour changes:**
+    - The enriched file, the caches and `products.json` are written 0600 and
+      atomically. Before, they got whatever the unit's umask gave.
+    - The cache files are rewritten with `cvss` as NVD sent it (10.0 stays
+      10.0).
+  - **Tests:** the Python suite's enrich tests moved to Go (the truth table,
+    KEV deadlines, band labels, report parsing, products). The brief.py tests
+    render `fleet-kit/tests/testdata/enriched-sample.json`, written by the
+    Python before it went. The runner tests stub `bin/cti-enrich`.
 
 ---
 

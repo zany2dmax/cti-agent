@@ -12,7 +12,7 @@
 // was a one-off application defect that will never be assigned a CVE, never
 // appear in a scanner feed, and never start an SLA clock.
 //
-// enrich.py finds no CVE in that mail, the digest never mentions it, and
+// cti-enrich finds no CVE in that mail, the digest never mentions it, and
 // cti-mailbox correctly leaves it in the inbox as "not a CTI advisory this
 // lane is responsible for". The intelligence arrives and dies there.
 //
