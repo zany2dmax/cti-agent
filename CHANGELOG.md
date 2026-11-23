@@ -39,6 +39,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Fleet runtime moves from Python to Go.** Python on the box is now for
+  SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, and
+  for the lanes not yet ported (`brief.py`, `scout.py`). Three moves so far;
+  what each replaced is under Removed below.
+  - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
+    `enrich.py`. Same flags and the same enriched file, held to golden files
+    the Python wrote. Its SQLite reads and writes go through `fleet-db`.
+  - **`cti-sanitize`**: the heartbeat's output cleaner, in place of
+    `fleet-sanitize`. It's the `internal/sanitize` package, so there's one
+    implementation of the Scenario-222 rules, not two.
+  - **`cti-mailer`** is now the only mailer: the Python `mailer.py` it
+    replaced in 1.6.6 is deleted.
+  - **On the box:** an update builds the two new binaries and deletes the
+    retired Python files and their man pages.
+
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code
     `/opt`, config `/etc`, state `/var/lib`, and logs `/var/log` plus the
