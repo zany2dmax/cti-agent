@@ -49,6 +49,7 @@ var allowed = map[string]string{
 	"internal/brief/render.go:Render:pri[p].label":                               "band heading from the fixed pri table",
 	"internal/brief/render.go:Render:p":                                          "a band name from the fixed SevOrder list",
 	"internal/brief/render.go:Render:pluralN(nUnverified)":                       "\"\" or \"s\"",
+	"internal/brief/advweek.go:advWeekSection:advHeading":                        "the FLEET ADVISORIES constant, declared in sections.go (the guard resolves names per file)",
 }
 
 // tokenVars are package-level names bound to emailkit tokens (collected).
