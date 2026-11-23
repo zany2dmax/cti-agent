@@ -407,6 +407,15 @@ Mark this as an off-cycle send: it is refused unless
 is also given. Checked after the recipient gate.
 Default:\~\fBfalse\fR.
 .TP
+.BI \-\-request\-id\-out " FILE"
+After a real send, write the Graph request id (what Microsoft support asks
+for when a mail goes missing) to
+.IR FILE ,
+0600, replacing it.
+.BR run\-digest (1)
+records it with the send. Nothing is written on a dry run, and a file that
+cannot be written is a warning, not a failure: the mail has gone.
+.TP
 .B \-\-approve
 The operator has approved this specific send, normally after it was posted
 to the board tagged

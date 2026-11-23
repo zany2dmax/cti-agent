@@ -132,6 +132,14 @@ Print the subject on standard output and exit; nothing is written and
 .B \-\-out
 is not needed.
 .TP
+.B \-\-counts
+Print the five band counts, Sev5 to Sev1, and the total, as six integers on
+one line, and exit: what
+.BR run\-digest (1)
+records with the send. A count that is not a whole number exits 1. Cannot be
+combined with
+.BR \-\-subject\-only .
+.TP
 .BI \-\-out " FILE"
 Write the HTML digest. Required unless
 .BR \-\-subject\-only .

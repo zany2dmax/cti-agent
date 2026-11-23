@@ -119,3 +119,36 @@ func TestUsage(t *testing.T) {
 		t.Errorf("a missing enriched file: exit %d", rc)
 	}
 }
+
+func TestCountsAreWhatRunDigestRecords(t *testing.T) {
+	dir := t.TempDir()
+	write := func(s string) string {
+		p := filepath.Join(dir, "e.json")
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for in, want := range map[string]string{
+		`{"counts": {"Sev5": 3, "Sev4": 0, "Sev3": 1, "Sev2": 2, "Sev1": 9}, "total": 15}`: "3 0 1 2 9 15",
+		`{"counts": {"Sev5": 2.9, "Sev4": null, "Sev1": "4"}, "findings": [1, 2]}`:         "2 0 0 0 4 2",
+		`{"counts": null, "total": 0}`: "0 0 0 0 0 0",
+		`{}`:                           "0 0 0 0 0 0",
+	} {
+		var o, e bytes.Buffer
+		if rc := run([]string{"--counts", "--enriched", write(in)}, brief.Env{}, "", time.Now(), &o, &e); rc != 0 || o.String() != want+"\n" {
+			t.Errorf("%s: exit %d, %q, %s", in, rc, o.String(), e.String())
+		}
+	}
+	// Not a number: an error, and run-digest records zeros and says so.
+	for _, in := range []string{`{"counts": {"Sev5": "three"}}`, `{"counts": {"Sev5": " "}}`, `{"total": [1]}`} {
+		var o, e bytes.Buffer
+		if rc := run([]string{"--counts", "--enriched", write(in)}, brief.Env{}, "", time.Now(), &o, &e); rc != 1 || o.Len() != 0 {
+			t.Errorf("%s: exit %d, %q", in, rc, o.String())
+		}
+	}
+	var o, e bytes.Buffer
+	if rc := run([]string{"--counts", "--subject-only", "--enriched", write(`{}`)}, brief.Env{}, "", time.Now(), &o, &e); rc != 2 {
+		t.Errorf("--counts with --subject-only: exit %d", rc)
+	}
+}

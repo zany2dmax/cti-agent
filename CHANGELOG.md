@@ -40,8 +40,9 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 ### Added
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
-  SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, and
-  for the lane not yet ported (`scout.py`). Four moves so far; what each
+  SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
+  the lane not yet ported (`scout.py`), and for a few inline reads left in
+  `run-patchtuesday` and `fleet-mode.sh`. Four moves so far; what each
   replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
@@ -54,8 +55,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     implementation of the Scenario-222 rules, not two.
   - **`cti-mailer`** is now the only mailer: the Python `mailer.py` it
     replaced in 1.6.6 is deleted.
-  - **On the box:** an update builds the two new binaries and deletes the
+  - **On the box:** an update builds the new binaries and deletes the
     retired Python files and their man pages.
+  - **`run-digest` runs no Python.** It stays a shell script that calls the
+    fleet's commands. Its three inline `python3 -c` reads are gone:
+    - the counts it records with the send, and the rollup's total, now come
+      from **`cti-brief --counts`**;
+    - Graph's request id comes from **`cti-mailer --request-id-out FILE`**,
+      written after a real send.
+
+    A count that can't be read is still recorded as 0, and a missing request
+    id as `unknown`. A test fails if Python comes back into the runner.
 
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code

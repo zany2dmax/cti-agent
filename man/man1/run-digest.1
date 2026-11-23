@@ -166,12 +166,20 @@ see the mailer for the send gate. Fatal on failure. The mailer's JSON
 result is printed.
 .TP
 .B 5. Log
-On a real run: the Sev5..Sev1 counts from the enriched file and the Graph
-request id are recorded with
+On a real run: the Sev5..Sev1 counts from the enriched file (read with
+.BR "cti\-brief \-\-counts" )
+and the Graph request id (which the mailer writes to
+.I state/enriched\-DATE\-request\-id
+with
+.BR \-\-request\-id\-out )
+are recorded with
 .BR "fleet\-db sent" ,
 which is what step 0 checks tomorrow, and an INFO line is posted to the
 board for
 .BR @you .
+A count that cannot be read is recorded as 0 and a missing request id as
+.BR unknown :
+the mail has gone, so the record must not fail. The runner runs no Python.
 On a dry run only a board line naming the HTML file.
 .PP
 A fatal step prints

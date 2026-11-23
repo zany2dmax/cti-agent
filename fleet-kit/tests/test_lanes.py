@@ -3648,6 +3648,45 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 self.assertTrue((out / "products.json").exists())
                 self.assertEqual(oct(out.stat().st_mode & 0o777), "0o700")
 
+    def test_the_digest_records_what_cti_brief_counted_and_the_request_id(self):
+        """The record that stops a second send carries the counts and Graph's
+        request-id. run-digest reads them from cti-brief --counts and the
+        mailer's --request-id-out, with no Python of its own."""
+        self.agent_logs_its_env()
+        stubs = {
+            "cti-brief": ('if [ "$1" = --counts ]; then echo "3 0 1 2 9 15"; exit 0; fi\n'
+                          'while [ $# -gt 0 ]; do case "$1" in --out|--text-out) echo x > "$2";; esac; shift; done\n'
+                          'echo "CTI subject"\n'),
+            "cti-mailer": ('while [ $# -gt 0 ]; do [ "$1" = --request-id-out ] && echo "0f1e-req-42" > "$2"; shift; done\n'
+                           'echo \'{"sent": true}\'\n'),
+        }
+        for name, body in stubs.items():
+            p = self.code / "bin" / name
+            p.write_text('#!/usr/bin/env bash\necho "%s $*" >> "$STUB_LOG"\n' % name + body)
+            p.chmod(0o755)
+        day = datetime.date.today().isoformat()
+        r, calls = self.run_lane("run-digest", "daily", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"fleet-db sent {day} 3 0 1 2 9 0f1e-req-42 daily", calls)
+        self.assertIn("done - Sev5=3 Sev4=0 Sev3=1 Sev2=2 Sev1=9", r.stdout)
+
+    def test_a_record_with_unreadable_counts_and_no_request_id_still_goes_in(self):
+        self.agent_logs_its_env()
+        p = self.code / "bin" / "cti-brief"
+        p.write_text('#!/usr/bin/env bash\necho "cti-brief $*" >> "$STUB_LOG"\n'
+                     'if [ "$1" = --counts ]; then echo "x; rm -rf /" ; exit 0; fi\n'
+                     'while [ $# -gt 0 ]; do case "$1" in --out|--text-out) echo x > "$2";; esac; shift; done\n')
+        p.chmod(0o755)
+        day = datetime.date.today().isoformat()
+        r, calls = self.run_lane("run-digest", "daily", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"fleet-db sent {day} 0 0 0 0 0 unknown daily", calls)
+
+    def test_run_digest_runs_no_python(self):
+        src = (KIT / "fleet" / "bin" / "run-digest").read_text(encoding="utf-8")
+        code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+        self.assertEqual([l for l in code if "python" in l], [])
+
     def test_digest_real_run_keeps_the_real_files_log_and_db(self):
         self.agent_logs_its_env()
         day = datetime.date.today().isoformat()

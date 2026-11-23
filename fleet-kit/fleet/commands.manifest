@@ -106,6 +106,7 @@ flag: --enriched FILE | enriched JSON from cti-enrich
 flag: --daily | the daily digest
 flag: --weekly | the weekly digest
 flag: --subject-only | print the subject line only
+flag: --counts | print the five band counts and the total as integers, for run-digest's record
 flag: --out FILE | HTML output path
 flag: --text-out FILE | plain-text output path
 
@@ -242,6 +243,7 @@ about: Send mail through Graph, or check the sender's credentials
 runs: effect
 modes: --dry-run --for-real --to-dev
 exempt: --check --armed
+risk: --request-id-out writes
 flag: --app-id STRING | with --lane owner: the scanner's web app id whose app-owners.txt line names the recipients
 flag: --app-name STRING | with --lane owner: the application's name, for an app-owners.txt line keyed by name
 flag: --approve | the operator approved this specific off-cycle send
@@ -256,6 +258,7 @@ flag: --html STRING | rendered digest to send
 flag: --lane STRING | send as a named lane (e.g. was): uses <LANE>_TO and <LANE>_ALLOW_TO, and refuses if either is unset rather than falling back to the digest audience
 flag: --message STRING | short plain-text body, wrapped in minimal HTML - for escalations, not digests
 flag: --require-approval | refuse unless --approve is also passed (off-cycle sends)
+flag: --request-id-out STRING | after a real send, write Graph's request-id to this file (run-digest records it with the send)
 flag: --save-to-sent STRING | keep a copy in Sent Items (default "true")
 flag: --subject STRING | subject line
 flag: --text STRING | plain-text alternative. Accepted and logged; Graph sends one body, so this is not transmitted. Kept because the runners pass it

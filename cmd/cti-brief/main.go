@@ -4,6 +4,7 @@
 //	cti-brief --daily  --enriched enriched.json --out digest.html --text-out digest.txt
 //	cti-brief --weekly --enriched weekly-enriched.json --out weekly.html
 //	cti-brief --subject-only --enriched enriched.json
+//	cti-brief --counts --enriched enriched.json      # "Sev5 Sev4 Sev3 Sev2 Sev1 total"
 //
 // Beside the enriched file it reads, when they are there: the ticket map
 // cti-jira wrote (-tickets.json, with the CVEs held for approval), the
@@ -28,8 +29,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,7 +45,7 @@ func main() {
 	os.Exit(run(os.Args[1:], brief.EnvFromOS(), os.Getenv("TRIAGE_ENABLED"), time.Now(), os.Stdout, os.Stderr))
 }
 
-const usage = "usage: cti-brief --enriched FILE [--daily | --weekly] [--subject-only] [--out FILE] [--text-out FILE]"
+const usage = "usage: cti-brief --enriched FILE [--daily | --weekly] [--subject-only | --counts] [--out FILE] [--text-out FILE]"
 
 func run(args []string, env brief.Env, triage string, now time.Time, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cti-brief", flag.ContinueOnError)
@@ -51,12 +54,13 @@ func run(args []string, env brief.Env, triage string, now time.Time, stdout, std
 	daily := fs.Bool("daily", false, "the daily digest (the default)")
 	weekly := fs.Bool("weekly", false, "the weekly digest")
 	subjectOnly := fs.Bool("subject-only", false, "print the subject line only")
+	countsOnly := fs.Bool("counts", false, "print the five band counts and the total as integers, for run-digest's record")
 	out := fs.String("out", "", "HTML output path")
 	textOut := fs.String("text-out", "", "plain-text output path")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() > 0 || *enriched == "" || (*daily && *weekly) {
+	if fs.NArg() > 0 || *enriched == "" || (*daily && *weekly) || (*subjectOnly && *countsOnly) {
 		_, _ = fmt.Fprintln(stderr, usage)
 		return 2
 	}
@@ -79,6 +83,17 @@ func run(args []string, env brief.Env, triage string, now time.Time, stdout, std
 		}
 		_, _ = fmt.Fprintf(stderr, "[brief] error: %s: %v\n", *enriched, err)
 		return 1
+	}
+	if *countsOnly {
+		// What run-digest records with the send (fleet-db sent) and says
+		// after a rollup. Read before Prepare, from the file as written.
+		line, err := countsLine(data)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "[brief] error: %s: %v\n", *enriched, err)
+			return 1
+		}
+		_, _ = fmt.Fprintln(stdout, line)
+		return 0
 	}
 	brief.Prepare(data, *enriched, kind, strings.TrimSpace(triage) == "1", now)
 
@@ -151,4 +166,63 @@ func write(path, content string) error {
 		return err
 	}
 	return os.Rename(name, abs)
+}
+
+// countsLine is the five band counts and the total, as run-digest used to
+// read them with Python: int(counts.get(band, 0) or 0), and the total
+// likewise (the number of findings when the file has none). A count that is
+// not a number is an error, and run-digest records zeros and says so.
+func countsLine(data map[string]any) (string, error) {
+	counts, _ := data["counts"].(map[string]any)
+	parts := make([]string, 0, 6)
+	for _, p := range brief.SevOrder {
+		n, err := pyInt(counts[p])
+		if err != nil {
+			return "", fmt.Errorf("counts.%s: %w", p, err)
+		}
+		parts = append(parts, strconv.Itoa(n))
+	}
+	total, ok := data["total"]
+	if !ok {
+		findings, _ := data["findings"].([]any)
+		total = json.Number(strconv.Itoa(len(findings)))
+	}
+	n, err := pyInt(total)
+	if err != nil {
+		return "", fmt.Errorf("total: %w", err)
+	}
+	return strings.Join(append(parts, strconv.Itoa(n)), " "), nil
+}
+
+// pyInt is Python's int(v or 0): null, false and "" are 0, a float is cut
+// toward zero, a string must hold an integer.
+func pyInt(v any) (int, error) {
+	switch x := v.(type) {
+	case nil:
+		return 0, nil
+	case bool:
+		if x {
+			return 1, nil
+		}
+		return 0, nil
+	case json.Number:
+		if i, err := strconv.Atoi(string(x)); err == nil {
+			return i, nil
+		}
+		f, err := strconv.ParseFloat(string(x), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("%q is not a number", string(x))
+		}
+		return int(f), nil
+	case string:
+		if x == "" {
+			return 0, nil
+		}
+		i, err := strconv.Atoi(strings.TrimSpace(x))
+		if err != nil {
+			return 0, fmt.Errorf("%q is not a whole number", x)
+		}
+		return i, nil
+	}
+	return 0, fmt.Errorf("%T is not a number", v)
 }

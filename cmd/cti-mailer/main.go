@@ -124,6 +124,8 @@ func run() int {
 		"the operator approved this specific off-cycle send")
 	saveToSent := flag.String("save-to-sent", "true", "keep a copy in Sent Items")
 	check := flag.Bool("check", false, "verify configuration, token and granted roles")
+	requestIDOut := flag.String("request-id-out", "",
+		"after a real send, write Graph's request-id to this file (run-digest records it with the send)")
 	flag.Var(&attach, "attach", "file to attach (repeatable, keep under ~3MB total)")
 	flag.Parse()
 	// --check and --armed only read; anything else sends, so it has to be told
@@ -408,6 +410,13 @@ func run() int {
 	// reporting 202 unconditionally would describe the code rather than the
 	// call.
 	logf("sent - HTTP %d, request-id %s", res.Status, safelog.Line(reqID))
+	if *requestIDOut != "" {
+		// The mail has gone: a file that cannot be written costs the
+		// record its request-id ("unknown"), never the exit code.
+		if err := writeRequestID(*requestIDOut, reqID); err != nil {
+			logf("WARNING: sent, but could not write --request-id-out: %s", safelog.Line(err.Error()))
+		}
+	}
 	emit(map[string]any{
 		"sent": true, "status": res.Status, "request_id": reqID,
 		"subject": subj, "to": recipients, "cc": orEmpty(copies), "refused": orEmpty(refused),
@@ -836,4 +845,27 @@ func pick(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// writeRequestID replaces path with the request-id and a newline, 0600.
+func writeRequestID(path, id string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(id + "\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
