@@ -193,7 +193,7 @@ It escalates to the operator when a decision is needed. It **cannot send any rep
 - **NEW in 2.0: standard *IX, everywhere.** Code in `/opt`, settings in `/etc`, secrets in the systemd credential store, state in `/var/lib`, logs in `/var/log` and the journal, man pages and tab completion where Linux keeps them, and a system account with no login shell. Anyone who knows Linux knows where to look, and the default SELinux policy fits with no custom module. The installer prints the full list on every run.
 - **NEW in 2.0: know exactly what you've configured.** `fleet-config check` reports missing settings, typos, duplicates, settings that can go, and any secret still in a settings file, without ever printing a value. `cti-agent-secrets` and `cti-agent-settings` move the secrets and split the settings, and refuse rather than guess.
 - **Ask the CLI, don't memorise it:** `sudo cti-agent` lists every command, `--help` works everywhere, and tab completion shows what each flag does and how risky it is.
-- **45 man pages**, a one-page cheat sheet (also available as a PDF), and a full runbook.
+- **45 man pages**, an operator cheat sheet (also available as a PDF), and a full runbook.
 - **A health check in one command**, plus `--check` on every integration, which tests credentials without changing anything.
 - **Test sends to the operator only** (`--to-dev`), so a new report can be rehearsed before the real audience sees it.
 - **Releases on rails:** every push passes the `task ship` gate (tests, static analysis, security scan, SBOM). Every tag becomes a GitHub Release with notes taken from the changelog, and a release candidate is marked Pre-release.

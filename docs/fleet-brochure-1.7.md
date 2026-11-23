@@ -179,7 +179,7 @@ It escalates to the operator when a decision is needed. It **cannot send any rep
 
 - **One command updates the box:** `cti-agent-update --for-real` pulls, builds, installs and checks connectivity in the right order.
 - **Ask the CLI, don't memorise it:** `sudo cti-agent` lists every command, `--help` works everywhere, and tab completion shows what each flag does and how risky it is.
-- **41 man pages**, a one-page cheat sheet (also available as a PDF), and a full runbook.
+- **41 man pages**, an operator cheat sheet (also available as a PDF), and a full runbook.
 - **A health check in one command**, plus `--check` on every integration, which tests credentials without changing anything.
 - **Test sends to the operator only** (`--to-dev`), so a new report can be rehearsed before the real audience sees it.
 - **Releases on rails:** every push passes the `task ship` gate (tests, static analysis, security scan, SBOM). Every tag becomes a GitHub Release with notes taken from the changelog.
