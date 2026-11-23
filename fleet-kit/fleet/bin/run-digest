@@ -378,9 +378,14 @@ fi
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
 say "brief: rendering $KIND"
-"$FLEET_CODE/bin/cti-brief" "--$KIND" \
+# The weekly's FLEET ADVISORIES rolls up the dailies' triage reports. They
+# are in the real state folder, which a dry run's enriched file is not; the
+# brief only reads them.
+WEEK_ARGS=()
+[ "$KIND" = weekly ] && WEEK_ARGS=(--advisories-dir "$FLEET_HOME/state" --week-days "${WEEKLY_DAYS:-7}")
+"$FLEET_CODE/bin/cti-brief" "--$KIND" ${WEEK_ARGS[@]+"${WEEK_ARGS[@]}"} \
   --enriched "$ENRICHED" --out "$HTML" --text-out "$TXT" || fail "brief lane failed"
-SUBJECT=$("$FLEET_CODE/bin/cti-brief" "--$KIND" --subject-only --enriched "$ENRICHED")
+SUBJECT=$("$FLEET_CODE/bin/cti-brief" "--$KIND" ${WEEK_ARGS[@]+"${WEEK_ARGS[@]}"} --subject-only --enriched "$ENRICHED")
 
 # ── 4. send ──────────────────────────────────────────────────────────────────
 say "send: $SUBJECT"

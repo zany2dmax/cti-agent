@@ -115,6 +115,9 @@ func Prepare(data obj, enriched, kind string, triageEnabled bool, now time.Time)
 	if kind == "daily" {
 		data["_advisories"] = loadAdvisories(enriched)
 	}
+	if kind == "weekly" {
+		SetWeekAdvisories(data, filepath.Dir(enriched), now, weekDays)
+	}
 	data["_triage_enabled"] = triageEnabled
 }
 

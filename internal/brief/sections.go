@@ -469,7 +469,72 @@ func firstS(l []string, n int) []string {
 	return l
 }
 
+// advRowHTML is one advisory's row; when, if set, is the day it arrived
+// (the weekly's roll-up).
+func advRowHTML(a advResult, when string) string {
+	red := emailkit.Red
+	r := a.r
+	parts := []string{`<b>` + esc(or(r["subject"], "(no subject)")) + `</b>` +
+		`<br><span style="color:#718096">` + advWhen(when) + `from ` + htmlEscape(advSender(r)) + `</span>`}
+	for _, x := range a.sightings {
+		parts = append(parts,
+			`<div style="background:`+red.Bg+`;color:`+red.Fg+`;border-left:3px solid `+red.Fg+`;`+
+				`padding:4px 8px;margin:4px 0;font-weight:700">SEEN ON OUR HOSTS: `+
+				esc(x["value"])+` (`+esc(x["type"])+`) on `+esc(x["hosts_seen_on"])+` `+
+				`host(s). Treat it as an incident lead.</div>`)
+	}
+	if truthy(r["not_triaged"]) {
+		parts = append(parts, `<div style="color:#718096">Not triaged: `+esc(r["not_triaged"])+`</div>`)
+	}
+	if items := strs(asList(or(r["cve_items"], []any{}))); len(items) > 0 {
+		parts = append(parts, `<div style="color:#718096">In the CVE report above, not judged here: `+
+			htmlEscape(strings.Join(firstS(items, 6), "; "))+htmlEscape(moreN(len(items), 6))+`</div>`)
+	}
+	for _, x := range a.verdicts {
+		rel := str(or(x["relevance"], "unknown"))
+		label := `<b>` + htmlEscape(strings.ToUpper(rel)) + `</b> &middot; ` + htmlEscape(advName(x))
+		if rel == "likely" || rel == "possible" {
+			by := ""
+			if str(x["reason_by"]) == "code" && x["reason_by"] != nil {
+				by = " (code)"
+			}
+			detail := []string{esc(x["reason"]) + by}
+			if truthy(x["raised_by_code"]) {
+				detail = append(detail, "Raised by code: "+esc(x["raised_by_code"]))
+			}
+			for _, fct := range firstN(asList(or(x["facts"], []any{})), 6) {
+				if fo, ok := fct.(obj); ok {
+					detail = append(detail, "Fact: "+esc(fo["text"]))
+				}
+			}
+			for _, c := range firstN(asList(or(x["suggested_checks"], []any{})), 3) {
+				detail = append(detail, "Check: "+esc(c))
+			}
+			parts = append(parts, `<div style="margin-top:4px">`+label+`<br>`+
+				`<span style="color:#2d3748">`+strings.Join(detail, "<br>")+`</span></div>`)
+		} else {
+			parts = append(parts, `<div style="margin-top:2px;color:#4a5568">`+label+`</div>`)
+		}
+	}
+	for _, pr := range firstN(asList(or(r["problems"], []any{})), 3) {
+		parts = append(parts, `<div style="color:#718096">Note: `+esc(pr)+`</div>`)
+	}
+	return `<tr><td style="padding:6px 0;vertical-align:top;` +
+		`border-bottom:1px solid #edf2f7">` + strings.Join(parts, "") + `</td></tr>`
+}
+
+func advWhen(when string) string {
+	if when == "" {
+		return ""
+	}
+	return htmlEscape(when) + " &middot; "
+}
+
 func advisoriesSection(data obj) string {
+	// Only the weekly's Prepare reads the week's reports.
+	if _, ok := data["_advisories_week"].(advWeekData); ok && str(data["_kind"]) == "weekly" {
+		return advWeekSection(data)
+	}
 	if str(data["_kind"]) != "daily" || data["_kind"] == nil {
 		return ""
 	}
@@ -484,57 +549,9 @@ func advisoriesSection(data obj) string {
 			`The digest run log says which.</td></tr>`
 		summary = "no report"
 	} else {
-		red := emailkit.Red
 		var rows strings.Builder
 		for _, a := range advResults(rep) {
-			r := a.r
-			parts := []string{`<b>` + esc(or(r["subject"], "(no subject)")) + `</b>` +
-				`<br><span style="color:#718096">from ` + htmlEscape(advSender(r)) + `</span>`}
-			for _, x := range a.sightings {
-				parts = append(parts,
-					`<div style="background:`+red.Bg+`;color:`+red.Fg+`;border-left:3px solid `+red.Fg+`;`+
-						`padding:4px 8px;margin:4px 0;font-weight:700">SEEN ON OUR HOSTS: `+
-						esc(x["value"])+` (`+esc(x["type"])+`) on `+esc(x["hosts_seen_on"])+` `+
-						`host(s). Treat it as an incident lead.</div>`)
-			}
-			if truthy(r["not_triaged"]) {
-				parts = append(parts, `<div style="color:#718096">Not triaged: `+esc(r["not_triaged"])+`</div>`)
-			}
-			if items := strs(asList(or(r["cve_items"], []any{}))); len(items) > 0 {
-				parts = append(parts, `<div style="color:#718096">In the CVE report above, not judged here: `+
-					htmlEscape(strings.Join(firstS(items, 6), "; "))+htmlEscape(moreN(len(items), 6))+`</div>`)
-			}
-			for _, x := range a.verdicts {
-				rel := str(or(x["relevance"], "unknown"))
-				label := `<b>` + htmlEscape(strings.ToUpper(rel)) + `</b> &middot; ` + htmlEscape(advName(x))
-				if rel == "likely" || rel == "possible" {
-					by := ""
-					if str(x["reason_by"]) == "code" && x["reason_by"] != nil {
-						by = " (code)"
-					}
-					detail := []string{esc(x["reason"]) + by}
-					if truthy(x["raised_by_code"]) {
-						detail = append(detail, "Raised by code: "+esc(x["raised_by_code"]))
-					}
-					for _, fct := range firstN(asList(or(x["facts"], []any{})), 6) {
-						if fo, ok := fct.(obj); ok {
-							detail = append(detail, "Fact: "+esc(fo["text"]))
-						}
-					}
-					for _, c := range firstN(asList(or(x["suggested_checks"], []any{})), 3) {
-						detail = append(detail, "Check: "+esc(c))
-					}
-					parts = append(parts, `<div style="margin-top:4px">`+label+`<br>`+
-						`<span style="color:#2d3748">`+strings.Join(detail, "<br>")+`</span></div>`)
-				} else {
-					parts = append(parts, `<div style="margin-top:2px;color:#4a5568">`+label+`</div>`)
-				}
-			}
-			for _, pr := range firstN(asList(or(r["problems"], []any{})), 3) {
-				parts = append(parts, `<div style="color:#718096">Note: `+esc(pr)+`</div>`)
-			}
-			rows.WriteString(`<tr><td style="padding:6px 0;vertical-align:top;` +
-				`border-bottom:1px solid #edf2f7">` + strings.Join(parts, "") + `</td></tr>`)
+			rows.WriteString(advRowHTML(a, ""))
 		}
 		if quiet := advNotIntel(rep); len(quiet) > 0 {
 			rows.WriteString(`<tr><td style="padding:4px 0;color:#718096">Read, no threat found: ` +
@@ -566,7 +583,62 @@ func advisoriesSection(data obj) string {
   </td></tr>`
 }
 
+// advRowText is advRowHTML for the text part.
+func advRowText(a advResult, when string) []string {
+	var lines []string
+	r := a.r
+	lines = append(lines, "  "+str(or(r["subject"], "(no subject)")), "    "+advWhenText(when)+"from "+advSender(r))
+	for _, x := range a.sightings {
+		lines = append(lines, "    >>> SEEN ON OUR HOSTS: "+str(x["value"])+" ("+str(x["type"])+") on "+
+			str(x["hosts_seen_on"])+" host(s). Treat it as an incident lead.")
+	}
+	if truthy(r["not_triaged"]) {
+		lines = append(lines, "    Not triaged: "+str(r["not_triaged"]))
+	}
+	if items := strs(asList(or(r["cve_items"], []any{}))); len(items) > 0 {
+		lines = append(lines, "    In the CVE report above, not judged here: "+
+			strings.Join(firstS(items, 6), "; ")+moreN(len(items), 6))
+	}
+	for _, x := range a.verdicts {
+		rel := str(or(x["relevance"], "unknown"))
+		lines = append(lines, "    "+strings.ToUpper(rel)+"  "+advName(x))
+		if rel == "likely" || rel == "possible" {
+			by := ""
+			if str(x["reason_by"]) == "code" && x["reason_by"] != nil {
+				by = " (code)"
+			}
+			lines = append(lines, "      "+str(x["reason"])+by)
+			if truthy(x["raised_by_code"]) {
+				lines = append(lines, "      Raised by code: "+str(x["raised_by_code"]))
+			}
+			for _, fct := range firstN(asList(or(x["facts"], []any{})), 6) {
+				if fo, ok := fct.(obj); ok {
+					lines = append(lines, "      Fact: "+str(fo["text"]))
+				}
+			}
+			for _, c := range firstN(asList(or(x["suggested_checks"], []any{})), 3) {
+				lines = append(lines, "      Check: "+str(c))
+			}
+		}
+	}
+	for _, pr := range firstN(asList(or(r["problems"], []any{})), 3) {
+		lines = append(lines, "    Note: "+str(pr))
+	}
+	return lines
+}
+
+func advWhenText(when string) string {
+	if when == "" {
+		return ""
+	}
+	return when + " - "
+}
+
 func advisoriesText(data obj) []string {
+	// Only the weekly's Prepare reads the week's reports.
+	if _, ok := data["_advisories_week"].(advWeekData); ok && str(data["_kind"]) == "weekly" {
+		return advWeekText(data)
+	}
 	if str(data["_kind"]) != "daily" || data["_kind"] == nil {
 		return nil
 	}
@@ -581,44 +653,7 @@ func advisoriesText(data obj) []string {
 	}
 	lines := []string{advHeading + " - " + advSummary(rep), rule68}
 	for _, a := range advResults(rep) {
-		r := a.r
-		lines = append(lines, "  "+str(or(r["subject"], "(no subject)")), "    from "+advSender(r))
-		for _, x := range a.sightings {
-			lines = append(lines, "    >>> SEEN ON OUR HOSTS: "+str(x["value"])+" ("+str(x["type"])+") on "+
-				str(x["hosts_seen_on"])+" host(s). Treat it as an incident lead.")
-		}
-		if truthy(r["not_triaged"]) {
-			lines = append(lines, "    Not triaged: "+str(r["not_triaged"]))
-		}
-		if items := strs(asList(or(r["cve_items"], []any{}))); len(items) > 0 {
-			lines = append(lines, "    In the CVE report above, not judged here: "+
-				strings.Join(firstS(items, 6), "; ")+moreN(len(items), 6))
-		}
-		for _, x := range a.verdicts {
-			rel := str(or(x["relevance"], "unknown"))
-			lines = append(lines, "    "+strings.ToUpper(rel)+"  "+advName(x))
-			if rel == "likely" || rel == "possible" {
-				by := ""
-				if str(x["reason_by"]) == "code" && x["reason_by"] != nil {
-					by = " (code)"
-				}
-				lines = append(lines, "      "+str(x["reason"])+by)
-				if truthy(x["raised_by_code"]) {
-					lines = append(lines, "      Raised by code: "+str(x["raised_by_code"]))
-				}
-				for _, fct := range firstN(asList(or(x["facts"], []any{})), 6) {
-					if fo, ok := fct.(obj); ok {
-						lines = append(lines, "      Fact: "+str(fo["text"]))
-					}
-				}
-				for _, c := range firstN(asList(or(x["suggested_checks"], []any{})), 3) {
-					lines = append(lines, "      Check: "+str(c))
-				}
-			}
-		}
-		for _, pr := range firstN(asList(or(r["problems"], []any{})), 3) {
-			lines = append(lines, "    Note: "+str(pr))
-		}
+		lines = append(lines, advRowText(a, "")...)
 	}
 	if quiet := advNotIntel(rep); len(quiet) > 0 {
 		lines = append(lines, "  Read, no threat found: "+strings.Join(firstS(quiet, 8), "; ")+moreN(len(quiet), 8))

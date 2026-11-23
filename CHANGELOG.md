@@ -39,6 +39,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The Weekly Brief has FLEET ADVISORIES.** Until now advisory triage was
+  only in the dailies, so a reader of the Monday brief alone never saw a
+  Wednesday sighting. The weekly now rolls up the daily triage reports
+  (`enriched-DAY-advisories.json`) for the `WEEKLY_DAYS` (default 7) days up
+  to yesterday, so it never races today's daily: what was seen on our hosts first,
+  then what was judged likely or possible, each with its day. One line
+  counts the rest, and with `TRIAGE_ENABLED=1` it names the days with no
+  report. It runs no model; the cost line is the dailies' week. A dry run
+  reads the real reports (`cti-brief --advisories-dir`), so its preview
+  matches. The daily's section is unchanged.
+
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
   SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
   and the lane not yet ported (`scout.py`). No runner, and nothing the

@@ -45,7 +45,7 @@ func main() {
 	os.Exit(run(os.Args[1:], brief.EnvFromOS(), os.Getenv("TRIAGE_ENABLED"), time.Now(), os.Stdout, os.Stderr))
 }
 
-const usage = "usage: cti-brief --enriched FILE [--daily | --weekly] [--subject-only | --counts] [--out FILE] [--text-out FILE]"
+const usage = "usage: cti-brief --enriched FILE [--daily | --weekly [--advisories-dir DIR] [--week-days N]] [--subject-only | --counts] [--out FILE] [--text-out FILE]"
 
 func run(args []string, env brief.Env, triage string, now time.Time, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cti-brief", flag.ContinueOnError)
@@ -57,7 +57,14 @@ func run(args []string, env brief.Env, triage string, now time.Time, stdout, std
 	countsOnly := fs.Bool("counts", false, "print the five band counts and the total as integers, for run-digest's record")
 	out := fs.String("out", "", "HTML output path")
 	textOut := fs.String("text-out", "", "plain-text output path")
+	advDir := fs.String("advisories-dir", "",
+		"weekly: the folder holding the dailies' enriched-DAY-advisories.json (default: the --enriched file's)")
+	weekDays := fs.Int("week-days", 7, "weekly: how many days, up to yesterday, FLEET ADVISORIES rolls up")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *weekDays < 1 || *weekDays > 31 {
+		_, _ = fmt.Fprintln(stderr, "cti-brief: --week-days must be 1 to 31")
 		return 2
 	}
 	if fs.NArg() > 0 || *enriched == "" || (*daily && *weekly) || (*subjectOnly && *countsOnly) {
@@ -96,6 +103,13 @@ func run(args []string, env brief.Env, triage string, now time.Time, stdout, std
 		return 0
 	}
 	brief.Prepare(data, *enriched, kind, strings.TrimSpace(triage) == "1", now)
+	if kind == "weekly" && (*advDir != "" || *weekDays != 7) {
+		dir := *advDir
+		if dir == "" {
+			dir = filepath.Dir(*enriched)
+		}
+		brief.SetWeekAdvisories(data, dir, now, *weekDays)
+	}
 
 	if *subjectOnly {
 		_, _ = fmt.Fprintln(stdout, brief.Subject(data, kind, now))

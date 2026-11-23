@@ -110,6 +110,8 @@ flag: --subject-only | print the subject line only
 flag: --counts | print the five band counts and the total as integers, for run-digest's record
 flag: --out FILE | HTML output path
 flag: --text-out FILE | plain-text output path
+flag: --advisories-dir FILE | weekly: the folder holding the dailies' enriched-DAY-advisories.json (default: the --enriched file's)
+flag: --week-days INT | weekly: how many days, up to yesterday, FLEET ADVISORIES rolls up (default 7)
 
 command: cti-budget
 about: The heartbeat's share of the Claude subscription: gate and ledger

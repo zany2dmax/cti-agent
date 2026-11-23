@@ -711,7 +711,8 @@ func TestNothingInItIsMarkupOrALink(t *testing.T) {
 	mustNotContain(t, html, "href")
 }
 
-// The advisories reach the daily and not the weekly.
+// The daily's own report never reaches the weekly: it has only the roll-up
+// (advweek_test.go), which needs the week's reports Prepare reads.
 func TestItReachesTheDailyAndNotTheWeekly(t *testing.T) {
 	mustContain(t, render(advData(t, true, true, "daily"), "daily"), "FLEET ADVISORIES")
 	mustContain(t, renderText(advData(t, true, true, "daily"), "daily"), "FLEET ADVISORIES")

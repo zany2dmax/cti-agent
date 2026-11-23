@@ -119,6 +119,31 @@ and, for the daily,
 .IR FILE \-advisories.json
 from
 .BR cti\-triage (1).
+The weekly instead reads the daily reports for the 7 days up to yesterday
+(today's daily may still be running),
+.IR enriched\-YYYY\-MM\-DD\-advisories.json
+in the same folder or
+.BR \-\-advisories\-dir ,
+and rolls them up: what was seen on our hosts, then
+what was judged likely or possible, each with its day, then one line
+counting the rest. It runs no model.
+.TP
+.BI \-\-advisories\-dir " DIR"
+Weekly only: the folder holding the dailies'
+.IR enriched\-YYYY\-MM\-DD\-advisories.json .
+.B run\-digest
+passes the state folder, so a dry run, whose enriched file is in its own
+folder, shows the same roll-up as the real weekly. Default: the
+.B \-\-enriched
+file's folder.
+.TP
+.BI \-\-week\-days " N"
+Weekly only: how many days, up to yesterday, FLEET ADVISORIES rolls up,
+1 to 31.
+.B run\-digest
+passes
+.BR WEEKLY_DAYS .
+Default:\~\fB7\fR.
 .TP
 .B \-\-daily
 Daily row limits, subject and heading. The default.
@@ -159,8 +184,9 @@ itself, as the other Go commands do; anything already in the environment
 wins.
 .TP
 .B TRIAGE_ENABLED
-1 shows the FLEET ADVISORIES section on the daily even when advisory triage
-wrote no report, saying so.
+1 shows the FLEET ADVISORIES section even when advisory triage wrote no
+report (the daily) or none in the weekly's window, saying so, and
+has the weekly name the days with no report.
 .TP
 .B FLEET_ORG
 Organisation name in the header and default footer.

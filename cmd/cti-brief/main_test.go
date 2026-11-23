@@ -152,3 +152,35 @@ func TestCountsAreWhatRunDigestRecords(t *testing.T) {
 		t.Errorf("--counts with --subject-only: exit %d", rc)
 	}
 }
+
+// --advisories-dir reads the dailies' reports from another folder (a dry
+// run's enriched file is not in the state folder); --week-days is 1 to 31.
+func TestTheWeeklyAdvisoryFlags(t *testing.T) {
+	state, work := t.TempDir(), t.TempDir()
+	now := time.Date(2026, 11, 23, 7, 0, 0, 0, time.Local)
+	if err := os.WriteFile(filepath.Join(state, "enriched-2026-11-20-advisories.json"), []byte(
+		`{"schema": "cti-advisories/1", "read": 1, "results": [{"subject": "Seen", "sender": "s@x.example",
+		  "verdicts": {"sightings": [{"value": "evil.example", "type": "domain", "hosts_seen_on": 1}], "verdicts": []}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	enriched := filepath.Join(work, "weekly-enriched-2026-11-23.json")
+	if err := os.WriteFile(enriched, []byte(`{"findings": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(work, "w.txt")
+	var so, se bytes.Buffer
+	env := brief.Env{Org: "Security", Warn: func(string) {}}
+	if rc := run([]string{"--weekly", "--advisories-dir", state, "--enriched", enriched, "--out", filepath.Join(work, "w.html"),
+		"--text-out", out}, env, "1", now, &so, &se); rc != 0 {
+		t.Fatalf("exit %d: %s", rc, se.String())
+	}
+	b, _ := os.ReadFile(out)
+	if !strings.Contains(string(b), "SEEN ON OUR HOSTS: evil.example") || !strings.Contains(string(b), "2026-11-20 - from s@x.example") {
+		t.Errorf("the roll-up did not read --advisories-dir:\n%s", b)
+	}
+	for _, n := range []string{"0", "32"} {
+		if rc := run([]string{"--weekly", "--week-days", n, "--enriched", enriched}, env, "1", now, &so, &se); rc != 2 {
+			t.Errorf("--week-days %s: exit %d, want 2", n, rc)
+		}
+	}
+}
