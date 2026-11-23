@@ -217,3 +217,31 @@ func TestAnUnknownRowNeverReachesTheConfirmedBands(t *testing.T) {
 		t.Errorf("unverified %s, present %s, noise %s: an exploited unknown sits mid-scale", unverified, quiet, noise)
 	}
 }
+
+// The agent writes a pipe in a subject as \| (internal/report escape). The
+// digest lists the subject as it was, pipes and all, at the start, middle or
+// end, and the cells after it stay in their columns.
+func TestASubjectKeepsItsPipes(t *testing.T) {
+	report := "# r\n\n## Emails read this run\n\n| CVE? | Received | Subject |\n|---|---|---|\n" +
+		"| yes | 2026-11-21 08:00 | Advisory: Log4j \\| again |\n" +
+		"| no | 2026-11-21 09:00 | \\|lead and trail\\| |\n" +
+		"| yes | 2026-11-21 10:00 | a \\| b \\| c |\n"
+	path := filepath.Join(t.TempDir(), "raw.md")
+	if err := os.WriteFile(path, []byte(report), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := ParseSubjects(path)
+	want := []Subject{
+		{true, "2026-11-21 08:00", "Advisory: Log4j | again"},
+		{false, "2026-11-21 09:00", "|lead and trail|"},
+		{true, "2026-11-21 10:00", "a | b | c"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

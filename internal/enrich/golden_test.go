@@ -4,6 +4,11 @@ package enrich
 // package replaced, run on the same inputs (testdata/sources.json and the two
 // reports). These tests hold the port to them: the same findings, keys,
 // bands, rationale text, products, novelty and counts.
+//
+// One deliberate difference, corrected in golden-rich.json by hand: the
+// Python split the subjects table on escaped pipes too, so it wrote the
+// subject "Advisory: Log4j | again" as "Advisory: Log4j \". See
+// TestASubjectKeepsItsPipes.
 
 import (
 	"bytes"

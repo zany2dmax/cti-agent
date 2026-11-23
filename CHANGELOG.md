@@ -121,6 +121,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **An email subject with a pipe in it is listed whole.** The digest's
+  "Emails read this run" list cut a subject at its first `|`, so
+  "Log4j | again" read "Log4j \". The agent escapes the pipe; the enrich lane
+  now splits that table on unescaped pipes only, as it already did for the
+  findings. The Python lane had the same bug, and the Go port kept it until
+  now so its output matched exactly.
+
 - **Advisory triage no longer reads Qualys scan results.** A WAS or VM scan
   notice is full of host names and IPs, so it passed the threat-intel content
   check, and the reader spent a call on each one to find nothing (four a day

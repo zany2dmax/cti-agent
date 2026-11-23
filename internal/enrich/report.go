@@ -139,8 +139,9 @@ const subjectsHeading = "## Emails read this run"
 // ParseSubjects reads the "Emails read this run" table the agent appends:
 // CVE? | Received | Subject. A report without it gives an empty list.
 //
-// The cells are split on every pipe, escaped or not, as they always were: a
-// subject containing a pipe keeps only the text before it.
+// Cells are split on unescaped pipes only, as in ParseReport: the agent
+// writes a pipe inside a subject as \|. The Python lane split on every
+// pipe, so "Log4j | again" reached the digest as "Log4j \".
 func ParseSubjects(path string) []Subject {
 	out := []Subject{}
 	// #nosec G304 -- the report path is the runner's own argument.
@@ -158,7 +159,11 @@ func ParseSubjects(path string) []Subject {
 		if !strings.HasPrefix(line, "|") || strings.HasPrefix(line, "|---") {
 			continue
 		}
-		cells := strings.Split(strings.Trim(line, "|"), "|")
+		body := line[1:]
+		if strings.HasSuffix(line, "|") && !strings.HasSuffix(line, "\\|") {
+			body = line[1 : len(line)-1]
+		}
+		cells := splitCells(body)
 		for k := range cells {
 			cells[k] = strings.TrimSpace(cells[k])
 		}
