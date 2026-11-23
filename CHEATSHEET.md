@@ -466,7 +466,7 @@ and you have decided the number):
 ```bash
 gh auth switch --user <personal-account>   # the account that owns origin
 git status                                 # clean, on main
-# 1. CHANGELOG: "## Unreleased" -> "## 1.6.7 — YYYY-MM-DD"; stamp line at the
+# 1. CHANGELOG: "## Unreleased" -> "## 1.6.7", dated like the others; stamp line at the
 #    top of this sheet -> "release 1.6.7 (YYYY-MM-DD)". Commit: "Release 1.6.7"
 scripts/release-notes.sh 1.6.7             # 2. the notes the release will get
 git tag -a 1.6.7 -m "Release 1.6.7"        # 3. tag first: ship checks the stamp against it

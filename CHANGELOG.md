@@ -35,6 +35,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **`task cheatsheet:pdf` could not build the cheat sheet.** An em dash in
+  its release steps stopped pdflatex, from 25f3141 on. The line is ASCII now,
+  and `task test` fails on any non-ASCII character in `CHEATSHEET.md` or
+  `docs/*.md`, the files the PDF tasks render, instead of waiting for
+  someone to build a PDF.
+
 ## 2.0-rc2 — 2026-11-23
 
 The second release candidate: 2.0-rc1 and one installer fix. The 2.0-rc1

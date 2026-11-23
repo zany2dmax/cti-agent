@@ -106,5 +106,24 @@ class ArchitectureMatchesTheTree(unittest.TestCase):
         self.assertEqual(missing, [], "fleet-kit/fleet/bin scripts missing from the project layout")
 
 
+
+class PdfSourcesArePlainASCII(unittest.TestCase):
+    """task cheatsheet:pdf and task docs:pdf run pdflatex, which stops on a
+    character outside ASCII. Each task checks first, but only when someone
+    builds a PDF: an em dash sat in CHEATSHEET.md from 25f3141 until
+    2026-11-23, and the PDF could not be built the whole time. This makes
+    `task test` say so the day it goes in."""
+
+    def test_every_pdf_source_is_ascii(self):
+        bad = []
+        for p in [REPO / "CHEATSHEET.md", *sorted((REPO / "docs").glob("*.md"))]:
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+                for c in line:
+                    if ord(c) > 127:
+                        bad.append(f"{p.relative_to(REPO)}:{n}: U+{ord(c):04X} in {line.strip()[:60]!r}")
+                        break
+        self.assertEqual(bad, [], "pdflatex cannot take these; write them in ASCII")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
