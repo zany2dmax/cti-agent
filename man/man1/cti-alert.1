@@ -78,8 +78,10 @@ mail it is allowed to send
 .IP \(bu 2
 .BR run\-appscan (1)
 with
-.B \-\-kind HOLD
-when a scanner credential failed.
+.B "\-\-kind HOLD \-\-finished"
+when a scanner credential failed, and
+.BR run\-appowners (1)
+the same way when it held back an owner's report.
 .IP \(bu 2
 The operator, by hand, to test the alert path.
 .PP
@@ -102,7 +104,10 @@ before anything is sent, so a hand-run test cannot open an incident.
 Amber banner, an
 .B INFO
 line on the board, never high importance: the lane stopped itself on
-purpose.
+purpose. With
+.BR \-\-finished ,
+the lane did not stop: it finished its run and held back only what the
+reason names, and the email says so (banner "items held back").
 .TP
 .B TEST
 Green banner, an
@@ -179,6 +184,14 @@ runs, so a value such as
 can never be read as an option. Both are called by absolute path
 .RB ( /usr/bin ).
 Default:\~empty.
+.TP
+.B \-\-finished
+With
+.BR "\-\-kind HOLD" :
+the lane finished its run and did everything else; only what
+.B \-\-reason
+names was held back. Worded as finished, not as a stop. Any other kind
+with it is a usage error (exit 2).
 .TP
 .BI \-\-kind " KIND"
 The headline word:

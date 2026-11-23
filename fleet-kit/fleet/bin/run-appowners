@@ -219,9 +219,11 @@ fi
 # Never fatal, and HOLD rather than FAILED: the lane did its job.
 if [ -s "$WORK/held.txt" ] || [ -n "$refused" ] || [ -s "$WORK/caveat.txt" ]; then
   n=$(wc -l < "$WORK/held.txt" | tr -d ' ')
-  reason=""
+  # What went out comes first: the run finished, and the reader's first
+  # question is whether the other owners got their reports.
+  reason="$sent report(s) sent to their owners, $failed not sent (tried again on the next run)."
   if [ "$n" -gt 0 ]; then
-    reason="$n application report(s) held back from their owners: $(awk '{printf "%s%s", sep, $0; sep="; "} END {print ""}' "$WORK/held.txt")."
+    reason="$reason $n held back: $(awk '{printf "%s%s", sep, $0; sep="; "} END {print ""}' "$WORK/held.txt"). A held report is not retried; that application's next scan is checked afresh."
   fi
   if [ -s "$WORK/caveat.txt" ]; then
     reason="$reason Sent, but the scan may be incomplete: $(awk -F': ' '{printf "%s%s", sep, $1; sep=", "} END {print ""}' "$WORK/caveat.txt") (Qualys reports Service Errors Detected - check the scan in Qualys)."
@@ -233,7 +235,7 @@ if [ -s "$WORK/held.txt" ] || [ -n "$refused" ] || [ -s "$WORK/caveat.txt" ]; th
   if [ -n "$DRY" ]; then
     log "dry run - would alert the operator"
   elif [ -x "$ALERT" ]; then
-    "$ALERT" --unit cti-agent-appowners.service --kind HOLD "$ALERTMODE" --reason "$reason" \
+    "$ALERT" --unit cti-agent-appowners.service --kind HOLD --finished "$ALERTMODE" --reason "$reason" \
       || log "warn: cti-alert failed - the holds are in this run's journal"
   else
     log "warn: cti-alert not found at $ALERT - not escalated"

@@ -142,6 +142,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **The application-owner hold alert said the lane had stopped when it
+  hadn't.** When one owner's report was held back (22 Nov 2026: a scan that
+  never finished), the email read "CTI fleet on hold … stopped itself on
+  purpose … will resume", although every other report had gone out and the
+  held one is never retried. `cti-alert --finished` (with `--kind HOLD`) now
+  words it as "finished, with items held back". `run-appowners` passes it,
+  and its reason leads with how many reports were sent and not sent, then
+  says a held report isn't retried. `run-appscan`'s failed-login alert passes
+  it too, since that run also finishes and sends.
+
 - **An email subject with a pipe in it is listed whole.** The digest's
   "Emails read this run" list cut a subject at its first `|`, so
   "Log4j | again" read "Log4j \". The agent escapes the pipe; the enrich lane

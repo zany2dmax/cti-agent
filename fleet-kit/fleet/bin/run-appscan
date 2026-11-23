@@ -322,7 +322,7 @@ elif [ -s "$AUTHFAIL" ]; then
     log "dry run - would alert the operator about $n authentication failure(s)"
   elif [ -x "$ALERT" ]; then
     # --to-dev on a test send: the alert goes to you too, not the operator.
-    "$ALERT" --unit cti-agent-appscan.service --kind HOLD "$ALERTMODE" \
+    "$ALERT" --unit cti-agent-appscan.service --kind HOLD --finished "$ALERTMODE" \
       --reason "Qualys WAS authentication failed on $n application(s): $apps. The scan covered only the public surface, so this week's counts are not comparable with last week's. Check the authentication record in Qualys WAS; details in $AUTHFAIL on $(hostname -s)." \
       || log "warn: cti-alert failed - the failure is still recorded in $AUTHFAIL"
   else

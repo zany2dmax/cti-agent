@@ -167,6 +167,38 @@ func TestAHoldAndAnEscalationLeadWithTheirOwnMessage(t *testing.T) {
 	}
 }
 
+// A lane that finished its run and held back one item is not a lane that
+// stopped. The 22 Nov 2026 appowners alert said "on hold", "stopped itself"
+// and "will resume", when every other report had gone out.
+func TestAFinishedHoldSaysTheLaneFinished(t *testing.T) {
+	f := failure{Kind: "HOLD", Finished: true, Unit: "cti-agent-appowners.service", Result: "success",
+		ExitCode: "0", Reason: "3 report(s) sent, 0 not sent. 1 held back: Example Portal"}
+	if got := explain(f); !strings.Contains(got, "finished its run, with items held back: 3 report(s) sent") {
+		t.Errorf("explain: %s", got)
+	}
+	for name, body := range map[string]string{"text": renderText(f), "html": renderHTML(f)} {
+		for _, bad := range []string{"stopped itself", "will resume", "is holding", "on hold"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s says %q:\n%s", name, bad, body)
+			}
+		}
+		if !strings.Contains(body, "did not stop") || !strings.Contains(body, "finished, with items held back") {
+			t.Errorf("%s does not say the lane finished:\n%s", name, body)
+		}
+	}
+	if !strings.Contains(renderHTML(f), "CTI fleet: items held back") {
+		t.Error("html banner")
+	}
+	if lvl, msg := boardLine(f); lvl != "INFO" || !strings.Contains(msg, "finished on") {
+		t.Errorf("board: %s %s", lvl, msg)
+	}
+	// A plain hold keeps its wording.
+	h := failure{Kind: "HOLD", Unit: "cti-agent-checkin.service", Reason: "beat budget used"}
+	if !strings.Contains(renderText(h), "will resume") {
+		t.Error("a plain hold lost its wording")
+	}
+}
+
 // The mailbox cleanup escalates from its own weekly check. Its email said
 // the orchestrator had written it (13 Nov 2026), which sent the operator to
 // the wrong place. Only the check-in unit is the orchestrator's: the guard

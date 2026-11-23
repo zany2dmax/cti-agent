@@ -28,6 +28,8 @@ func explain(f failure) string {
 		// cleanup's never-read mail). Naming the orchestrator here sent the
 		// operator looking at the wrong thing.
 		return capFirst(what) + " needs you to look at something: " + f.Reason
+	case f.heldBack() && f.Reason != "":
+		return fmt.Sprintf("%s finished its run, with items held back: %s", capFirst(what), f.Reason)
 	case f.isHold() && f.Reason != "":
 		return fmt.Sprintf("%s stopped itself on purpose: %s", capFirst(what), f.Reason)
 	case f.isTest():

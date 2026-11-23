@@ -33,6 +33,7 @@ about: Tell the operator a unit failed or the heartbeat needs a person
 runs: effect
 modes: --dry-run --for-real --to-dev
 flag: --dry-run | print what would be sent, send and post nothing
+flag: --finished | with --kind HOLD: the lane finished its run and did everything else; only what --reason names was held back
 flag: --kind STRING | headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator needs a human and nothing is broken. TEST is inferred when the named unit is healthy (default "FAILED")
 flag: --reason STRING | one-line explanation shown above the systemd detail
 flag: --to-dev | send to FLEET_DEV_EMAIL only, subject prefixed [DEV TEST], and post nothing to the board

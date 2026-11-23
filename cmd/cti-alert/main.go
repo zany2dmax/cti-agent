@@ -80,6 +80,12 @@ func main() {
 		"headline word: FAILED for a crash, HOLD for a deliberate stop, ESCALATION when the orchestrator or a lane's own check needs a human and nothing is broken. TEST is inferred when the named unit is healthy")
 	reason := flag.String("reason", "",
 		"one-line explanation shown above the systemd detail")
+	// A lane that finished its run but held some items back (one owner's
+	// report, a scan whose login failed) is not a lane that stopped. Worded
+	// as a stop, the 22 Nov 2026 appowners alert read as if no report had
+	// gone out when every other one had.
+	finished := flag.Bool("finished", false,
+		"with --kind HOLD: the lane finished its run and did everything else; only what --reason names was held back")
 	flag.Parse()
 	// No default: a person, a unit and the heartbeat all say how.
 	if _, msg := cli.Resolve("cti-alert", *dryRun, *forReal, *toDev, true, cli.Words{
@@ -117,6 +123,11 @@ func main() {
 	f := gather(name)
 	f.Kind = strings.ToUpper(*kind)
 	f.Reason = *reason
+	f.Finished = *finished
+	if f.Finished && !f.isHold() {
+		fmt.Fprintln(os.Stderr, "cti-alert: --finished goes with --kind HOLD")
+		os.Exit(2)
+	}
 	if f.isEscalation() {
 		f.Reason = escalationReason(f.Reason)
 	}
@@ -202,6 +213,7 @@ type failure struct {
 	IsDigest  bool   // the digest failing has a consequence the others do not
 	Kind      string // FAILED, HOLD, TEST or ESCALATION - they must not look alike
 	Reason    string // set for HOLD and TEST; empty for a crash, where the journal is the story
+	Finished  bool   // a HOLD where the lane finished its run and held back only some items
 }
 
 func gather(unit string) failure {
@@ -286,6 +298,9 @@ func postToBoard(f failure) bool {
 // "failed (result= exit=)" described a unit that had not failed.
 func boardLine(f failure) (level, msg string) {
 	switch {
+	case f.heldBack():
+		return "INFO", fmt.Sprintf("%s finished on %s at %s, with items held back: %s",
+			f.Unit, f.Host, f.When, f.Reason)
 	case f.isHold():
 		return "INFO", fmt.Sprintf("%s is holding on %s at %s: %s",
 			f.Unit, f.Host, f.When, f.Reason)
@@ -396,6 +411,9 @@ func renderText(f failure) string {
 		consequence = "This is a test. The unit is healthy and nothing failed. " +
 			"Receiving this confirms the alert path works end to end: systemd " +
 			"started the alerter, it read the journal, and Graph delivered the mail."
+	} else if f.heldBack() {
+		verb = "finished, with items held back"
+		consequence = heldBackConsequence
 	} else if f.isHold() {
 		// A hold is the brake working. Saying so plainly is the difference
 		// between an operator who ignores it and one who goes looking for a
@@ -446,6 +464,14 @@ Next steps on the box:
 // explicit HOLD is treated as a failure, so a malformed --kind errs toward
 // alarming rather than reassuring.
 func (f failure) isHold() bool { return f.Kind == "HOLD" }
+
+// heldBack is a HOLD from a lane that did not stop: it finished its run and
+// held back only the items its reason names.
+func (f failure) heldBack() bool { return f.isHold() && f.Finished }
+
+const heldBackConsequence = "Nothing is broken and the lane did not stop. It finished " +
+	"its run and did everything else; only what is named above was held back. " +
+	"The reason says whether that is tried again."
 
 // isTest marks an alert triggered by hand against a healthy unit. Like a hold,
 // it is not a failure - so it must not be red, not be high importance, and not
@@ -575,6 +601,11 @@ func renderHTML(f failure) string {
 		verb = "is healthy - alert path tested"
 		consequence = "<b>This is a test.</b> The unit is healthy and nothing " +
 			"failed. Receiving this confirms the alert path works end to end."
+	} else if f.heldBack() {
+		banner, tone, band = "CTI fleet: items held back", emailkit.Amber, emailkit.Amber.Fg
+		verb = "finished, with items held back"
+		consequence = "<b>Nothing is broken and the lane did not stop.</b>" +
+			html.EscapeString(strings.TrimPrefix(heldBackConsequence, "Nothing is broken and the lane did not stop."))
 	} else if f.isHold() {
 		banner, tone, band = "CTI fleet on hold", emailkit.Amber, emailkit.Amber.Fg
 		verb = "is holding"
