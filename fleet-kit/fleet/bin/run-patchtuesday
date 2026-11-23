@@ -143,7 +143,12 @@ NOMANIFEST=()
 # Arrays below use the ${A[@]+...} guard form: macOS bash 3.2 calls an
 # empty array expansion unbound under set -u. Fedora's bash 5 does not, so the
 # plain form passed on the box and failed only in tests on the Mac.
+# How many of the release's CVEs are present here, for the record below.
+PRESENT_FILE="${JSON%.json}-present"
+MID_FILE="${JSON%.json}-request-id"
+rm -f "$PRESENT_FILE" "$MID_FILE"
 "$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} ${NOMANIFEST[@]+"${NOMANIFEST[@]}"} --out "$HTML" --text-out "$TXT" --json "$JSON" \
+  --present-out "$PRESENT_FILE" \
   || fail "cti-patchtuesday exited non-zero (check outbound 443 to api.msrc.microsoft.com and www.bleepingcomputer.com)"
 [ -s "$HTML" ] || fail "no HTML written to $HTML"
 
@@ -202,7 +207,7 @@ if [ -n "$TODEV" ]; then
   exit 0
 fi
 RESULT=$("$FLEET_CODE/bin/cti-mailer" --html "$HTML" --text "$TXT" \
-           --subject "$SUBJECT" "${DRY:---for-real}") || fail "send failed"
+           --subject "$SUBJECT" --request-id-out "$MID_FILE" "${DRY:---for-real}") || fail "send failed"
 echo "$RESULT"
 
 if [ -z "$DRY" ]; then
@@ -216,16 +221,18 @@ if [ -z "$DRY" ]; then
   "$PT" ${MONTH_ARG[@]+"${MONTH_ARG[@]}"} --mark-sent \
     || say "WARNING: could not mark the manifest sent; the daily digest will keep reporting this release's CVEs"
 
-  MID=$(printf '%s' "$RESULT" | python3 -c \
-    "import json,sys;print(json.load(sys.stdin).get('request_id','unknown'))" \
-    2>/dev/null || echo unknown)
-  PRESENT=$(python3 -c "
-import json
-try:
-    d=json.load(open('$JSON'))
-    print(len(d.get('exposure',{}).get('PresentCVEs') or []))
-except Exception:
-    print(0)")
+  # Both written by the Go commands above. Unreadable is 0 and unknown: the
+  # mail has gone, so the record must not fail.
+  MID=unknown
+  if [ -s "$MID_FILE" ]; then
+    read -r MID <"$MID_FILE" || true
+    case "$MID" in ''|*[!A-Za-z0-9._:-]*) MID=unknown ;; esac
+  fi
+  PRESENT=0
+  if [ -s "$PRESENT_FILE" ]; then
+    read -r PRESENT <"$PRESENT_FILE" || true
+    case "$PRESENT" in ''|*[!0-9]*) PRESENT=0 ;; esac
+  fi
   # Reuse the digests table: same shape, distinct kind, so was-sent works and
   # the counts column carries something meaningful for this lane too.
   "$DB" sent "$TAG" "$PRESENT" 0 0 0 0 "$MID" "$KIND" 2>/dev/null || true

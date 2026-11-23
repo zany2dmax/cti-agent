@@ -56,8 +56,10 @@ fleet_require_mode() {
 #
 # The lock is flock(2) on file descriptor 9, which the runner and everything
 # it starts hold open until they exit, so the kernel releases it on any way
-# out - kill -9 included - and there is no stale lock to clear. python3 takes
-# it because macOS has no flock(1).
+# out - kill -9 included - and there is no stale lock to clear. cti-lock (Go)
+# takes it on the inherited descriptor, beside this file in bin/ when
+# installed, else on PATH; macOS has no flock(1). Missing, the lane does not
+# start: a runner never goes ahead without asking for its lock.
 fleet_lock() {
   local lane="$1" kind="$2" dir rc=0 wait=0 holder
   dir="${FLEET_HOME:?FLEET_HOME is not set}/state/locks"
@@ -69,22 +71,15 @@ fleet_lock() {
     wait="${FLEET_LOCK_WAIT_SECONDS:-600}"
     case "$wait" in ''|*[!0-9]*) wait=600 ;; esac
   fi
-  python3 -I -c '
-import fcntl, os, sys, time
-wait, who = int(sys.argv[1]), sys.argv[2]
-deadline = time.monotonic() + wait
-while True:
-    try:
-        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        break
-    except BlockingIOError:
-        left = deadline - time.monotonic()
-        if left <= 0:
-            sys.exit(75)
-        time.sleep(min(5.0, left))
-os.ftruncate(9, 0)
-os.write(9, (who + "\n").encode())
-' "$wait" "pid $$, $kind run, started $(date '+%F %T')" || rc=$?
+  local locker
+  locker="$(dirname "${BASH_SOURCE[0]}")/../bin/cti-lock"
+  [ -x "$locker" ] || locker="${FLEET_CODE:-}/bin/cti-lock"
+  [ -x "$locker" ] || locker="$(command -v cti-lock || true)"
+  if [ -z "$locker" ] || [ ! -x "$locker" ]; then
+    echo "$lane: cti-lock is not installed, so the lane lock cannot be taken - rerun the installer" >&2
+    exit 1
+  fi
+  "$locker" --fd 9 --wait "$wait" --who "pid $$, $kind run, started $(date '+%F %T')" || rc=$?
   [ "$rc" = 0 ] && return 0
   holder="$(head -n 1 "$dir/$lane.lock" 2>/dev/null || true)"
   if [ "$rc" != 75 ]; then

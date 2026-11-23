@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty-one binaries, and the project layout.
+surprise you, the twenty-two binaries, and the project layout.
 
 ---
 
@@ -377,7 +377,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 
 ---
 
-## The twenty-one binaries
+## The twenty-two binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -400,6 +400,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-enrich` | `run-digest`, between ingest and brief; by hand | The @enrich lane: NVD CVSS and CPE products, FIRST EPSS and the CISA KEV catalog (cached in `state/`), then the Sev5-Sev1 bands with a rationale, the KEV deadline rollup and novelty. Writes the enriched file and `products.json`; reads and writes `memory.db` only through `fleet-db`. Replaced the Python `enrich.py` |
 | `cti-brief` | `run-digest`, after cti-jira and triage; by hand | The @brief lane: renders the enriched file as the daily or weekly digest (HTML, text and subject), with the ticket map, held CVEs, product names and advisory report from beside it. Sends nothing. Replaced the Python `brief.py`, byte for byte |
 | `cti-sanitize` | `fleet-board`, `fleet-journal` and `fleet-db`, inside a beat only | Cleans what the heartbeat reads (Scenario-222): strips control, bidi and zero-width characters, cuts over-long lines and output over 64 KB, logs each change to the journal as `cti-sanitize`. A filter over `internal/sanitize`; a wrapper prints nothing if it is missing |
+| `cti-lock` | every runner, through `fleet_lock` in `share/fleet-mode.sh` | Takes the lane lock: flock(2) on the descriptor the runner holds open, so the kernel releases it however the run ends; writes who holds it. Waits up to the runner's limit (75 when still busy). Replaced a python3 snippet |
 | `cti-audit` | `run-mailbox-cleanup`, daily (`--prune`); `fleet-owners` and scripts (`--action`); by hand (`--check`) | The audit trail's command. The Graph and Jira clients write their own events; this writes one for a script, prunes `audit-DATE.log` files past `AUDIT_RETAIN_DAYS` (120), and checks that the trail is writable and the optional syslog collector (`AUDIT_SYSLOG_ADDR`) reachable |
 | `cti-podprobe` | by hand | Reads one window of Proofpoint on Demand's Log API and prints aggregate counts: events per direction, routes, DMARC and SPF results, the From domains and DKIM of outbound mail. Built to learn the log before the domains lane relied on it; the domains lane reads the gateway through `internal/domains/podgw` |
 
@@ -407,14 +408,14 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty-one are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-two are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty-one into bin/
+task build              # all twenty-two into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -454,6 +455,7 @@ cmd/cti-checkin-verdict/       checks each heartbeat's cti-checkin/1 verdict aga
 cmd/cti-brief/                 the @brief lane: the digest email, from the enriched file
 cmd/cti-enrich/                the @enrich lane: NVD, EPSS and KEV, then the Sev5-Sev1 bands
 cmd/cti-sanitize/              the heartbeat wrappers' output cleaner, a filter over internal/sanitize
+cmd/cti-lock/                  the runners' lane lock (flock on the descriptor fleet-mode.sh opens)
 cmd/cti-audit/                 the audit trail: write an event, prune, check
 cmd/cti-podprobe/              read-only probe of the Proofpoint on Demand log
 cmd/cti-domains/               weekly domains check: registrar, DNS, web, mail records

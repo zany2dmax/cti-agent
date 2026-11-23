@@ -49,6 +49,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/httpx"
 	"github.com/zany2dmax/cti-agent/internal/patchtuesday"
+	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/sanitize"
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
@@ -86,6 +87,9 @@ func main() {
 		"record that this month's synopsis was delivered, and exit. The daily "+
 			"digest holds back a release's CVEs only once this is set, so the "+
 			"runner calls it after the mailer succeeds and never before")
+	presentOut := flag.String("present-out", "",
+		"write how many of the release's CVEs are present here (a whole number) to this file; "+
+			"run-patchtuesday records it with the send")
 	noManifest := flag.Bool("no-manifest", false,
 		"do not write the release manifest. run-patchtuesday --dry-run passes "+
 			"this, because a manifest is a statement about what was sent")
@@ -383,6 +387,15 @@ func main() {
 				"patches": report.Patches, "subject": report.Subject(),
 			})
 			_ = f.Close()
+		}
+	}
+
+	if *presentOut != "" {
+		// What run-patchtuesday records with the send. A file that cannot be
+		// written leaves the runner to record 0, as it did when the JSON
+		// could not be read.
+		if err := writeCount(*presentOut, len(report.Exposure.PresentCVEs)); err != nil {
+			fmt.Fprintf(os.Stderr, "cti-patchtuesday: WARNING: --present-out: %s\n", safelog.Line(err.Error()))
 		}
 	}
 
@@ -728,4 +741,26 @@ func refuseDryRunUndone(args []string, dryRun bool) error {
 		}
 	}
 	return nil
+}
+
+// writeCount replaces path with n and a newline, 0600.
+func writeCount(path string, n int) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := fmt.Fprintf(tmp, "%d\n", n); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }

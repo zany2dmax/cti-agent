@@ -56,7 +56,7 @@ SCENARIOS = HERE / "checkin"
 
 REAL_BIN = ["run-checkin", "checkin-bash-guard", "fleet-trace",
             "fleet-board", "fleet-db"]
-GO_BIN = ["cti-budget", "cti-kev", "cti-checkin-verdict", "cti-sanitize"]
+GO_BIN = ["cti-budget", "cti-kev", "cti-checkin-verdict", "cti-sanitize", "cti-lock"]
 FAKES = ["fleet-journal", "fleet-timers", "cti-alert", "cti-mailer", "cti-jira",
          "cti-appreport", "cti-domains", "cti-vmscan", "cti-patchtuesday", "cti-mailbox"]
 CHECK_TOOLS = ["cti-mailer", "cti-jira", "cti-appreport", "cti-domains", "cti-vmscan"]

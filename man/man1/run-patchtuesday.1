@@ -134,8 +134,14 @@ the release's CVEs to this email. Failure is a warning only: the daily keeps
 reporting them. Then
 .B fleet\-db sent
 .I TAG
-records the send with the number of present CVEs from the structured digest,
-and a board INFO line is posted. Neither of these can fail the run.
+records the send with the number of present CVEs (written by
+.B cti\-patchtuesday \-\-present\-out
+beside the structured digest) and Graph's request id (written by
+.BR "cti\-mailer \-\-request\-id\-out" ),
+and a board INFO line is posted. Neither of these can fail the run: an
+unreadable count is 0 and a missing request id
+.BR unknown .
+The runner runs no Python.
 .PP
 A fatal step prints
 .B FAILED:
@@ -265,8 +271,12 @@ The rendered synopsis. A dry run's are in
 .I reports/patchtuesday\-TAG.json
 The structured digest. Its
 .I exposure.PresentCVEs
-gives the count recorded with
-.BR "fleet\-db sent" .
+is the list whose length is recorded with
+.BR "fleet\-db sent" ;
+.I reports/patchtuesday\-TAG\-present
+holds that count, and
+.I reports/patchtuesday\-TAG\-request\-id
+the send's request id.
 .TP
 .I state/patchtuesday\-YYYY\-MM.json
 The release manifest, written unsent by a run without

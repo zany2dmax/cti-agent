@@ -1,0 +1,94 @@
+.TH CTI-LOCK 1 "2026-11-22" "cti-agent 1.7" "CTI Fleet Manual"
+.SH NAME
+cti-lock \- take a runner's lane lock on a file descriptor it holds open
+.SH SYNOPSIS
+.B cti\-lock
+.BI \-\-fd " N"
+.BI \-\-wait " SECONDS"
+.BI \-\-who " TEXT"
+.SH DESCRIPTION
+.B cti\-lock
+is called by
+.B fleet_lock
+in
+.IR share/fleet\-mode.sh ,
+which every runner that changes something sources. It is not an operator
+command.
+.PP
+The runner opens
+.IR $FLEET_HOME/state/locks/ lane .lock
+on descriptor 9 and keeps it open until it exits;
+.B cti\-lock
+takes flock(2) on that inherited descriptor. The lock belongs to the open
+file, so the kernel releases it however the run ends (kill \-9 included)
+and there is never a stale lock to clear. Once it holds the lock it
+replaces the file's contents with
+.IR TEXT ,
+which another run prints when it finds the lane busy.
+.PP
+Another run's lock is retried every 5 seconds until
+.I SECONDS
+have passed; 0 refuses at once (a dry run never waits). What a runner does
+then (a real run may go ahead beside a rehearsal, with a warning) is
+.BR fleet_lock 's
+decision, not this tool's.
+.PP
+It replaced a python3 snippet that was there only because macOS has no
+flock(1). The runner looks for it beside
+.I fleet\-mode.sh
+in
+.IR bin/ ,
+then in
+.IR $FLEET_CODE/bin ,
+then on
+.BR PATH ;
+when it is missing the runner does not start.
+.SH OPTIONS
+.TP
+.BI \-\-fd " N"
+The descriptor to lock, 3 or more. The runners use 9.
+.TP
+.BI \-\-wait " SECONDS"
+How long to wait for another run. Default 0.
+.TP
+.BI \-\-who " TEXT"
+What to write in the lock file once it is held.
+.SH EXIT STATUS
+.TP
+.B 0
+The lock is held.
+.TP
+.B 75
+Another run still held it after
+.I SECONDS
+seconds.
+.TP
+.B 1
+The descriptor could not be locked or written.
+.TP
+.B 2
+Bad arguments.
+.SH EXAMPLES
+See who holds the daily digest's lock, as a busy run reports it:
+.PP
+.EX
+sudo cat /var/lib/cti\-agent/state/locks/digest\-daily.lock
+.EE
+.PP
+What fleet_lock runs for a real run:
+.PP
+.EX
+exec 9>>"$FLEET_HOME/state/locks/digest\-daily.lock"
+cti\-lock \-\-fd 9 \-\-wait 600 \-\-who "pid $$, real run, started $(date '+%F %T')"
+.EE
+.SH FILES
+.TP
+.I /opt/cti\-agent/bin/cti\-lock
+The helper, root-owned.
+.TP
+.I /var/lib/cti\-agent/state/locks/
+One lock file per lane, 0600.
+.SH SEE ALSO
+.BR run\-digest (1),
+.BR run\-patchtuesday (1),
+.BR cti\-agent (1)

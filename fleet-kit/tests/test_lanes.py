@@ -34,6 +34,21 @@ KIT = pathlib.Path(__file__).resolve().parents[1]
 LANES = KIT / "fleet" / "lanes"
 
 
+def _go_helpers_on_path():
+    """cti-lock, which every runner's fleet_lock calls, built from this
+    checkout and put on PATH: in a test the runners' bin/ holds stubs."""
+    d = tempfile.mkdtemp(prefix="cti-test-bin-")
+    exe = os.path.join(d, "cti-lock")
+    subprocess.run(["go", "build", "-o", exe, "./cmd/cti-lock"],
+                   cwd=KIT.parent, check=True, capture_output=True)
+    os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+    return exe
+
+
+# A test that sets its own PATH copies this into its runner's bin/ instead.
+CTI_LOCK = _go_helpers_on_path()
+
+
 @contextlib.contextmanager
 def quiet():
     """Lanes log to stdout/stderr by design. Swallow it during tests so a real
@@ -3682,10 +3697,22 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"fleet-db sent {day} 0 0 0 0 0 unknown daily", calls)
 
-    def test_run_digest_runs_no_python(self):
-        src = (KIT / "fleet" / "bin" / "run-digest").read_text(encoding="utf-8")
-        code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
-        self.assertEqual([l for l in code if "python" in l], [])
+    # run-checkin still runs Python in three heredocs (the settings check, the
+    # Claude config merge, the beat's counter file). Listed here so the gap
+    # is named; remove it from this set when they move.
+    PYTHON_STILL_IN = {"run-checkin"}
+
+    def test_no_runner_or_shared_library_runs_python(self):
+        """The runners call the fleet's commands; Python is for fleet-db,
+        fleet-owners and the hand-run tools. Inline python3 (-c or a heredoc)
+        in a runner is logic hidden in shell."""
+        files = sorted((KIT / "fleet" / "bin").glob("run-*")) + sorted((KIT / "fleet" / "share").glob("*.sh"))
+        for f in files:
+            if f.name in self.PYTHON_STILL_IN:
+                continue
+            code = [l for l in f.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")]
+            with self.subTest(file=f.name):
+                self.assertEqual([l for l in code if "python" in l], [])
 
     def test_digest_real_run_keeps_the_real_files_log_and_db(self):
         self.agent_logs_its_env()
@@ -3871,6 +3898,30 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         build = [c for c in calls if c.startswith("cti-patchtuesday ") and "--out" in c][0]
         self.assertIn(f"--out {self.home}/reports/patchtuesday-2026-October.html", build)
+
+    def test_patchtuesday_records_the_present_count_and_request_id(self):
+        """run-patchtuesday reads both from files the Go commands write
+        (cti-patchtuesday --present-out, cti-mailer --request-id-out), not
+        from their JSON with Python."""
+        pt = self.code / "bin" / "cti-patchtuesday"
+        pt.write_text('#!/usr/bin/env bash\necho "cti-patchtuesday $*" >> "$STUB_LOG"\n'
+                      'case "$*" in *--subject-only*) echo "Microsoft Patch Tuesday for October 2026"; exit 0;; esac\n'
+                      'while [ $# -gt 0 ]; do case "$1" in\n'
+                      '  --out|--text-out|--json) echo x > "$2";;\n'
+                      '  --present-out) echo 7 > "$2";;\n'
+                      'esac; shift; done\n')
+        pt.chmod(0o755)
+        mailer = self.code / "bin" / "cti-mailer"
+        mailer.write_text('#!/usr/bin/env bash\necho "cti-mailer $*" >> "$STUB_LOG"\n'
+                          'while [ $# -gt 0 ]; do [ "$1" = --request-id-out ] && echo "req-77" > "$2"; shift; done\n'
+                          'echo \'{"sent": true}\'\n')
+        mailer.chmod(0o755)
+        r, calls = self.run_lane("run-patchtuesday", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        sent = [c for c in calls if c.startswith("fleet-db sent ")]
+        self.assertEqual(len(sent), 1, calls)
+        self.assertIn(" 7 0 0 0 0 req-77 ", sent[0] + " ")
+        self.assertIn("done - 7 CVE(s) present", r.stdout)
 
     def test_appowners_rehearsal_works_in_its_own_directory(self):
         old = self.plant("state/appowners-2026-01-01T0000/report.html")
@@ -4096,6 +4147,7 @@ class SupplierRunner(unittest.TestCase):
         (self.code / "agents" / "supplier").mkdir(parents=True)
         shutil.copy(KIT / "fleet" / "share" / "fleet-mode.sh", self.code / "share")
         shutil.copy(KIT / "fleet" / "share" / "model-lane.sh", self.code / "share")
+        shutil.copy(CTI_LOCK, self.code / "bin")
         (self.code / "agents" / "supplier" / "CLAUDE.md").write_text("STANDING INSTRUCTIONS")
         self.home = self.tmp / "home"
         self.home.mkdir()

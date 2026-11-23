@@ -271,10 +271,12 @@ command: cti-patchtuesday
 about: Build, save and mark the monthly Patch Tuesday synopsis
 runs: local
 risk: --mark-sent writes
+risk: --present-out writes
 flag: --drop-dir STRING | folder holding saved copies of the two articles (a file named *qualys* and one named *bleeping*, .html or .txt), used instead of fetching; default $FLEET_HOME/inbox/patchtuesday/YYYY-MM
 flag: --dry-run | print the text version to stdout, write nothing
 flag: --explain STRING | print every place a CVE was found on the source pages, and whether anything ties it to a Microsoft product, then exit
 flag: --json STRING | write the structured digest here, for inspection
+flag: --present-out STRING | write how many of the release's CVEs are present here (a whole number) to this file; run-patchtuesday records it with the send
 flag: --mark-sent | record that this month's synopsis was delivered, and exit. The daily digest holds back a release's CVEs only once this is set, so the runner calls it after the mailer succeeds and never before
 flag: --max-rows INT | cap the present-CVE table (default 25). The full list is always in --json
 flag: --month STRING | YYYY-MM to report on; default is the most recent release. Use this to replay a past month and check the lane against an email you already sent

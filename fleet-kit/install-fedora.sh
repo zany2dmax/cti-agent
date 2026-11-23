@@ -887,6 +887,13 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-checkin-verdict"
   ok "built $CODE_DIR/bin/cti-checkin-verdict"
 
+  # The runners' lane lock: share/fleet-mode.sh's fleet_lock calls it, and a
+  # runner without it does not start. Built first of the helpers so a timer
+  # that fires during the build finds it.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-lock" ./cmd/cti-lock )
+  chmod 0755 "$CODE_DIR/bin/cti-lock"
+  ok "built $CODE_DIR/bin/cti-lock"
+
   # The heartbeat's output cleaner (Scenario-222). fleet-board, fleet-journal
   # and fleet-db pipe what a beat reads through it, and print nothing if it
   # is missing, so a beat without it reads no board, journal or memory.
@@ -1422,7 +1429,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief"; do
+         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 

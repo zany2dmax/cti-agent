@@ -168,6 +168,14 @@ every detecting QID (the full list, not capped by
 and the subject including the exposure counts. It carries host names.
 Not written with
 .BR \-\-dry\-run .
+.TP
+.BI \-\-present\-out " FILE"
+Write how many of the release's CVEs are present here, a whole number and a
+newline, to
+.IR FILE ,
+0600, replacing it.
+.BR run\-patchtuesday (1)
+records it with the send. A file that cannot be written is a warning.
 Refused, exit 1, when
 .I FILE
 is the release manifest

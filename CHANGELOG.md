@@ -41,8 +41,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
   SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
-  the lane not yet ported (`scout.py`), and for a few inline reads left in
-  `run-patchtuesday` and `fleet-mode.sh`. Four moves so far; what each
+  the lane not yet ported (`scout.py`), and for three inline heredocs left in
+  `run-checkin`. Four moves so far; what each
   replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
@@ -66,6 +66,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
     A count that can't be read is still recorded as 0, and a missing request
     id as `unknown`. A test fails if Python comes back into the runner.
+  - **`run-patchtuesday` and `fleet-mode.sh` run no Python either.**
+    - The present count comes from **`cti-patchtuesday --present-out FILE`**,
+      and the request id from `cti-mailer --request-id-out`.
+    - The lane lock is taken by **`cti-lock`** (Go): flock(2) on the
+      descriptor the runner holds open, as the python3 snippet did. A runner
+      that can't find it does not start; the installer builds it first.
+    - A test fails if any runner or shared shell file other than
+      `run-checkin` (named as the known gap) runs Python.
 
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code

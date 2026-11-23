@@ -20,6 +20,7 @@ NOT_A_COMMAND = {
     "cti-agent",           # cmd/cti-agent: the original ingest binary, not installed
     "checkin-bash-guard",  # the heartbeat's PreToolUse hook, run by Claude Code
     "cti-sanitize",        # the heartbeat wrappers' output cleaner, a filter not a command
+    "cti-lock",            # the runners' lane lock, called by fleet-mode.sh, not a command
 }
 
 GO_FLAG = re.compile(
