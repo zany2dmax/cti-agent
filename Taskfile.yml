@@ -293,6 +293,7 @@ tasks:
         fi
         files="fleet-kit/fleet/lanes fleet-kit/tests"
         for f in fleet-kit/fleet/bin/*; do
+          [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then files="$files $f"; fi
         done
         # shellcheck disable=SC2086
@@ -316,6 +317,7 @@ tasks:
         fi
         files="fleet-kit/fleet/lanes"
         for f in fleet-kit/fleet/bin/*; do
+          [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then files="$files $f"; fi
         done
         # shellcheck disable=SC2086
@@ -598,6 +600,7 @@ tasks:
         # had no .py name and was not in a hand-written list) is parsed too.
         pyfiles="$(ls fleet-kit/fleet/lanes/*.py)"
         for f in fleet-kit/fleet/bin/*; do
+          [ -f "$f" ] || continue  # __pycache__ and other directories
           if head -1 "$f" | grep -q python; then pyfiles="$pyfiles $f"; fi
         done
         for f in $pyfiles; do

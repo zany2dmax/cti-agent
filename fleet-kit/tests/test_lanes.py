@@ -9,7 +9,6 @@ offline and deterministically. What they cover is the logic that decides what a
 human sees - priority assignment, report parsing and digest rendering. The
 mailer's gate is Go now (internal/mailer, cmd/cti-mailer) and tested there.
 """
-import base64
 import contextlib
 import datetime
 import fcntl
