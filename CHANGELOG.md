@@ -79,8 +79,9 @@ shows every needed credential stored.
 
 ### Added
 
-- **The 1.7 brochure and release announcement are in the repo**, as
-  `docs/fleet-brochure-1.7.md` and `docs/release-1.7-announcement.md`.
+- **The 1.7 and 2.0-rc1 brochures and release announcements are in the
+  repo**: `docs/fleet-brochure-1.7.md`, `docs/release-1.7-announcement.md`,
+  `docs/fleet-brochure-2.0-rc1.md` and `docs/release-2.0-rc1-announcement.md`.
   `task docs:pdf` renders each Markdown file in `docs/` to a PDF beside it,
   with the same pandoc toolchain and preamble as `task cheatsheet:pdf`. The
   PDFs are generated and gitignored.
@@ -205,8 +206,7 @@ shows every needed credential stored.
     would use `$NAME` from a lane file its lane never loads.
   - **Units and runners:** each unit loads core and its own file (the check-in
     loads all), through generated `EnvironmentFile=` lines and
-    `FLEET_ENV_FILES`. Runners, `fleetenv.Load` and `mailer.py` read the same
-    list.
+    `FLEET_ENV_FILES`. Runners and `fleetenv.Load` read the same list.
   - **Hand runs** of a runner load exactly its unit's files. Other hand runs
     load them all.
   - **Placement:** each setting's file is generated into `settings.manifest`
