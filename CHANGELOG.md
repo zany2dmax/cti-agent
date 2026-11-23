@@ -41,8 +41,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
   SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, for
-  the lane not yet ported (`scout.py`), and for the beat's Bash guard and
-  trace (`checkin-bash-guard`, `fleet-trace`). No runner runs Python. Four moves so far; what each
+  and the lane not yet ported (`scout.py`). No runner, and nothing the
+  heartbeat runs, is Python. Four moves so far; what each
   replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
@@ -81,7 +81,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     nested config files and counter files. The one change: a counter file
     whose `tripped` isn't a list is reported as unreadable, instead of being
     read character by character. A beat without the helper doesn't start.
-    (checkin-bash-guard itself is still a Python script.)
+  - **`checkin-bash-guard` and `fleet-trace` are Go**, under the same names,
+    so `checkin-settings.json`, run-checkin, run-supplier and model-lane.sh
+    are unchanged.
+    - **The guard** gives the same verdict as the Python on every one of 279
+      calls (every granted command with good and bad arguments, every syntax
+      character in and out of each quote, odd hook input) and on 9 per-beat
+      counter sequences. It starts in milliseconds on each of the beat's
+      Bash calls.
+    - **fleet-trace** writes byte-identical traces, so the `--max-mb` cut
+      lands on the same line and the content hashes match. It also matches
+      the Python's journal timeline, plain text, `show`, `list`, `prune` and
+      every usage error. That depends on `internal/pyjson`, which keeps JSON
+      key order and writes it as Python's `json.dumps` did.
+    - **One change:** where the Python `show` crashed with a traceback on a
+      malformed event, Go stops at the same line with a message.
+    - The installer builds both over the old scripts.
 
 - **Every standard location is named.**
   - **Preflight:** `install-fedora.sh` (and so `cti-agent-update`) prints code

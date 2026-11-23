@@ -887,6 +887,17 @@ if [ "$MODE" != dryrun ]; then
   chmod 0755 "$CODE_DIR/bin/cti-checkin-verdict"
   ok "built $CODE_DIR/bin/cti-checkin-verdict"
 
+  # The heartbeat's Bash guard (the PreToolUse hook checkin-settings.json
+  # names at this path) and its trace recorder, Go after 1.7.2; the Python
+  # scripts of the same names are replaced in place. run-checkin refuses a
+  # beat whose guard does not refuse a redirect.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/checkin-bash-guard" ./cmd/checkin-bash-guard )
+  chmod 0755 "$CODE_DIR/bin/checkin-bash-guard"
+  ok "built $CODE_DIR/bin/checkin-bash-guard"
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/fleet-trace" ./cmd/fleet-trace )
+  chmod 0755 "$CODE_DIR/bin/fleet-trace"
+  ok "built $CODE_DIR/bin/fleet-trace"
+
   # The runners' lane lock: share/fleet-mode.sh's fleet_lock calls it, and a
   # runner without it does not start. Built first of the helpers so a timer
   # that fires during the build finds it.
@@ -1436,7 +1447,8 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock" "$CODE_DIR/bin/cti-checkin-check"; do
+         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief" "$CODE_DIR/bin/cti-lock" "$CODE_DIR/bin/cti-checkin-check" \
+         "$CODE_DIR/bin/checkin-bash-guard" "$CODE_DIR/bin/fleet-trace"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 

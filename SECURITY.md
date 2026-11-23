@@ -970,7 +970,7 @@ and `/usr/bin/journalctl` by absolute path, with the unit after `--`.
 `fleet-timers > state/budget.json`, every grant would be an arbitrary file write
 as the service account, and `cmd $(other)` would run something never granted.
 Whether Claude Code's own matcher refuses each of those is its business; the
-fleet no longer depends on it. `checkin-bash-guard` (`python3 -I`) is a
+fleet no longer depends on it. `checkin-bash-guard` (Go, `cmd/checkin-bash-guard`) is a
 PreToolUse hook on Bash in the root-owned settings file, and exits 2 on any
 command containing `<`, `>`, `|`, `;`, `&`, a backtick, a newline or CR, and,
 outside single quotes, `$` (any expansion), `*`, `?`, `[` or `~`, or starting
@@ -982,7 +982,7 @@ fails closed. `$` is refused even as plain `$NAME`, because the beat's
 environment carries the `fleet.env` secrets, so `$CLIENT_SECRET` could reach the
 board or a `cti-alert` mail. Single-quoted text is literal, so `'cti-agent-*'`
 is fine; the beat types absolute paths, never `$FLEET_CODE`. A hook whose
-command is missing fails open, and so does a guard whose python is missing, so
+command is missing fails open, and so does a guard that is broken, so
 `run-checkin` refuses to start on Linux if the guard file is missing, if the
 settings do not parse to `disableAllHooks: false` with a Bash PreToolUse command
 hook at `$FLEET_CODE/bin/checkin-bash-guard`, or if piping a redirect payload

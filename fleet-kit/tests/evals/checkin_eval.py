@@ -6,8 +6,8 @@ Each scenario in checkin/<name>.json describes a fleet - board lines, memory
 rows, journal output, timers, what each --check prints - and what the beat
 must and should do about it. For every run this builds a throwaway fleet:
 
-  FLEET_CODE  the REAL run-checkin, checkin-bash-guard, fleet-trace,
-              fleet-board and fleet-db, the real cti-budget, cti-kev and
+  FLEET_CODE  the REAL run-checkin, fleet-board and fleet-db, and
+              checkin-bash-guard, fleet-trace, cti-budget, cti-kev and
               cti-sanitize built from this checkout, and recording FAKES for
               everything that would touch systemd, Graph or Qualys
               (fleet-journal, fleet-timers, cti-alert, the --check tools)
@@ -54,10 +54,9 @@ REPO = HERE.parents[2]
 FLEET = REPO / "fleet-kit" / "fleet"
 SCENARIOS = HERE / "checkin"
 
-REAL_BIN = ["run-checkin", "checkin-bash-guard", "fleet-trace",
-            "fleet-board", "fleet-db"]
+REAL_BIN = ["run-checkin", "fleet-board", "fleet-db"]
 GO_BIN = ["cti-budget", "cti-kev", "cti-checkin-verdict", "cti-sanitize", "cti-lock",
-          "cti-checkin-check"]
+          "cti-checkin-check", "checkin-bash-guard", "fleet-trace"]
 FAKES = ["fleet-journal", "fleet-timers", "cti-alert", "cti-mailer", "cti-jira",
          "cti-appreport", "cti-domains", "cti-vmscan", "cti-patchtuesday", "cti-mailbox"]
 CHECK_TOOLS = ["cti-mailer", "cti-jira", "cti-appreport", "cti-domains", "cti-vmscan"]

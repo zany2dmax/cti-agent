@@ -199,7 +199,8 @@ def scan(kept=None):
         read_rx = re.compile(r'"' + re.escape(k) + r'"|\$\{?' + re.escape(k) + r'(?![A-Za-z0-9_])')
         reading_files = set()
         for i, (name, is_go, text) in enumerate(srcs):
-            if (secret and name in NAMES_SECRETS_ONLY) or not word.search(text):
+            # A Go source is keyed by its package path (.../cmd/checkin-bash-guard).
+            if (secret and name.rsplit("/", 1)[-1] in NAMES_SECRETS_ONLY) or not word.search(text):
                 continue
             if read_rx.search(text):
                 reading_files.add(i)

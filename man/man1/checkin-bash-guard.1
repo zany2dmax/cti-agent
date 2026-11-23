@@ -17,10 +17,12 @@ and installed root-owned in
 .IR $FLEET_CODE/bin ,
 where
 .BR run\-checkin (1)
-checks it with the rest of the code. It is a Python 3 script run with
-.BR "python3 \-I" ,
-so nothing in the working directory, the environment or the service account's
-site-packages can load code into it.
+checks it with the rest of the code. It is a Go binary, built by the
+installer from
+.IR cmd/checkin\-bash\-guard ,
+so nothing in the working directory or the environment can load code into
+it. It replaced a Python script of the same name, verdict for verdict: the
+Go tests hold it to the Python's answers on several hundred calls.
 .PP
 The heartbeat's tool grant is a list of prefix rules such as
 .BR "$FLEET_CODE/bin/fleet\-timers:*" .
@@ -157,8 +159,8 @@ if the guard file is missing, if this file does not parse to
 .B disableAllHooks
 false with a Bash PreToolUse command hook at
 .IR $FLEET_CODE/bin/checkin\-bash\-guard ,
-or if piping a redirect payload through the guard does not exit 2 (a missing
-python would otherwise fail open).
+or if piping a redirect payload through the guard does not exit 2 (a guard
+that is missing or broken would otherwise fail open).
 .SH EXAMPLES
 A blocked call, as the orchestrator would see it in the beat's log:
 .PP

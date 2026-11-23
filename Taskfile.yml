@@ -688,6 +688,8 @@ tasks:
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-sanitize ./cmd/cti-sanitize
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-lock ./cmd/cti-lock
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-checkin-check ./cmd/cti-checkin-check
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/checkin-bash-guard ./cmd/checkin-bash-guard
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/fleet-trace ./cmd/fleet-trace
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-enrich ./cmd/cti-enrich
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-brief ./cmd/cti-brief
       - go build -ldflags "{{.LDFLAGS}}" -o bin/cti-podprobe ./cmd/cti-podprobe

@@ -166,7 +166,7 @@ if [ "$FLEET_OS" != "macos" ]; then
     | "$FLEET_CODE/bin/checkin-bash-guard" >/dev/null 2>&1 || guard_rc=$?
   if [ "$guard_rc" -ne 2 ]; then
     echo "run-checkin: REFUSING to start: checkin-bash-guard let a redirect" >&2
-    echo "  through (exit $guard_rc, want 2). Is the interpreter on its first line installed?" >&2
+    echo "  through (exit $guard_rc, want 2). Rerun the installer, which builds it." >&2
     exit 1
   fi
 else

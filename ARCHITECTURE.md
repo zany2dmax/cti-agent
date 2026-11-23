@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty-three binaries, and the project layout.
+surprise you, the twenty-five binaries, and the project layout.
 
 ---
 
@@ -377,7 +377,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 
 ---
 
-## The twenty-three binaries
+## The twenty-five binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -398,6 +398,8 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-falcon` | by hand | The CrowdStrike Falcon API client's own command. `--check` makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts), prints counts and revokes its token. `--find-app NAME` and `--new-apps DAYS` read Falcon Discover: installed applications with host, version and platform counts, and applications first seen in the window (with host type, exposure, criticality and Falcon's suspicious flag). Never prints a host name or ID. Follows no redirects, and only to a published Falcon API host. `cti-triage` uses the same client (`internal/falcon`) |
 | `cti-checkin-verdict` | `run-checkin`, after each beat | Checks the `cti-checkin/1` verdict the beat ends with: strict parsing, then against the counts `checkin-bash-guard` kept (alerts, board and memory writes), which the model cannot change. Saves it in `state/verdicts/`; a missing, invalid or contradicted verdict is one INFO board line a day for each kind |
 | `cti-checkin-check` | `run-checkin`, around each beat | The runner's file checks: the beat's settings run checkin-bash-guard as the Bash hook with hooks on (else no beat), no Claude Code config file sets a risky key (steering audit), and which limits the guard enforced (trips). Replaced three python3 heredocs |
+| `checkin-bash-guard` | Claude Code, before every Bash call a beat makes (PreToolUse hook) | Refuses shell syntax, holds each granted command to its argument table, and counts the beat's calls against its limits (PrimeSec 39260, Scenarios 223 and 224). Exit 2 blocks the call; any failure blocks it too. Replaced the Python script of the same name |
+| `fleet-trace` | `run-checkin` (tee), `run-supplier` (unwrap), by hand (show, list) | Keeps each beat's trace (allowlisted, untrusted content replaced by size and hash), prints its timeline to the journal, writes the plain text cti-budget reads, records model cost. Replaced the Python script of the same name, writing byte-identical traces |
 | `cti-enrich` | `run-digest`, between ingest and brief; by hand | The @enrich lane: NVD CVSS and CPE products, FIRST EPSS and the CISA KEV catalog (cached in `state/`), then the Sev5-Sev1 bands with a rationale, the KEV deadline rollup and novelty. Writes the enriched file and `products.json`; reads and writes `memory.db` only through `fleet-db`. Replaced the Python `enrich.py` |
 | `cti-brief` | `run-digest`, after cti-jira and triage; by hand | The @brief lane: renders the enriched file as the daily or weekly digest (HTML, text and subject), with the ticket map, held CVEs, product names and advisory report from beside it. Sends nothing. Replaced the Python `brief.py`, byte for byte |
 | `cti-sanitize` | `fleet-board`, `fleet-journal` and `fleet-db`, inside a beat only | Cleans what the heartbeat reads (Scenario-222): strips control, bidi and zero-width characters, cuts over-long lines and output over 64 KB, logs each change to the journal as `cti-sanitize`. A filter over `internal/sanitize`; a wrapper prints nothing if it is missing |
@@ -409,14 +411,14 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty-three are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-five are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty-three into bin/
+task build              # all twenty-five into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -454,6 +456,8 @@ cmd/cti-triage/                advisory triage: reader, Falcon lookups, judge, F
 cmd/cti-falcon/                the CrowdStrike Falcon client's check, and app inventory from Discover
 cmd/cti-checkin-verdict/       checks each heartbeat's cti-checkin/1 verdict against the guard's counts
 cmd/cti-checkin-check/         run-checkin's file checks: guard wired, steering audit, trips
+cmd/checkin-bash-guard/        the heartbeat's Bash hook: syntax, argument table, per-beat limits
+cmd/fleet-trace/               beat traces, the journal timeline, model cost
 cmd/cti-brief/                 the @brief lane: the digest email, from the enriched file
 cmd/cti-enrich/                the @enrich lane: NVD, EPSS and KEV, then the Sev5-Sev1 bands
 cmd/cti-sanitize/              the heartbeat wrappers' output cleaner, a filter over internal/sanitize
@@ -488,6 +492,7 @@ internal/mailer/               per-lane recipient resolution and allowlist refer
 internal/budget/               rolling-window and daily ceilings, backoff
 internal/enrich/               NVD, EPSS and KEV clients and caches, the Sev5-Sev1 scoring, product names
 internal/pyfmt/                values written as the Python lanes wrote them (10.0, None, repr), so the Go ports match
+internal/pyjson/               JSON with its key order kept, written as Python's json.dumps did (fleet-trace)
 internal/kev/                  deadline bands, present-only filtering
 internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest

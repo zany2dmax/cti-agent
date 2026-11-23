@@ -84,6 +84,13 @@ replace every control character, ANSI escape and bidirectional override with
 .B ?
 before printing, so text the beat read cannot rewrite what the operator's
 terminal shows.
+.PP
+.B fleet\-trace
+is a Go binary, built by the installer from
+.IR cmd/fleet\-trace .
+It replaced a Python script of the same name and writes the same trace
+files byte for byte (the same lines, sizes and content hashes), so traces
+from before and after the change read alike.
 .SH COMMANDS
 .TP
 .BR show " [\fIFILE\fR | " \-\-last "] [" \-\-full ]

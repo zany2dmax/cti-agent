@@ -130,7 +130,7 @@ class TestCommandManifest(unittest.TestCase):
             "fleet-board": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-board",
             "fleet-db": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-db",
             "fleet-owners": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-owners",
-            "fleet-trace": ROOT / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
+            "fleet-trace": ROOT / "cmd" / "fleet-trace" / "main.go",
             "cti-budget": ROOT / "cmd" / "cti-budget" / "main.go",
         }
         for name, path in files.items():

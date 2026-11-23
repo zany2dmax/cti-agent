@@ -37,15 +37,17 @@ def _go_helpers_on_path():
     """cti-lock, which every runner's fleet_lock calls, built from this
     checkout and put on PATH: in a test the runners' bin/ holds stubs."""
     d = tempfile.mkdtemp(prefix="cti-test-bin-")
-    for name in ("cti-lock", "cti-checkin-check"):
+    names = ("cti-lock", "cti-checkin-check", "checkin-bash-guard", "fleet-trace")
+    for name in names:
         subprocess.run(["go", "build", "-o", os.path.join(d, name), f"./cmd/{name}"],
                        cwd=KIT.parent, check=True, capture_output=True)
     os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-    return os.path.join(d, "cti-lock"), os.path.join(d, "cti-checkin-check")
+    return tuple(pathlib.Path(d) / n for n in names)
 
 
 # A test that sets its own PATH copies these into its runner's bin/ instead.
-CTI_LOCK, CTI_CHECKIN_CHECK = _go_helpers_on_path()
+# The guard and fleet-trace are the ones the box runs (cmd/), built here.
+CTI_LOCK, CTI_CHECKIN_CHECK, GUARD_BIN, FLEET_TRACE_BIN = _go_helpers_on_path()
 
 
 @contextlib.contextmanager
@@ -1277,8 +1279,7 @@ class TestFileShape(unittest.TestCase):
         # The real checks (settings, steering, trips), built from this checkout.
         shutil.copy(CTI_CHECKIN_CHECK, code / "bin" / "cti-checkin-check")
         if trace:
-            shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace",
-                        code / "bin" / "fleet-trace")
+            shutil.copy(FLEET_TRACE_BIN, code / "bin" / "fleet-trace")
         if verdict is not None:
             (code / "bin" / "cti-checkin-verdict").write_text(
                 f'#!/bin/sh\necho "cti-checkin-verdict $*" >> "{ran}"\n{verdict}')
@@ -1600,9 +1601,8 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertFalse(any("fleet-trace" in r for r in rules), rules)
 
     def _fleet_trace(self, home, *args, stdin=""):
-        root = pathlib.Path(__file__).resolve().parents[2]
         return subprocess.run(
-            [sys.executable, str(root / "fleet-kit" / "fleet" / "bin" / "fleet-trace"), *args],
+            [str(FLEET_TRACE_BIN), *args],
             input=stdin, capture_output=True, text=True, check=False,
             env={"PATH": "/usr/bin:/bin", "FLEET_HOME": str(home)})
 
@@ -1903,11 +1903,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 self.assertIn("plain English", text)
         m = re.search(r'--reason "([^"<>]*If you do nothing[^"<>]*)"', skill)
         self.assertIsNotNone(m, "the skill shows an example escalation that says what happens if nothing is done")
-        guard = root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
+        guard = GUARD_BIN
         cmd = ('/opt/cti-agent/bin/cti-alert --unit cti-agent-checkin.service --for-real '
                '--kind ESCALATION --reason "%s"' % m.group(1))
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
-        r = subprocess.run([sys.executable, "-I", str(guard)], input=payload,
+        r = subprocess.run([str(guard)], input=payload,
                            capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 0, r.stderr)
 
@@ -1916,13 +1916,11 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         hook lets through one granted command with plain arguments and
         blocks (exit 2) redirection, pipes, chaining, substitution and line
         breaks - and anything it cannot parse."""
-        root = pathlib.Path(__file__).resolve().parents[2]
-        guard = root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
-        self.assertEqual(guard.read_text(encoding="utf-8").split("\n")[0], "#!/usr/bin/python3 -I")
+        guard = GUARD_BIN  # cmd/checkin-bash-guard, built from this checkout
 
         def run(payload):
             data = payload if isinstance(payload, str) else json.dumps(payload)
-            return subprocess.run([sys.executable, "-I", str(guard)], input=data,
+            return subprocess.run([str(guard)], input=data,
                                   capture_output=True, text=True, check=False)
 
         def bash(cmd):
@@ -2009,14 +2007,13 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
 
 
     def _guard(self):
-        root = pathlib.Path(__file__).resolve().parents[2]
-        return root / "fleet-kit" / "fleet" / "bin" / "checkin-bash-guard"
+        return GUARD_BIN
 
     def _run_guard(self, cmd, env=None):
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
         e = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
         e.update(env or {})
-        return subprocess.run([sys.executable, "-I", str(self._guard())], input=payload,
+        return subprocess.run([str(self._guard())], input=payload,
                               capture_output=True, text=True, check=False, env=e)
 
     def test_the_guard_holds_each_granted_command_to_its_arguments(self):
@@ -2131,21 +2128,18 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         """The table in the guard and run-checkin's grant must not drift:
         a granted command with no row would be refused, and a row with no grant
         is dead weight that suggests a capability the beat does not have."""
-        import importlib.machinery
-        import importlib.util
-        loader = importlib.machinery.SourceFileLoader("checkin_guard", str(self._guard()))
-        spec = importlib.util.spec_from_loader("checkin_guard", loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
         root = pathlib.Path(__file__).resolve().parents[2]
+        src = (root / "cmd" / "checkin-bash-guard" / "policy.go").read_text(encoding="utf-8")
+        table = src.split("var policy = map[string]func([]string) string{", 1)[1].split("\n}", 1)[0]
+        policy = set(re.findall(r'^\s*"([a-z-]+)":', table, re.M))
         run = (root / "fleet-kit" / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
         granted = set()
         for line in run.splitlines():
             if "ALLOWED_TOOLS" in line:
                 granted.update(re.findall(r"\$FLEET_CODE/bin/([a-z-]+)", line))
         self.assertTrue(granted, "found no grants in run-checkin")
-        self.assertEqual(granted, set(mod.POLICY),
-                         "run-checkin's Bash grants and the guard's POLICY table differ")
+        self.assertEqual(granted, policy,
+                         "run-checkin's Bash grants and the guard's policy table differ")
 
     def test_the_guard_counts_a_beats_calls_and_refuses_past_the_limit(self):
         """Scenario-224: per-beat counters, set by run-checkin and kept where
@@ -2903,9 +2897,14 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             for f in d.glob("*.go"):
                 if f.name.endswith("_test.go"):
                     continue
-                flags += self.MAN_GO_FLAG.findall(f.read_text(encoding="utf-8"))
+                text = f.read_text(encoding="utf-8")
+                flags += self.MAN_GO_FLAG.findall(text)
+                if d.name == "fleet-trace":
+                    # Subcommands with hand-parsed flags, as the Python had.
+                    flags += [x for x in re.findall(r'"--([a-z][a-z0-9-]*)"', text) if x != "help"]
             with self.subTest(cmd=d.name):
-                self.assertTrue(flags or d.name == "cti-agent", f"no flags found in {d}")
+                # cti-agent is not installed; the guard reads only stdin.
+                self.assertTrue(flags or d.name in ("cti-agent", "checkin-bash-guard"), f"no flags found in {d}")
                 self._assert_documented(d.name, flags)
 
     def test_every_runner_argument_is_in_its_man_page(self):
@@ -4449,7 +4448,7 @@ fi
 
     def with_trace(self, reply=None):
         """The real fleet-trace on the box, and a model that answers in JSON."""
-        shutil.copy(KIT / "fleet" / "bin" / "fleet-trace", self.code / "bin" / "fleet-trace")
+        shutil.copy(FLEET_TRACE_BIN, self.code / "bin" / "fleet-trace")
         (self.code / "bin" / "fleet-trace").chmod(0o755)
         reply_file = self.tmp / "reply.json"
         reply_file.write_text(json.dumps(reply or self.REPLY))
@@ -4466,7 +4465,7 @@ fi
         return sorted((self.home / "state" / "traces").glob("supplier-*.jsonl"))
 
     def fleet_trace(self, *args):
-        return subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), *args],
+        return subprocess.run([str(self.code / "bin" / "fleet-trace"), *args],
                               capture_output=True, text=True, check=False,
                               env={"PATH": "/usr/bin:/bin", "FLEET_HOME": str(self.home)})
 
@@ -4567,14 +4566,14 @@ fi
         d = self.home / "state" / "traces"
         d.mkdir(parents=True)
         reply = json.dumps(self.REPLY)
-        r = subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), "unwrap",
+        r = subprocess.run([str(self.code / "bin" / "fleet-trace"), "unwrap",
                             "--result", str(self.tmp / "r1"), "--trace", str(d / "checkin-20261111T080000.jsonl")],
                            input=reply, capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 2)
         target = self.tmp / "elsewhere"
         target.write_text("")
         (d / "supplier-20261111T080000.jsonl").symlink_to(target)
-        r = subprocess.run([sys.executable, str(self.code / "bin" / "fleet-trace"), "unwrap",
+        r = subprocess.run([str(self.code / "bin" / "fleet-trace"), "unwrap",
                             "--result", str(self.tmp / "r2"), "--trace", str(d / "supplier-20261111T080000.jsonl")],
                            input=reply, capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 0, "the judgement is kept")
@@ -4599,10 +4598,10 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
     BIN = "/opt/cti-agent/bin/"
 
     def guard(self, cmd):
-        guard = KIT / "fleet" / "bin" / "checkin-bash-guard"
+        guard = GUARD_BIN
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
         env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
-        return subprocess.run([sys.executable, "-I", str(guard)], input=payload,
+        return subprocess.run([str(guard)], input=payload,
                               capture_output=True, text=True, check=False, env=env)
 
     def test_each_check_is_allowed_exactly(self):
@@ -4656,13 +4655,6 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
         # The examples are what the beat copies. A semicolon or question mark
         # inside them is refused by checkin-bash-guard even in quotes, which
         # costs the beat a turn (found in review, 2026-11-11).
-        import importlib.machinery
-        import importlib.util
-        guard = KIT / "fleet" / "bin" / "checkin-bash-guard"
-        loader = importlib.machinery.SourceFileLoader("checkin_guard_ex", str(guard))
-        spec = importlib.util.spec_from_loader("checkin_guard_ex", loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
         text = (KIT / "fleet" / "CLAUDE.md").read_text(encoding="utf-8")
         examples = re.findall(r"```\n(What I am asking:[^\n]+)\n```", text)
         self.assertEqual(len(examples), 2, "expected the alert and the board example")
@@ -4671,8 +4663,11 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
         for ex, wrap in zip(examples, wraps):
             cmd = "/opt/cti-agent/bin/" + (wrap % ex)
             event = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            env = {k: v for k, v in os.environ.items() if not k.startswith("CHECKIN_")}
             with self.subTest(example=ex[:40]):
-                self.assertIsNone(mod.verdict(event))
+                r = subprocess.run([str(GUARD_BIN)], input=json.dumps(event), capture_output=True,
+                                   text=True, check=False, env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class FleetDbWritesAreChecked(unittest.TestCase):
@@ -4682,7 +4677,7 @@ class FleetDbWritesAreChecked(unittest.TestCase):
     database from every other caller, and the limits are the guard's."""
 
     DB = KIT / "fleet" / "bin" / "fleet-db"
-    GUARD = KIT / "fleet" / "bin" / "checkin-bash-guard"
+    GUARD = KIT.parent / "cmd" / "checkin-bash-guard" / "policy.go"
 
     def setUp(self):
         self.home = tempfile.mkdtemp()
@@ -4817,16 +4812,22 @@ class FleetDbWritesAreChecked(unittest.TestCase):
             loader.exec_module(mod)
             return mod
 
-        guard = load_file("checkin_guard_for_db", self.GUARD)
         db = load_file("fleet_db_for_guard", self.DB)
-        self.assertEqual(db.MAX_MEMORY_CONTENT, guard.MAX_MEMORY_CONTENT)
-        self.assertIn(f"_text({db.MAX_TASK_TITLE})", self.GUARD.read_text(), "the task title limit drifted from the guard's")
-        self.assertEqual(db.MAX_MAIL_BODY, guard.MAX_BOARD_MESSAGE)
-        self.assertEqual(db.ID_RX.pattern, guard.ID.pattern)
-        self.assertEqual(db.NUM_ID_RX.pattern, guard.NUM_ID.pattern)
-        src = self.GUARD.read_text()
-        self.assertIn(f'r"{db.CATEGORY_RX.pattern}"', src)
-        self.assertIn(f'r"{db.TOPIC_RX.pattern}"', src)
+        src = self.GUARD.read_text(encoding="utf-8")
+
+        def const(name):
+            m = re.search(r"\b" + name + r"\s*=\s*(\d+)", src)
+            self.assertIsNotNone(m, name)
+            return int(m.group(1))
+
+        def go_rx(rx):
+            # Python r"X\Z" with re.match is Go `^X\z`.
+            return "`^" + rx.pattern[:-2] + "\\z`"
+        self.assertEqual(db.MAX_MEMORY_CONTENT, const("maxMemory"))
+        self.assertIn(f"text({db.MAX_TASK_TITLE})", src, "the task title limit drifted from the guard's")
+        self.assertEqual(db.MAX_MAIL_BODY, const("maxBoardMessage"))
+        for rx in (db.ID_RX, db.NUM_ID_RX, db.CATEGORY_RX, db.TOPIC_RX):
+            self.assertIn(go_rx(rx), src, rx.pattern)
 
 
 class AuditTrailUnits(unittest.TestCase):

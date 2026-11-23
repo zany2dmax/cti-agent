@@ -130,7 +130,7 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
   (ties into the fleet housekeeping item in the backlog).
 - Keep printing a plain-text summary to the journal so `journalctl` stays
   readable.
-- A small reader (`fleet-trace`, Python stdlib) prints one beat as a
+- A small reader (`fleet-trace`, Go) prints one beat as a
   timeline: tool, arguments, allowed or denied, result size, tokens, cost.
 - **Watch:** `cti-budget record --output` classifies the tail of the beat's
   text today. It must keep receiving the CLI's error text, not the last
