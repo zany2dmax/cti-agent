@@ -297,7 +297,7 @@ func run() int {
 	// the only recipient gate in the fleet, and cti-alert is the only
 	// escalation channel. So the finding is written to a file and the runner,
 	// which already knows how to call cti-alert, decides. Same shape as the
-	// cve->ticket map the digest passes to brief.py, and for the same reason:
+	// cve->ticket map the digest passes to cti-brief, and for the same reason:
 	// the component that can talk to the outside world is the one that talks.
 	//
 	// Empty file, or no file, means no failures. The runner must not treat a

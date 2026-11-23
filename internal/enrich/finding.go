@@ -56,7 +56,7 @@ func (k *KEVEntry) UnmarshalJSON(b []byte) error {
 }
 
 // Finding is one CVE through enrichment. It is written to the enriched file
-// with the same keys, in the same order, as it always has been: brief.py,
+// with the same keys, in the same order, as it always has been: cti-brief,
 // cti-jira and fleet-db read it.
 type Finding struct {
 	CVE            string
@@ -252,7 +252,7 @@ type Novelty struct {
 	NewCVEs      []string `json:"new_cves"`
 }
 
-// Result is the enriched file, cti-enriched in all but name: brief.py,
+// Result is the enriched file, cti-enriched in all but name: cti-brief,
 // cti-jira, cti-kev and the weekly read it.
 type Result struct {
 	Generated     string     `json:"generated"`

@@ -6,7 +6,7 @@
 //	cti-enrich --cves CVE-2026-1234,CVE-2026-5678 --out enriched.json
 //	cti-enrich --report raw.md --out enriched.json --no-db     # no upsert
 //
-// It writes the enriched file brief.py, cti-jira, cti-kev and the weekly
+// It writes the enriched file cti-brief, cti-jira, cti-kev and the weekly
 // read, and products.json beside it. Then it upserts the findings into the
 // fleet's memory database through fleet-db, which owns the SQLite: this
 // binary has no SQL in it. Before that it asks fleet-db when each CVE was

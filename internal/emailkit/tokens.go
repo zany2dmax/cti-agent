@@ -6,11 +6,10 @@ import (
 	"fmt"
 )
 
-// tokens.json is the one definition of the fleet's colours and font. Go reads
-// it here; brief.py (Python cannot import this package) reads a copy at
-// fleet-kit/fleet/lanes/email-tokens.json, and emailkit_test.go fails the
-// build when the two differ. Change the look in internal/emailkit/tokens.json,
-// then copy it over the lanes file.
+// tokens.json is the one definition of the fleet's colours and font, read
+// here and embedded in every Go lane that sends mail, the digest included.
+// (The Python brief.py read a copy at fleet-kit/fleet/lanes/email-tokens.json;
+// both are gone.)
 //
 //go:embed tokens.json
 var tokensJSON []byte

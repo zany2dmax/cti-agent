@@ -69,8 +69,8 @@ func TestCreditUsesTheFleetAttributionOrTheFallback(t *testing.T) {
 
 // A Go lane must not write its own header band or page background: those are
 // what make an email recognisably the fleet's, and a copy is how the owner
-// emails came to be unstyled. (brief.py, which cannot import this package,
-// reads the same tokens: TestBriefReadsTheSameTokens.)
+// emails came to be unstyled. (internal/brief, the digest, reads the
+// colours from here by name.)
 func TestNoLaneDrawsItsOwnPageShell(t *testing.T) {
 	root := filepath.Join("..", "..")
 	var found = map[string]bool{}
@@ -100,19 +100,5 @@ func TestNoLaneDrawsItsOwnPageShell(t *testing.T) {
 	for rel := range found {
 		t.Errorf("%s draws its own page shell (%s or %s). Build the email with "+
 			"internal/emailkit instead, so it looks like the fleet's others.", rel, Navy, PageBG)
-	}
-}
-
-// brief.py cannot import Go, so it reads a copy of tokens.json from the lanes
-// directory. The two must be the same bytes, or the daily digest and the other
-// emails drift apart without anybody changing a line of either.
-func TestTheLanesTokensFileIsTheSameAsTheEmbeddedOne(t *testing.T) {
-	lanes, err := os.ReadFile(filepath.Join("..", "..", "fleet-kit", "fleet", "lanes", "email-tokens.json")) // #nosec G304 -- fixed path in this repository
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(lanes) != string(tokensJSON) {
-		t.Fatal("fleet-kit/fleet/lanes/email-tokens.json differs from internal/emailkit/tokens.json: " +
-			"change the look in the second, then `cp internal/emailkit/tokens.json fleet-kit/fleet/lanes/email-tokens.json`")
 	}
 }

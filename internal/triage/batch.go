@@ -11,7 +11,7 @@ package triage
 // cti-triage --batch runs each through the reader, which lists its items
 // and their CVEs; items with a CVE are set aside for the CVE digest, and the
 // rest go through the Falcon lookups and the judge, into one AdvisoryReport
-// that brief.py renders as FLEET ADVISORIES.
+// that cti-brief renders as FLEET ADVISORIES.
 //
 // Every advisory that was read appears in the report: triaged, failed with
 // its reason, or over the day's cap. A section that silently lists fewer

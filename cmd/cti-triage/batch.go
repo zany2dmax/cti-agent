@@ -1,7 +1,7 @@
 package main
 
 // --batch: the digest's advisory triage. One input file from ingest (every
-// message from a threat-intel sender), one report out for brief.py. Each advisory is
+// message from a threat-intel sender), one report out for cti-brief. Each advisory is
 // read, looked up and judged on its own, with its own timeout; a failure in
 // one is recorded on it and the batch goes on. At most TRIAGE_MAX_PER_RUN
 // are triaged (default 10, at most 50); the rest are listed as over the cap,

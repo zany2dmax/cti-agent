@@ -42,7 +42,7 @@ const (
 const (
 	NVDCacheFile = "nvd-cache.json"
 	KEVCacheFile = "kev-cache.json"
-	// ProductsFile sits beside the enriched file, where brief.py looks for it.
+	// ProductsFile sits beside the enriched file, where cti-brief looks for it.
 	ProductsFile = "products.json"
 
 	nvdTTL = 7 * 24 * time.Hour // CVSS scores rarely move once assigned

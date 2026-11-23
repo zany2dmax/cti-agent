@@ -41,10 +41,9 @@ config.local.yaml
 !internal/appscan/testdata/owners-snapshot.json
 # Not output: the cases internal/sanitize and cti-sanitize are tested against.
 !internal/sanitize/testdata/sanitize-cases.json
-# Not output: the email palette. internal/emailkit embeds the first (a clean
-# clone does not build without it) and brief.py reads the second.
+# Not output: the email palette. internal/emailkit embeds it (a clean clone
+# does not build without it).
 !internal/emailkit/tokens.json
-!fleet-kit/fleet/lanes/email-tokens.json
 # Not output: the check-in eval's scenarios (HARNESS H2), invented data only -
 # test_evals.py fails on a real-looking address, IP or URL in them.
 !fleet-kit/tests/evals/checkin/*.json
@@ -128,7 +127,7 @@ app-owners.txt
 .task/
 
 # Not output: cti-enrich's golden files and inputs, written once by the Python
-# enrich.py it replaced, and the enriched file brief.py's tests render. Invented
+# enrich.py it replaced, and the enriched file the digest tests render. Invented
 # hosts (h1, h2...) and example.com addresses only; listed last, after
 # enriched-*.json, so these lines win.
 !internal/enrich/testdata/*.json

@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/pyfmt"
 )
 
-// SevOrder is the severity bands, most urgent first. brief.py mirrors it for
+// SevOrder is the severity bands, most urgent first. internal/brief mirrors it for
 // rendering, and fleet-db migrates stored values to match.
 var SevOrder = []string{"Sev5", "Sev4", "Sev3", "Sev2", "Sev1"}
 
@@ -207,38 +209,6 @@ func numberValue(n json.Number) float64 {
 	return v
 }
 
-// pyNumber writes a JSON number the way the digest always has: an integer as
-// an integer, anything with a point or exponent as a float that keeps its
-// ".0" (CVSS 10.0, not 10).
-func pyNumber(n json.Number) string {
-	s := string(n)
-	if !strings.ContainsAny(s, ".eE") {
-		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return strconv.FormatInt(i, 10)
-		}
-	}
-	return pyFloat(numberValue(n))
-}
+func pyNumber(n json.Number) string { return pyfmt.Number(n) }
 
-// pyFloat is a float as its shortest round-trip text, with ".0" when it is a
-// whole number, and an exponent only below 1e-4 or from 1e16.
-func pyFloat(v float64) string {
-	if v != 0 && !math.IsInf(v, 0) {
-		// The exponent of the shortest form decides, as it does in Python.
-		e := strconv.FormatFloat(v, 'e', -1, 64)
-		if exp, err := strconv.Atoi(e[strings.IndexByte(e, 'e')+1:]); err == nil && (exp < -4 || exp >= 16) {
-			return e // Go writes 1e-05 and 1e+16 as Python does
-		}
-	}
-	s := strconv.FormatFloat(v, 'f', -1, 64)
-	if !strings.ContainsAny(s, ".") {
-		s += ".0"
-	}
-	return s
-}
-
-// percent is a probability as a whole percentage, rounded half to even on
-// the exact value: 0.125 is 12%, 0.135 is 14%.
-func percent(p float64) string {
-	return strconv.FormatFloat(p*100, 'f', 0, 64) + "%"
-}
+func percent(p float64) string { return pyfmt.Percent(p, 0) }

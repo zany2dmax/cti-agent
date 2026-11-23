@@ -13,7 +13,7 @@ User=ctiagent
 Group=ctiagent
 
 # 0077, so a lane that writes with a bare open() cannot land a world- or
-# group-readable file. The Python lanes (brief.py, scout.py) do exactly that:
+# group-readable file. The Python lane (scout.py) does exactly that:
 # no chmod, no umask in the code, so under systemd's default 0022 the digest
 # HTML and enriched-*.json - which carries host names - were 0644. The Go
 # commands set 0600 explicitly and are unaffected; this closes the rest.

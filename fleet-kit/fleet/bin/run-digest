@@ -150,7 +150,7 @@ if [ -n "$DRY" ]; then
   TXT="$OUT/$(basename "$TXT")"
   export FLEET_PROCESSED_LOG="$OUT/processed-messages.json"
   NODB="--no-db"
-  # Same names in the work directory, which is where brief.py looks for them
+  # Same names in the work directory, which is where cti-brief looks for them
   # (beside the enriched file). The weekly copies its borrowed map itself.
   for f in "${REAL_ENRICHED%.json}-tickets.json" "$FLEET_HOME/state/products.json"; do
     if [ -f "$f" ]; then cp "$f" "$OUT/" 2>/dev/null || true; fi
@@ -164,7 +164,7 @@ fi
 # every threat-intel message - from anyone, if it holds a CVE, ATT&CK ID,
 # defanged indicator or link, public IP or file hash; any from an
 # authenticated TRIAGE_SENDERS sender - beside the enriched file; step 2c triages them
-# and leaves the report there too, which is where brief.py looks. Both names
+# and leaves the report there too, which is where cti-brief looks. Both names
 # follow ENRICHED, so a dry run's land in its own directory. Today's old
 # copies are removed just before ingest (after the already-sent check, so a
 # digest that went out keeps its record): a rerun must never render a
@@ -306,7 +306,7 @@ fi
 
 # ── 2b. ticket ───────────────────────────────────────────────────────────────
 # Files or updates one Jira ticket per confirmed KEV or Sev5 CVE, and writes a
-# cve -> ticket map that brief.py reads in the next step. Hence the position:
+# cve -> ticket map that cti-brief reads in the next step. Hence the position:
 # after enrich because it needs the findings, before brief because the keys
 # must exist by the time the email is rendered.
 #
@@ -374,9 +374,9 @@ fi
 
 # ── 3. brief ─────────────────────────────────────────────────────────────────
 say "brief: rendering $KIND"
-python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" \
+"$FLEET_CODE/bin/cti-brief" "--$KIND" \
   --enriched "$ENRICHED" --out "$HTML" --text-out "$TXT" || fail "brief lane failed"
-SUBJECT=$(python3 "$FLEET_CODE/lanes/brief.py" "--$KIND" --subject-only --enriched "$ENRICHED")
+SUBJECT=$("$FLEET_CODE/bin/cti-brief" "--$KIND" --subject-only --enriched "$ENRICHED")
 
 # ── 4. send ──────────────────────────────────────────────────────────────────
 say "send: $SUBJECT"

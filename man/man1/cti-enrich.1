@@ -20,7 +20,7 @@ cti-enrich \- the @enrich lane: add NVD, EPSS and CISA KEV context to CVEs and a
 .B cti\-enrich
 takes the CVEs the Go agent found, or an explicit list, adds the context that
 decides whether anyone should care, and writes one JSON file that
-.BR brief.py (1)
+.BR cti\-brief (1)
 renders and
 .BR cti\-jira (1)
 and
@@ -259,7 +259,7 @@ sudo cti\-agent cti\-enrich \-\-skip\-nvd \-\-no\-db \e
   \-\-out /var/lib/cti\-agent/state/enriched\-test.json
 .EE
 .SH SEE ALSO
-.BR brief.py (1),
+.BR cti\-brief (1),
 .BR scout.py (1),
 .BR fleet\-db (1),
 .BR run\-digest (1),

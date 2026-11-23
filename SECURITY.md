@@ -236,7 +236,7 @@ root, encrypts values passed on stdin, and never prints one.
 > domain, never the address. At most `TRIAGE_MAX_PER_RUN` advisories are
 > triaged a day (authenticated feed senders first), and the input and report
 > files are validated as they are written and read. `cti-triage --batch`
-> triages them, and `brief.py` renders FLEET ADVISORIES with every value
+> triages them, and `cti-brief` renders FLEET ADVISORIES with every value
 > escaped and nothing made a link. Any failure costs the section, never the
 > digest.
 
@@ -364,7 +364,7 @@ Where each control lives in the built lane:
 3. **Schema-validated.** The reader's answer must parse as `cti-subjects/2` and
    the judge's as `cti-judgement/1`, strictly; anything else is a failure for that
    advisory, reported in the section, never an empty result.
-4. **Escaped on render.** `brief.py` escapes every value and makes nothing a
+4. **Escaped on render.** `cti-brief` escapes every value and makes nothing a
    link.
 
 ### Instruction-injection posture
@@ -392,11 +392,12 @@ A generated report pairs exploitability with named machines. Treat it as such.
 - Mailed only to addresses on an allowlist.
 - Carries a "do not commit" banner when it contains real hostnames.
 
-**The Python lanes rely on the unit's umask.** `brief.py` writes the digest
-HTML and the digest text with a bare `open(path, "w")` and no `chmod`.
-(`cti-enrich`, which replaced `enrich.py`, writes `enriched-*.json` — which
-carries host names — and its caches 0600 itself.) Every service unit
-now sets `UMask=0077`, so those land `0600` too. Run a lane outside systemd
+**The remaining Python lane relies on the unit's umask.** `scout.py` writes
+its output with a bare `open(path, "w")` and no `chmod`. (The Go lanes that
+replaced `enrich.py` and `brief.py` write `enriched-*.json`, the caches and
+the digest HTML and text — all of which carry host names — 0600 themselves.)
+Every service unit now sets `UMask=0077`, so the scout's files land `0600`
+too. Run a lane outside systemd
 and it inherits your shell's umask instead, which is worth remembering when
 replaying by hand.
 
@@ -1312,7 +1313,7 @@ about where:
 | `scout.py` | yes | Python | yes |
 | `fleet-db` | yes | Python | yes |
 | `fleet-owners` | yes | Python | yes — and it puts Python on the owner lane's recipient data, see below |
-| `brief.py` | no | Python | **no** — historical |
+| `cti-brief` | no | Go | yes |
 | `cti-mailer` | no | Go | yes |
 | the other six `cti-*` binaries | no | Go | yes |
 
@@ -1360,9 +1361,11 @@ it never was.
 after 1.7.2; the installer deletes it from the box. See
 [RUNBOOK → The mailer](RUNBOOK.md#11b-the-mailer).
 
-`brief.py` is 689 lines of email layout. The case for moving it is weaker and
-mostly about `html/template` being a better escaping story than string
-concatenation. Not urgent.
+`brief.py`, the digest's email layout, **has been ported to `cmd/cti-brief`**
+(`internal/brief`), byte for byte: the Go tests compare its output with
+golden files the Python wrote, including a case with markup and quotes in
+every field. The escaping is the Python's `html.escape` rule, kept exactly,
+rather than `html/template`, so the email did not change.
 
 Shell is the third language, for the runners and installers only. It
 orchestrates; it does not parse untrusted input or hold credentials beyond
@@ -1449,7 +1452,7 @@ a run once reported three occurrences of an issue that had twenty-six.
   attacker-controlled subject lines straight to the journal.
 - **Subject lines**: the Patch Tuesday subject is ASCII by construction and
   tested for it, so no gateway or inbox rule can be broken by a character in
-  it. The daily digest subject, built in `brief.py`, is **not** — it can
+  it. The daily digest subject, built in `cti-brief`, is **not** — it can
   contain an em dash. That is the subject most likely to have a rule keyed on
   it, so it is a gap rather than a nuance.
 
@@ -1645,7 +1648,7 @@ nor the portal reports the effective scope.
 **Worth fixing**
 
 - **The daily digest subject can contain a non-ASCII character** (an em dash
-  from `brief.py`), unlike the Patch Tuesday subject, which is tested for
+  from `cti-brief`), unlike the Patch Tuesday subject, which is tested for
   ASCII. Inbox rules are keyed on subjects.
 - **The alert path is not recipient-gated** and falls back from
   `FLEET_OPERATOR_EMAIL` to `DIGEST_TO`, so a misconfiguration can mail

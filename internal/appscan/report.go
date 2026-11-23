@@ -138,7 +138,7 @@ type report struct {
 // orgName is the banner label, shared with the daily brief's FLEET_ORG.
 //
 // Read here rather than passed in so the renderer keeps the two-argument
-// signature the lane and its tests already use. Default matches brief.py.
+// signature the lane and its tests already use. Default matches the digest (internal/brief).
 func orgName() string {
 	if s := strings.TrimSpace(os.Getenv("FLEET_ORG")); s != "" {
 		return s

@@ -561,7 +561,7 @@ def _main(argv):
                               "worst_overdue_days": worst,
                               "ransomware_present": ransomware,
                               "overdue_cves": overdue_cves},
-            # Omitted deliberately, not set to []: brief.py drops the
+            # Omitted deliberately, not set to []: cti-brief drops the
             # "emails read this run" section when it is absent.
             "findings": rows,
         }

@@ -78,6 +78,14 @@ mailer() {
   "$bin" "$@"
 }
 
+# The brief lane, cti-brief, built from this checkout the same way.
+briefer() {
+  local bin="$FLEET_HOME/cti-brief-dev"
+  ( cd "$REPO" && go build -o "$bin" ./cmd/cti-brief ) >&2 \
+    || { bad "go build ./cmd/cti-brief failed - fix the compile error above"; return 1; }
+  "$bin" "$@"
+}
+
 # The enrich lane, cti-enrich, built from this checkout the same way. It finds
 # fleet-db through FLEET_CODE, which here is the checkout's fleet-kit/fleet.
 enricher() {
@@ -280,9 +288,9 @@ PY
 stage_brief() {
   bold "Brief  (render only - nothing is sent)"
   [ -s "$ENRICHED" ] || { bad "no $ENRICHED - run enrich first"; return 1; }
-  python3 "$KIT/fleet/lanes/brief.py" --daily --enriched "$ENRICHED" \
+  briefer --daily --enriched "$ENRICHED" \
     --out "$HTML" --text-out "$TXT" 2>&1 | sed 's/^\[brief\] /    /'
-  ok "subject: $(python3 "$KIT/fleet/lanes/brief.py" --daily --subject-only --enriched "$ENRICHED")"
+  ok "subject: $(briefer --daily --subject-only --enriched "$ENRICHED")"
   info "html: $HTML"
   info "text: $TXT"
   bold "Plain-text preview"
@@ -325,7 +333,7 @@ stage_send() {
   export VM_ALLOW_TO="$to" FLEET_ALLOW_TO=""
 
   local subject
-  subject=$(python3 "$KIT/fleet/lanes/brief.py" --daily --subject-only --enriched "$ENRICHED")
+  subject=$(briefer --daily --subject-only --enriched "$ENRICHED")
   info "from   : ${GRAPH_MAILBOX:-unset}"
   info "to     : $to"
   info "subject: $subject"

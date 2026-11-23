@@ -3,7 +3,7 @@
 //
 // Configured, not hardcoded. This repository is deliberately generic - no
 // organisation name, no addresses - so the wording comes from FLEET_ATTRIBUTION
-// and the optional link from FLEET_REPO_URL. brief.py and cti-patchtuesday
+// and the optional link from FLEET_REPO_URL. cti-brief and cti-patchtuesday
 // read the same two variables with the same rules; this is the Go copy for the
 // lanes that did not have it (the AppSec emails).
 //

@@ -67,7 +67,7 @@ broke. Read them as reference, not as a recipe.
 
 3. **Brief.** Render HTML.
    ```
-   python3 $FLEET_CODE/lanes/brief.py --daily \
+   $FLEET_CODE/bin/cti-brief --daily \
      --enriched $FLEET_HOME/state/enriched-$(date +%F).json \
      --out $FLEET_HOME/reports/digest-$(date +%F).html
    ```
@@ -82,7 +82,7 @@ broke. Read them as reference, not as a recipe.
    ```
    $FLEET_CODE/bin/cti-mailer --for-real \
      --html $FLEET_HOME/reports/digest-$(date +%F).html \
-     --subject "$(python3 $FLEET_CODE/lanes/brief.py --subject-only \
+     --subject "$($FLEET_CODE/bin/cti-brief --subject-only \
                     --enriched $FLEET_HOME/state/enriched-$(date +%F).json)"
    ```
    With `--dry-run`, stop here and post the path to the board instead.
@@ -98,7 +98,7 @@ broke. Read them as reference, not as a recipe.
   CVEs in the last 24h" is useful signal. Do not skip silently.
 - If a lane errors, send the digest with an explicit `DEGRADED` banner naming
   which enrichment source was unavailable. A digest that hides its own gaps is
-  worse than no digest. `brief.py` renders that banner from the `degraded` list
+  worse than no digest. `cti-brief` renders that banner from the `degraded` list
   in the enriched JSON, so you do not have to write it yourself.
 - The digest carries CISA KEV deadlines automatically: a red banner and a
   subject suffix when something present in the estate is past its published

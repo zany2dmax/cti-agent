@@ -64,7 +64,7 @@ LINUX SERVER · your Claude subscription · user: ctiagent
 ├── @ingest   cti-agent (Go)   mailbox → CVEs → scanner → markdown
 ├── @enrich   cti-enrich (Go)         + NVD CVSS, EPSS, CISA KEV → Sev5–Sev1
 ├── @scout    lanes/scout.py          advisory feeds → CVEs the mailbox missed
-├── @brief    lanes/brief.py          enriched JSON → HTML digest
+├── @brief    cti-brief (Go)          enriched JSON → HTML digest
 ├── @jira     cti-jira (Go)           KEV/Sev5/CVSS 9.0+/QDS 91+ tickets, daily re-check, lock-down ticket
 ├── @ptuesday cti-patchtuesday (Go)   Microsoft release + scanner → monthly synopsis
 ├── @appscan  cti-appscan (Go)        DAST scan mail + API → AppSec report
@@ -1956,7 +1956,6 @@ fleet-kit/
     ├── checkin-settings.json      root-owned --settings for the beat (one Bash guard hook, deny rules)
     ├── lanes/
     │   ├── scout.py               RSS/Atom advisory poller (stdlib XML)
-    │   ├── brief.py               HTML + plain-text digest renderer
     │   └── feeds.txt              feed list — trim to your estate
     ├── skills/
     │   ├── checkin/SKILL.md       the heartbeat's brain

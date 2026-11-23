@@ -42,6 +42,13 @@ var allowed = map[string]string{
 	"cmd/cti-jira/appscan.go:findingBlock:title":                                 "para's title is a constant at all three call sites",
 	"internal/report/markdown.go:WriteMarkdownScan:m":                            "held-CVE month key in a local markdown report, not rendered as HTML",
 	"cmd/cti-appreport/main.go:newestTicketsFile":                                "usage text for the terminal: the '<' is a placeholder, not markup",
+	"internal/brief/brief.go:badge:style":                                        "every badge() call passes a constant style or one built from a band colour",
+	"internal/brief/brief.go:findingBlock:b.fg":                                  "band colour from the fixed pri table (emailkit tokens)",
+	"internal/brief/render.go:Render:b.bg":                                       "band colour from the fixed pri table (emailkit tokens)",
+	"internal/brief/render.go:Render:pri[p].fg":                                  "band colour from the fixed pri table (emailkit tokens)",
+	"internal/brief/render.go:Render:pri[p].label":                               "band heading from the fixed pri table",
+	"internal/brief/render.go:Render:p":                                          "a band name from the fixed SevOrder list",
+	"internal/brief/render.go:Render:pluralN(nUnverified)":                       "\"\" or \"s\"",
 }
 
 // tokenVars are package-level names bound to emailkit tokens (collected).

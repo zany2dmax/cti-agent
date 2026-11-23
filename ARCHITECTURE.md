@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty binaries, and the project layout.
+surprise you, the twenty-one binaries, and the project layout.
 
 ---
 
@@ -377,7 +377,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 
 ---
 
-## The twenty binaries
+## The twenty-one binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -398,6 +398,7 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-falcon` | by hand | The CrowdStrike Falcon API client's own command. `--check` makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts), prints counts and revokes its token. `--find-app NAME` and `--new-apps DAYS` read Falcon Discover: installed applications with host, version and platform counts, and applications first seen in the window (with host type, exposure, criticality and Falcon's suspicious flag). Never prints a host name or ID. Follows no redirects, and only to a published Falcon API host. `cti-triage` uses the same client (`internal/falcon`) |
 | `cti-checkin-verdict` | `run-checkin`, after each beat | Checks the `cti-checkin/1` verdict the beat ends with: strict parsing, then against the counts `checkin-bash-guard` kept (alerts, board and memory writes), which the model cannot change. Saves it in `state/verdicts/`; a missing, invalid or contradicted verdict is one INFO board line a day for each kind |
 | `cti-enrich` | `run-digest`, between ingest and brief; by hand | The @enrich lane: NVD CVSS and CPE products, FIRST EPSS and the CISA KEV catalog (cached in `state/`), then the Sev5-Sev1 bands with a rationale, the KEV deadline rollup and novelty. Writes the enriched file and `products.json`; reads and writes `memory.db` only through `fleet-db`. Replaced the Python `enrich.py` |
+| `cti-brief` | `run-digest`, after cti-jira and triage; by hand | The @brief lane: renders the enriched file as the daily or weekly digest (HTML, text and subject), with the ticket map, held CVEs, product names and advisory report from beside it. Sends nothing. Replaced the Python `brief.py`, byte for byte |
 | `cti-sanitize` | `fleet-board`, `fleet-journal` and `fleet-db`, inside a beat only | Cleans what the heartbeat reads (Scenario-222): strips control, bidi and zero-width characters, cuts over-long lines and output over 64 KB, logs each change to the journal as `cti-sanitize`. A filter over `internal/sanitize`; a wrapper prints nothing if it is missing |
 | `cti-audit` | `run-mailbox-cleanup`, daily (`--prune`); `fleet-owners` and scripts (`--action`); by hand (`--check`) | The audit trail's command. The Graph and Jira clients write their own events; this writes one for a script, prunes `audit-DATE.log` files past `AUDIT_RETAIN_DAYS` (120), and checks that the trail is writable and the optional syslog collector (`AUDIT_SYSLOG_ADDR`) reachable |
 | `cti-podprobe` | by hand | Reads one window of Proofpoint on Demand's Log API and prints aggregate counts: events per direction, routes, DMARC and SPF results, the From domains and DKIM of outbound mail. Built to learn the log before the domains lane relied on it; the domains lane reads the gateway through `internal/domains/podgw` |
@@ -406,14 +407,14 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-one are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty into bin/
+task build              # all twenty-one into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -450,6 +451,7 @@ cmd/cti-appreport/             the scanner's own per-application report, for the
 cmd/cti-triage/                advisory triage: reader, Falcon lookups, judge, FLEET ADVISORIES
 cmd/cti-falcon/                the CrowdStrike Falcon client's check, and app inventory from Discover
 cmd/cti-checkin-verdict/       checks each heartbeat's cti-checkin/1 verdict against the guard's counts
+cmd/cti-brief/                 the @brief lane: the digest email, from the enriched file
 cmd/cti-enrich/                the @enrich lane: NVD, EPSS and KEV, then the Sev5-Sev1 bands
 cmd/cti-sanitize/              the heartbeat wrappers' output cleaner, a filter over internal/sanitize
 cmd/cti-audit/                 the audit trail: write an event, prune, check
@@ -481,11 +483,13 @@ internal/graph/                Microsoft Graph mailbox reader, sendMail, move
 internal/mailer/               per-lane recipient resolution and allowlist references
 internal/budget/               rolling-window and daily ceilings, backoff
 internal/enrich/               NVD, EPSS and KEV clients and caches, the Sev5-Sev1 scoring, product names
+internal/pyfmt/                values written as the Python lanes wrote them (10.0, None, repr), so the Go ports match
 internal/kev/                  deadline bands, present-only filtering
 internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
 internal/mailbox/              processed-message log and the cleanup decision table
-internal/emailkit/             the fleet email look (tokens.json is the palette, shared with brief.py): header band, lead, tiles, cards, footer
+internal/brief/                the digest email: subject, HTML and text, read from the enriched JSON
+internal/emailkit/             the fleet email look (tokens.json is the palette, shared with the digest): header band, lead, tiles, cards, footer
 internal/attribution/          the FLEET_ATTRIBUTION / FLEET_REPO_URL credit line
 internal/report/               markdown report writer, hostname redaction
 internal/triage/               advisory triage: extractor, reader and judge checks, Falcon lookups, the brief section
@@ -516,7 +520,7 @@ man/man1/                      a man page for every operator command
 
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
-fleet-kit/fleet/lanes/         scout, brief
+fleet-kit/fleet/lanes/         scout
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-appscan,
                                run-appowners, run-vmscan, run-supplier, run-domains,
                                run-mailbox-cleanup, fleet-board, fleet-db, fleet-owners,

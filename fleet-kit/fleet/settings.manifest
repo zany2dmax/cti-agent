@@ -282,7 +282,7 @@ file: core
 
 key: FLEET_ATTRIBUTION
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
+readers: cti-agent cti-alert cti-appreport cti-appscan cti-brief cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
 file: core
 
 key: FLEET_BUDGET_BACKOFF_BASE_HOURS
@@ -317,7 +317,7 @@ file: checkin
 
 key: FLEET_CODE
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-journal fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
 key: FLEET_DEV_EMAIL
@@ -337,13 +337,13 @@ file: core
 
 key: FLEET_ENV
 section: 3. PATHS - re-check these on every box
-readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 default-conflict: '/etc/cti-agent/fleet.env' | 'fleet.env'
 file: core
 
 key: FLEET_FEEDS
 section: 3. PATHS - re-check these on every box
-readers: cti-agent cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan installer run-checkin run-digest scout.py
+readers: cti-agent cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan installer run-checkin run-digest scout.py
 file: core
 
 key: FLEET_GROUP
@@ -353,7 +353,7 @@ file: core
 
 key: FLEET_HOME
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-budget cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan scout.py
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan scout.py
 file: core
 
 key: FLEET_LOCK_WAIT_SECONDS
@@ -381,7 +381,8 @@ note: cti-alert refuses to run without it
 
 key: FLEET_ORG
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
+readers: cti-agent cti-alert cti-appreport cti-appscan cti-brief cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
+empty-differs: yes
 file: core
 
 key: FLEET_OWNERS_DIR
@@ -408,7 +409,7 @@ file: core
 
 key: FLEET_REPO_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: brief.py cti-agent cti-alert cti-appreport cti-appscan cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
+readers: cti-agent cti-alert cti-appreport cti-appscan cti-brief cti-domains cti-jira cti-mailer cti-patchtuesday cti-supplier cti-vmscan
 file: core
 
 key: FLEET_SUPPLIER_TIME
@@ -693,7 +694,7 @@ required: if LOOKUP_PROVIDER=qualys
 
 key: REPORT_HOSTNAMES
 section: 5. REPORT CONTENT
-readers: brief.py cti-agent dev-run
+readers: cti-agent cti-brief dev-run
 file: core
 
 key: REPORT_PATH
@@ -844,7 +845,7 @@ file: digest
 
 key: TRIAGE_ENABLED
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: brief.py cti-agent cti-triage run-digest
+readers: cti-agent cti-brief cti-triage run-digest
 file: core
 file-why: wanted digest, also read by the mailbox lane(s)
 
@@ -877,7 +878,7 @@ file: digest
 
 key: TRIAGE_SENDERS
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: brief.py cti-agent cti-triage run-digest
+readers: cti-agent cti-triage run-digest
 file: core
 file-why: wanted digest, also read by the mailbox lane(s)
 

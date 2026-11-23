@@ -389,30 +389,27 @@ for f in "$SRC"/fleet/bin/*; do
   run install -m 0755 -o root -g root "$f" "$CODE_DIR/bin/$(basename "$f")"
   info "bin/$(basename "$f")"
 done
-for f in scout.py brief.py; do
-  run install -m 0755 -o root -g root "$SRC/fleet/lanes/$f" "$CODE_DIR/lanes/$f"
-  info "lanes/$f"
-done
+# The one Python lane left (the others are Go binaries, built below).
+run install -m 0755 -o root -g root "$SRC/fleet/lanes/scout.py" "$CODE_DIR/lanes/scout.py"
+info "lanes/scout.py"
 # Retired files. An update installs over the old tree and never deletes, so a
 # file the repo no longer ships stays on the box, and the cti-agent wrapper
 # still runs anything in lanes/. Removed after 1.7.2:
 #   mailer.py      - replaced by cti-mailer in 1.6.6
 #   fleet-sanitize - replaced by cti-sanitize (Go)
 #   enrich.py      - replaced by cti-enrich (Go)
+#   brief.py       - replaced by cti-brief (Go), with the email-tokens.json
+#                    copy only it read (the Go lanes embed internal/emailkit's)
 # Take them, and their man pages, off the box.
 for f in "$CODE_DIR/lanes/mailer.py" "$MAN_DIR/mailer.py.1" \
          "$CODE_DIR/bin/fleet-sanitize" "$MAN_DIR/fleet-sanitize.1" \
-         "$CODE_DIR/lanes/enrich.py" "$MAN_DIR/enrich.py.1"; do
+         "$CODE_DIR/lanes/enrich.py" "$MAN_DIR/enrich.py.1" \
+         "$CODE_DIR/lanes/brief.py" "$MAN_DIR/brief.py.1" "$CODE_DIR/lanes/email-tokens.json"; do
   if [ -e "$f" ]; then
     run rm -f "$f"
     info "removed $f (retired)"
   fi
 done
-# The colours and font brief.py shares with the Go lanes (internal/emailkit).
-# Data, not code: 0644. Without it the digest still renders, from a built-in
-# copy of the same values.
-run install -m 0644 -o root -g root "$SRC/fleet/lanes/email-tokens.json" "$CODE_DIR/lanes/email-tokens.json"
-info "lanes/email-tokens.json"
 # The supplier-request lane's standing instructions: the system prompt of the
 # no-tools model that judges each request. Root-owned like the code, so the
 # service account cannot rewrite what its own model is told. Data, not code: 0644.
@@ -903,6 +900,12 @@ if [ "$MODE" != dryrun ]; then
   ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-enrich" ./cmd/cti-enrich )
   chmod 0755 "$CODE_DIR/bin/cti-enrich"
   ok "built $CODE_DIR/bin/cti-enrich"
+
+  # The @brief lane: renders the digest from the enriched file. run-digest
+  # runs it after cti-jira, so the ticket map beside the enriched file exists.
+  ( cd "$AGENT_SRC" && go build -ldflags "$LDFLAGS" -o "$CODE_DIR/bin/cti-brief" ./cmd/cti-brief )
+  chmod 0755 "$CODE_DIR/bin/cti-brief"
+  ok "built $CODE_DIR/bin/cti-brief"
 
   # Read-only probe of the Proofpoint on Demand Log API: prints counts only.
   # Needs outbound 443 to logstream.proofpoint.com and POD_* in fleet.env.
@@ -1419,7 +1422,7 @@ for p in "$CODE_DIR/bin/cti-alert" "$CODE_DIR/bin/cti-budget" \
          "$CODE_DIR/bin/cti-mailbox" "$CODE_DIR/bin/cti-mailer" "$CODE_DIR/bin/cti-audit" \
          "$CODE_DIR/bin/cti-jira" "$CODE_DIR/bin/cti-appscan" "$CODE_DIR/bin/cti-vmscan" "$CODE_DIR/bin/cti-supplier" \
          "$CODE_DIR/bin/cti-appreport" "$CODE_DIR/bin/cti-domains" \
-         "$CODE_DIR/bin/cti-enrich"; do
+         "$CODE_DIR/bin/cti-enrich" "$CODE_DIR/bin/cti-brief"; do
   if [ -e "$p" ] || [ "$MODE" = dryrun ]; then ok "$p"; else bad "missing $p"; FAIL=1; fi
 done
 

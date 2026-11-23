@@ -51,405 +51,7 @@ def load(name):
     return mod
 
 
-brief = load("brief")
 
-
-class Degradation(unittest.TestCase):
-    """A digest that hides its own gaps is worse than no digest."""
-
-    def test_degraded_banner_reaches_the_digest(self):
-        data = {"generated": "2026-09-02T00:00:00+00:00", "source_meta": {},
-                "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}, "total": 0,
-                "degraded": ["NVD", "EPSS"], "findings": []}
-        html = brief.render(data, "daily")
-        self.assertIn("DEGRADED", html)
-        self.assertIn("NVD", html)
-
-
-class BriefRendering(unittest.TestCase):
-    def enriched(self):
-        """An enriched file as cti-enrich writes it: eleven findings across
-        every band, written by the Python enrich.py before it was replaced
-        (internal/enrich holds the Go lane to the same output)."""
-        path = pathlib.Path(__file__).resolve().parent / "testdata" / "enriched-sample.json"
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    def test_subject_leads_with_sev5(self):
-        d = self.enriched()
-        self.assertTrue(brief.subject(d, "daily").startswith("[Sev5]"))
-
-    def test_subject_without_sev5_does_not_cry_wolf(self):
-        d = self.enriched()
-        d["findings"] = [f for f in d["findings"] if f["priority"] != "Sev5"]
-        d["counts"]["Sev5"] = 0
-        self.assertFalse(brief.subject(d, "daily").startswith("[Sev5]"))
-
-    def test_empty_run_still_says_something_useful(self):
-        d = {"generated": "x", "source_meta": {}, "total": 0, "degraded": [],
-             "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}, "findings": []}
-        self.assertIn("no new CVEs", brief.subject(d, "daily"))
-        self.assertIn("Nothing to action", brief.render(d, "daily"))
-
-    def test_html_tags_balance(self):
-        html = brief.render(self.enriched(), "daily")
-        self.assertEqual(html.count("<table"), html.count("</table>"))
-        self.assertEqual(html.count("<tr"), html.count("</tr>"))
-
-    def test_a_cve_the_team_asked_about_is_listed_whatever_its_band(self):
-        """The security team mails a CVE in to be checked. A Sev1 is a count
-        with no name, so the lookup they asked for came back as nothing they
-        could see (CVE mailed in 16 Nov 2026). An asked CVE gets its own
-        section with its band and status, and is not listed twice."""
-        def f(cve, prio, status="NOT_PRESENT", asked=False, hosts=0):
-            return {"cve": cve, "priority": prio, "status": status, "host_count": hosts,
-                    "rationale": "r", "asked": asked}
-        d = {"generated": "x", "source_meta": {}, "total": 3, "degraded": [],
-             "counts": {"Sev5": 0, "Sev4": 1, "Sev3": 0, "Sev2": 0, "Sev1": 2},
-             "findings": [f("CVE-2026-4004", "Sev4", "PRESENT", asked=True, hosts=2),
-                          f("CVE-2026-123158", "Sev1", "UNKNOWN", asked=True),
-                          f("CVE-2026-1111", "Sev1")]}
-        for kind in ("daily", "weekly"):
-            html = brief.render(d, kind)
-            text = brief.render_text(d, kind)
-            for body in (html, text):
-                self.assertIn("Asked about", body)
-                self.assertIn("CVE-2026-123158", body)
-                self.assertNotIn("CVE-2026-1111", body, "a Sev1 nobody asked about got a row")
-                self.assertEqual(body.count("CVE-2026-4004</a>" if body is html else "CVE-2026-4004  "),
-                                 1, "an asked row is listed twice")
-                self.assertIn("listed under Asked about", body)
-            self.assertIn(">Sev1</span>", html, "the asked row does not show its band")
-            self.assertIn("CVE-2026-123158  Sev1", text)
-            self.assertEqual(html.count("<tr"), html.count("</tr>"))
-        d["findings"] = [dict(x, asked=False) for x in d["findings"]]
-        self.assertNotIn("Asked about", brief.render(d, "daily"))
-        self.assertNotIn("Asked about", brief.render_text(d, "daily"))
-
-    def test_sev1_is_a_count_not_a_list_in_either_digest(self):
-        """Awareness items get a number and no prose.
-
-        They used to fill 25 rows of the weekly. A large weekly earns a mail
-        rule pointing at Trash, and that rule cannot tell a Sev5 from a Sev1 -
-        so padding the weekly with things nobody acts on costs the Sev5s their
-        audience.
-
-        The count is not lost: it is in the tiles at the top of the HTML and
-        the header line of the text version, both of which iterate every band
-        regardless of how many rows it lists.
-        """
-        d = self.enriched()
-        for kind in ("daily", "weekly"):
-            html = brief.render(d, kind)
-            self.assertNotIn("Awareness only", html,
-                             f"{kind}: Sev1 should have no section")
-            # ...but its number is still on the email.
-            self.assertIn(">Sev1<", html, f"{kind}: the Sev1 count tile is missing")
-            text = brief.render_text(d, kind)
-            # Find the counts strip rather than assuming its line number -
-            # blank lines and the degraded/novelty blocks move it around.
-            strip = [l for l in text.split("\n")
-                     if "Sev5" in l and "Sev1" in l and "total" in l]
-            self.assertEqual(len(strip), 1,
-                             f"{kind}: expected exactly one counts strip, got {strip}")
-            self.assertRegex(strip[0], r"Sev1 \d+",
-                             f"{kind}: the strip should carry a Sev1 number")
-            self.assertNotIn("Sev1 - Awareness only", text,
-                             f"{kind}: Sev1 should have no text section")
-
-    def test_both_renderers_cap_the_same_way(self):
-        """render_text used to have its own hardcoded caps.
-
-        It printed up to 99 Sev4 rows where the HTML printed 12, so the
-        plain-text alternative - which is what some clients display - was the
-        wordier of the two. One table, read by both.
-        """
-        d = self.enriched()
-        for kind in ("daily", "weekly"):
-            limits = brief.ROW_LIMITS[kind]
-            text = brief.render_text(d, kind)
-            for band, cap in limits.items():
-                group = [f for f in d["findings"] if f["priority"] == band]
-                shown = sum(1 for line in text.split("\n")
-                            if line.startswith("  CVE-")
-                            and any(f["cve"] in line for f in group))
-                self.assertLessEqual(shown, cap,
-                                     f"{kind}/{band}: {shown} rows exceeds the cap of {cap}")
-
-    def test_truncation_is_stated_in_the_text_version_too(self):
-        d = self.enriched()
-        # Force a truncation: more Sev4 rows than the daily cap allows.
-        cap = brief.ROW_LIMITS["daily"]["Sev4"]
-        d["findings"] = [dict(d["findings"][0], cve=f"CVE-2026-{9000+i}",
-                              priority="Sev4", status="PRESENT", host_count=5)
-                         for i in range(cap + 3)]
-        d["counts"] = {"Sev5": 0, "Sev4": cap + 3, "Sev3": 0, "Sev2": 0, "Sev1": 0}
-        text = brief.render_text(d, "daily")
-        self.assertIn("+3 more Sev4 in the full report", text,
-                      "a list that silently stops is one the reader believes is complete")
-
-    def test_sample_hosts_are_deduped(self):
-        d = self.enriched()
-        html = brief.render(d, "daily")
-        # CVE-2026-45659's sample hosts are "h6, h6" in the fixture.
-        self.assertEqual(html.count(">h6<") + html.count(" h6,"), 0,
-                         "duplicate hostnames should collapse")
-
-    def test_no_hardcoded_address_when_metadata_missing(self):
-        d = self.enriched()
-        d["source_meta"] = {}
-        self.assertNotIn("@", brief.render(d, "daily").split("Generated by")[0]
-                         .split("Presence is determined")[-1])
-
-    def test_text_version_renders(self):
-        text = brief.render_text(self.enriched(), "daily")
-        self.assertIn("Sev5", text)
-        self.assertIn("Presence determined solely", text)
-
-
-class Attribution(unittest.TestCase):
-    """The footer credit is configuration, not code.
-
-    This kit was deliberately genericised - no organisation name, no
-    addresses, no internal identifiers. An attribution line baked into the
-    renderer would undo that, so unset renders the wording the digest has
-    always had and advertises nobody.
-    """
-
-    def setUp(self):
-        # Isolate from the developer's shell. These tests are about what the
-        # environment does to the output, so ambient values would make them
-        # pass or fail for reasons that have nothing to do with the code -
-        # and sourcing .env before running them is a normal thing to do.
-        self._saved = {k: os.environ.pop(k, None)
-                       for k in ("FLEET_ATTRIBUTION", "FLEET_REPO_URL", "FLEET_ORG")}
-
-    def tearDown(self):
-        for k, v in self._saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-    def data(self):
-        return {"generated": "2026-09-21T06:00:00Z", "total": 1,
-                "counts": {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 1},
-                "findings": [{"cve": "CVE-2026-1", "priority": "Sev1",
-                              "status": "UNKNOWN", "host_count": 0,
-                              "cvss": 0, "epss": 0, "kev": 0, "qids": "",
-                              "sample_hosts": "", "rationale": "awareness"}],
-                "source_meta": {}}
-
-    def test_unset_keeps_the_footer_it_always_had(self):
-        self.assertEqual(brief.attribution(), ("", ""))
-        html = brief.render(self.data(), "daily")
-        self.assertIn("Generated by the ", html)
-        self.assertNotIn("CTI agent fleet", html)
-        self.assertNotIn("Claude Code Agent Fleet", html)
-
-    def test_a_url_alone_is_enough_and_names_the_org(self):
-        os.environ["FLEET_ORG"] = "Example Org"
-        os.environ["FLEET_REPO_URL"] = "https://github.com/example/cti-agent"
-        text, url = brief.attribution()
-        self.assertIn("Example Org Claude Code Agent Fleet", text)
-        self.assertEqual(url, "https://github.com/example/cti-agent")
-
-    def test_explicit_text_wins_and_reaches_both_renderings(self):
-        os.environ["FLEET_ATTRIBUTION"] = \
-            "Correlated and published by the CR Claude Code Agent Fleet"
-        os.environ["FLEET_REPO_URL"] = "https://github.com/example/cti-agent"
-        html = brief.render(self.data(), "daily")
-        self.assertIn('href="https://github.com/example/cti-agent"', html)
-        self.assertIn("CR Claude Code Agent Fleet", html)
-        text = brief.render_text(self.data(), "daily")
-        self.assertIn("Correlated and published by the CR Claude Code Agent Fleet", text)
-        # URL on its own line: a text-only reader cannot follow an anchor.
-        self.assertIn("\nhttps://github.com/example/cti-agent", text)
-
-    def test_only_http_links_reach_the_email(self):
-        for bad in ("javascript:alert(1)",
-                    "data:text/html;base64,PHNjcmlwdD4=",
-                    "file:///etc/passwd",
-                    "github.com/example/cti-agent",
-                    "https://",
-                    "   "):
-            self.assertEqual(brief.safe_link_url(bad), "",
-                             f"{bad!r} should be refused")
-        for good in ("https://github.com/example/cti-agent",
-                     "http://intranet.example.com/cti",
-                     "HTTPS://GitHub.com/Example/cti-agent"):
-            self.assertNotEqual(brief.safe_link_url(good), "",
-                                f"{good!r} is a usable link")
-
-    def test_a_refused_url_does_not_take_the_text_with_it(self):
-        os.environ["FLEET_ATTRIBUTION"] = "Published by the CR fleet"
-        os.environ["FLEET_REPO_URL"] = "javascript:alert(1)"
-        text, url = brief.attribution()
-        self.assertEqual(url, "")
-        self.assertEqual(text, "Published by the CR fleet")
-        html = brief.render(self.data(), "daily")
-        self.assertNotIn("javascript", html)
-        self.assertIn("Published by the CR fleet", html)
-
-    def test_the_credit_is_escaped(self):
-        os.environ["FLEET_ATTRIBUTION"] = "CR <script>alert(1)</script> & co"
-        os.environ["FLEET_REPO_URL"] = 'https://example.com/?a=1&b="2"'
-        html = brief.render(self.data(), "daily")
-        self.assertNotIn("<script>alert(1)</script>", html)
-        self.assertIn("&amp;", html)
-        self.assertNotIn('b="2"', html)
-
-    def test_go_and_python_agree_on_what_a_link_is(self):
-        """Both emails must apply the same rule.
-
-        The daily digest is rendered in Python and the monthly synopsis in Go.
-        Two implementations of "is this a safe href" that disagree is a bug
-        waiting for whichever email gets the odd URL.
-        """
-        go = (pathlib.Path(__file__).resolve().parents[2]
-              / "internal" / "patchtuesday" / "render.go").read_text()
-        self.assertIn("safeLinkURL", go)
-        # The Go side must accept exactly http and https, like safe_link_url.
-        self.assertIn('case "http", "https":', go)
-
-
-class BandLabelsDoNotOverclaim(unittest.TestCase):
-    """A band heading must not assert presence the scanner never confirmed.
-
-    The digest once printed "Present in the environment" directly above rows
-    whose own status read UNKNOWN, because one band held both. The five-band
-    split fixes that structurally: these tests check the structure, not just
-    the wording, since wording drifts and structure does not."""
-
-    def data(self, findings, **counts):
-        c = {"Sev5": 0, "Sev4": 0, "Sev3": 0, "Sev2": 0, "Sev1": 0}
-        c.update(counts)
-        return {"counts": c, "total": len(findings), "degraded": [],
-                "source_meta": {}, "generated": "g", "kev_deadlines": {},
-                "findings": findings}
-
-    def unknown(self, cve, pri="Sev4"):
-        return {"cve": cve, "priority": pri, "status": "UNKNOWN", "host_count": 0,
-                "rationale": "No Qualys KnowledgeBase CVE-to-QID mapping found",
-                "sample_hosts": "", "qids": ""}
-
-    def present(self, cve, hosts=3, pri="Sev4"):
-        return {"cve": cve, "priority": pri, "status": "PRESENT",
-                "host_count": hosts, "rationale": f"PRESENT on {hosts} host(s)",
-                "sample_hosts": "h1", "qids": "1"}
-
-    def test_sev4_claims_presence_because_only_presence_lands_there(self):
-        # With five bands the label can finally be plain. Sev4 is confirmed
-        # present and nothing else, so saying so is honest rather than the
-        # overclaim it was when the band also held UNKNOWN rows.
-        self.assertIn("Confirmed present", brief.PRI["Sev4"][2])
-        self.assertNotIn("unverified", brief.PRI["Sev4"][2].lower())
-
-    def test_no_band_label_claims_presence_for_unverified_rows(self):
-        # The structural fix for the reported bug. Sev3 and Sev2 are where
-        # UNKNOWN rows live, and neither may assert presence.
-        for band in ("Sev3", "Sev2"):
-            label = brief.PRI[band][2].lower()
-            self.assertNotIn("confirmed present", label, band)
-
-    def test_the_scale_is_monotonic(self):
-        # A severity number has to mean what it says: Sev4 outranks Sev3, and
-        # no amount of reasoning in a comment changes that. An earlier draft
-        # claimed Sev3 outranked Sev4 and this test caught it.
-        self.assertEqual(list(brief.SEV_ORDER),
-                         ["Sev5", "Sev4", "Sev3", "Sev2", "Sev1"])
-        order = {p: i for i, p in enumerate(brief.SEV_ORDER)}
-        for higher, lower in zip(brief.SEV_ORDER, brief.SEV_ORDER[1:]):
-            self.assertLess(order[higher], order[lower])
-
-    def test_sev3_explains_why_it_exists(self):
-        d = self.data([self.unknown("CVE-1", pri="Sev3")], Sev3=1)
-        html = brief.render(d, "daily")
-        self.assertIn("it means nobody looked", html)
-        self.assertNotIn("Confirmed present", html.split("Sev3")[1][:400])
-
-    def test_all_present_band_carries_no_caveat(self):
-        # A caveat on a band that does not need one is noise, and noise is how
-        # a caveat stops being read when it matters.
-        d = self.data([self.present("CVE-1"), self.present("CVE-2")], Sev4=2)
-        html = brief.render(d, "daily")
-        self.assertNotIn("nobody looked", html)
-
-    def test_subject_counts_confirmed_presence_not_band_size(self):
-        # "3 confirmed present" was printed from a band count that could be
-        # entirely UNKNOWN. It now counts rows.
-        d = self.data([self.unknown("CVE-1", pri="Sev3"),
-                       self.unknown("CVE-2", pri="Sev3")], Sev3=2)
-        s = brief.subject(d, "daily")
-        self.assertIn("0 confirmed present", s)
-        self.assertIn("could not check", s)
-
-        d = self.data([self.present("CVE-1"),
-                       self.unknown("CVE-2", pri="Sev3")], Sev4=1, Sev3=1)
-        s = brief.subject(d, "daily")
-        self.assertIn("1 confirmed present", s)
-        self.assertIn("1 unverified", s)
-
-    def test_text_digest_carries_the_same_caveat(self):
-        d = self.data([self.present("CVE-1"),
-                       self.unknown("CVE-2", pri="Sev3")], Sev4=1, Sev3=1)
-        txt = brief.render_text(d, "daily")
-        self.assertIn("unverified coverage", txt)
-        self.assertIn("not that we are clean", txt)
-
-    def test_label_never_says_p1_through_p4(self):
-        # The point of the rename: no collision with the incident scale.
-        for band, (_, _, label) in brief.PRI.items():
-            for p in ("P1", "P2", "P3", "P4"):
-                self.assertNotIn(p, label, f"{band} label mentions {p}")
-
-
-class KevInTheDigest(unittest.TestCase):
-    def data(self, kev, sev5=1):
-        return {"counts": {"Sev5": sev5, "Sev4": 2, "Sev3": 0, "Sev2": 0,
-                           "Sev1": 0}, "total": 3,
-                "degraded": [], "source_meta": {}, "generated": "2026-09-15T06:00:00Z",
-                "kev_deadlines": kev,
-                "findings": [{"cve": "CVE-2026-1", "priority": "Sev5",
-                              "status": "PRESENT", "host_count": 12,
-                              "rationale": "present", "sample_hosts": "a",
-                              "qids": "1"}]}
-
-    def test_sev5_still_leads_the_subject(self):
-        # An overdue deadline on a Sev4 is less urgent than a Sev5. A subject that
-        # led with OVERDUE would bury the more urgent fact.
-        s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
-                                     "overdue_cves": ["X", "Y"]}), "daily")
-        self.assertTrue(s.startswith("[Sev5]"), s)
-        self.assertIn("OVERDUE", s, "the deadline should still ride along")
-
-    def test_overdue_leads_when_there_is_no_sev5(self):
-        s = brief.subject(self.data({"overdue": 2, "worst_overdue_days": 26,
-                                     "overdue_cves": ["X", "Y"]}, sev5=0), "daily")
-        self.assertTrue(s.startswith("[OVERDUE]"), s)
-
-    def test_no_banner_when_nothing_is_due(self):
-        # A banner that says "nothing overdue" every morning is a banner
-        # nobody reads by Thursday.
-        html = brief.render(self.data({"overdue": 0, "due_within_14d": 0}), "daily")
-        self.assertNotIn("remediation deadline", html)
-        self.assertNotIn("fall due within", html)
-
-    def test_banners_coexist_with_the_degraded_notice(self):
-        d = self.data({"overdue": 1, "worst_overdue_days": 4, "overdue_cves": ["X"]})
-        d["degraded"] = ["KEV catalog"]
-        html = brief.render(d, "daily")
-        self.assertIn("DEGRADED", html)
-        self.assertIn("remediation deadline", html)
-        self.assertEqual(html.count("<div"), html.count("</div>"))
-
-    def test_missing_summary_key_does_not_break_rendering(self):
-        # Older enriched files predate kev_deadlines. The digest must still
-        # render rather than failing the whole 6am run over a new field.
-        d = self.data({})
-        del d["kev_deadlines"]
-        self.assertTrue(brief.render(d, "daily"))
-        self.assertTrue(brief.render_text(d, "daily"))
-        self.assertTrue(brief.subject(d, "daily"))
 
 class DigestSendLedger(unittest.TestCase):
     """`was-sent` is the duplicate-send guard, and it never once fired.
@@ -798,412 +400,6 @@ echo "gh stub: unhandled: $*" >&2; exit 9
         self.assertFalse([c for c in self.calls() if c.startswith(("gh release create", "gh release upload"))], self.calls())
 
 
-class DigestTicketLinks(unittest.TestCase):
-    """The digest must quote the ticket, and must render without one.
-
-    Every ticket description promises "the CTI daily digest will keep listing
-    this CVE, with this ticket's key, until the scanner stops finding it".
-    Until now nothing kept that promise.
-    """
-
-    def setUp(self):
-        self.dir = tempfile.mkdtemp()
-        self.enriched = os.path.join(self.dir, "enriched-2026-10-02.json")
-        self.tickets = os.path.join(self.dir, "enriched-2026-10-02-tickets.json")
-        with open(self.enriched, "w") as fh:
-            json.dump({"findings": [], "counts": {}}, fh)
-
-    def tearDown(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-
-    def write_map(self, obj):
-        with open(self.tickets, "w") as fh:
-            json.dump(obj, fh)
-
-    def test_the_map_is_found_beside_the_enriched_file(self):
-        self.write_map({"tickets": {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9"}}})
-        got = brief.load_tickets(self.enriched)
-        self.assertEqual(got["CVE-1"]["key"], "CR-9")
-
-    def test_a_missing_map_is_silent_not_an_error(self):
-        # Ticketing is optional and runs before the renderer. A digest that
-        # refused to render because Jira was down would turn an optional
-        # feature into an outage of the security email.
-        self.assertEqual(brief.load_tickets(self.enriched), {})
-
-    def test_a_corrupt_map_is_silent_too(self):
-        with open(self.tickets, "w") as fh:
-            fh.write("{not json")
-        self.assertEqual(brief.load_tickets(self.enriched), {})
-
-    def test_the_key_and_link_reach_the_html(self):
-        tickets = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9",
-                             "status": "In Progress"}}
-        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
-        self.assertIn("CR-9", html)
-        self.assertIn("https://x/browse/CR-9", html)
-        self.assertIn("In Progress", html)
-
-    def test_a_finding_with_no_ticket_renders_nothing(self):
-        self.assertEqual(brief.ticket_cell_html({"cve": "CVE-2"}, {}), "")
-        self.assertIsNone(brief.ticket_cell_text({"cve": "CVE-2"}, {}))
-
-    def test_only_http_urls_become_links(self):
-        # Same rule the attribution line follows. The map is generated
-        # locally, but this lands in an email.
-        tickets = {"CVE-1": {"key": "CR-9", "url": "javascript:alert(1)"}}
-        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
-        self.assertNotIn("javascript:", html)
-        self.assertIn("CR-9", html)
-
-    def test_the_ticket_key_is_escaped(self):
-        tickets = {"CVE-1": {"key": "<script>", "url": ""}}
-        html = brief.ticket_cell_html({"cve": "CVE-1"}, tickets)
-        self.assertNotIn("<script>", html)
-
-    def test_the_text_digest_carries_it_too(self):
-        # Some readers get the text part. A ticket quoted only in HTML is a
-        # ticket half the recipients never see.
-        tickets = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9"}}
-        line = brief.ticket_cell_text({"cve": "CVE-1"}, tickets)
-        self.assertIn("CR-9", line)
-        self.assertIn("https://x/browse/CR-9", line)
-
-
-class DigestAdvisories(unittest.TestCase):
-    """FLEET ADVISORIES: advisory triage's report, rendered by brief.py.
-
-    Mail anyone can send, so nothing in it is a link and everything is
-    escaped; a sighting comes first whatever the judge said; every advisory
-    read is listed.
-    """
-
-    REPORT = {
-        "schema": "cti-advisories/1", "read": 3, "triaged": 2, "cost_usd": 0.0612,
-        "gaps": ["not visible to Falcon: sites without the sensor"],
-        "results": [
-            {"subject": "Quiet one", "sender": "feed@example.com", "trusted_sender": True,
-             "verdicts": {"sightings": [], "verdicts": [
-                 {"subject": "S1", "title": "7-Zip", "relevance": "unlikely", "reason": "not installed",
-                  "reason_by": "judge", "facts": []}]}},
-            {"subject": "<script>x</script> hxxp://evil[.]example/a", "sender": "a@b.example",
-             "trusted_sender": False, "problems": ["reader: no JSON object"],
-             "verdicts": {"sightings": [{"value": "evil.example", "type": "domain", "hosts_seen_on": 2}],
-                          "verdicts": [{"subject": "S1", "title": "Campaign", "relevance": "possible",
-                                        "reason": "the domain was seen on 2 hosts", "reason_by": "judge",
-                                        "raised_by_code": "one of our hosts saw one of the advisory's indicators",
-                                        "facts": [{"id": "F1", "text": "indicator \"evil.example\" seen on 2"}],
-                                        "suggested_checks": ["isolate the 2 hosts"]}]}},
-            {"subject": "Third", "sender": "c@d.example", "not_triaged": "over the cap of 2"},
-            {"subject": "Re: lunch", "sender": "x@corp.example", "why": "1 public IP address(es)",
-             "not_threat_intel": True, "verdicts": {"sightings": [], "verdicts": []}},
-            {"subject": "CVE roundup", "sender": "feed@example.com", "trusted_sender": True,
-             "cve_items": ["Chrome bug (CVE-2026-1)"],
-             "verdicts": {"sightings": [], "verdicts": []}},
-        ],
-    }
-
-    def data(self, rep=REPORT, enabled=True, kind="daily"):
-        return {"findings": [], "counts": {}, "total": 0, "generated": "now",
-                "_advisories": rep, "_triage_enabled": enabled, "_kind": kind}
-
-    def test_sightings_first_and_every_advisory_listed(self):
-        txt = "\n".join(brief.advisories_text(self.data()))
-        self.assertIn("FLEET ADVISORIES - 3 threat-intel messages, 1 worth a look", txt)
-        self.assertLess(txt.index("SEEN ON OUR HOSTS: evil.example"), txt.index("Quiet one"))
-        self.assertIn("Not triaged: over the cap of 2", txt)
-        self.assertIn("Raised by code:", txt)
-        self.assertIn("Check: isolate the 2 hosts", txt)
-        self.assertIn("a@b.example", txt)
-        self.assertIn("(a listed threat-intel sender)", txt)
-        self.assertIn("Read, no threat found: Re: lunch", txt)
-        self.assertNotIn("    from x@corp.example", txt)
-        self.assertIn("Model cost: $0.06", txt)
-        self.assertIn("In the CVE report above, not judged here: Chrome bug (CVE-2026-1)", txt)
-
-    def test_nothing_in_it_is_markup_or_a_link(self):
-        html = brief.advisories_section(self.data())
-        self.assertNotIn("<script>", html)
-        self.assertIn("&lt;script&gt;", html)
-        self.assertNotIn("<a ", html)
-        self.assertNotIn("href", html)
-
-    def test_it_reaches_the_daily_and_not_the_weekly(self):
-        self.assertIn("FLEET ADVISORIES", brief.render(self.data(), "daily"))
-        self.assertIn("FLEET ADVISORIES", brief.render_text(self.data(), "daily"))
-        self.assertNotIn("FLEET ADVISORIES", brief.render(self.data(kind="weekly"), "weekly"))
-
-    def test_missing_report(self):
-        self.assertIn("reported nothing today", brief.advisories_section(self.data(rep=None)))
-        self.assertEqual(brief.advisories_section(self.data(rep=None, enabled=False)), "")
-        self.assertEqual(brief.advisories_text(self.data(rep=None, enabled=False)), [])
-
-    def test_load_advisories_rejects_other_shapes(self):
-        with tempfile.TemporaryDirectory() as d:
-            enriched = os.path.join(d, "enriched-x.json")
-            self.assertIsNone(brief.load_advisories(enriched))
-            path = os.path.join(d, "enriched-x-advisories.json")
-            for bad in ("not json", '{"schema": "cti-advisories/2", "results": []}', '{"schema": "cti-advisories/1"}'):
-                pathlib.Path(path).write_text(bad)
-                self.assertIsNone(brief.load_advisories(enriched), bad)
-            pathlib.Path(path).write_text(json.dumps(self.REPORT))
-            self.assertEqual(brief.load_advisories(enriched)["read"], 3)
-
-
-class DigestFleetTickets(unittest.TestCase):
-    """Every fleet ticket appears in the digest, not only today's CVEs'.
-
-    A ticket used to show only on a day its CVE was back in the mail. The
-    follow-up re-checked all of them and commented in Jira, and the reader of
-    the digest heard nothing - "today's daily still didn't include ticket
-    status".
-    """
-
-    TICKETS = {
-        "CVE-2026-1": {"key": "CR-10", "url": "https://x/browse/CR-10", "status": "In Progress",
-                       "cve": "CVE-2026-1", "checked": True, "hosts": 0,
-                       "outcome": "commented: no detections remain (was 12) - this ticket can be closed"},
-        "CVE-2026-2": {"key": "CR-9", "url": "https://x/browse/CR-9", "status": "Open",
-                       "cve": "CVE-2026-2", "checked": True, "hosts": 227,
-                       "outcome": "no change since the last report (227 host(s)) - no comment"},
-        "CVE-2026-3": {"key": "CR-11", "url": "https://x/browse/CR-11", "status": "Done",
-                       "done": True, "cve": "CVE-2026-3", "checked": True, "hosts": 0},
-        "CVE-2026-4": {"key": "CR-12", "url": "javascript:alert(1)", "status": "<b>New</b>",
-                       "outcome": "not re-checked: the scanner lookup failed"},
-    }
-
-    def data(self, tickets=None):
-        return {"findings": [], "counts": {}, "total": 0, "generated": "now",
-                "_tickets": self.TICKETS if tickets is None else tickets}
-
-    def test_every_ticket_is_listed_open_first_in_key_order(self):
-        open_, closed = brief._fleet_tickets(self.data())
-        self.assertEqual([t["key"] for t in open_], ["CR-9", "CR-10", "CR-12"])
-        self.assertEqual([t["key"] for t in closed], ["CR-11"])
-
-    def test_the_html_says_what_the_recheck_found(self):
-        html = brief.fleet_tickets_section(self.data())
-        self.assertIn("FLEET TICKETS &mdash; 3 open", html)
-        self.assertIn("no detections remain", html)
-        self.assertIn("227 hosts", html)
-        self.assertIn("not re-checked", html)
-        self.assertIn("Closed in the last 30 days", html)
-        self.assertNotIn("javascript:", html)
-        self.assertNotIn("<b>New</b>", html)
-
-    def test_it_reaches_the_rendered_daily_even_with_no_findings(self):
-        html = brief.render(self.data(), "daily")
-        self.assertIn("FLEET TICKETS", html)
-        txt = brief.render_text(self.data(), "daily")
-        self.assertIn("FLEET TICKETS - 3 open", txt)
-        self.assertIn("CR-9", txt)
-        self.assertIn("227 hosts", txt)
-
-    def test_the_domains_lock_down_ticket_is_shown_as_such(self):
-        t = {"DNS lock-down": {"key": "CR-50", "url": "https://x/browse/CR-50", "status": "Open",
-                               "kind": "domains-lockdown",
-                               "outcome": "the weekly domains lock-down ticket"}}
-        html = brief.fleet_tickets_section(self.data(t))
-        self.assertIn("DNS lock-down", html)
-        self.assertIn("DNS changes for IT", html)
-        self.assertNotIn("not re-checked", html)
-
-    def test_the_spreadsheet_ticket_is_shown_as_such(self):
-        t = {"Spreadsheet fixes": {"key": "CR-77", "url": "https://x/browse/CR-77", "status": "Open",
-                                   "kind": "vmscan-sheet-fixes",
-                                   "outcome": "the network team's spreadsheet ticket - updated by the weekly VM scan run"}}
-        html = brief.fleet_tickets_section(self.data(t))
-        self.assertIn("CR-77", html)
-        self.assertIn("Spreadsheet fixes", html)
-        self.assertIn("spreadsheet fixes for the network team", html)
-        self.assertNotIn("not re-checked", html)
-        txt = "\n".join(brief.fleet_tickets_text(self.data(t)))
-        self.assertIn("spreadsheet fixes for the network team", txt)
-        self.assertNotIn("Product:", txt)
-
-    def test_supplier_items_are_one_summary_line(self):
-        def item(key, done=False):
-            return {"key": key, "url": f"https://x/browse/{key}", "status": "Done" if done else "To Do",
-                    "cve": "Supplier request", "kind": "supplier-request", "done": done}
-        t = {"supplier:CR-81": item("CR-81"), "supplier:CR-83": item("CR-83"),
-             "supplier:CR-84": item("CR-84", done=True)}
-        html = brief.fleet_tickets_section(self.data(t))
-        self.assertIn("2 Supplier request tickets opened for TPRM evaluation", html)
-        self.assertNotIn("CR-81", html, "supplier items are a count, not a row each")
-        txt = "\n".join(brief.fleet_tickets_text(self.data(t)))
-        self.assertIn("2 Supplier request tickets opened for TPRM evaluation", txt)
-        one = {"supplier:CR-81": item("CR-81")}
-        self.assertIn("1 Supplier request ticket opened", brief.fleet_tickets_section(self.data(one)))
-
-    def test_other_fleet_tickets_are_shown(self):
-        t = {"fleet:CR-82": {"key": "CR-82", "url": "https://x/browse/CR-82", "status": "Open",
-                             "cve": "Fleet ticket", "kind": "fleet-other",
-                             "outcome": "a fleet ticket this daily re-check does not cover"}}
-        html = brief.fleet_tickets_section(self.data(t))
-        for want in ("CR-82", "Fleet ticket", "listed, not re-checked"):
-            self.assertIn(want, html)
-
-    def test_no_tickets_no_section(self):
-        self.assertEqual(brief.fleet_tickets_section(self.data({})), "")
-        self.assertNotIn("FLEET TICKETS", brief.render_text(self.data({}), "daily"))
-
-    def test_an_old_map_without_the_new_fields_still_renders(self):
-        old = {"CVE-1": {"key": "CR-9", "url": "https://x/browse/CR-9", "status": "Open"}}
-        html = brief.fleet_tickets_section(self.data(old))
-        self.assertIn("CR-9", html)
-        self.assertIn("CVE-1", html)
-        self.assertIn("not re-checked", html)
-
-
-    def test_the_heading_claims_only_the_recheck_that_happened(self):
-        # The spreadsheet ticket is in every list; the heading differs by
-        # where the map came from.
-        sheet = {"key": "HD-7", "url": "https://x/browse/HD-7", "status": "Open",
-                 "kind": "vmscan-sheet-fixes",
-                 "outcome": "the network team's spreadsheet ticket - updated by the weekly VM scan run"}
-        for extra, want in (({}, "re-checked against the scanner today"),
-                            ({"_kind": "weekly"}, "as the latest daily re-checked them"),
-                            ({"_tickets_listed_only": True}, "not re-checked against the scanner this run")):
-            d = dict(self.data({"VM scan spreadsheet": sheet}), **extra)
-            html = brief.fleet_tickets_section(d)
-            text = "\n".join(brief.fleet_tickets_text(d))
-            for out in (html, text):
-                with self.subTest(extra=extra):
-                    self.assertIn(want, out)
-                    self.assertIn("HD-7", out)
-                    self.assertIn("spreadsheet fixes for the network team", out)
-            if extra:
-                self.assertNotIn("re-checked against the scanner today", html)
-            self.assertIn('href="https://x/browse/HD-7"', html)
-
-    def test_the_listed_only_flag_is_read_from_the_map(self):
-        with tempfile.TemporaryDirectory() as d:
-            enriched = os.path.join(d, "weekly-enriched-2026-11-16.json")
-            with open(enriched[:-5] + "-tickets.json", "w") as fh:
-                json.dump({"generated": "now", "listed_only": True,
-                           "tickets": {"x": {"key": "HD-7", "kind": "vmscan-sheet-fixes"}}}, fh)
-            self.assertTrue(brief._ticket_map(enriched).get("listed_only"))
-            self.assertEqual(brief.load_tickets(enriched)["x"]["key"], "HD-7")
-
-
-class HeldForApproval(unittest.TestCase):
-    """A Sev5 held for approval is named in the digest, with the command.
-
-    CVE-2026-111497 was held and the only trace was a journal line, so the
-    reader could not tell "no ticket wanted" from "no ticket filed".
-    """
-    HELD = [{"cve": "CVE-2026-111497", "hosts": 14, "title": "Some <b>exploit</b>"}]
-
-    def setUp(self):
-        self.dir = tempfile.mkdtemp()
-        self.enriched = os.path.join(self.dir, "enriched-2026-10-02.json")
-        self.tickets = os.path.join(self.dir, "enriched-2026-10-02-tickets.json")
-
-    def tearDown(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-
-    def write_map(self, obj):
-        with open(self.tickets, "w") as fh:
-            json.dump(obj, fh)
-
-    def held_data(self, held=None):
-        d = {"findings": [], "counts": {}, "total": 0, "generated": "now", "_tickets": {}}
-        d["_held"] = self.HELD if held is None else held
-        d["_enriched"] = self.enriched
-        return d
-
-    def test_the_held_cve_the_hosts_and_the_command_reach_the_html(self):
-        html = brief.held_section(self.held_data())
-        self.assertIn("HELD FOR APPROVAL", html)
-        self.assertIn("CVE-2026-111497", html)
-        self.assertIn("14 hosts", html)
-        self.assertIn("--for-real --approve", html)
-        self.assertIn(self.enriched, html)
-
-    def test_titles_are_escaped(self):
-        html = brief.held_section(self.held_data())
-        self.assertNotIn("<b>exploit</b>", html)
-
-    def test_the_text_digest_names_it_too(self):
-        text = brief.render_text(self.held_data(), "daily")
-        self.assertIn("HELD FOR APPROVAL", text)
-        self.assertIn("CVE-2026-111497", text)
-        self.assertIn("--approve", text)
-
-    def test_nothing_held_means_no_section(self):
-        self.assertEqual(brief.held_section(self.held_data([])), "")
-        self.assertNotIn("HELD FOR APPROVAL",
-                         brief.render_text(self.held_data([]), "daily"))
-
-    def test_load_held_reads_the_map_and_survives_a_bad_one(self):
-        self.write_map({"tickets": {}, "held": self.HELD + ["junk", {"hosts": 2}]})
-        self.assertEqual(brief.load_held(self.enriched), self.HELD)
-        self.write_map({"tickets": {}, "held": "nope"})
-        self.assertEqual(brief.load_held(self.enriched), [])
-        self.write_map(["not", "a", "dict"])
-        self.assertEqual(brief.load_held(self.enriched), [])
-        self.assertEqual(brief.load_tickets(self.enriched), {})
-        os.remove(self.tickets)
-        self.assertEqual(brief.load_held(self.enriched), [])
-
-
-class ProductName(unittest.TestCase):
-    """Every finding and fleet ticket says which product it is about.
-
-    Asked for 2026-11-09: "the targeted configuration item ... highlighted,
-    i.e. Chrome, Safari, PHP". From the CISA KEV catalog first, NVD's CPE
-    data second, and never guessed.
-    """
-
-    def test_brief_reads_the_product_map_beside_the_enriched_file(self):
-        # cti-enrich writes it (internal/enrich SaveProducts, tested there).
-        with tempfile.TemporaryDirectory() as tmp:
-            with open(os.path.join(tmp, "products.json"), "w") as f:
-                json.dump({"fetched": "2026-11-22T06:00:00.000000+00:00", "data": {
-                    "CVE-2026-1": "PHP", "CVE-2026-2": "Apple Safari", "CVE-2026-3": "Node.js"}}, f)
-            got = brief.load_products(os.path.join(tmp, "enriched-x.json"))
-        self.assertEqual(got, {"CVE-2026-1": "PHP", "CVE-2026-2": "Apple Safari",
-                               "CVE-2026-3": "Node.js"})
-
-    def finding(self, **kw):
-        f = {"cve": "CVE-2026-9", "priority": "Sev5", "status": "PRESENT",
-             "host_count": 3, "rationale": "r"}
-        f.update(kw)
-        return f
-
-    def test_the_card_highlights_the_product(self):
-        html = brief.finding_block(self.finding(product="Google <Chrome>", product_source="NVD"))
-        self.assertIn("Google &lt;Chrome&gt;", html)
-        self.assertIn('title="from NVD"', html)
-
-    def test_the_card_says_when_no_product_was_found(self):
-        self.assertIn("product not identified", brief.finding_block(self.finding(product="")))
-
-    def test_an_old_row_without_the_field_renders_as_before(self):
-        self.assertNotIn("product not identified", brief.finding_block(self.finding()))
-
-    def test_fleet_tickets_name_the_product_from_the_map(self):
-        d = {"findings": [self.finding(cve="CVE-2026-1", product="PHP")],
-             "counts": {}, "total": 1, "generated": "now",
-             "_products": {"CVE-2026-2": "Apple Safari"},
-             "_tickets": {
-                 "CVE-2026-1": {"key": "CR-1", "cve": "CVE-2026-1", "status": "Open"},
-                 "CVE-2026-2": {"key": "CR-2", "cve": "CVE-2026-2", "status": "Open"},
-                 "CVE-2026-3": {"key": "CR-3", "cve": "CVE-2026-3", "status": "Open"}}}
-        html = brief.fleet_tickets_section(d)
-        self.assertIn("PHP", html)
-        self.assertIn("Apple Safari", html)
-        txt = "\n".join(brief.fleet_tickets_text(d))
-        self.assertIn("Product: PHP", txt)
-        self.assertIn("Product: Apple Safari", txt)
-        self.assertEqual(txt.count("Product:"), 2)
-
-    def test_the_text_digest_names_the_product(self):
-        d = {"findings": [self.finding(product="PHP")], "counts": {"Sev5": 1},
-             "total": 1, "generated": "now"}
-        self.assertIn("CVE-2026-9  [PHP]", brief.render_text(d, "daily"))
-
-
 class RemediationNote(unittest.TestCase):
     """A ticketed finding must stop reporting as un-actioned.
 
@@ -1327,40 +523,6 @@ class RemediationNote(unittest.TestCase):
         self.backdate("CVE-2026-85046", days=5)
         self.assertEqual(len(self.findings("--stale-days", "2")), 1,
                          "clearing the note should make it stale again")
-
-
-class EmailTokens(unittest.TestCase):
-    """brief.py reads the palette the Go lanes read (internal/emailkit)."""
-
-    def setUp(self):
-        self.brief = load("brief")
-        self.file = json.loads((KIT / "fleet" / "lanes" / "email-tokens.json").read_text())
-
-    def test_the_builtin_fallback_is_the_file(self):
-        # The fallback exists so a missing file cannot cost the 6am digest; it
-        # must therefore say exactly what the file says.
-        self.assertEqual(self.brief._TOKEN_FALLBACK, self.file)
-
-    def test_the_severity_bands_use_the_shared_tones(self):
-        tones = self.file["tones"]
-        for sev, name in (("Sev5", "red"), ("Sev4", "amber"), ("Sev3", "yellow"),
-                          ("Sev2", "blue"), ("Sev1", "grey")):
-            self.assertEqual(self.brief.PRI[sev][:2], (tones[name]["fg"], tones[name]["bg"]), sev)
-
-    def test_the_digest_page_is_drawn_from_the_tokens(self):
-        data = {"counts": {}, "findings": [], "total": 0, "generated": "now", "source_meta": {}}
-        with quiet():
-            html = self.brief.render(data, "daily")
-        for key in ("navy", "page_bg", "band_text"):
-            self.assertIn(self.file[key], html, key)
-
-    def test_a_missing_tokens_file_does_not_stop_the_digest(self):
-        real = os.path.join
-        try:
-            os.path.join = lambda *a: "/nonexistent/email-tokens.json" if a[-1] == "email-tokens.json" else real(*a)
-            self.assertEqual(self.brief.email_tokens(), self.brief._TOKEN_FALLBACK)
-        finally:
-            os.path.join = real
 
 
 class DeadFeedsAreNamedAsDead(unittest.TestCase):
@@ -1560,7 +722,7 @@ class WeeklyRollsUpStoredFindings(unittest.TestCase):
                              f"which reads as 'the mailbox was empty'")
 
     def test_the_emails_read_section_is_absent_not_zero(self):
-        # brief.py drops the section when email_subjects is missing. Setting it
+        # cti-brief drops the section when email_subjects is missing. Setting it
         # to [] would render "0 total", which is a different claim.
         self.assertNotIn("email_subjects", self.rollup())
 
@@ -1613,65 +775,16 @@ class WeeklyRollsUpStoredFindings(unittest.TestCase):
         with open(enriched, "w", encoding="utf-8") as f:
             json.dump(d, f)
         out = os.path.join(self.tmp, "w.html")
-        subprocess.run([sys.executable, str(LANES / "brief.py"), "--weekly",
-                        "--enriched", enriched, "--out", out],
+        # fleet-db (Python) writes the rollup, cti-brief (Go) renders it: the
+        # one place the two meet, so it is tested across the languages.
+        exe = os.path.join(self.tmp, "cti-brief")
+        subprocess.run(["go", "build", "-o", exe, "./cmd/cti-brief"], cwd=KIT.parent,
+                       capture_output=True, check=True)
+        subprocess.run([exe, "--weekly", "--enriched", enriched, "--out", out],
                        capture_output=True, check=True)
         html = pathlib.Path(out).read_text(encoding="utf-8")
         self.assertIn("no mailbox read this run", html)
         self.assertNotIn("EMAILS READ THIS RUN", html)
-
-
-class WeeklyIsDistinguishableFromDaily(unittest.TestCase):
-    """The weekly subject must never equal the daily subject.
-
-    On Monday 2026-10-05 the 06:00 daily and the 07:00 weekly went out with
-    byte-identical subjects - "CTI Oct 05: no new CVEs in the last 24h" - on a
-    report covering seven days. subject() accepted a `kind` parameter and used
-    it in none of its six return paths, and Python does not warn about that.
-
-    The operator read it as the daily having sent twice. That was the correct
-    reading of the evidence he had.
-    """
-
-    def setUp(self):
-        self.brief = load("brief")
-
-    def cases(self):
-        return {
-            "quiet": {"counts": {}, "total": 0, "findings": [], "kev_deadlines": {}},
-            "sev5": {"counts": {"Sev5": 4}, "total": 9, "findings": [],
-                     "kev_deadlines": {"overdue": 4, "worst_overdue_days": 12}},
-            "overdue only": {"counts": {}, "total": 3, "findings": [],
-                             "kev_deadlines": {"overdue": 2, "worst_overdue_days": 5}},
-            "present": {"counts": {}, "total": 5, "kev_deadlines": {},
-                        "findings": [{"status": "PRESENT", "host_count": 3,
-                                      "priority": "Sev3"}]},
-            "unverified": {"counts": {}, "total": 4, "kev_deadlines": {},
-                           "findings": [{"status": "UNKNOWN", "priority": "Sev3"}]},
-            "reviewed": {"counts": {}, "total": 7, "findings": [],
-                         "kev_deadlines": {}},
-        }
-
-    def test_no_branch_produces_the_same_subject_for_both_kinds(self):
-        for name, data in self.cases().items():
-            daily = self.brief.subject(data, "daily")
-            weekly = self.brief.subject(data, "weekly")
-            self.assertNotEqual(
-                daily, weekly,
-                f"{name}: daily and weekly subjects are identical - {daily!r}")
-
-    def test_the_weekly_says_weekly(self):
-        for name, data in self.cases().items():
-            s = self.brief.subject(data, "weekly")
-            self.assertIn("Weekly", s, f"{name}: {s!r} does not say it is weekly")
-
-    def test_neither_kind_claims_the_wrong_window(self):
-        quiet = self.cases()["quiet"]
-        self.assertIn("24h", self.brief.subject(quiet, "daily"))
-        self.assertNotIn(
-            "24h", self.brief.subject(quiet, "weekly"),
-            "the weekly subject claims a 24-hour window")
-        self.assertIn("7 days", self.brief.subject(quiet, "weekly"))
 
 
 class TestFileShape(unittest.TestCase):
@@ -3794,7 +2907,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
     def test_every_lane_argument_is_in_its_man_page(self):
         root = pathlib.Path(__file__).resolve().parents[2]
         arg = re.compile(r"add_argument\(\s*\"--([a-z][a-z0-9-]*)\"")
-        for lane in ("scout.py", "brief.py"):
+        for lane in ("scout.py",):
             src = (root / "fleet-kit" / "fleet" / "lanes" / lane).read_text(encoding="utf-8")
             with self.subTest(lane=lane):
                 self._assert_documented(lane, arg.findall(src))
@@ -4063,6 +3176,7 @@ done
 case "$me $*" in
   "cti-mailer --lane owner --armed"*) [ -n "${OWNER_ALLOW_DOMAINS:-}" ] || exit 3 ;;
   "cti-appscan --subject-only"*)      echo "AppSec weekly" ;;
+  "cti-brief"*"--subject-only"*)      echo "CTI daily digest" ;;
   "cti-patchtuesday"*"--subject-only"*) echo "Microsoft Patch Tuesday for October 2026" ;;
   "fleet-db was-sent"*)               echo no ;;
   "fleet-db rollup"*)                 echo '{"total": 0, "counts": {}}' ;;
@@ -4070,24 +3184,12 @@ esac
 exit 0
 """
 
-_LANE_STUB = r"""import sys, os
-a = sys.argv[1:]
-with open(os.environ["STUB_LOG"], "a") as f:
-    f.write(os.path.basename(sys.argv[0]) + " " + " ".join(a) + "\n")
-if "--subject-only" in a:
-    print("CTI daily digest")
-for flag in ("--out", "--text-out"):
-    if flag in a:
-        open(a[a.index(flag) + 1], "w").write("<p>x</p>")
-"""
-
-
 class RunnersToDev(unittest.TestCase):
     """--to-dev on a runner: real pipeline, mail to FLEET_DEV_EMAIL only, and
     none of the side effects a real send has."""
 
     BIN = ("cti-mailer", "cti-alert", "cti-jira", "cti-domains", "cti-appscan", "cti-appreport",
-           "cti-patchtuesday", "cti-enrich", "fleet-db", "fleet-board")
+           "cti-patchtuesday", "cti-enrich", "cti-brief", "fleet-db", "fleet-board")
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -4100,7 +3202,6 @@ class RunnersToDev(unittest.TestCase):
             p = self.code / "bin" / name
             p.write_text(_STUB)
             p.chmod(0o755)
-        (self.code / "lanes" / "brief.py").write_text(_LANE_STUB)
         agent = root / "agent"
         agent.mkdir()
         (agent / "cti-agent").write_text(
@@ -4539,7 +3640,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 enrich_ = [c for c in calls if c.startswith("cti-enrich ")]
                 self.assertIn("--no-db", enrich_[0], "the rehearsal upserted into memory.db")
                 self.assertIn(f"--out {out}/enriched-{day}.json", enrich_[0])
-                self.assertIn(f"--enriched {out}/enriched-{day}.json", [c for c in calls if c.startswith("brief.py ")][0])
+                self.assertIn(f"--enriched {out}/enriched-{day}.json", [c for c in calls if c.startswith("cti-brief ")][0])
                 jira = [c for c in calls if c.startswith("cti-jira ")]
                 self.assertEqual(jira, [f"cti-jira --from-enriched {out}/enriched-{day}.json --dry-run --follow-up"])
                 # What the preview reads beside the enriched file, copied in.
@@ -4598,7 +3699,7 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 self.assertFalse(stale.exists(), "a report from an earlier read survived the rerun")
                 self.assertFalse(adv_in.exists(), "the input is removed once triaged")
                 order = [c.split()[0] for c in calls]
-                self.assertLess(order.index("cti-triage"), order.index("brief.py"))
+                self.assertLess(order.index("cti-triage"), order.index("cti-brief"))
 
     def test_digest_survives_a_failed_triage(self):
         self.triage_stubs(triage_exit=1)
@@ -5684,7 +4785,7 @@ class TlsFloor(unittest.TestCase):
             self.assertTrue(ctx.check_hostname, name)
 
     def test_no_lane_builds_its_own_unfloored_context(self):
-        for name in ("scout", "brief"):
+        for name in ("scout",):
             src = (LANES / f"{name}.py").read_text()
             for ln, line in enumerate(src.splitlines(), 1):
                 if "create_default_context" in line:

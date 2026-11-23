@@ -302,10 +302,10 @@ func pastTense(s string) string {
 	return s
 }
 
-// TicketMap is written beside the enriched file for brief.py to read.
+// TicketMap is written beside the enriched file for cti-brief to read.
 //
-// A FILE, not a database lookup from the renderer. brief.py is stdlib Python
-// with no Jira credentials and no business having any - the lane that can
+// A FILE, not a database lookup from the renderer. cti-brief has
+// no Jira credentials and no business having any - the lane that can
 // already talk to Jira does the talking, and hands the renderer a flat map.
 type TicketMap struct {
 	Generated string               `json:"generated"`

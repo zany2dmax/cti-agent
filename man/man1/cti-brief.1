@@ -1,26 +1,23 @@
-.TH BRIEF.PY 1 "2026-10-12" "cti-agent 1.3" "CTI Fleet Manual"
+.TH CTI-BRIEF 1 "2026-11-22" "cti-agent 1.7" "CTI Fleet Manual"
 .SH NAME
-brief.py \- the @brief lane: render enriched findings as the daily or weekly CTI digest
+cti-brief \- the @brief lane: render enriched findings as the daily or weekly CTI digest
 .SH SYNOPSIS
-.B brief.py
+.B cti\-brief
 .BI \-\-enriched " FILE"
 .RB [ \-\-daily | \-\-weekly ]
 .BI \-\-out " FILE"
 .RB [ \-\-text\-out
 .IR FILE ]
 .br
-.B brief.py
+.B cti\-brief
 .BI \-\-enriched " FILE"
 .RB [ \-\-daily | \-\-weekly ]
 .B \-\-subject\-only
 .PP
-.B sudo cti\-agent brief.py
-.I options
-.br
-.B python3 $FLEET_CODE/lanes/brief.py
+.B sudo cti\-agent cti\-brief
 .I options
 .SH DESCRIPTION
-.B brief.py
+.B cti\-brief
 turns the JSON written by
 .BR cti\-enrich (1),
 or by
@@ -87,7 +84,14 @@ and
 .BR "the last 7 days" .
 Dates are local time.
 .PP
-.B brief.py
+It replaced the Python
+.BR brief.py ,
+flag for flag, and writes the same email byte for byte (the Go tests hold
+it to golden output that Python wrote). The colours come from
+.IR internal/emailkit ,
+the palette every fleet email shares.
+.PP
+.B cti\-brief
 only renders. It sends nothing and calls no network service.
 .SH OPTIONS
 .TP
@@ -106,7 +110,15 @@ beside it (the
 .I .json
 suffix replaced), written by
 .BR cti\-jira (1);
-a missing or unreadable ticket file is silently ignored.
+a missing or unreadable ticket file is silently ignored. So are the
+product map
+.I products.json
+beside it, written by
+.BR cti\-enrich (1),
+and, for the daily,
+.IR FILE \-advisories.json
+from
+.BR cti\-triage (1).
 .TP
 .B \-\-daily
 Daily row limits, subject and heading. The default.
@@ -123,7 +135,8 @@ is not needed.
 .BI \-\-out " FILE"
 Write the HTML digest. Required unless
 .BR \-\-subject\-only .
-Missing directories are created.
+Missing directories are created. Both outputs are written 0600, since the
+digest names hosts.
 .TP
 .BI \-\-text\-out " FILE"
 Also write the plain-text version: subject, band counts, degraded sources,
@@ -131,14 +144,15 @@ new and previously reported counts, KEV deadlines, then each listed finding
 with its status, host count, rationale and ticket. Ignored with
 .BR \-\-subject\-only .
 .SH ENVIRONMENT
-.B brief.py
-does not load
+.B cti\-brief
+loads
 .I fleet.env
-itself;
-.B run\-digest
-sources it first, and so does the
-.BR cti\-agent (1)
-wrapper on a hand run.
+itself, as the other Go commands do; anything already in the environment
+wins.
+.TP
+.B TRIAGE_ENABLED
+1 shows the FLEET ADVISORIES section on the daily even when advisory triage
+wrote no report, saying so.
 .TP
 .B FLEET_ORG
 Organisation name in the header and default footer.
@@ -184,7 +198,7 @@ The subject was printed, or the digest was written.
 .TP
 .B 1
 The input could not be read or is not JSON, or an output could not be
-written (Python traceback).
+written.
 .TP
 .B 2
 .B \-\-out
@@ -200,7 +214,7 @@ and
 Re-render today's daily to look at it, without sending:
 .PP
 .EX
-sudo cti\-agent brief.py \-\-daily \e
+sudo cti\-agent cti\-brief \-\-daily \e
   \-\-enriched /var/lib/cti\-agent/state/enriched\-$(date +%F).json \e
   \-\-out /var/lib/cti\-agent/reports/preview.html \e
   \-\-text\-out /var/lib/cti\-agent/reports/preview.txt
@@ -210,7 +224,7 @@ The subject this week's rollup would carry:
 .PP
 .EX
 sudo cti\-agent fleet\-db rollup \-\-days 7 > /tmp/week.json
-python3 /opt/cti\-agent/lanes/brief.py \-\-weekly \-\-subject\-only \e
+sudo cti\-agent cti\-brief \-\-weekly \-\-subject\-only \e
   \-\-enriched /tmp/week.json
 .EE
 .SH SEE ALSO

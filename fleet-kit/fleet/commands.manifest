@@ -28,16 +28,6 @@
 #   exempt:  flags that make an effect command read-only, so no mode is needed
 #            (cti-jira --check, cti-mailer --check and --armed)
 
-command: brief.py
-about: Render the CTI digest from an enriched file
-runs: local
-flag: --enriched FILE | enriched JSON from cti-enrich
-flag: --daily | the daily digest
-flag: --weekly | the weekly digest
-flag: --subject-only | print the subject line only
-flag: --out FILE | HTML output path
-flag: --text-out FILE | plain-text output path
-
 command: cti-alert
 about: Tell the operator a unit failed or the heartbeat needs a person
 runs: effect
@@ -108,6 +98,16 @@ flag: --prune | delete audit-DATE.log files older than --days
 flag: --stdin | write many events in one call: one JSON object per line on standard input, {"action":..,"target":..,"outcome":..,"detail":..}; a line that is not an event is named and skipped
 flag: --target STRING | with --action: what it was done to
 risk: --prune changes
+
+command: cti-brief
+about: Render the CTI digest from an enriched file
+runs: local
+flag: --enriched FILE | enriched JSON from cti-enrich
+flag: --daily | the daily digest
+flag: --weekly | the weekly digest
+flag: --subject-only | print the subject line only
+flag: --out FILE | HTML output path
+flag: --text-out FILE | plain-text output path
 
 command: cti-budget
 about: The heartbeat's share of the Claude subscription: gate and ledger

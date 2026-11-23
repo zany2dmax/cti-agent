@@ -267,7 +267,7 @@ func TestTheSubjectLeadsWithTheFaultNotTheCount(t *testing.T) {
 func TestTheHtmlMatchesTheDailyBriefsLayout(t *testing.T) {
 	// The operator's first note on the real email: "it should mimic the daily
 	// and fleet message colors and layout". These are the daily's own values,
-	// from fleet-kit/fleet/lanes/brief.py - the page background, the navy
+	// from the digest (internal/brief, once fleet-kit/fleet/lanes/brief.py) - the page background, the navy
 	// header band, the 640px card and the Sev5 red.
 	b := render(t, deepScan(), publicScan())
 	for _, want := range []string{

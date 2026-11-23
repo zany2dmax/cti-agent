@@ -132,14 +132,14 @@ the CVE report, and the rest go through the Falcon lookups and the judge
 20 minutes in all) and writes
 .IR state/enriched\-DATE\-advisories.json ,
 which
-.B brief.py
+.B cti\-brief
 renders as FLEET ADVISORIES. The input is removed once triaged and kept if
 triage fails. Runs on a dry run too, in its directory, so the preview is
 what the real digest would show; that costs the same model calls. Any
 failure costs the section and nothing else.
 .TP
 .B 3. Brief
-.B python3 lanes/brief.py \-\-daily
+.B bin/cti\-brief \-\-daily
 (or
 .BR \-\-weekly )
 renders
@@ -357,7 +357,7 @@ The daily's enriched findings.
 The CVE-to-ticket map
 .B cti\-jira
 writes for
-.BR brief.py .
+.BR cti\-brief .
 .TP
 .IR state/enriched\-DATE\-advisory\-input.json ", " state/enriched\-DATE\-advisories.json
 Advisory triage's input (message bodies with no CVE) and report, 0600.
@@ -496,13 +496,12 @@ journalctl \-u cti\-agent\-digest.service \-n 50
 .BR run\-mailbox\-cleanup (1),
 .BR cti\-agent (1)
 .PP
-The lane
-.I lanes/brief.py
-under
-.IR /opt/cti\-agent ,
-and the binaries
-.I bin/cti\-enrich
+The binaries
+.IR bin/cti\-enrich ,
+.I bin/cti\-brief
 and
-.IR bin/cti\-mailer .
+.I bin/cti\-mailer
+under
+.IR /opt/cti\-agent .
 .PP
 RUNBOOK.md sections 9, 11a and 12; fleet\-kit/README.md, "Schedule".

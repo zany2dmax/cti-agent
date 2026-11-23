@@ -41,11 +41,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 - **Fleet runtime moves from Python to Go.** Python on the box is now for
   SQLite (`fleet-db`, `fleet-owners`), for tools a person runs by hand, and
-  for the lanes not yet ported (`brief.py`, `scout.py`). Three moves so far;
-  what each replaced is under Removed below.
+  for the lane not yet ported (`scout.py`). Four moves so far; what each
+  replaced is under Removed below.
   - **`cti-enrich`** (`internal/enrich`): the @enrich lane, in place of
     `enrich.py`. Same flags and the same enriched file, held to golden files
     the Python wrote. Its SQLite reads and writes go through `fleet-db`.
+  - **`cti-brief`** (`internal/brief`): the @brief lane, in place of
+    `brief.py`. Same flags and the same email, byte for byte, held to golden
+    files the Python wrote.
   - **`cti-sanitize`**: the heartbeat's output cleaner, in place of
     `fleet-sanitize`. It's the `internal/sanitize` package, so there's one
     implementation of the Scenario-222 rules, not two.
@@ -222,6 +225,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     KEV deadlines, band labels, report parsing, products). The brief.py tests
     render `fleet-kit/tests/testdata/enriched-sample.json`, written by the
     Python before it went. The runner tests stub `bin/cti-enrich`.
+- **The Python `brief.py` lane.** `cti-brief` (Go, `internal/brief`)
+  replaces it in `run-digest`, `dev-run` and the digest skill, with the same
+  flags. It renders the same email: subject, HTML and text, daily and weekly.
+  - **Proof:** before the Python was deleted, it rendered 22 digests (every
+    section, every truncation and caveat, and one with markup and quotes in
+    every field) and ran 9 command lines. The Go tests require the output to
+    match byte for byte, exit codes and log lines included.
+  - **Shared look:** the colours come from `internal/emailkit`, like every
+    other fleet email. The lanes copy of the palette,
+    `fleet-kit/fleet/lanes/email-tokens.json`, is gone, and so is the test
+    that kept it in step.
+  - **On the box:** an update builds `bin/cti-brief` and deletes
+    `lanes/brief.py`, `lanes/email-tokens.json` and the `brief.py` man page.
+  - **Behaviour changes:**
+    - The digest HTML and text are written 0600 and atomically. Before, they
+      got whatever the unit's umask gave.
+    - The band counts and KEV deadline numbers are HTML-escaped like every
+      other value. The Python wrote them raw; they are numbers in practice,
+      but nothing checked that (`internal/renderguard` now does).
+  - **`internal/pyfmt`:** writes numbers, None and string reprs as the Python
+    lanes did. `cti-enrich` and `cti-brief` both use it.
 
 ---
 
