@@ -35,7 +35,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 2.0-rc2 — 2026-11-23
+
+The second release candidate: 2.0-rc1 and one installer fix. The 2.0-rc1
+update stopped partway on a box upgrading from 1.7.2; this candidate
+finishes it. Everything 2.0-rc1 says about the candidate week, and what 2.0
+final will require, still holds.
+
+**Upgrade:** `sudo cti-agent-update --for-real`. Nothing else is required.
 
 ### Fixed
 
