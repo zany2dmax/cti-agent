@@ -37,6 +37,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Changed
+
+- **No real site names in the repository.** Code comments, a test and one
+  older CHANGELOG entry named real locations as examples; they now use
+  placeholders like the rest of the repository. The names remain in git
+  history; the history was not rewritten.
+
 ### Added
 
 - **The org pack** ([docs/org-pack.md](docs/org-pack.md)). What one
@@ -1314,8 +1321,8 @@ only adds to the schedules, and stale titles are reported as missing. Then
   says the notice did not arrive. Without the scan list the week is built from
   the notices and the report says so. `cti-vmscan --check` now lists the scans.
 - **The coverage check picks each location's 10.X.30 network, whatever its
-  label.** It used to take only rows labelled `corp`: HQ and 3000 Pine label
-  theirs `inside` and Bell Cabinetry `Employee LAN`, so they were checked
+  label.** It used to take only rows labelled `corp`: some locations label
+  theirs `inside` and others `Employee LAN`, so they were checked
   against the wrong network or none. A location with no 10.X.30 network inside
   its own /16 falls back to `corp`; a `netrules.txt` line still decides.
 - **The spreadsheet fixes go to the help desk as a Jira ticket.** The rows

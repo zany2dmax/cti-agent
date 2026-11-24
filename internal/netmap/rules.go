@@ -11,7 +11,7 @@ import (
 var cidrRE = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b`)
 
 // headerBlocks are the networks a location's header names for itself, such as
-// the /16 in "ARD Miami - FL - 10.4.0.0/16". A corp network outside all of them
+// the /16 in "Example Site - ST - 10.4.0.0/16". A corp network outside all of them
 // is usually a typo in the sheet.
 func headerBlocks(header string) []netip.Prefix {
 	var out []netip.Prefix
@@ -183,8 +183,8 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		bad, blank := "", false
 		badRow, headRow := 0, 0
 		// Without a rule, the location's user network is its 10.X.30 network:
-		// the sheet's own convention, whatever the row is labelled (HQ and 3000
-		// Pine call it "inside", Bell Cabinetry "Employee LAN"). Only when it
+		// the sheet's own convention, whatever the row is labelled (some
+		// locations call it "inside", others "Employee LAN"). Only when it
 		// has none does the "corp" label decide.
 		thirty := []Subnet(nil)
 		if key == "" {

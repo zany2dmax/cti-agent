@@ -93,8 +93,8 @@ func TestGatherBuildsTheSheetFromFactsOnly(t *testing.T) {
 		{Product: "Chrome", Vendor: "Google", FixedIn: "131.0.6778.86", Techniques: []string{"T1566.002", "T1203"}, Inferred: []string{"T1203"}},
 		{Product: "x'+vendor:*", Title: "hostile"},
 	}}
-	fs := Gather(context.Background(), src, body, ex, subj, nil, time.Now(), "Vitoria; Ramos")
-	if fs.Sensors != 2128 || fs.BlindSpots != "Vitoria; Ramos" {
+	fs := Gather(context.Background(), src, body, ex, subj, nil, time.Now(), "Site A; Site B")
+	if fs.Sensors != 2128 || fs.BlindSpots != "Site A; Site B" {
 		t.Errorf("sheet header = %+v", fs)
 	}
 	chrome := fs.Subjects[0]
