@@ -887,6 +887,11 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
 file: vmscan
 
+key: VMSCAN_GAP_TEAMS
+section: 4. RECIPIENTS AND THE SEND GATE - required
+readers: cti-vmscan
+file: vmscan
+
 key: VMSCAN_SCANS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-jira cti-vmscan

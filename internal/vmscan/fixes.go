@@ -18,8 +18,8 @@ import (
 // check) are written as a list that cti-jira --vmscan-fixes files as ONE
 // ticket, unassigned, for the help desk to route, and comments on only when the
 // list changes - the domains lane's lock-down ticket, for the spreadsheet. Only
-// these: the "not scanned" networks are a different question, for the network
-// and M&A teams, and stay in the email.
+// these: the "not scanned" networks are a different question, for the teams
+// in the gap-teams setting, and stay in the email.
 //
 // The list's hash ignores sheet row numbers: inserting a row above a location
 // moves every row below it, and that is not a change anyone has to act on.

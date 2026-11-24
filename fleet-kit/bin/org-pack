@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# org-pack - find, check and apply an organization's pack (docs/org-pack.md).
+#
+#   org-pack find KIT_ROOT CONF_DIR       print the pack's directory, or nothing
+#   org-pack check PACK CORE [--root-owned]
+#   org-pack compose CORE_FILE [ORG_FILE] print CORE_FILE with the org notes after it
+#
+# An org pack is what one organization adds to the fleet's prompts and skills,
+# kept out of the core files so pulling upstream never conflicts with it:
+#
+#   orchestrator.md            appended to the orchestrator's CLAUDE.md
+#   agents/<agent>.md          appended to agents/<agent>/CLAUDE.md (a core agent)
+#   skills/<name>/SKILL.md     an extra skill (never one of the core skills' names)
+#   README.md                  for people; not installed
+#
+# ADDITIVE ONLY. A pack adds notes after the core text and new skills beside
+# the core ones. It cannot replace or remove a core instruction: the hard
+# rules, the grant and the escalation rules stay what upstream wrote, and the
+# appended block says that where the two disagree, the core text wins.
+#
+# The pack steers the beat, so it is held to the rules the installed prompts
+# are: on the box every file and directory in it is root-owned and writable
+# by nobody else (--root-owned), and no symlinks, so the service account can
+# neither write it nor point it somewhere else. Anything the layout does not
+# name is refused by name: a misspelt file would otherwise be silently ignored.
+#
+# Where it lives: a fork commits it as org/ at the top of its repository; a
+# box that installs from an upstream clone keeps it in /etc/cti-agent/org/.
+# Both at once is refused: there would be two answers to "which notes apply".
+set -euo pipefail
+
+MAX_BYTES=65536
+SKILL_RE='^[a-z0-9][a-z0-9-]{0,39}$'
+
+usage() {
+  sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+fail() { echo "org-pack: $*" >&2; exit 1; }
+
+cmd_find() {
+  [ $# -eq 2 ] || usage
+  local kit="$1/org" conf="$2/org" found=""
+  [ -e "$kit" ] && found="$kit"
+  if [ -e "$conf" ]; then
+    [ -z "$found" ] || fail "two org packs: $kit and $conf. Keep one: a fork's org/ in the repository, or $conf on a box installed from upstream."
+    found="$conf"
+  fi
+  [ -z "$found" ] || [ -d "$found" ] || fail "$found is not a directory"
+  if [ -n "$found" ]; then printf '%s\n' "$found"; fi
+}
+
+cmd_check() {
+  [ $# -ge 2 ] && [ $# -le 3 ] || usage
+  local pack="$1" core="$2" root_owned="" rel name n=0 problems=""
+  if [ $# -eq 3 ]; then
+    [ "$3" = --root-owned ] || usage
+    root_owned=1
+  fi
+  [ -d "$pack" ] || fail "$pack is not a directory"
+  [ -d "$core/agents" ] && [ -d "$core/skills" ] || fail "$core has no agents/ and skills/ (pass the kit's fleet/ directory)"
+
+  add() { problems="$problems  $1"$'\n'; }
+
+  while IFS= read -r -d '' p; do
+    rel="${p#"$pack"/}"
+    if [ -L "$p" ]; then add "$rel: a symlink (copy the file in instead)"; continue; fi
+    if [ -d "$p" ]; then
+      case "$rel" in
+        agents|skills) ;;
+        skills/*/*) add "$rel: skills hold one folder per skill, with SKILL.md in it" ;;
+        skills/*)
+          name="${rel#skills/}"
+          if ! printf '%s' "$name" | grep -Eq "$SKILL_RE"; then
+            add "$rel: a skill name is lower-case letters, digits and hyphens"
+          elif [ -d "$core/skills/$name" ]; then
+            add "$rel: /$name is a core skill; a pack adds skills, it does not replace them (put notes in orchestrator.md)"
+          elif [ ! -f "$p/SKILL.md" ]; then
+            add "$rel: no SKILL.md"
+          fi ;;
+        *) add "$rel: not part of an org pack (docs/org-pack.md lists what is)" ;;
+      esac
+      continue
+    fi
+    if [ ! -f "$p" ]; then add "$rel: not a regular file"; continue; fi
+    case "$rel" in
+      README.md|orchestrator.md) ;;
+      agents/*.md)
+        name="${rel#agents/}"; name="${name%.md}"
+        [ -d "$core/agents/$name" ] || add "$rel: there is no core agent called $name (the agents are: $(ls "$core/agents" | tr '\n' ' '))" ;;
+      skills/*/SKILL.md) ;;
+      *) add "$rel: not part of an org pack (docs/org-pack.md lists what is)" ;;
+    esac
+    [ "$(wc -c < "$p" | tr -d ' ')" -le "$MAX_BYTES" ] || add "$rel: larger than $MAX_BYTES bytes"
+    n=$((n + 1))
+  done < <(find "$pack" -mindepth 1 -print0)
+
+  # Writable by anyone but its owner, anywhere in the pack: refused on and off
+  # the box. Owned by anyone but root: refused where the installer runs.
+  while IFS= read -r -d '' p; do
+    add "${p#"$pack"/}: writable by group or others"
+  done < <(find "$pack" \( -perm -0020 -o -perm -0002 \) ! -type l -print0)
+  if [ -n "$root_owned" ]; then
+    while IFS= read -r -d '' p; do
+      add "${p#"$pack"/}: not owned by root (sudo chown -R root:root $pack)"
+    done < <(find "$pack" ! -user 0 -print0)
+    [ "$(find "$pack" -maxdepth 0 -user 0)" = "$pack" ] || add ".: the pack directory itself is not owned by root"
+  fi
+
+  if [ -n "$problems" ]; then
+    printf 'org-pack: %s is not a usable org pack:\n%s' "$pack" "$problems" >&2
+    exit 1
+  fi
+  echo "org-pack: $pack ok ($n files)"
+}
+
+cmd_compose() {
+  [ $# -ge 1 ] && [ $# -le 2 ] || usage
+  local core="$1" org="${2:-}"
+  [ -f "$core" ] || fail "no core file $core"
+  cat "$core"
+  if [ -n "$org" ] && [ -f "$org" ]; then
+    printf '\n---\n\n## Organization notes\n\n'
+    printf '%s\n\n' "These notes come from this organization's pack. They add to the instructions above and never override them: where the two disagree, the instructions above win."
+    cat "$org"
+  fi
+}
+
+[ $# -ge 1 ] || usage
+sub="$1"; shift
+case "$sub" in
+  find) cmd_find "$@" ;;
+  check) cmd_check "$@" ;;
+  compose) cmd_compose "$@" ;;
+  -h|--help) usage ;;
+  *) usage ;;
+esac

@@ -265,7 +265,8 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 	for _, want := range []string{
 		"NOT SCANNED (2)",
 		"Alpha Site (sheet row 12): 10.1.30.0/24 is in no Qualys Asset Group.",
-		"Network or M&A team: say why this is not scanned.",
+		"Network team: say why this is not scanned.",
+		"The network team is\n  asked to find out and say.",
 		"Beta Site (sheet row 20): 10.2.30.0/24 is in the Asset Group \"Beta\", which no scan targeted this week.",
 		"FOR THE NETWORK TEAM: FIX IN THE SPREADSHEET (3)", "The security team only reads this spreadsheet",
 		"Delta Site (sheet row 41)", "Network team: fill in this location's corp network.",
@@ -285,7 +286,33 @@ func TestTheCoverageCheckLeadsTheSubjectWhenANetworkIsNotScanned(t *testing.T) {
 	}
 }
 
-// The email goes to the network and acquisitions teams as well as security, so
+// Who is asked about an unscanned network differs by organization:
+// cti-vmscan's gap-teams setting names them, in the text, the HTML and the worksheet.
+func TestTheGapTeamsAreASetting(t *testing.T) {
+	w := Combine(both(t), weeklies)
+	w.Coverage = sampleCoverage()
+	w.Coverage.GapTeams = "  network and  M&A teams "
+	b := Render(w, "Acme", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"Network and M&A teams: say why this is not scanned.",
+		"The network and M&A teams are\n  asked to find out and say.",
+	} {
+		if !strings.Contains(b.Text, want) {
+			t.Errorf("text lacks %q", want)
+		}
+	}
+	if !strings.Contains(b.HTML, "the network and M&amp;A teams are asked to find out and say.") {
+		t.Error("html does not name the teams, escaped")
+	}
+	if !strings.Contains(w.Coverage.CSV(), "Network and M&A teams: say why this is not scanned.") {
+		t.Error("worksheet does not name the teams")
+	}
+	if strings.Contains(b.Text+b.HTML, "network team is asked") {
+		t.Error("the default leaked through")
+	}
+}
+
+// The email goes to the network team (and the gap teams) as well as security, so
 // the same findings come as a worksheet they can work through.
 func TestTheFindingsComeAsAWorksheet(t *testing.T) {
 	c := sampleCoverage()

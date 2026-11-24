@@ -335,6 +335,25 @@ case "$SEMODE" in
   *)          info "SELinux: $SEMODE" ;;
 esac
 
+# The org pack (docs/org-pack.md): this organization's notes for the prompts,
+# and its extra skills, kept out of the core files so an upstream pull never
+# conflicts with them. A fork commits it as org/ in its repository; a box
+# installed from an upstream clone keeps it in $CONF_DIR/org. Checked here,
+# before anything is installed, because it steers the beat: root-owned, no
+# symlinks, nothing the layout does not name.
+ORG_PACK="$("$SRC/bin/org-pack" find "$SRC/.." "$CONF_DIR")" || bail 1
+ORG_TMP="$(mktemp -d)"
+if [ -n "$ORG_PACK" ]; then
+  "$SRC/bin/org-pack" check "$ORG_PACK" "$SRC/fleet" --root-owned || bail 1
+  ok "org pack: $ORG_PACK"
+else
+  info "org pack: none (the core prompts and skills only; docs/org-pack.md)"
+fi
+# org_compose CORE NAME OUT - CORE with the pack's NAME file appended, into OUT.
+org_compose() {
+  "$SRC/bin/org-pack" compose "$1" "${ORG_PACK:+$ORG_PACK/$2}" > "$3"
+}
+
 # ───────────────────────────────────────────────────── service account ───────
 bold "Service account: $FLEET_USER"
 if id "$FLEET_USER" >/dev/null 2>&1; then
@@ -418,17 +437,19 @@ fi
 # The supplier-request lane's standing instructions: the system prompt of the
 # no-tools model that judges each request. Root-owned like the code, so the
 # service account cannot rewrite what its own model is told. Data, not code: 0644.
-run install -d -m 0755 -o root -g root "$CODE_DIR/agents/supplier"
-run install -m 0644 -o root -g root "$SRC/fleet/agents/supplier/CLAUDE.md" "$CODE_DIR/agents/supplier/CLAUDE.md"
-info "agents/supplier/CLAUDE.md"
-# The advisory triage reader's instructions, root-owned for the same reason.
-run install -d -m 0755 -o root -g root "$CODE_DIR/agents/triage-reader"
-run install -m 0644 -o root -g root "$SRC/fleet/agents/triage-reader/CLAUDE.md" "$CODE_DIR/agents/triage-reader/CLAUDE.md"
-info "agents/triage-reader/CLAUDE.md"
-# The triage judge's instructions: the one triage model that sees our facts.
-run install -d -m 0755 -o root -g root "$CODE_DIR/agents/triage-judge"
-run install -m 0644 -o root -g root "$SRC/fleet/agents/triage-judge/CLAUDE.md" "$CODE_DIR/agents/triage-judge/CLAUDE.md"
-info "agents/triage-judge/CLAUDE.md"
+# The advisory triage reader's instructions, root-owned for the same reason,
+# and the triage judge's: the one triage model that sees our facts. Each gets
+# the org pack's agents/<name>.md after it, when the pack has one.
+for a in supplier triage-reader triage-judge; do
+  org_compose "$SRC/fleet/agents/$a/CLAUDE.md" "agents/$a.md" "$ORG_TMP/agent-$a.md"
+  run install -d -m 0755 -o root -g root "$CODE_DIR/agents/$a"
+  run install -m 0644 -o root -g root "$ORG_TMP/agent-$a.md" "$CODE_DIR/agents/$a/CLAUDE.md"
+  if [ -n "$ORG_PACK" ] && [ -f "$ORG_PACK/agents/$a.md" ]; then
+    info "agents/$a/CLAUDE.md (with the org pack's notes)"
+  else
+    info "agents/$a/CLAUDE.md"
+  fi
+done
 # The list of fleet commands and what each takes, and what answers questions
 # about it: `cti-agent` with no arguments, `cti-agent CMD --help`, and the TAB
 # completions all read this one file.
@@ -534,11 +555,16 @@ run install -d -m 0755 -o root -g root "$AGENT_DIR" "$AGENT_DIR/.claude" \
 # So: remember the hash of what we install. Unmodified since last time means
 # it is ours to update. Modified means an operator changed it (only root can,
 # now), and THAT is worth preserving - but loudly, with the diff named.
+#
+# What we install is the shipped CLAUDE.md with the org pack's orchestrator.md
+# after it. An organization's own notes belong in the pack, where an update
+# keeps them; an edit to the installed copy freezes the whole file instead.
 CLAUDE_MD_HASH="$CODE_DIR/.orchestrator-CLAUDE.md.sha256"
+org_compose "$SRC/fleet/CLAUDE.md" orchestrator.md "$ORG_TMP/CLAUDE.md"
 claude_md_unmodified() {
   # Identical to what we ship counts as unmodified even with no hash on
   # record, so the first run does not cry wolf.
-  cmp -s "$AGENT_DIR/CLAUDE.md" "$SRC/fleet/CLAUDE.md" && return 0
+  cmp -s "$AGENT_DIR/CLAUDE.md" "$ORG_TMP/CLAUDE.md" && return 0
   [ -f "$CLAUDE_MD_HASH" ] || return 1
   [ "$(sha256sum "$AGENT_DIR/CLAUDE.md" | cut -d" " -f1)" = "$(cat "$CLAUDE_MD_HASH")" ]
 }
@@ -549,11 +575,17 @@ if [ -f "$AGENT_DIR/CLAUDE.md" ] && ! claude_md_unmodified; then
   info "  diff:     sudo diff -u $AGENT_DIR/CLAUDE.md $SRC/fleet/CLAUDE.md"
   info "  The agent follows YOUR copy. If the shipped one changed how it"
   info "  escalates or what it may run, your copy will not know."
+  info "  Move your changes into the org pack's orchestrator.md"
+  info "  (docs/org-pack.md), delete this copy, and re-run: updates keep the pack."
   run chown root:root "$AGENT_DIR/CLAUDE.md"
   run chmod 0644 "$AGENT_DIR/CLAUDE.md"
 else
-  run install -m 0644 -o root -g root "$SRC/fleet/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
-  info "CLAUDE.md -> $AGENT_DIR (the orchestrator's standing instructions)"
+  run install -m 0644 -o root -g root "$ORG_TMP/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
+  if [ -n "$ORG_PACK" ] && [ -f "$ORG_PACK/orchestrator.md" ]; then
+    info "CLAUDE.md -> $AGENT_DIR (the orchestrator's standing instructions, with the org pack's notes)"
+  else
+    info "CLAUDE.md -> $AGENT_DIR (the orchestrator's standing instructions)"
+  fi
   if [ "$MODE" != dryrun ]; then
     sha256sum "$AGENT_DIR/CLAUDE.md" | cut -d" " -f1 > "$CLAUDE_MD_HASH"
     chmod 0644 "$CLAUDE_MD_HASH"
@@ -567,6 +599,29 @@ for s in checkin cti-digest scout-sweep patch-tuesday; do
       "$SRC/fleet/skills/$s/SKILL.md" "$AGENT_DIR/.claude/skills/$s/SKILL.md"
   info "/$s"
 done
+# The org pack's own skills, beside the core ones (org-pack check refused any
+# that reuses a core skill's name). A skill the pack no longer has is removed,
+# so dropping one from the pack drops it from the box; the core skills are
+# never touched by this.
+ORG_SKILLS=" "
+if [ -n "$ORG_PACK" ] && [ -d "$ORG_PACK/skills" ]; then
+  for d in "$ORG_PACK"/skills/*/; do
+    [ -d "$d" ] || continue
+    s="$(basename "$d")"
+    ORG_SKILLS="$ORG_SKILLS$s "
+    run install -d -m 0755 -o root -g root "$AGENT_DIR/.claude/skills/$s"
+    run install -m 0644 -o root -g root "$d/SKILL.md" "$AGENT_DIR/.claude/skills/$s/SKILL.md"
+    info "/$s (org pack)"
+  done
+fi
+for d in "$AGENT_DIR"/.claude/skills/*/; do
+  [ -d "$d" ] || continue
+  s="$(basename "$d")"
+  case " checkin cti-digest scout-sweep patch-tuesday$ORG_SKILLS" in *" $s "*) continue ;; esac
+  run rm -rf "$AGENT_DIR/.claude/skills/$s"
+  info "removed /$s (no longer in the org pack)"
+done
+rm -rf "$ORG_TMP"
 
 # The beat's --settings file: one hook (bin/checkin-bash-guard, which refuses
 # shell syntax on every Bash call), no project MCP servers, edit and web

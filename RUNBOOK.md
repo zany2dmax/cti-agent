@@ -48,6 +48,7 @@ lists every location.
 - [11m. What is in fleet.env](#11m-what-is-in-fleetenv)
 - [11n. Moving secrets into systemd credentials](#11n-moving-secrets-into-systemd-credentials)
 - [11o. Settings per lane](#11o-settings-per-lane)
+- [11p. The org pack](#11p-the-org-pack)
 - [12. Verifying a run](#12-verifying-a-run)
 - [13. Report sensitivity](#13-report-sensitivity)
 - [14. Scanner KB cache freshness](#14-scanner-kb-cache-freshness)
@@ -3248,6 +3249,38 @@ in `settings.manifest` (`file:`).
 `pre-split` file back to `fleet.env` and remove `fleet.d`.
 
 **Status.** `sudo cti-agent-settings status`.
+
+---
+
+## 11p. The org pack
+
+What this organization adds to the orchestrator's instructions, the three
+agent prompts and the skills goes in an org pack, not in edits to the
+installed files. The installer adds the pack's notes after the core text on
+every install and update, so the notes survive updates and the core rules
+still apply. [docs/org-pack.md](docs/org-pack.md) has the layout, the rules
+the installer checks, and how to move existing edits into a pack.
+
+On this box (installed from an upstream clone) the pack is
+`/etc/cti-agent/org/`, owned by root. A fork commits it as `org/` instead.
+Start from `examples/org-pack/`.
+
+The installer refuses to go on when the pack is not root-owned, holds a
+symlink or a file it does not know, or reuses a core skill's name. Check a
+pack before installing:
+
+```bash
+sudo /root/cti-agent-kit/fleet-kit/bin/org-pack check /etc/cti-agent/org /root/cti-agent-kit/fleet-kit/fleet --root-owned
+```
+
+**`VMSCAN_GAP_TEAMS`** came with the pack: who the VM scan report asks about
+unscanned networks used to be fixed text ("the network and M&A teams") and is
+now this setting, default the network team. Set it in
+`/etc/cti-agent/fleet.d/vmscan.env` to keep the old wording:
+
+```
+VMSCAN_GAP_TEAMS="network and M&A teams"
+```
 
 ---
 

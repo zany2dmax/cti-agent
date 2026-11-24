@@ -35,6 +35,44 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **The org pack** ([docs/org-pack.md](docs/org-pack.md)). What one
+  organization adds to the fleet's prompts now lives in its own folder:
+  - `orchestrator.md` for the orchestrator's `CLAUDE.md`
+  - `agents/<agent>.md` for the supplier, triage-reader and triage-judge
+    prompts
+  - extra skills under `skills/`
+
+  The installer adds each file after the core text under
+  "Organization notes", on every install and update, so an org's notes no
+  longer freeze the installed `CLAUDE.md` against updates, and a fork's
+  pull from upstream never conflicts with them. A pack only adds: it can't
+  replace a core skill, and the appended block says the core text wins where
+  the two disagree.
+
+  The pack steers the beat, so `fleet-kit/bin/org-pack check` refuses an
+  install, before anything is installed, if the pack:
+  - isn't root-owned, or is group- or world-writable
+  - holds a symlink, or a file larger than 64 KB
+  - holds a file the layout doesn't name, or notes for an agent that isn't
+    core
+  - reuses a core skill's name
+
+  A fork commits the pack as `org/`; a box installed from upstream keeps it
+  in `/etc/cti-agent/org/`. Both at once is refused. A skill dropped from the
+  pack is removed from the box on the next install. `examples/org-pack/` is
+  a sanitized example of every file. Tested in `fleet-kit/tests/test_org_pack.py`.
+- **`VMSCAN_GAP_TEAMS`**: who the VM scan report asks why a network isn't
+  scanned. This was fixed text ("the network and M&A teams"), one
+  organization's process. The default is now the network team. To keep the
+  old wording, set `VMSCAN_GAP_TEAMS="network and M&A teams"` in
+  `fleet.d/vmscan.env` before updating. The action line now reads "Network
+  and M&A teams: say why this is not scanned." (it read "Network or M&A
+  team").
+
 ## 2.0-rc4 — 2026-11-24
 
 ### Fixed

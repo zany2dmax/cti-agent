@@ -171,6 +171,7 @@ func run() int {
 	if !*noCoverage {
 		week.Coverage = coverage(ctx, cfg, g, week, *subnetsFile)
 		week.Coverage.TicketSlot = *ticketSlot
+		week.Coverage.GapTeams = os.Getenv("VMSCAN_GAP_TEAMS")
 		if c := week.Coverage; c.Unavailable != "" {
 			logf("warn   : coverage check not run: %s", safelog.Line(c.Unavailable))
 		} else {

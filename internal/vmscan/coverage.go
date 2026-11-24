@@ -14,8 +14,8 @@ import (
 // spreadsheet, or the reason it could not be checked.
 //
 // It is written for the people who have to act on it: the security team (add a
-// network to Qualys) and the network and acquisitions teams (fix or add to the
-// spreadsheet), so every line names the location, the spreadsheet row and what
+// network to Qualys) and the network team, with whoever the gap-teams setting adds
+// (fix or add to the spreadsheet), so every line names the location, the spreadsheet row and what
 // to do about it.
 type Coverage struct {
 	Checked   int
@@ -31,6 +31,27 @@ type Coverage struct {
 	// TicketSlot leaves the spreadsheet ticket's slot after the network
 	// team's sections, for run-vmscan to stamp (ticketref.go).
 	TicketSlot bool
+	// GapTeams is who is asked why a network is not scanned
+	// (set by cti-vmscan, for example "network and M&A teams"). Empty means
+	// the network team. Who that is differs by organization, so it is a
+	// setting, not report text.
+	GapTeams string
+}
+
+// gapTeams is GapTeams, or the network team when unset.
+func (c *Coverage) gapTeams() string {
+	if t := strings.Join(strings.Fields(c.GapTeams), " "); t != "" {
+		return t
+	}
+	return "network team"
+}
+
+// gapVerb agrees with gapTeams: "the network team is", "the ... teams are".
+func (c *Coverage) gapVerb() string {
+	if strings.HasSuffix(c.gapTeams(), "s") {
+		return "are"
+	}
+	return "is"
 }
 
 // slot writes the ticket slot's sentinel when one was asked for.
@@ -99,9 +120,10 @@ func gapLine(f netmap.Finding) string {
 // gapAction is what is asked about an unscanned network. The lane marks it as
 // not scanned and nothing more: why differs from one location to the next (not
 // set up yet, not reachable, no network architecture yet) and the security team
-// has no way to check which, so the network and M&A teams are asked to say.
-func gapAction(netmap.Kind) string {
-	return "Network or M&A team: say why this is not scanned."
+// has no way to check which, so the gap teams are asked to say.
+func (c *Coverage) gapAction(netmap.Kind) string {
+	t := c.gapTeams()
+	return strings.ToUpper(t[:1]) + t[1:] + ": say why this is not scanned."
 }
 
 // questionAction is what the network team is asked to do. The security team only
@@ -201,10 +223,10 @@ func (c *Coverage) text() string {
 	fmt.Fprintf(&b, "  %d corporate networks checked, %d fully inside the groups the scans cover.\n", c.Checked, c.Covered)
 	if g := c.Gaps(); len(g) > 0 {
 		fmt.Fprintf(&b, "\nNOT SCANNED (%d) - networks in the spreadsheet that no scan this week reached\n%s\n", len(g), strings.Repeat("-", 72))
-		b.WriteString("  The security team does not know why in each case. The network and M&A teams are\n  asked to find out and say.\n")
+		fmt.Fprintf(&b, "  The security team does not know why in each case. The %s %s\n  asked to find out and say.\n", c.gapTeams(), c.gapVerb())
 		for _, k := range gapOrder {
 			for _, f := range c.gapsOf(k) {
-				fmt.Fprintf(&b, "  - %s\n      -> %s\n", gapLine(f), gapAction(k))
+				fmt.Fprintf(&b, "  - %s\n      -> %s\n", gapLine(f), c.gapAction(k))
 			}
 		}
 	}
@@ -260,12 +282,12 @@ func (c *Coverage) html(b *strings.Builder) {
 		var l strings.Builder
 		for _, k := range gapOrder {
 			for _, f := range c.gapsOf(k) {
-				fmt.Fprintf(&l, "&bull; %s<br><span style=\"color:%s\">&rarr; %s</span><br>", e(gapLine(f)), emailkit.Muted, e(gapAction(k)))
+				fmt.Fprintf(&l, "&bull; %s<br><span style=\"color:%s\">&rarr; %s</span><br>", e(gapLine(f)), emailkit.Muted, e(c.gapAction(k)))
 			}
 		}
 		emailkit.Card(b, emailkit.Red, fmt.Sprintf("NOT SCANNED (%d)", len(g)),
 			"Networks in the spreadsheet that no scan this week reached. The security team does not know why "+
-				"in each case; the network and M&amp;A teams are asked to find out and say.<br><br>"+l.String())
+				"in each case; the "+e(c.gapTeams())+" "+c.gapVerb()+" asked to find out and say.<br><br>"+l.String())
 	}
 	if len(c.Questions) > 0 {
 		var l strings.Builder
@@ -338,7 +360,7 @@ func (c *Coverage) CSV() string {
 	}
 	for _, k := range gapOrder {
 		for _, f := range c.gapsOf(k) {
-			_ = w.Write([]string{"NOT SCANNED", f.Location, row(f.Row), f.Subnet, f.Group, gapAction(k), ""})
+			_ = w.Write([]string{"NOT SCANNED", f.Location, row(f.Row), f.Subnet, f.Group, c.gapAction(k), ""})
 		}
 	}
 	for _, k := range questionOrder {
