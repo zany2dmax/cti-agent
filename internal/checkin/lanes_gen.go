@@ -17,3 +17,17 @@ var Lanes = []string{
 	"supplier",
 	"mailbox",
 }
+
+// LaneOf is the lane (the name FLEET_LANES uses) each of Lanes belongs to.
+var LaneOf = map[string]string{
+	"digest":       "digest",
+	"weekly":       "digest",
+	"scout":        "scout",
+	"patchtuesday": "patchtuesday",
+	"appscan":      "appscan",
+	"appowners":    "appowners",
+	"domains":      "domains",
+	"vmscan":       "vmscan",
+	"supplier":     "supplier",
+	"mailbox":      "mailbox",
+}

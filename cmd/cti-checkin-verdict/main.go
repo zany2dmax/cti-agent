@@ -55,6 +55,12 @@ func run() int {
 			c = nil
 		}
 	}
+	// The lanes this box runs: a lane outside them must be reported off. A
+	// FLEET_LANES naming no lane is said, and the verdict checked as if every
+	// lane ran, rather than lost.
+	if err := checkin.SetLanesInUse(os.Getenv("FLEET_LANES")); err != nil {
+		fmt.Fprintf(os.Stderr, "cti-checkin-verdict: %s; checking as if every lane runs\n", safelog.Line(err.Error()))
+	}
 	res := checkin.Evaluate(final, c)
 	res.Beat = *beat
 

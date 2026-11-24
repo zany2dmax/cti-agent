@@ -105,6 +105,12 @@ key would otherwise be silently ignored. `exec` must run something under
   check. A test also holds the checkin skill's credential-check list to the
   declared `--check` grants. Each granted command still needs its row in
   the bash guard's policy table (`test_lanes.py` checks that).
+- **`fleet-kit/fleet/lanes.list`**: each lane, its units and the
+  credential checks the beat runs for it, one tab-separated line a lane. It
+  goes to `/opt/cti-agent/share/` for the tools on the box that don't read
+  TOML: the installer, `fleet-timers` and `fleet-config`, which use it for
+  `FLEET_LANES`. `internal/checkin/lanes_gen.go` also maps each unit to its
+  lane, for the verdict.
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
 

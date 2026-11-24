@@ -37,6 +37,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **`FLEET_LANES`: run only some lanes.** List the lanes a box runs,
+  comma-separated, by their manifest names. Unset still means every lane.
+  For each lane left out:
+  - the installer turns its timer off, and stops with the list of real
+    lanes if a name isn't one
+  - `fleet-config check` no longer requires its settings, and reports a name
+    that is no lane
+  - `fleet-timers` ends with the lanes off on purpose and the credential
+    checks to skip
+  - the check-in is told to treat them as off, not broken
+  - `cti-checkin-verdict` requires them to be `off` in the beat's verdict
+
+  `scripts/lanes` also generates `fleet-kit/fleet/lanes.list`, installed in
+  `/opt/cti-agent/share/` for the tools on the box that don't read TOML, and
+  a unit-to-lane map for the verdict. Tested in
+  `fleet-kit/tests/test_fleet_lanes.py` and `internal/checkin`.
+
 ### Changed
 
 - **The systemd units are generated from lane manifests**

@@ -126,3 +126,46 @@ func TestWithoutCountsOnlyTheSchemaIsChecked(t *testing.T) {
 		t.Errorf("problems: %v", r.Problems)
 	}
 }
+
+// A lane this box does not run (FLEET_LANES) is still accounted for, as off.
+func TestALaneNotInUseMustBeOff(t *testing.T) {
+	t.Cleanup(func() { _ = SetLanesInUse("") })
+	if err := SetLanesInUse("checkin, digest scout"); err != nil {
+		t.Fatal(err)
+	}
+	offProblems := func(v map[string]any) []string {
+		var out []string
+		for _, p := range Evaluate(message(v), nil).Problems {
+			if strings.Contains(p.Text, "is not in FLEET_LANES") {
+				out = append(out, p.Text)
+			}
+		}
+		return out
+	}
+	// Every lane "ok": digest and weekly (the digest lane's) and scout are in
+	// use, so the other seven are reported.
+	if got := offProblems(good()); len(got) != len(Lanes)-3 {
+		t.Errorf("%d lanes reported, want %d: %v", len(got), len(Lanes)-3, got)
+	}
+	v := good()
+	for _, l := range v["lanes"].([]map[string]any) {
+		if lane := LaneOf[l["lane"].(string)]; lane != "digest" && lane != "scout" {
+			l["state"] = "off"
+		}
+	}
+	if got := offProblems(v); len(got) != 0 {
+		t.Errorf("off lanes still reported: %v", got)
+	}
+	if r := Evaluate(message(v), nil); !r.Valid {
+		t.Errorf("a verdict with the unused lanes off is invalid: %v", r.Problems)
+	}
+	if err := SetLanesInUse("digest,nosuch"); err == nil || !strings.Contains(err.Error(), `"nosuch"`) {
+		t.Errorf("an unknown lane: %v", err)
+	}
+	if len(notInUse) != len(Lanes)-3 {
+		t.Error("a refused FLEET_LANES changed the lanes in use")
+	}
+	if err := SetLanesInUse(""); err != nil || len(notInUse) != 0 {
+		t.Error("empty is every lane")
+	}
+}

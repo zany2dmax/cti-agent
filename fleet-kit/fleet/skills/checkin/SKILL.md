@@ -91,8 +91,8 @@ What you owe the schedule instead is **checking it happened**:
 | Mailbox cleanup ran (daily, after 07:00) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-mailbox.service --since today --no-pager` | The no-processing-record count climbing is a possible ingest failure (CLAUDE.md, quiet beats) |
 | VM scan report (weekly, on the timer's day: Monday unless `FLEET_VMSCAN_DAY` sets another; `fleet-timers --all` shows its next run) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-vmscan.service --since today --no-pager` | Nothing today is normal on any other day. On its day (the LAST column of `fleet-timers --all` moved to today), no `[run-vmscan] done` line: post to the board. `[NO RESULT]` in the subject: a scheduled scan had not finished, so the report day may be too early - note it, and the second week running, tell the operator. A `Not run this week:` line names the part that could not run |
 | Patch Tuesday sent (from the Thursday after Patch Tuesday) | `fleet-db was-sent <YYYY-MM> patchtuesday` | Run by hand for now, so nothing fails loudly if it is forgotten. Not sent: remind the operator once, naming the month (CHEATSHEET.md section 7a) |
-| Timers still enabled | `$FLEET_CODE/bin/fleet-timers --all` | A disabled timer is silent forever. Tell the operator - except `cti-agent-patchtuesday.timer`, which is off on purpose for now, and `cti-agent-vmscan.timer` if the operator has not turned it on yet (if disabled, ask once whether that is still intended) |
-| Credentials still work (once a day, and after a login failure in a journal) | `$FLEET_CODE/bin/cti-mailer --check`, `cti-jira --check`, `cti-appreport --check`, `cti-domains --check`, `cti-vmscan --check`: each exactly that, nothing after `--check` | Exit 1 means that lane's next run will fail or be degraded. One escalation naming the lane and the check's last line, then track it on the board until it passes |
+| Timers still enabled | `$FLEET_CODE/bin/fleet-timers --all` | A disabled timer is silent forever. Tell the operator - except a lane `fleet-timers` lists under "Off on purpose" (this box does not run it), `cti-agent-patchtuesday.timer`, which is off on purpose for now, and `cti-agent-vmscan.timer` if the operator has not turned it on yet (if disabled, ask once whether that is still intended) |
+| Credentials still work (once a day, and after a login failure in a journal) | `$FLEET_CODE/bin/cti-mailer --check`, `cti-jira --check`, `cti-appreport --check`, `cti-domains --check`, `cti-vmscan --check`: each exactly that, nothing after `--check`. Skip the ones `fleet-timers` lists under "Skip their credential checks" | Exit 1 means that lane's next run will fail or be degraded. One escalation naming the lane and the check's last line, then track it on the board until it passes |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
 **You cannot re-run the pipeline yourself** - no runner is on your grant,
@@ -244,7 +244,8 @@ against what the guard counted, so report what you did, not what you meant to.
   a call was refused).
 - `lanes`: **all ten, every beat, once each**, in any order. `state` is `ok`
   (ran as it should), `not_due` (its time has not come), `held` (it ran and held
-  something back), `failed`, `off` (disabled on purpose, like patchtuesday), or
+  something back), `failed`, `off` (disabled on purpose, like patchtuesday, or
+  listed by `fleet-timers` as off on purpose: those must be `off`), or
   `unknown` (you could not tell). `note` is optional, one short phrase.
 - `credential_checks`: `ran` (this beat), `already_today`, or `skipped`.
 - `escalations`: one `{"subject": "...", "why": "..."}` per `cti-alert

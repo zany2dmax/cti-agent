@@ -449,6 +449,17 @@ sudo git -C "$D" log --oneline -1
 One primitive at a time. Each of these should run, and be read, before the next
 one is enabled.
 
+**A box that does not run every lane** sets `FLEET_LANES` in
+`fleet.d/00-core.env`: the lanes it runs, comma-separated, by the names in
+`/opt/cti-agent/share/lanes.list`. The installer then:
+- turns off the timers of the others and skips them in its timer report
+- checks that every name is a lane, and stops if one isn't
+
+`fleet-config check` stops requiring the other lanes' settings, and
+`fleet-timers --all` lists them as off on purpose. So the check-in neither
+reports them nor runs their credential checks, and its verdict must call them
+`off`. Unset, every lane runs. Skip the steps below for a lane you left out.
+
 ### On a new deployment: the steps after the installer
 
 The installer enables no timer, on purpose. On a new box it ends by pointing

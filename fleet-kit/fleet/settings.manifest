@@ -356,6 +356,11 @@ section: 3. PATHS - re-check these on every box
 readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-check cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-lock cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
+key: FLEET_LANES
+section: 4. RECIPIENTS AND THE SEND GATE - required
+readers: cti-checkin-check cti-checkin-verdict fleet-config fleet-timers installer
+file: core
+
 key: FLEET_LOCK_WAIT_SECONDS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: fleet-mode.sh

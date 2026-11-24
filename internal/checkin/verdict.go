@@ -28,6 +28,41 @@ const Schema = "cti-checkin/1"
 
 // Lanes (every lane the beat accounts for) is generated: lanes_gen.go.
 
+// notInUse is the units of lanes this box does not run (FLEET_LANES). The
+// beat still accounts for each, as off: a lane it is not told about and a
+// lane it was told is off look the same in the verdict otherwise.
+var notInUse = map[string]bool{}
+
+// SetLanesInUse takes FLEET_LANES: the lanes this box runs, comma- or
+// space-separated, by their manifest names. Empty means every lane. A name
+// that is no lane is an error, and nothing changes.
+func SetLanesInUse(list string) error {
+	names := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+	if len(names) == 0 {
+		notInUse = map[string]bool{}
+		return nil
+	}
+	known := map[string]bool{"checkin": true}
+	for _, l := range LaneOf {
+		known[l] = true
+	}
+	use := map[string]bool{}
+	for _, n := range names {
+		if !known[n] {
+			return fmt.Errorf("FLEET_LANES names %q, which is not a lane", n)
+		}
+		use[n] = true
+	}
+	off := map[string]bool{}
+	for unit, lane := range LaneOf {
+		if !use[lane] {
+			off[unit] = true
+		}
+	}
+	notInUse = off
+	return nil
+}
+
 // Allowed values. Anything else is a problem, not a guess.
 var (
 	Statuses     = []string{"ok", "attention", "escalated", "degraded"}
@@ -183,6 +218,9 @@ func Check(v *Verdict, c *Counts) []Problem {
 		}
 		if !in(l.State, LaneStates) {
 			bad(Invalid, "lane %s: state %q is not one of %s", l.Lane, l.State, strings.Join(LaneStates, ", "))
+		}
+		if notInUse[l.Lane] && l.State != "off" {
+			bad(Invalid, "lane %s is not in FLEET_LANES, so it is off, not %q", l.Lane, l.State)
 		}
 	}
 	var missing, twice []string
