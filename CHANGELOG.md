@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 2.0-rc4 — 2026-11-24
 
 ### Fixed
 
