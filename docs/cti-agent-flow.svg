@@ -65,7 +65,7 @@
 <path d="M36 570 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 <text class="t hw" x="58" y="574" style="fill:#1A1A1A">10 task lint:shell</text>
 <path d="M36 592 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-<text class="t hw" x="58" y="596" style="fill:#1A1A1A">11 task cheatsheet:check</text>
+<text class="t hw" x="58" y="596" style="fill:#1A1A1A">11 task release:check</text>
 <path d="M34 614 L50 614 M44 608 L50 614 L44 620" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 <text class="th hw" x="58" y="618" style="fill:#1E9E4A">12 git push</text>
 <path d="M56 624 q40 4 80 0" fill="none" stroke="#1E9E4A" stroke-width="2" stroke-linecap="round"/>

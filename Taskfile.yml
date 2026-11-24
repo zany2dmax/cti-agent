@@ -513,7 +513,7 @@ tasks:
       - scripts/quiet-step.sh bandit task bandit
       - scripts/quiet-step.sh lint:shell task lint:shell
       - scripts/quiet-step.sh sbom task sbom
-      - scripts/quiet-step.sh cheatsheet:check task cheatsheet:check
+      - scripts/quiet-step.sh release:check task release:check
       - scripts/quiet-step.sh push git push
       - 'echo "task ship: every step passed, and the push went out: $(git rev-parse --short HEAD)"'
 
@@ -528,19 +528,55 @@ tasks:
     cmds:
       - python3 scripts/sbom.py
 
+  release:check:
+    desc: "Fail if the latest tag's own commit has no CHANGELOG section for it, or a cheat sheet for another release"
+    # 2.0-rc2 and 2.0-rc3 were both tagged on a commit before "Release X":
+    # the CHANGELOG at the tag still said Unreleased, so the GitHub Release
+    # failed after the push, and the cheat sheet passed only because its stamp
+    # was sitting uncommitted in the working tree. Both checks read the files
+    # as committed at the tag, which is what the box installs and what the
+    # Release workflow reads.
+    cmds:
+      - task: changelog:check
+      - task: cheatsheet:check
+
+  changelog:check:
+    desc: "Fail if CHANGELOG.md at the latest tag has no section for that tag"
+    cmds:
+      - |
+        tag="$(git describe --tags --abbrev=0 2>/dev/null)"
+        if [ -z "$tag" ]; then echo "changelog:check: no release tag, skipping"; exit 0; fi
+        ver="${tag#v}"
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        git show "$tag:CHANGELOG.md" > "$tmp"
+        if ! scripts/release-notes.sh "$tag" "$tmp" > /dev/null 2>&1; then
+          at="$(git rev-parse --short "$tag^{commit}")"
+          echo "changelog:check: CHANGELOG.md at $tag ($at) has no section for $ver, so its GitHub Release fails." >&2
+          echo "  Rename ## Unreleased to ## $ver — YYYY-MM-DD, stamp the cheat sheet, commit both as \"Release $ver\"," >&2
+          echo "  then move the tag onto that commit: git tag -d $tag && git tag -a $tag -m \"Release $ver\"" >&2
+          echo "  (and git push --force origin $tag if it was already pushed)." >&2
+          exit 1
+        fi
+
   cheatsheet:check:
-    desc: "Fail if CHEATSHEET.md names a different release than the latest tag"
+    desc: "Fail if CHEATSHEET.md, as committed at the latest tag and at HEAD, names a different release"
     # The sheet says which release it describes so nobody works from an old
     # copy. Pushing a new tag without bumping that line leaves a sheet that
     # claims to be current and is not, so ship refuses until it is stamped.
+    # Read from git, not the working tree: an uncommitted stamp passed here
+    # while the tagged sheet still named the release before.
     cmds:
       - |
-        want="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
-        if [ -z "$want" ]; then echo "cheatsheet:check: no release tag, skipping"; exit 0; fi
-        if ! grep -q "^\*\*This copy is for release $want " CHEATSHEET.md; then
-          echo "CHEATSHEET.md does not name release $want. Run: task cheatsheet:stamp, then commit." >&2
-          exit 1
-        fi
+        tag="$(git describe --tags --abbrev=0 2>/dev/null)"
+        if [ -z "$tag" ]; then echo "cheatsheet:check: no release tag, skipping"; exit 0; fi
+        want="${tag#v}"
+        for rev in "$tag" HEAD; do
+          if ! git show "$rev:CHEATSHEET.md" | grep -q "^\*\*This copy is for release $want "; then
+            echo "CHEATSHEET.md at $rev does not name release $want. Run: task cheatsheet:stamp, commit it, and tag that commit." >&2
+            exit 1
+          fi
+        done
 
   cheatsheet:stamp:
     desc: "Write the latest release and its date into CHEATSHEET.md"

@@ -35,6 +35,20 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **`task ship` refuses a release tag that is not on the release commit.**
+  2.0-rc2 and 2.0-rc3 were both tagged on the commit before "Release X", so
+  the CHANGELOG at the tag still said Unreleased and the GitHub Release failed
+  after the push. `cheatsheet:check` passed anyway, because it read the stamp
+  from the working tree, where it sat uncommitted. The new `release:check`
+  step runs `changelog:check` (the tag's own CHANGELOG has its section) and
+  `cheatsheet:check`, which now reads the sheet as committed at the tag and at
+  HEAD. Its message says how to move the tag. Tested in
+  `fleet-kit/tests/test_release_check.py` against a scratch repository.
+
 ## 2.0-rc3 — 2026-11-24
 
 ### Fixed

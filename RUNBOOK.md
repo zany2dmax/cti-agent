@@ -2580,8 +2580,13 @@ On the Mac, in `~/code/cti-agent`, clean and on `main`:
    git push origin 1.6.7
    ```
    `task ship` runs every check and pushes `main`; it does not push tags, so
-   the second push is not optional. `cheatsheet:check` (inside `task ship`)
-   fails if the tag and the stamp line disagree.
+   the second push is not optional. `release:check` (inside `task ship`)
+   reads the files as committed at the tag: it fails if the tag's CHANGELOG
+   has no section for it, or the stamp line at the tag or at HEAD names
+   another release. So a tag made before the `Release 1.6.7` commit, or a
+   stamp left uncommitted, stops the ship before anything is pushed. The fix
+   is to move the tag onto the release commit:
+   `git tag -d 1.6.7 && git tag -a 1.6.7 -m "Release 1.6.7"`.
 4. About a minute later the release is on the Releases page, with its SBOM under
    Assets. If not, look at **Actions → Release**.
 5. Update the box: `sudo cti-agent-update --for-real`.
