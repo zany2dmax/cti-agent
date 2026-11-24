@@ -3,6 +3,9 @@
 lane = "appscan"
 handles = ["@appscan"]
 summary = "The weekly application-security report from the web app scanner's results, with Jira tickets per application."
+# Settings whose names start with these live in this lane's fleet.d file
+# (scripts/settings-manifest); the longest matching prefix wins.
+setting_prefixes = ["WAS_", "APPSCAN_REPORT_PROVIDER"]
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

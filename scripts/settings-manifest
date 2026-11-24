@@ -51,25 +51,29 @@ CONF = "/etc/cti-agent"
 # lane's file only if no program outside that lane reads it, else it goes to
 # core and the manifest says why. Secrets and their logins are not here: they
 # are systemd credentials (step 2).
-LANE_RULES = [
-    ("CHECKIN_", "checkin"), ("FLEET_BUDGET_", "checkin"),
-    ("SUPPLIER_", "supplier"),
-    ("VMSCAN_", "vmscan"), ("NETNOTES_", "vmscan"), ("NETRULES_", "vmscan"),
-    ("SUBNETS_", "vmscan"), ("JIRA_VMSCAN_", "vmscan"),
-    ("DOMAINS_", "domains"), ("DOM_", "domains"), ("PROOFPOINT_POD_", "domains"),
-    ("JIRA_DOMAINS_", "domains"),
-    ("WAS_OWNER_CC", "appowners"), ("OWNER_ALLOW_DOMAINS", "appowners"),
-    ("WAS_", "appscan"), ("APPSCAN_REPORT_PROVIDER", "appscan"),
-    ("DIGEST_CC", "digest"), ("DIGEST_SKIP_SUBJECTS", "digest"), ("VM_ALLOW_TO", "digest"),
-    ("FLEET_ALLOW_TO", "digest"), ("TRIAGE_", "digest"),
-    ("MAILBOX_", "mailbox"), ("FLEET_MAILBOX_", "mailbox"),
-]
+def _lane_manifests():
+    """The lane manifests (fleet-kit/lanes/*.toml), through scripts/lanes, so
+    which lane owns a setting, which unit is which lane's, and which lane loads
+    every file are said once, in the manifests, not again here."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("lanes_script", str(ROOT / "scripts" / "lanes"))
+    spec = importlib.util.spec_from_loader("lanes_script", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod, mod.load_all()
+
+
+_LANES_MOD, _LANES = _lane_manifests()
+# (prefix, lane), longest prefix first: each lane's setting_prefixes.
+LANE_RULES = _LANES_MOD.setting_rules(_LANES)
 # Programs whose reads say nothing about which lane owns a setting: the
 # mailer and the tools that report on every setting by name.
 SHARED_READERS = {"cti-mailer", "installer", "dev-run", "fleet-config",
                   "cti-agent-secrets", "cti-agent-settings", "checkin-bash-guard"}
-# Checked by the check-in, which therefore loads every lane's file.
-ALL_FILES_LANE = "checkin"
+# Checked by the check-in, which therefore loads every lane's file: the lane
+# whose manifest says all_settings.
+ALL_FILES_LANE = _LANES_MOD.all_settings_lane(_LANES)
 EXAMPLE = ROOT / "fleet-kit" / "fleet" / "fleet.env.example"
 
 # Set by systemd, sudo or the fleet's own runners at run time; never in fleet.env.
@@ -331,9 +335,14 @@ def grants(scanned, kept):
 
 
 def unit_lane(unit_name):
-    """cti-agent-digest.service -> digest; the weekly is the digest's other run."""
-    lane = unit_name.replace("cti-agent-", "").replace(".service", "").replace("@", "")
-    return "digest" if lane == "weekly" else lane
+    """cti-agent-digest.service -> digest, by the lane manifests (the weekly is
+    the digest lane's other unit). A unit no manifest names (the alert@
+    handler) is its own lane."""
+    name = unit_name.replace("cti-agent-", "").replace(".service", "")
+    return _UNIT_LANES.get(name, name.replace("@", ""))
+
+
+_UNIT_LANES = _LANES_MOD.unit_lanes(_LANES)
 
 
 def lane_programs(g_calls):

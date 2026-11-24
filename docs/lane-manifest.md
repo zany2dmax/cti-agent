@@ -6,10 +6,10 @@ Each lane is described once, in `fleet-kit/lanes/<lane>.toml`.
 (`task lane:check`).
 
 A manifest owns the lane's `.service` units, its row in the orchestrator's
-lane table, and its place in the list of lanes every check-in beat must
-account for, and is checked against its timers. Later steps add the settings
-and commands manifest rows and the grants a lane needs, so adding or removing
-a lane is one file instead of eight.
+lane table, its place in the list of lanes every check-in beat must account
+for, and which settings belong in its `fleet.d` file. It is checked against
+its timers and against the commands manifest. A later step adds the grants a
+lane needs, so adding or removing a lane is one file instead of eight.
 
 ## Why
 
@@ -26,6 +26,8 @@ which lines to change.
 lane = "scout"                  # lower case; must match the file name
 handles = ["@scout"]            # board handles the lane answers to ([] for none)
 summary = "One line: what the lane does."
+setting_prefixes = ["SCOUT_"]   # settings named like this go in fleet.d/scout.env
+all_settings = false            # true for the one lane that loads every lane's file
 
 [orchestrator]                  # the lane's row in the orchestrator's lane table
 order = 2                       # where the row goes; unique
@@ -76,6 +78,17 @@ key would otherwise be silently ignored. `exec` must run something under
   must account for (`cti-checkin-verdict` refuses a verdict that skips one or
   names another), is every unit of every lane in the table, in table order.
   The check-in lane itself has no `[orchestrator]` table and isn't in either.
+- **Which `fleet.d` file a setting lives in.** `scripts/settings-manifest`
+  reads the lanes' `setting_prefixes` (the longest matching prefix wins, so
+  `WAS_OWNER_CC` is appowners' and the rest of `WAS_` is appscan's), maps
+  each unit to its lane from the manifests (the weekly unit is the digest
+  lane's), and gives the `all_settings` lane every lane's file. A setting
+  that a program outside its lane also reads still goes to core, as before.
+- **The command each unit starts** must exist as `cmd/<name>` or
+  `fleet-kit/fleet/bin/<name>` and be listed in `commands.manifest`. An effect
+  command (one that sends, moves or files) must be started with `--for-real`,
+  and with no rehearsal mode: a timer that says `--dry-run` would quietly
+  never send.
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
 

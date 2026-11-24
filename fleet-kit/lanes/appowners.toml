@@ -3,6 +3,9 @@
 lane = "appowners"
 handles = ["@appowners"]
 summary = "Each application's scan report, sent to its owners the morning after the scan."
+# Settings whose names start with these live in this lane's fleet.d file
+# (scripts/settings-manifest); the longest matching prefix wins.
+setting_prefixes = ["WAS_OWNER_CC", "OWNER_ALLOW_DOMAINS"]
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

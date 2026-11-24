@@ -66,6 +66,19 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   some unit's command, and the checkin skill's example verdict and lane count
   to match.
 
+  `scripts/settings-manifest` takes its lane knowledge from the manifests too:
+  - which `fleet.d` file a setting belongs in (each lane's
+    `setting_prefixes`, longest match wins), where it had a hard-coded prefix
+    table
+  - which lane a unit is (the weekly is the digest's), where it had a special
+    case
+  - which lane loads every file (`all_settings`)
+
+  The settings manifest and every unit come out unchanged.
+  `scripts/lanes --check` also refuses a unit whose command doesn't exist,
+  isn't in `commands.manifest`, or is an effect command started without
+  `--for-real`.
+
 - **No real site or scan names in the repository.** Code comments, tests,
   a timer comment, the RUNBOOK, `fleet.env.example` and older CHANGELOG
   entries named real locations, business units and scan titles as examples;

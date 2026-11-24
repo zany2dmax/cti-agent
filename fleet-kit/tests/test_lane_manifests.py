@@ -94,6 +94,34 @@ class TheOrchestratorKnowsEveryLane(unittest.TestCase):
                 self.assertRegex(self.skill.lower(), rf"\b{name}\b", f"the checkin skill never mentions {name}")
 
 
+class TheSettingsGeneratorReadsTheManifests(unittest.TestCase):
+    """scripts/settings-manifest decides a setting's fleet.d file from the
+    lanes' setting_prefixes, a unit's lane from the manifests, and which lane
+    loads every file from all_settings. Nothing about lanes is said there."""
+
+    def test_longest_prefix_wins(self):
+        m = module()
+        rules = m.setting_rules(m.load_all())
+        def lane(k):
+            return next((ln for pre, ln in rules if k.startswith(pre)), "core")
+        self.assertEqual(lane("WAS_OWNER_CC"), "appowners")
+        self.assertEqual(lane("WAS_TO"), "appscan")
+        self.assertEqual(lane("JIRA_VMSCAN_PROJECT_KEY"), "vmscan")
+        self.assertEqual(lane("JIRA_PROJECT_KEY"), "core")
+
+    def test_the_weekly_is_the_digests_and_checkin_loads_everything(self):
+        m = module()
+        lanes = m.load_all()
+        self.assertEqual(m.unit_lanes(lanes)["weekly"], "digest")
+        self.assertEqual(m.all_settings_lane(lanes), "checkin")
+
+    def test_settings_manifest_has_no_lane_list_of_its_own(self):
+        text = (REPO / "scripts" / "settings-manifest").read_text(encoding="utf-8")
+        self.assertNotRegex(text, r'\("[A-Z_]+", "(checkin|vmscan|digest|appscan)"\)', "a hard-coded prefix rule")
+        self.assertNotIn('== "weekly"', text)
+        self.assertNotIn('ALL_FILES_LANE = "', text)
+
+
 class AScratchCopy(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp())
@@ -138,14 +166,14 @@ summary = "x"
 [[unit]]
 name = "newlane"
 description = "A new lane"
-exec = "/opt/cti-agent/bin/cti-new --for-real"
+exec = "/opt/cti-agent/bin/cti-scout --days 1"
 timeout = 60
 nice = 10
 ''')
         self.assertEqual(self.m.main(["--write"]), 0)
         text = (self.units / "cti-agent-newlane.service").read_text()
         self.assertIn("EnvironmentFile=/etc/cti-agent/fleet.env\n", text)  # settings-manifest fills it
-        self.assertIn("ExecStart=/opt/cti-agent/bin/cti-new --for-real\nTimeoutStartSec=60\nNice=10\n", text)
+        self.assertIn("ExecStart=/opt/cti-agent/bin/cti-scout --days 1\nTimeoutStartSec=60\nNice=10\n", text)
         self.assertIn("SyslogIdentifier=cti-agent-newlane\n", text)
         self.assertNotIn("LogsDirectory", text)
 
@@ -177,6 +205,18 @@ nice = 10
         self.m.main(["--write"])
         self.assertIn("| `@newlane` | `$FLEET_CODE/bin/cti-new` | Daily | nobody |", orch.read_text())
         self.assertIn('\t"newlane",\n}', (self.dir / "lanes_gen.go").read_text())
+
+    def test_a_unit_that_does_not_run_for_real_is_caught(self):
+        p = self.lanes / "domains.toml"
+        p.write_text(p.read_text().replace("run-domains --for-real", "run-domains --dry-run"))
+        self.assertEqual(self.check(), 1)
+        p.write_text(p.read_text().replace("run-domains --dry-run", "run-domains"))
+        self.assertEqual(self.check(), 1)
+
+    def test_a_unit_running_an_unknown_command_is_caught(self):
+        p = self.lanes / "scout.toml"
+        p.write_text(p.read_text().replace("bin/cti-scout ", "bin/cti-scoutt "))
+        self.assertEqual(self.check(), 1)
 
     def test_a_timer_that_disagrees_is_caught(self):
         p = self.units / "cti-agent-domains.timer"
@@ -239,6 +279,20 @@ class BadManifests(unittest.TestCase):
         with self.assertRaises(self.m.ManifestError) as cm:
             self.m.load_all()
         self.assertIn("both have orchestrator order", str(cm.exception))
+
+    def test_a_prefix_claimed_twice(self):
+        lanes = self.dir / "lanes"
+        lanes.mkdir()
+        shutil.copy(LANES / "vmscan.toml", lanes / "vmscan.toml")
+        other = (LANES / "domains.toml").read_text().replace('"DOMAINS_"', '"VMSCAN_"')
+        (lanes / "domains.toml").write_text(other)
+        self.m.LANES = lanes
+        with self.assertRaises(self.m.ManifestError) as cm:
+            self.m.load_all()
+        self.assertIn("setting prefix VMSCAN_ is claimed by both", str(cm.exception))
+
+    def test_a_lower_case_prefix(self):
+        self.refused(self.good.replace('summary =', 'setting_prefixes = ["vmscan_"]\nsummary ='), "setting_prefixes must be")
 
     def test_a_unit_in_two_lanes(self):
         lanes = self.dir / "lanes"

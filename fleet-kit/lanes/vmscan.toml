@@ -3,6 +3,9 @@
 lane = "vmscan"
 handles = ["@vmscan"]
 summary = "The weekly VM scan report: which scheduled scans ran, and which networks in the network sheet no scan reached."
+# Settings whose names start with these live in this lane's fleet.d file
+# (scripts/settings-manifest); the longest matching prefix wins.
+setting_prefixes = ["VMSCAN_", "NETNOTES_", "NETRULES_", "SUBNETS_", "JIRA_VMSCAN_"]
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]
