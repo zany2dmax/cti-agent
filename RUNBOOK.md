@@ -1309,10 +1309,9 @@ map of where to look, and it is handled like the VM reports for that reason.
 
 `cti-agent-vmscan.timer`, Mondays 08:00 by default (`FLEET_VMSCAN_DAY` and
 `FLEET_VMSCAN_TIME`, applied by the installer when `FLEET_TIMEZONE` is set),
-runner `run-vmscan`. The scheduled Qualys VM scans (in 2026-11, "Weekly
-Scheduled Scan for non-UMI/TRJ" and "UMI/TRJ Weekly", both starting Thursday
-13:00 UTC; the UMI/TRJ one runs about a day, so its notice arrives Friday
-around 13:00 UTC) each email a "Qualys:
+runner `run-vmscan`. The scheduled Qualys VM scans (in 2026-11, two weeklies
+for different groups of sites, both starting Thursday 13:00 UTC; the longer
+one runs about a day, so its notice arrives Friday around 13:00 UTC) each email a "Qualys:
 Scan Results" notice when they finish. This lane reads those notices from the
 CTI mailbox and sends **one** email with every scheduled scan, kept
 in separate sections: that it ran, when and for how long, addresses scanned and

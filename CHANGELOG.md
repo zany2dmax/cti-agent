@@ -39,10 +39,11 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
-- **No real site names in the repository.** Code comments, a test and one
-  older CHANGELOG entry named real locations as examples; they now use
-  placeholders like the rest of the repository. The names remain in git
-  history; the history was not rewritten.
+- **No real site or scan names in the repository.** Code comments, tests,
+  a timer comment, the RUNBOOK, `fleet.env.example` and older CHANGELOG
+  entries named real locations, business units and scan titles as examples;
+  they now use placeholders like the rest of the repository. The names remain
+  in git history; the history was not rewritten.
 
 ### Added
 
@@ -1317,7 +1318,7 @@ only adds to the schedules, and stale titles are reported as missing. Then
 
 - **The VM scan weekly reports every scheduled scan, whatever it is called.**
   It used to report only the scans named in `VMSCAN_SCANS`. When the scans
-  were renamed in Qualys ("Weekly Scheduled Scan for non-UMI/TRJ"), the real
+  were renamed in Qualys (to names after the sites each covered), the real
   scan was filed as "other" and the coverage check compared all 65 locations
   against nothing: "0 covered, 65 gaps". Now every scheduled scan whose notice
   arrived in the week is reported and its Target Groups count for coverage; a
@@ -1335,7 +1336,7 @@ only adds to the schedules, and stale titles are reported as missing. Then
 - **Which VM scans ran comes from Qualys, not the mailbox.** The weekly lists
   the scans launched in the week through the Qualys API, with the Asset Groups
   each targeted, and matches each to its results notice by scan reference. A
-  scan whose notice never arrived (the UMI/TRJ weekly's, lost in the 11-13
+  scan whose notice never arrived (the longer weekly's, lost in the 11-13
   Microsoft outage) is still reported and still counts for coverage; its card
   says the notice did not arrive. Without the scan list the week is built from
   the notices and the report says so. `cti-vmscan --check` now lists the scans.
@@ -1403,7 +1404,7 @@ only adds to the schedules, and stale titles are reported as missing. Then
   reports network rows and locations instead of calling every network row a
   site.
 - **"Decommissioned" is read from the start of a location's header.** A
-  header that mentioned the old site it replaced ("Formally TRJ - Norwood
+  header that mentioned the old site it replaced ("Formally Old Site
   Decommissioned 8/1/2025") closed an open site, and the misspelling
   "DECOMISSIONED" kept a closed one. Now only a header that starts with it,
   either spelling, closes the location.

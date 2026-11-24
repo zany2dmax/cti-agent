@@ -863,7 +863,7 @@
     "subject": "Account set up for Example Tile Co",
     "sender": "buyer@example.test",
     "state": "none",
-    "body": "We want to open an account with Example Tile Co as a new product line for the Charleston showroom. They will ship product and a display to the warehouse."
+    "body": "We want to open an account with Example Tile Co as a new product line for the new showroom. They will ship product and a display to the warehouse."
   },
   {
     "name": "product_line_account_goods_not_stated",

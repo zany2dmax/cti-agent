@@ -57,8 +57,8 @@ func inactiveText(s string) bool {
 
 // inactiveHeader reports a location header that marks the location itself as
 // closed. Only a header that STARTS with it counts, and the common misspelling
-// too: "DECOMISSIONED - Cumberland" is closed, while "Charleston Warehouse -
-// Formally TRJ - Norwood Decommissioned 8/1/2025" is an open site naming the
+// too: "DECOMISSIONED - Example Site" is closed, while "Example Warehouse -
+// Formally Old Site Decommissioned 8/1/2025" is an open site naming the
 // one it replaced. A word anywhere in the header used to count, which dropped
 // the open site and kept the misspelled closed one.
 func inactiveHeader(s string) bool {

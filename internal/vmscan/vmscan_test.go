@@ -399,13 +399,13 @@ func TestTheHTMLHeadingIsInCapitalsWithoutHelpFromCSS(t *testing.T) {
 // every location against nothing. Every scheduled scan now counts.
 func TestEveryScheduledScanIsReportedWhateverItIsCalled(t *testing.T) {
 	s := both(t)
-	s[0].Title, s[1].Title = "Weekly Scheduled Scan for non-UMI/TRJ", "UMI and TRJ Weekly"
+	s[0].Title, s[1].Title = "Weekly Scheduled Scan for the North sites", "North and South Weekly"
 	w := Combine(s, nil)
 	if len(w.Scans) != 2 || len(w.Missing) != 0 || len(w.Other) != 0 {
 		t.Fatalf("scans %d missing %v other %d", len(w.Scans), w.Missing, len(w.Other))
 	}
 	// Unexpected scans are ordered by title.
-	if w.Scans[0].Title != "UMI and TRJ Weekly" {
+	if w.Scans[0].Title != "North and South Weekly" {
 		t.Errorf("order: %q, %q", w.Scans[0].Title, w.Scans[1].Title)
 	}
 	if strings.HasPrefix(w.Subject("Acme", time.Now()), "[NO RESULT]") {

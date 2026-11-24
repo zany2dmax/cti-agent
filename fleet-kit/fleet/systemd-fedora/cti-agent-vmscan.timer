@@ -3,7 +3,7 @@ Description=Weekly Qualys VM scan report
 
 [Timer]
 # Monday morning. Both scheduled scans start Thursday 13:00 UTC and the
-# UMI/TRJ one runs about a day, so its results notice arrives Friday around
+# longer one runs about a day, so its results notice arrives Friday around
 # 13:00 UTC; Monday leaves room for a notice that is late. The installer pins
 # the day and time to FLEET_TIMEZONE with FLEET_VMSCAN_DAY and
 # FLEET_VMSCAN_TIME; without a timezone it runs Monday 08:00 on the system

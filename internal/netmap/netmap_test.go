@@ -347,7 +347,7 @@ func TestOnlyAHeaderThatStartsWithDecommissionedIsClosed(t *testing.T) {
 	rows := [][]string{
 		{"DECOMISSIONED - Old Branch - GA - 10.2.0.0/16"}, {"corp", "10.2.30.0/24", "vlan1"},
 		{"Decommissioned?? - Maybe Branch - 10.35.0.0/16"}, {"corp", "10.35.30.0/24", "vlan1"},
-		{"Charleston Store - 10.44.0.0/16 - Formally Old Store Decommissioned 8/1/2025"}, {"corp", "10.44.30.0/24", "vlan30"},
+		{"Example Store - 10.44.0.0/16 - Formally Old Store Decommissioned 8/1/2025"}, {"corp", "10.44.30.0/24", "vlan30"},
 	}
 	corp, _ := SelectCorp(ParseSites(rows), Rules{})
 	if len(corp) != 1 || corp[0].Subnet.Prefix.String() != "10.44.30.0/24" {
