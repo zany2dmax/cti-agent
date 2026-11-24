@@ -116,6 +116,17 @@ class FleetTimers(unittest.TestCase):
         self.assertNotIn("Off on purpose", r.stdout)
 
 
+class TheBeatsReadOnlyWrappersGetNoSecrets(unittest.TestCase):
+    def test_credentials_map(self):
+        # fleet-timers once wrote its code path so that the settings generator
+        # took it for a call to the cti-agent wrapper and granted it every
+        # secret, which a hand run through the wrapper would then receive.
+        lines = (FLEET / "credentials.map").read_text(encoding="utf-8").splitlines()
+        granted = {ln.split()[0] for ln in lines if ln.strip() and not ln.startswith("#")}
+        for w in ("fleet-timers", "fleet-journal", "fleet-board"):
+            self.assertNotIn(w, granted, f"{w} is granted secrets in credentials.map")
+
+
 class FleetConfig(unittest.TestCase):
     def setUp(self):
         loader = importlib.machinery.SourceFileLoader("fleet_config", str(FLEET / "bin" / "fleet-config"))

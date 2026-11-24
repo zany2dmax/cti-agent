@@ -60,7 +60,12 @@ rc=0
 # credential checks. From the installed lane list; nothing when FLEET_LANES
 # is unset (every lane runs) or the list is missing.
 lanes="${FLEET_LANES:-}"
-list="${FLEET_CODE:-/opt/cti-agent}/share/lanes.list"
+# The code path always ends in a slash here: scripts/settings-manifest reads
+# the bare code directory at the end of a word as a call to the fleet's
+# wrapper command, and would grant this every secret.
+list="${FLEET_CODE:-}"
+[ -n "$list" ] || list=/opt/cti-agent/
+list="${list%/}/share/lanes.list"
 if [ -n "$lanes" ] && [ -r "$list" ]; then
   case "$lanes" in
     *[!a-z0-9,\ -]*) echo "fleet-timers: FLEET_LANES has characters a lane name does not; not read" ;;
