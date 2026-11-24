@@ -181,7 +181,7 @@ func closeTicket(ctx context.Context, c *jira.Client, cfg config.Config, is jira
 		logf("close: %s: could not read its workflow transitions: %s", is.Key, safelog.Line(err.Error()))
 		return closeFailed
 	}
-	choice, err := jira.ChooseClose(ts, cfg.JiraCloseTransition)
+	choice, err := jira.ChooseClose(ts, cfg.JiraCloseTransition, cfg.JiraCloseResolution)
 	if err != nil {
 		logf("close: %s: left open - %s", is.Key, safelog.Line(err.Error()))
 		return closeFailed

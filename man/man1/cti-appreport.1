@@ -298,6 +298,13 @@ The WAS API. Required for the
 .B qualys\-was
 provider. Section 2.
 .TP
+.B QUALYS_PORTAL_HOSTS
+Optional. Further Qualys UI hosts, comma-separated, that links in Qualys
+mail may point at. The US pods and the UI host of the pod in
+.B QUALYS_BASE_URL
+(qualysapi.X gives qualysguard.X) are accepted without it. A value that is not
+a plain host name stops the run. Section 2.
+.TP
 .B APPSCAN_REPORT_PROVIDER
 Which scanner's report to fetch. Default:\~\fBqualys\-was\fR (also
 .BR qualys ).

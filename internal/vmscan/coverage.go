@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
@@ -198,13 +199,30 @@ func oddLine(f netmap.Finding) string {
 var gapOrder = []netmap.Kind{netmap.NotInAnyGroup, netmap.GroupNotScanned, netmap.PartlyCovered}
 
 // layoutGuide is how the spreadsheet has to be laid out to be read. It is in
-// the email because the people who maintain the sheet are on it.
-var layoutGuide = []string{
-	"One header row per location: the name on its own in the first column, ideally ending with the location's /16 block, for example \"Example Site - ST - 10.4.0.0/16\".",
-	"Under it, the location's user network as a CIDR: the 10.X.30 network inside its own block, for example 10.4.30.0/24, whatever the row is labelled. A location with no 10.X.30 network needs a row labelled corp instead. Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check.",
-	"Do not leave the network cell blank or write it without a mask length: \"10.29.30\" cannot be read.",
-	"A location that has been retired: START its header with DECOMMISSIONED. A word later in the header (\"formerly X, decommissioned\") does not close the location. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
-	"Every location needs one, including headquarters and the datacenter: a location with neither a 10.X.30 network nor a row labelled corp cannot be checked, and is listed for the network team to correct.",
+// the email because the people who maintain the sheet are on it. It follows
+// the reader's user-network rule (netmap.UserOctet), so it never tells the
+// network team about a convention the reader is not using.
+func layoutGuide() []string {
+	octet, on := netmap.UserOctet()
+	user := "Under it, the location's user network as a CIDR, in a row labelled corp. " +
+		"Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check."
+	every := "Every location needs one, including headquarters and the datacenter: a location with no row labelled " +
+		"corp cannot be checked, and is listed for the network team to correct."
+	if on {
+		n := strconv.Itoa(octet)
+		user = "Under it, the location's user network as a CIDR: the 10.X." + n + " network inside its own block, for example 10.4." +
+			n + ".0/24, whatever the row is labelled. A location with no 10.X." + n + " network needs a row labelled corp instead. " +
+			"Other rows (security, netman, guest, voice, and so on) are fine and are ignored by this check."
+		every = "Every location needs one, including headquarters and the datacenter: a location with neither a 10.X." + n +
+			" network nor a row labelled corp cannot be checked, and is listed for the network team to correct."
+	}
+	return []string{
+		"One header row per location: the name on its own in the first column, ideally ending with the location's /16 block, for example \"Example Site - ST - 10.4.0.0/16\".",
+		user,
+		"Do not leave the network cell blank or write it without a mask length: \"10.29.30\" cannot be read.",
+		"A location that has been retired: START its header with DECOMMISSIONED. A word later in the header (\"formerly X, decommissioned\") does not close the location. A block that is free: put \"Open to use\" in the header or label. Both are skipped.",
+		every,
+	}
 }
 
 // text is the coverage section of the plain-text report.
@@ -259,7 +277,7 @@ func (c *Coverage) text() string {
 		b.WriteString("  Nothing missing.\n")
 	}
 	b.WriteString("\nHOW THE SPREADSHEET IS READ\n" + strings.Repeat("-", 72) + "\n")
-	for _, l := range layoutGuide {
+	for _, l := range layoutGuide() {
 		fmt.Fprintf(&b, "  - %s\n", l)
 	}
 	b.WriteString("\n")
@@ -334,7 +352,7 @@ func (c *Coverage) html(b *strings.Builder) {
 		emailkit.Item(b, "Nothing missing.")
 	}
 	var g strings.Builder
-	for _, l := range layoutGuide {
+	for _, l := range layoutGuide() {
 		g.WriteString("&bull; " + e(l) + "<br>")
 	}
 	emailkit.Card(b, emailkit.Grey, "How the spreadsheet is read", g.String())

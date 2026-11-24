@@ -6,6 +6,8 @@ package main
 // TestOnlyWiringNamesAVendor fails the build if that stops being true.
 
 import (
+	"os"
+
 	"github.com/zany2dmax/cti-agent/internal/appscan"
 	"github.com/zany2dmax/cti-agent/internal/appscan/qualys"
 	"github.com/zany2dmax/cti-agent/internal/config"
@@ -21,4 +23,10 @@ func newScanner(cfg config.Config) appscan.Scanner {
 		return nil
 	}
 	return qualys.NewAPI(cfg.QualysBaseURL, cfg.QualysUsername, cfg.QualysPassword)
+}
+
+// usePlatform tells each vendor package which of its hosts this install's
+// links may point at, from the operator's own settings.
+func usePlatform(cfg config.Config) error {
+	return qualys.UsePlatform(cfg.QualysBaseURL, os.Getenv("QUALYS_PORTAL_HOSTS"))
 }

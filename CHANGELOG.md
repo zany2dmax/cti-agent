@@ -72,6 +72,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   in `/etc/cti-agent/org/`. Both at once is refused. A skill dropped from the
   pack is removed from the box on the next install. `examples/org-pack/` is
   a sanitized example of every file. Tested in `fleet-kit/tests/test_org_pack.py`.
+- **Vendor setup as settings.** Four things that described how one
+  organization set up a vendor or its network are now settings. Each one
+  defaults to what the fleet did before, so an update needs no config change.
+  - **`QUALYS_PORTAL_HOSTS`, and the platform from `QUALYS_BASE_URL`.** Links
+    in Qualys mail were trusted only to the four US pods, so on any other
+    Qualys platform (EU, CA, IN, UK, AE, KSA) every report link was refused
+    as unverified. cti-appscan, cti-appreport and cti-vmscan now also
+    accept the UI host of the pod named in `QUALYS_BASE_URL`
+    (`qualysapi.X` gives `qualysguard.X`), plus any hosts listed in
+    `QUALYS_PORTAL_HOSTS`. A value that isn't a plain host name stops the run.
+  - **`VMSCAN_USER_OCTET`** (default `30`, or `off`): the third octet that
+    marks a location's user network in the network sheet (10.X.30). `off`
+    leaves only rows labelled corp. The report's "How the spreadsheet is
+    read" guide follows the setting.
+  - **`VMSCAN_EXTRA_LABELS`**: row labels a sheet uses beyond the built-in
+    ones, so a label alone on its row isn't read as a new location.
+  - **`JIRA_CLOSE_RESOLUTION`** (default `Done`): the resolution set when the
+    close transition's screen asks for one, for a project that renamed
+    Jira's stock resolution.
 - **`VMSCAN_GAP_TEAMS`**: who the VM scan report asks why a network isn't
   scanned. This was fixed text ("the network and M&A teams"), one
   organization's process. The default is now the network team. To keep the

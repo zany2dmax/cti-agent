@@ -66,8 +66,10 @@ type CloseChoice struct {
 }
 
 // ResolutionName is the resolution set when the transition's screen asks for
-// one. "Done" is Jira's stock name; a project that renamed it will refuse the
-// transition and the failure is reported, never worked around.
+// one and the caller names none. "Done" is Jira's stock name; a project that
+// renamed it names its own (cti-jira's close-resolution setting), and a name
+// the project does not have makes Jira refuse the transition: the failure is
+// reported, never worked around.
 const ResolutionName = "Done"
 
 // ChooseClose picks the transition that closes an issue.
@@ -79,7 +81,14 @@ const ResolutionName = "Done"
 // guessing between "Done" and "Won't Do" is a decision for a person. A
 // candidate needing any required field other than resolution and comment, with
 // no default, is not usable.
-func ChooseClose(ts []Transition, prefer string) (CloseChoice, error) {
+//
+// resolution is the resolution to set when the screen asks for one; empty
+// means ResolutionName.
+func ChooseClose(ts []Transition, prefer, resolution string) (CloseChoice, error) {
+	resolution = strings.TrimSpace(resolution)
+	if resolution == "" {
+		resolution = ResolutionName
+	}
 	var cands []Transition
 	for _, t := range ts {
 		if t.To.StatusCategory.Key == "done" {
@@ -115,7 +124,7 @@ func ChooseClose(ts []Transition, prefer string) (CloseChoice, error) {
 	for name, f := range t.Fields {
 		switch name {
 		case "resolution":
-			res = ResolutionName
+			res = resolution
 		case "comment":
 		default:
 			if f.Required && !f.HasDefaultValue {

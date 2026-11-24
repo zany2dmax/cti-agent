@@ -474,3 +474,25 @@ func TestTheLeadAndSubjectCountScansAndAssetGroups(t *testing.T) {
 		t.Errorf("one scan: %q", s)
 	}
 }
+
+// The sheet guide in the email follows the reader's user-network rule, so the
+// network team is never told about a convention the reader is not using.
+func TestTheSheetGuideFollowsTheUserOctet(t *testing.T) {
+	t.Cleanup(func() { _ = netmap.UseSheetConventions("", "") })
+	guide := func() string { return strings.Join(layoutGuide(), "\n") }
+	if g := guide(); !strings.Contains(g, "the 10.X.30 network inside its own block, for example 10.4.30.0/24") {
+		t.Errorf("default guide:\n%s", g)
+	}
+	if err := netmap.UseSheetConventions("40", ""); err != nil {
+		t.Fatal(err)
+	}
+	if g := guide(); !strings.Contains(g, "the 10.X.40 network") || !strings.Contains(g, "neither a 10.X.40 network") || strings.Contains(g, "10.X.30") {
+		t.Errorf("octet 40 guide:\n%s", g)
+	}
+	if err := netmap.UseSheetConventions("off", ""); err != nil {
+		t.Fatal(err)
+	}
+	if g := guide(); strings.Contains(g, "10.X.") || !strings.Contains(g, "in a row labelled corp") {
+		t.Errorf("off guide:\n%s", g)
+	}
+}

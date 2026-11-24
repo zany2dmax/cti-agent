@@ -278,12 +278,33 @@ Optional security-team rules for locations the spreadsheet does not make clear. 
 Optional notes from cross-checks, for the network team. Default
 .IR /etc/cti\-agent/sheet\-notes.txt .
 .TP
+.B VMSCAN_GAP_TEAMS
+Who the report asks why a network is not scanned. Default: the network team.
+.TP
+.B VMSCAN_USER_OCTET
+The third octet that marks a location's user network: its 10.X.<octet>
+network inside its /16, whatever the row is labelled. Default
+.BR 30 ;
+.B off
+leaves only rows labelled corp. The report's sheet guide follows it.
+.TP
+.B VMSCAN_EXTRA_LABELS
+Row labels the sheet uses beyond the built-in ones, comma-separated, so a
+label alone on its row is not read as a new location.
+.TP
 .B QUALYS_BASE_URL
 .TQ
 .B QUALYS_USERNAME
 .TQ
 .B QUALYS_PASSWORD
 The Qualys API account, to list the Asset Groups (read-only).
+.TP
+.B QUALYS_PORTAL_HOSTS
+Optional. Further Qualys UI hosts, comma-separated, that links in Qualys
+mail may point at. The US pods and the UI host of the pod in
+.B QUALYS_BASE_URL
+(qualysapi.X gives qualysguard.X) are accepted without it. A value that is not
+a plain host name stops the run. Section 2.
 .TP
 .B FLEET_ORG
 The organisation name in the report header.

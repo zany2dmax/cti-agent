@@ -141,6 +141,9 @@ func run() int {
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
+	if err := qualys.UsePlatform(cfg.QualysBaseURL, os.Getenv("QUALYS_PORTAL_HOSTS")); err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
 
 	fetcher, err := reportProvider(cfg)
 	if err != nil {

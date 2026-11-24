@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/appscan/qualys"
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
@@ -101,6 +102,14 @@ func run() int {
 	fleetenv.Load()
 	cfg, err := config.LoadGraphOnly()
 	if err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	if err := qualys.UsePlatform(cfg.QualysBaseURL, os.Getenv("QUALYS_PORTAL_HOSTS")); err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
+	// The network sheet's conventions that are one IP plan's habits, not the
+	// format's: which octet marks a user network, and extra row labels.
+	if err := netmap.UseSheetConventions(os.Getenv("VMSCAN_USER_OCTET"), os.Getenv("VMSCAN_EXTRA_LABELS")); err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
 	if *check {

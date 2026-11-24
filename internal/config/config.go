@@ -115,13 +115,15 @@ type Config struct {
 	// that is no longer defined in the scanner. Same shape and same default
 	// as JiraAllowCreate (empty: never). JiraCloseTransition optionally names
 	// the workflow transition to use when a project has more than one that
-	// ends in a done status.
+	// ends in a done status, and JiraCloseResolution the resolution to set
+	// when its screen asks for one (empty: Jira's stock "Done").
 	// JiraTrustedReporters are Jira account ids (comma-separated) whose
 	// tickets the fleet adopts besides the ones its own account filed
 	// (JIRA_TRUSTED_REPORTERS). Empty: only its own.
 	JiraTrustedReporters string
 	JiraAllowClose       string
 	JiraCloseTransition  string
+	JiraCloseResolution  string
 }
 
 // DefaultDigestSkipSubjects is what the digest ignores when
@@ -422,6 +424,7 @@ func load(needGraph, needQualys, needJira bool) (Config, error) {
 		JiraAllowClose:       os.Getenv("JIRA_ALLOW_CLOSE"),
 		JiraTrustedReporters: os.Getenv("JIRA_TRUSTED_REPORTERS"),
 		JiraCloseTransition:  os.Getenv("JIRA_CLOSE_TRANSITION"),
+		JiraCloseResolution:  os.Getenv("JIRA_CLOSE_RESOLUTION"),
 	}
 
 	missing := []string{}

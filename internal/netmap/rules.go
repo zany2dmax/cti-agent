@@ -182,7 +182,8 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 		var seenRoles []string
 		bad, blank := "", false
 		badRow, headRow := 0, 0
-		// Without a rule, the location's user network is its 10.X.30 network:
+		// Without a rule, the location's user network is its 10.X.30 network
+		// (UserOctet; off leaves the corp label to decide):
 		// the sheet's own convention, whatever the row is labelled (some
 		// locations call it "inside", others "Employee LAN"). Only when it
 		// has none does the "corp" label decide.
@@ -281,12 +282,14 @@ func SelectCorp(subs []Subnet, rules Rules) ([]Corp, []Question) {
 	return corp, qs
 }
 
-// userNetworks are a location's valid, active 10.X.30 networks inside its
+// userNetworks are a location's valid, active 10.X.30 networks (the octet is
+// UserOctet's; none when that rule is off) inside its
 // own block (the /16 its header names): 10.45.30.0/23 and 10.62.30.0/26
 // qualify, 10.20.30.0/24 under a location whose block is 10.14.0.0/16 does
 // not. A location whose header names no block has none.
 func userNetworks(rows []Subnet, blocks []netip.Prefix) []Subnet {
-	if len(blocks) == 0 {
+	octet, on := UserOctet()
+	if len(blocks) == 0 || !on {
 		return nil
 	}
 	var out []Subnet
@@ -295,7 +298,7 @@ func userNetworks(rows []Subnet, blocks []netip.Prefix) []Subnet {
 			continue
 		}
 		b := s.Prefix.Addr().As4()
-		if b[0] == 10 && b[2] == 30 && within(blocks, s.Prefix) {
+		if b[0] == 10 && int(b[2]) == octet && within(blocks, s.Prefix) {
 			out = append(out, s)
 		}
 	}

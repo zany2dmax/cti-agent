@@ -39,7 +39,7 @@ var roleLabels = map[string]bool{
 }
 
 func isRoleLabel(label string) bool {
-	l := strings.ToLower(strings.TrimSpace(label))
+	l := strings.ToLower(strings.Join(strings.Fields(label), " "))
 	return roleLabels[l] || strings.HasPrefix(l, "internet")
 }
 

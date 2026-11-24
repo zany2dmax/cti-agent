@@ -491,6 +491,12 @@ section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan installer
 credential: yes
 
+key: JIRA_CLOSE_RESOLUTION
+section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
+readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
+file: core
+default: Done
+
 key: JIRA_CLOSE_TRANSITION
 section: 9. JIRA TICKETING - confirmed exposure becomes tracked work
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan
@@ -675,6 +681,11 @@ section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
 readers: cti-agent cti-appreport cti-appscan cti-jira cti-mailbox cti-patchtuesday cti-supplier cti-vmscan dev-run
 secret: yes
 required: if LOOKUP_PROVIDER=qualys
+
+key: QUALYS_PORTAL_HOSTS
+section: 2. VULNERABILITY SCANNER - required when LOOKUP_PROVIDER=qualys
+readers: cti-appreport cti-appscan cti-vmscan
+file: core
 
 key: QUALYS_RL_MAX_WAIT
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -887,6 +898,11 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
 file: vmscan
 
+key: VMSCAN_EXTRA_LABELS
+section: 4. RECIPIENTS AND THE SEND GATE - required
+readers: cti-vmscan
+file: vmscan
+
 key: VMSCAN_GAP_TEAMS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
@@ -902,6 +918,12 @@ key: VMSCAN_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
 file: vmscan
+
+key: VMSCAN_USER_OCTET
+section: 4. RECIPIENTS AND THE SEND GATE - required
+readers: cti-vmscan
+file: vmscan
+default: 30
 
 key: VM_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required

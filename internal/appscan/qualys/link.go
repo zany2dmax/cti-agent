@@ -1,7 +1,9 @@
 package qualys
 
 import (
+	"fmt"
 	neturl "net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -15,9 +17,9 @@ import (
 // subdomain would accept one an attacker can register on a shared platform,
 // and the whole point of checking the link is to not do that.
 //
-// A new pod means a one-line change here and a parse problem reported in the
-// meantime, which is the right failure: visible, and not a silently dropped
-// link.
+// Another platform is added from the operator's configuration at startup
+// (UsePlatform); until it is, its links are reported as unverified, which is
+// the right failure: visible, and not a silently dropped link.
 var ReportHosts = []string{
 	"qualysguard.qg1.apps.qualys.com",
 	"qualysguard.qg2.apps.qualys.com",
@@ -37,6 +39,56 @@ var PortalHosts = []string{
 	"qualysguard.qg2.apps.qualys.com",
 	"qualysguard.qg3.apps.qualys.com",
 	"qualysguard.qg4.apps.qualys.com",
+}
+
+// UsePlatform adds the operator's own Qualys platform to ReportHosts and
+// PortalHosts, so a subscription outside the four US pods (EU, CA, IN, UK and
+// the rest) gets verified links instead of every one refused.
+//
+// Both come from the operator's configuration, never from mail: the API host
+// in baseURL (qualysapi.<platform> gives qualysguard.<platform> for the UI),
+// and extra, a comma- or space-separated list of further UI hosts for a
+// platform that rule does not fit. The US pods stay accepted, so a box on one
+// of them behaves as before. A host that is not a plain lower-case DNS name -
+// a wildcard, a port, a path, a scheme - is refused, and nothing is added.
+// Call it once at startup, before any link is checked.
+func UsePlatform(baseURL, extra string) error {
+	var add []string
+	api := ""
+	if u, err := neturl.Parse(strings.TrimSpace(baseURL)); err == nil && u.Scheme == "https" {
+		if host := strings.ToLower(u.Hostname()); strings.HasPrefix(host, "qualysapi.") && hostRE.MatchString(host) {
+			add = append(add, "qualysguard."+strings.TrimPrefix(host, "qualysapi."))
+			api = host
+		}
+	}
+	for _, h := range strings.FieldsFunc(extra, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		h = strings.ToLower(h)
+		if !hostRE.MatchString(h) {
+			return fmt.Errorf("portal host %q for Qualys is not a plain host name (no scheme, port, path or wildcard)", h)
+		}
+		add = append(add, h)
+	}
+	if api != "" {
+		ReportHosts = appendNew(ReportHosts, api)
+	}
+	for _, h := range add {
+		ReportHosts = appendNew(ReportHosts, h)
+		PortalHosts = appendNew(PortalHosts, h)
+	}
+	return nil
+}
+
+// hostRE is a lower-case DNS name of at least three labels: no wildcard, no
+// port, nothing a URL could smuggle in.
+var hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?){2,}$`)
+
+func appendNew(list []string, h string) []string {
+	for _, x := range list {
+		if x == h {
+			return list
+		}
+	}
+	return append(list, h)
 }
 
 // UnwrapReportLink returns the Qualys report URL from a notification, or an

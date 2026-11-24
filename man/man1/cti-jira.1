@@ -459,7 +459,8 @@ lead there,
 .B JIRA_CLOSE_TRANSITION
 names the one to use. A transition that requires a field other than
 resolution or comment is refused; a resolution field on the screen is set to
-"Done"; the comment goes in the same request. Needs the Jira permission
+.B JIRA_CLOSE_RESOLUTION
+("Done" when unset); the comment goes in the same request. Needs the Jira permission
 "Transition issues". Closing is reversible by reopening; if the application
 returns with findings, a new ticket is filed and linked to the closed one.
 Default:\~empty.
@@ -658,6 +659,10 @@ Section 9.
 .B JIRA_CLOSE_TRANSITION
 Optional. The name (case-insensitive) of the transition to use when several
 lead to a Done-category status. Section 9.
+.TP
+.B JIRA_CLOSE_RESOLUTION
+Optional. The resolution set when the close transition's screen asks for one.
+Default "Done", Jira's stock name; set it if the project renamed it. Section 9.
 .TP
 .BR QUALYS_BASE_URL ", " QUALYS_USERNAME ", " QUALYS_PASSWORD
 The scanner the host lists come from. Required when

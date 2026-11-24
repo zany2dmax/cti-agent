@@ -22,14 +22,14 @@ func TestChooseCloseByStatusCategoryNotName(t *testing.T) {
 		tr("1", "Start", "In Progress", "indeterminate", nil),
 		tr("2", "Close it", "Finished", "done", nil), // renamed workflow: category still says done
 	}
-	ch, err := ChooseClose(ts, "")
+	ch, err := ChooseClose(ts, "", "")
 	if err != nil || ch.Transition.ID != "2" || ch.Resolution != "" {
 		t.Fatalf("got %+v, %v", ch, err)
 	}
 }
 
 func TestChooseCloseNothingDone(t *testing.T) {
-	if _, err := ChooseClose([]Transition{tr("1", "Start", "In Progress", "indeterminate", nil)}, ""); err == nil {
+	if _, err := ChooseClose([]Transition{tr("1", "Start", "In Progress", "indeterminate", nil)}, "", ""); err == nil {
 		t.Fatal("no done transition must be an error")
 	}
 }
@@ -39,13 +39,13 @@ func TestChooseCloseAmbiguousNeedsPreference(t *testing.T) {
 		tr("2", "Done", "Done", "done", nil),
 		tr("3", "Won't Do", "Won't Do", "done", nil),
 	}
-	if _, err := ChooseClose(ts, ""); err == nil || !strings.Contains(err.Error(), "JIRA_CLOSE_TRANSITION") {
+	if _, err := ChooseClose(ts, "", ""); err == nil || !strings.Contains(err.Error(), "JIRA_CLOSE_TRANSITION") {
 		t.Fatalf("ambiguity must name the setting, got %v", err)
 	}
-	if _, err := ChooseClose(ts, "no such"); err == nil {
+	if _, err := ChooseClose(ts, "no such", ""); err == nil {
 		t.Fatal("a preference matching nothing must not fall back to a guess")
 	}
-	ch, err := ChooseClose(ts, " done ")
+	ch, err := ChooseClose(ts, " done ", "")
 	if err != nil || ch.Transition.ID != "2" {
 		t.Fatalf("preferred transition not used: %+v, %v", ch, err)
 	}
@@ -53,10 +53,10 @@ func TestChooseCloseAmbiguousNeedsPreference(t *testing.T) {
 
 func TestChooseCloseHonoursAPreferenceEvenWithOneCandidate(t *testing.T) {
 	only := []Transition{tr("3", "Won't Do", "Won't Do", "done", nil)}
-	if _, err := ChooseClose(only, "Done"); err == nil {
+	if _, err := ChooseClose(only, "Done", ""); err == nil {
 		t.Fatal("a lone Won't Do must not be used when Done was asked for")
 	}
-	if ch, err := ChooseClose(only, ""); err != nil || ch.Transition.ID != "3" {
+	if ch, err := ChooseClose(only, "", ""); err != nil || ch.Transition.ID != "3" {
 		t.Fatalf("no preference: the one candidate is used: %+v, %v", ch, err)
 	}
 }
@@ -66,21 +66,33 @@ func TestChooseCloseResolutionAndBlockers(t *testing.T) {
 		"resolution": {Required: true},
 		"comment":    {Required: false},
 	})
-	ch, err := ChooseClose([]Transition{withRes}, "")
+	ch, err := ChooseClose([]Transition{withRes}, "", "")
 	if err != nil || ch.Resolution != ResolutionName {
 		t.Fatalf("resolution not set: %+v, %v", ch, err)
+	}
+	// A project that renamed its resolution names its own; blank is the stock one.
+	if ch, _ := ChooseClose([]Transition{withRes}, "", " Fixed "); ch.Resolution != "Fixed" {
+		t.Errorf("configured resolution not used: %+v", ch)
+	}
+	if ch, _ := ChooseClose([]Transition{withRes}, "", "  "); ch.Resolution != "Done" {
+		t.Errorf("blank resolution: %+v", ch)
+	}
+	// A screen with no resolution field sets none, whatever is configured.
+	plain := tr("2", "Done", "Done", "done", nil)
+	if ch, _ := ChooseClose([]Transition{plain}, "", "Fixed"); ch.Resolution != "" {
+		t.Errorf("resolution set on a screen without one: %+v", ch)
 	}
 	blocked := tr("2", "Done", "Done", "done", map[string]TransitionField{
 		"customfield_10050": {Required: true},
 	})
-	if _, err := ChooseClose([]Transition{blocked}, ""); err == nil ||
+	if _, err := ChooseClose([]Transition{blocked}, "", ""); err == nil ||
 		!strings.Contains(err.Error(), "customfield_10050") {
 		t.Fatalf("an unfillable required field must refuse, got %v", err)
 	}
 	defaulted := tr("2", "Done", "Done", "done", map[string]TransitionField{
 		"customfield_10050": {Required: true, HasDefaultValue: true},
 	})
-	if _, err := ChooseClose([]Transition{defaulted}, ""); err != nil {
+	if _, err := ChooseClose([]Transition{defaulted}, "", ""); err != nil {
 		t.Fatalf("a required field with a default is fine: %v", err)
 	}
 }

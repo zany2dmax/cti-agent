@@ -377,6 +377,13 @@ and a note says so. A
 that does not map to a known Qualys portal leaves report links as plain
 text. Section 2.
 .TP
+.B QUALYS_PORTAL_HOSTS
+Optional. Further Qualys UI hosts, comma-separated, that links in Qualys
+mail may point at. The US pods and the UI host of the pod in
+.B QUALYS_BASE_URL
+(qualysapi.X gives qualysguard.X) are accepted without it. A value that is not
+a plain host name stops the run. Section 2.
+.TP
 .B APPSCAN_OWNERS_FILE
 The application owners file. Default:\~\fI/etc/cti\-agent/app\-owners.txt\fR.
 One line per application:

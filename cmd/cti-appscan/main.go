@@ -134,6 +134,9 @@ func run() int {
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
 	}
+	if err := usePlatform(cfg); err != nil {
+		return die("%s", safelog.Line(err.Error()))
+	}
 	if *listApps {
 		return doListApps(cfg, *listJSON)
 	}
