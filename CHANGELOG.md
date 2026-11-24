@@ -56,6 +56,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   just after `Group=`; nothing systemd reads changed. This is the first step
   of making a lane one file instead of eight.
 
+  The manifests also generate two more files:
+  - the orchestrator's lane table in `fleet-kit/fleet/CLAUDE.md` (between
+    markers; the rows are unchanged)
+  - `internal/checkin/lanes_gen.go`, the lanes every check-in verdict must
+    account for, which was a hand-kept list in `verdict.go`
+
+  Tests now require every timed lane to have a table row, every runner to be
+  some unit's command, and the checkin skill's example verdict and lane count
+  to match.
+
 - **No real site or scan names in the repository.** Code comments, tests,
   a timer comment, the RUNBOOK, `fleet.env.example` and older CHANGELOG
   entries named real locations, business units and scan titles as examples;

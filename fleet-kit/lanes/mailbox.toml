@@ -4,6 +4,13 @@ lane = "mailbox"
 handles = ["@mailbox"]
 summary = "Mailbox housekeeping: file processed advisories away after the digest has read them."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 9
+runs = "`$FLEET_CODE/bin/run-mailbox-cleanup`"
+when = "Daily 07:00 (`cti-agent-mailbox.timer`)"
+sends_to = "nobody: moves mail"
+
 [[unit]]
 name = "mailbox"
 description = "CTI mailbox cleanup (archive processed, delete auto-replies)"

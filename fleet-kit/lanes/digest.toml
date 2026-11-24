@@ -4,6 +4,13 @@ lane = "digest"
 handles = ["@ingest", "@enrich", "@brief"]
 summary = "The daily threat-intel digest: read the CTI mail, enrich every CVE with exposure on our hosts, and send the brief; on Mondays, the weekly rollup."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 1
+runs = "`$FLEET_CODE/bin/run-digest`: `cti-agent`, `cti-enrich`, `cti-brief` (all Go)"
+when = "Daily 06:00 (`cti-agent-digest.timer`), Monday weekly (`cti-agent-weekly.timer`)"
+sends_to = "`$DIGEST_TO`"
+
 [[unit]]
 name = "digest"
 description = "CTI daily digest (ingest, enrich, brief, send)"

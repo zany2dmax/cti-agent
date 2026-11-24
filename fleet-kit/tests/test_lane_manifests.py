@@ -55,6 +55,45 @@ class TheRepository(unittest.TestCase):
         self.assertEqual(handles, guard - {"@all", "@operator", "@you"})
 
 
+class TheOrchestratorKnowsEveryLane(unittest.TestCase):
+    """A lane nobody oversees fails silently: on 2026-11-11 the owner lane held
+    a scan and the orchestrator, never told the lane existed, said nothing.
+    The table and the verdict's lane list are generated now; these hold the
+    rest to them."""
+
+    def setUp(self):
+        self.lanes = module().load_all()
+        self.skill = (REPO / "fleet-kit" / "fleet" / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_every_timed_lane_is_in_the_table(self):
+        for m in self.lanes.values():
+            timed = any(u.get("timer") for u in m["unit"])
+            if m["lane"] == "checkin":
+                self.assertNotIn("orchestrator", m, "the check-in does not oversee itself")
+                continue
+            with self.subTest(lane=m["lane"]):
+                self.assertTrue(timed, "a lane with no timer")
+                self.assertIn("orchestrator", m, "a timed lane with no row in the orchestrator's table")
+
+    def test_every_runner_is_some_units_command(self):
+        runners = {p.name for p in (REPO / "fleet-kit" / "fleet" / "bin").glob("run-*")}
+        used = {u["exec"].split()[0].rsplit("/", 1)[-1] for m in self.lanes.values() for u in m["unit"]}
+        self.assertLessEqual(runners, used, "a runner no lane's unit starts")
+
+    def test_the_skills_verdict_example_names_every_lane_once(self):
+        lanes = [u["name"] for m in module().overseen(self.lanes) for u in m["unit"]]
+        example = re.findall(r'\{"lane": "([a-z]+)"', self.skill)
+        self.assertEqual(sorted(example), sorted(lanes), "the checkin skill's example verdict lists other lanes")
+        words = {8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen"}
+        self.assertIn(f"**all {words[len(lanes)]}, every beat, once each**", self.skill,
+                      "the checkin skill says a different number of lanes")
+
+    def test_the_skill_has_a_check_for_every_lane(self):
+        for name in [u["name"] for m in module().overseen(self.lanes) for u in m["unit"]]:
+            with self.subTest(lane=name):
+                self.assertRegex(self.skill.lower(), rf"\b{name}\b", f"the checkin skill never mentions {name}")
+
+
 class AScratchCopy(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp())
@@ -110,6 +149,35 @@ nice = 10
         self.assertIn("SyslogIdentifier=cti-agent-newlane\n", text)
         self.assertNotIn("LogsDirectory", text)
 
+    def test_a_hand_edit_to_the_lane_table_is_caught(self):
+        orch = self.dir / "CLAUDE.md"
+        shutil.copy(REPO / "fleet-kit" / "fleet" / "CLAUDE.md", orch)
+        self.m.ORCHESTRATOR = orch
+        self.m.VERDICT_LANES = self.dir / "lanes_gen.go"
+        self.assertEqual(self.m.main(["--write"]), 0)
+        self.assertEqual(self.check(), 0)
+        orch.write_text(orch.read_text().replace("| `@scout` |", "| `@scouts` |"))
+        self.assertEqual(self.check(), 1)
+        # A new lane with a table row gets a row and a verdict entry.
+        (self.lanes / "newlane.toml").write_text('''lane = "newlane"
+handles = ["@newlane"]
+summary = "x"
+[orchestrator]
+order = 99
+runs = "`$FLEET_CODE/bin/cti-new`"
+when = "Daily"
+sends_to = "nobody"
+[[unit]]
+name = "newlane"
+description = "A new lane"
+exec = "/opt/cti-agent/bin/cti-new --for-real"
+timeout = 60
+nice = 10
+''')
+        self.m.main(["--write"])
+        self.assertIn("| `@newlane` | `$FLEET_CODE/bin/cti-new` | Daily | nobody |", orch.read_text())
+        self.assertIn('\t"newlane",\n}', (self.dir / "lanes_gen.go").read_text())
+
     def test_a_timer_that_disagrees_is_caught(self):
         p = self.units / "cti-agent-domains.timer"
         p.write_text(p.read_text().replace("OnCalendar=Tue", "OnCalendar=Wed"))
@@ -158,11 +226,25 @@ class BadManifests(unittest.TestCase):
     def test_not_toml(self):
         self.refused("lane = ", "not valid TOML")
 
+    def test_a_table_cell_with_a_pipe(self):
+        self.refused(re.sub(r'(?m)^runs = .*$', 'runs = "a | b"', self.good), "must be one line with no |")
+
+    def test_two_lanes_with_one_order(self):
+        lanes = self.dir / "lanes"
+        lanes.mkdir()
+        (lanes / "scout.toml").write_text(self.good)
+        other = self.good.replace('lane = "scout"', 'lane = "other"').replace('"@scout"', '"@other"').replace('name = "scout"', 'name = "other"')
+        (lanes / "other.toml").write_text(other)
+        self.m.LANES = lanes
+        with self.assertRaises(self.m.ManifestError) as cm:
+            self.m.load_all()
+        self.assertIn("both have orchestrator order", str(cm.exception))
+
     def test_a_unit_in_two_lanes(self):
         lanes = self.dir / "lanes"
         lanes.mkdir()
         (lanes / "scout.toml").write_text(self.good)
-        (lanes / "copy.toml").write_text(self.good.replace('lane = "scout"', 'lane = "copy"'))
+        (lanes / "copy.toml").write_text(re.sub(r"(?m)^order = .*$", "order = 98", self.good.replace('lane = "scout"', 'lane = "copy"')))
         self.m.LANES = lanes
         with self.assertRaises(self.m.ManifestError) as cm:
             self.m.load_all()

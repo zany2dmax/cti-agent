@@ -4,6 +4,13 @@ lane = "appowners"
 handles = ["@appowners"]
 summary = "Each application's scan report, sent to its owners the morning after the scan."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 5
+runs = "`$FLEET_CODE/bin/run-appowners`"
+when = "Daily 07:15 (`cti-agent-appowners.timer`)"
+sends_to = "each application's owners and watchers"
+
 [[unit]]
 name = "appowners"
 description = "CTI application scan reports to their owners, daily"

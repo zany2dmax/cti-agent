@@ -4,6 +4,13 @@ lane = "domains"
 handles = ["@domains"]
 summary = "The weekly domains check: registrar, DNS, web and mail records, plus one Jira ticket for IT."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 6
+runs = "`$FLEET_CODE/bin/run-domains`"
+when = "Tuesdays 08:00 (`cti-agent-domains.timer`)"
+sends_to = "`$DOM_TO`, plus one Jira ticket for IT"
+
 [[unit]]
 name = "domains"
 description = "CTI weekly domains check (registrar, DNS, web, mail records)"

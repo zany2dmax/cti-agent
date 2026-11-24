@@ -26,10 +26,7 @@ import (
 // than a struct of zero values.
 const Schema = "cti-checkin/1"
 
-// Lanes is every lane the beat accounts for, exactly once, every beat. Each
-// has a timer in fleet-kit/fleet/systemd-fedora (the check-in itself aside).
-var Lanes = []string{"digest", "weekly", "mailbox", "appowners", "supplier",
-	"scout", "appscan", "domains", "vmscan", "patchtuesday"}
+// Lanes (every lane the beat accounts for) is generated: lanes_gen.go.
 
 // Allowed values. Anything else is a problem, not a guess.
 var (

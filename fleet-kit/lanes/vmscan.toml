@@ -4,6 +4,13 @@ lane = "vmscan"
 handles = ["@vmscan"]
 summary = "The weekly VM scan report: which scheduled scans ran, and which networks in the network sheet no scan reached."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 7
+runs = "`$FLEET_CODE/bin/run-vmscan`"
+when = "Weekly, on `FLEET_VMSCAN_DAY` (Monday unless the box sets another day; `cti-agent-vmscan.timer`)"
+sends_to = "`$VMSCAN_TO`, plus one Jira ticket of spreadsheet fixes for the help desk"
+
 [[unit]]
 name = "vmscan"
 description = "CTI vulnerability-scan weekly report (the two Qualys VM weeklies combined)"

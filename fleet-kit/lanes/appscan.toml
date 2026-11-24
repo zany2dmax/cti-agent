@@ -4,6 +4,13 @@ lane = "appscan"
 handles = ["@appscan"]
 summary = "The weekly application-security report from the web app scanner's results, with Jira tickets per application."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 4
+runs = "`$FLEET_CODE/bin/run-appscan`"
+when = "Fridays (`cti-agent-appscan.timer`)"
+sends_to = "`$WAS_TO`"
+
 [[unit]]
 name = "appscan"
 description = "CTI application-security weekly report"

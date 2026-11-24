@@ -2055,8 +2055,10 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         2026-11-11 and the orchestrator, which had never been told the lane
         existed, said nothing. So every cti-agent-*.timer must be named in its
         instructions (fleet/CLAUDE.md), and the lane table must name each
-        runner's handle. Add the lane there, and a check to the checkin skill's
-        'Scheduled work' table, when a lane is created."""
+        runner's handle. The table is generated from the lane manifests now
+        (fleet-kit/lanes/*.toml, scripts/lanes; test_lane_manifests.py): give a
+        new lane an [orchestrator] table there, and a check in the checkin
+        skill's 'Scheduled work' table."""
         root = pathlib.Path(__file__).resolve().parents[1] / "fleet"
         orch = (root / "CLAUDE.md").read_text(encoding="utf-8")
         skill = (root / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")

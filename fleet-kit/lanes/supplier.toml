@@ -4,6 +4,13 @@ lane = "supplier"
 handles = ["@supplier"]
 summary = "Supplier requests from the supplier mailbox, judged for third-party risk, with Jira Kanban items."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 8
+runs = "`$FLEET_CODE/bin/run-supplier`"
+when = "Daily 07:45 UTC (`cti-agent-supplier.timer`)"
+sends_to = "`$SUPPLIER_TO`, plus Jira Kanban items"
+
 [[unit]]
 name = "supplier"
 description = "CTI supplier-request lane (judge each new supplier request, file Kanban items, email one digest)"

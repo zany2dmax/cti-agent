@@ -4,6 +4,13 @@ lane = "patchtuesday"
 handles = ["@patchtuesday"]
 summary = "The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by hand for now; its timer is off on purpose."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 3
+runs = "`$FLEET_CODE/bin/run-patchtuesday`"
+when = "Monthly, by hand (`cti-agent-patchtuesday.timer` is off on purpose)"
+sends_to = "`$DIGEST_TO`"
+
 [[unit]]
 name = "patchtuesday"
 description = "CTI monthly Microsoft Patch Tuesday synopsis"

@@ -5,11 +5,11 @@ Each lane is described once, in `fleet-kit/lanes/<lane>.toml`.
 `task ship` refuses to push when a generated file is stale
 (`task lane:check`).
 
-This is the first part of the lane manifest work. Today a manifest owns the
-lane's `.service` units and is checked against its timers. Later steps add the
-orchestrator's lane table, the settings and commands manifest rows, and the
-grants a lane needs, so adding or removing a lane is one file instead of
-eight.
+A manifest owns the lane's `.service` units, its row in the orchestrator's
+lane table, and its place in the list of lanes every check-in beat must
+account for, and is checked against its timers. Later steps add the settings
+and commands manifest rows and the grants a lane needs, so adding or removing
+a lane is one file instead of eight.
 
 ## Why
 
@@ -26,6 +26,12 @@ which lines to change.
 lane = "scout"                  # lower case; must match the file name
 handles = ["@scout"]            # board handles the lane answers to ([] for none)
 summary = "One line: what the lane does."
+
+[orchestrator]                  # the lane's row in the orchestrator's lane table
+order = 2                       # where the row goes; unique
+runs = "`$FLEET_CODE/bin/cti-scout`"
+when = "Every 4 hours (`cti-agent-scout.timer`)"
+sends_to = "nobody: feeds the digest"
 
 [[unit]]                        # one per systemd service; a lane may have several
 name = "scout"                  # cti-agent-<name>.service and .timer
@@ -63,6 +69,13 @@ key would otherwise be silently ignored. `exec` must run something under
   than a generated file. `scripts/lanes --check` fails when a timer's
   `Unit=`, `Description=`, `Persistent=`, or schedule (`OnCalendar=`, or
   `OnBootSec=` and `OnUnitActiveSec=`) disagrees with the manifest.
+- **The orchestrator's lane table** in `fleet-kit/fleet/CLAUDE.md`, between
+  its `BEGIN lane table` and `END lane table` markers, is generated from each
+  lane's `[orchestrator]` table. The Handle column comes from `handles`.
+- **`internal/checkin/lanes_gen.go`**, the lanes a check-in beat's verdict
+  must account for (`cti-checkin-verdict` refuses a verdict that skips one or
+  names another), is every unit of every lane in the table, in table order.
+  The check-in lane itself has no `[orchestrator]` table and isn't in either.
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
 
@@ -80,9 +93,14 @@ key would otherwise be silently ignored. `exec` must run something under
    scripts/settings-manifest --write
    ```
 
-The rest of a new lane is still done by hand for now: the orchestrator's lane
-table, the checkin skill, the commands manifest, and the installer's timer
-list. The tests that keep those in step will name anything missed.
+The rest of a new lane is still done by hand for now:
+- the "What to know about each" notes and the checkin skill's "Scheduled
+  work" check, including its example verdict and lane count
+- the commands manifest
+- the installer's timer list
+
+The tests in `fleet-kit/tests/test_lane_manifests.py` and `test_lanes.py` name
+anything missed.
 
 ```bash
 scripts/lanes --list

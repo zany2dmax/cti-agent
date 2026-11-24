@@ -4,6 +4,13 @@ lane = "scout"
 handles = ["@scout"]
 summary = "Poll advisory feeds for CVEs the mail has not mentioned yet, to feed the digest."
 
+# The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
+[orchestrator]
+order = 2
+runs = "`$FLEET_CODE/bin/cti-scout`"
+when = "Every 4 hours (`cti-agent-scout.timer`)"
+sends_to = "nobody: feeds the digest"
+
 [[unit]]
 name = "scout"
 description = "CTI scout sweep (poll advisory feeds)"
