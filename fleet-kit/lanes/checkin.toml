@@ -9,6 +9,36 @@ setting_prefixes = ["CHECKIN_", "FLEET_BUDGET_"]
 # The check-in runs every lane's credential check, so it loads every lane's file.
 all_settings = true
 
+# What the beat may run (run-checkin's ALLOWED_TOOLS): the fleet-wide tools.
+# Bash(x) is $FLEET_CODE/bin/x, Read(d/**) is $FLEET_HOME/d. Each lane
+# declares the ones it adds; scripts/lanes --check fails on any difference.
+beat_grants = [
+  "Bash(fleet-board say:*)",
+  "Bash(fleet-board read:*)",
+  "Bash(fleet-board tail:*)",
+  "Bash(fleet-board resolve:*)",
+  "Bash(fleet-board expire:*)",
+  "Bash(fleet-db recent:*)",
+  "Bash(fleet-db findings:*)",
+  "Bash(fleet-db was-sent:*)",
+  "Bash(fleet-db rollup:*)",
+  "Bash(fleet-db remember:*)",
+  "Bash(fleet-db task:*)",
+  "Bash(fleet-db mail:*)",
+  "Bash(fleet-db ack:*)",
+  "Bash(fleet-db vacuum:*)",
+  "Bash(cti-budget status:*)",
+  "Bash(cti-kev:*)",
+  "Bash(cti-mailer --check)",
+  "Bash(cti-jira --check)",
+  "Bash(fleet-timers:*)",
+  "Bash(cti-alert:*)",
+  "Bash(fleet-journal:*)",
+  "Read(reports/**)",
+  "Read(logs/**)",
+  "Read(archive/**)",
+]
+
 [[unit]]
 name = "checkin"
 description = "CTI orchestrator heartbeat (one /checkin beat)"

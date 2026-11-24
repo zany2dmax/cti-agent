@@ -22,6 +22,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "lanes"
 UNITS = REPO / "fleet-kit" / "fleet" / "systemd-fedora"
 LANES = REPO / "fleet-kit" / "lanes"
+RUN_CHECKIN = REPO / "fleet-kit" / "fleet" / "bin" / "run-checkin"
 
 
 def module():
@@ -120,6 +121,53 @@ class TheSettingsGeneratorReadsTheManifests(unittest.TestCase):
         self.assertNotRegex(text, r'\("[A-Z_]+", "(checkin|vmscan|digest|appscan)"\)', "a hard-coded prefix rule")
         self.assertNotIn('== "weekly"', text)
         self.assertNotIn('ALL_FILES_LANE = "', text)
+
+
+class TheBeatsGrantIsDeclared(unittest.TestCase):
+    """Every Bash and Read grant run-checkin gives the beat is declared by
+    exactly one lane (beat_grants), and every declared one is given. The beat
+    reads untrusted mail, so a capability nobody signed for is the thing to
+    catch."""
+
+    def test_the_repository_agrees(self):
+        m = module()
+        self.assertEqual(m.grant_problems(m.load_all()), [])
+        self.assertGreaterEqual(len(m.actual_grants()), 20)
+
+    def test_the_skills_credential_checks_are_the_declared_ones(self):
+        m = module()
+        checks = sorted(g[len("Bash("):-len(" --check)")] for g in m.declared_grants(m.load_all()) if g.endswith(" --check)"))
+        skill = (REPO / "fleet-kit" / "fleet" / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
+        row = next(line for line in skill.splitlines() if line.startswith("| Credentials still work"))
+        named = sorted(set(re.findall(r"`(?:\$FLEET_CODE/bin/)?([a-z-]+) --check`", row)))
+        self.assertEqual(named, checks, "the checkin skill's credential checks differ from the declared grants")
+
+    def scratch(self, edit):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)
+        rc = d / "run-checkin"
+        rc.write_text(edit(RUN_CHECKIN.read_text(encoding="utf-8")))
+        m = module()
+        m.RUN_CHECKIN = rc
+        return m, m.grant_problems(m.load_all())
+
+    def test_an_undeclared_grant_is_caught(self):
+        add = 'ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailer --lane digest:*)"\n'
+        _, problems = self.scratch(lambda t: t.replace("\nDISALLOWED_TOOLS=", "\n" + add + "DISALLOWED_TOOLS=", 1))
+        self.assertEqual(problems, ["run-checkin grants Bash(cti-mailer --lane digest:*), which no lane manifest declares "
+                                    "(add it to that lane's beat_grants)"])
+
+    def test_a_widened_grant_is_caught(self):
+        # --check becoming --check:* would let anything ride along after it.
+        _, problems = self.scratch(lambda t: t.replace("cti-vmscan --check)", "cti-vmscan --check:*)"))
+        self.assertIn("run-checkin grants Bash(cti-vmscan --check:*), which no lane manifest declares "
+                      "(add it to that lane's beat_grants)", problems)
+        self.assertIn("vmscan.toml declares the beat grant Bash(cti-vmscan --check), which run-checkin does not give", problems)
+
+    def test_a_new_read_directory_is_caught(self):
+        _, problems = self.scratch(lambda t: t.replace("for d in reports logs archive; do", "for d in reports logs archive state; do"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Read(state/**)", problems[0])
 
 
 class AScratchCopy(unittest.TestCase):
@@ -293,6 +341,11 @@ class BadManifests(unittest.TestCase):
 
     def test_a_lower_case_prefix(self):
         self.refused(self.good.replace('summary =', 'setting_prefixes = ["vmscan_"]\nsummary ='), "setting_prefixes must be")
+
+    def test_a_bad_grant(self):
+        for bad in ["Bash(/opt/cti-agent/bin/cti-kev)", "Bash(cti-kev; rm -rf /)", "Write(reports/**)", "Read(/etc/**)"]:
+            with self.subTest(grant=bad):
+                self.refused(self.good.replace("summary =", f'beat_grants = ["{bad}"]\nsummary ='), "beat_grants must be")
 
     def test_a_unit_in_two_lanes(self):
         lanes = self.dir / "lanes"

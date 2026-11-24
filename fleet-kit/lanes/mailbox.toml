@@ -7,6 +7,11 @@ summary = "Mailbox housekeeping: file processed advisories away after the digest
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["MAILBOX_", "FLEET_MAILBOX_"]
 
+# The beat may preview the cleanup, never move mail (run-checkin's grant).
+beat_grants = [
+  "Bash(cti-mailbox --dry-run)",
+]
+
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]
 order = 9

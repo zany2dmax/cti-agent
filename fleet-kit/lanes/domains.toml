@@ -7,6 +7,11 @@ summary = "The weekly domains check: registrar, DNS, web and mail records, plus 
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["DOMAINS_", "DOM_", "PROOFPOINT_POD_", "JIRA_DOMAINS_"]
 
+# The beat checks that the registrar and gateway logins still work.
+beat_grants = [
+  "Bash(cti-domains --check)",
+]
+
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]
 order = 6

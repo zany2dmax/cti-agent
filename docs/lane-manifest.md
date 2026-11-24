@@ -7,9 +7,9 @@ Each lane is described once, in `fleet-kit/lanes/<lane>.toml`.
 
 A manifest owns the lane's `.service` units, its row in the orchestrator's
 lane table, its place in the list of lanes every check-in beat must account
-for, and which settings belong in its `fleet.d` file. It is checked against
-its timers and against the commands manifest. A later step adds the grants a
-lane needs, so adding or removing a lane is one file instead of eight.
+for, which settings belong in its `fleet.d` file, and what it adds to the
+check-in beat's grant. It is checked against its timers, the commands
+manifest, and the grant `run-checkin` actually gives.
 
 ## Why
 
@@ -28,6 +28,9 @@ handles = ["@scout"]            # board handles the lane answers to ([] for none
 summary = "One line: what the lane does."
 setting_prefixes = ["SCOUT_"]   # settings named like this go in fleet.d/scout.env
 all_settings = false            # true for the one lane that loads every lane's file
+beat_grants = [                 # what this lane adds to the check-in beat's grant
+  "Bash(cti-vmscan --check)",   # Bash(x) is $FLEET_CODE/bin/x, exactly as granted
+]                               # Read(d/**) is $FLEET_HOME/d
 
 [orchestrator]                  # the lane's row in the orchestrator's lane table
 order = 2                       # where the row goes; unique
@@ -89,6 +92,19 @@ key would otherwise be silently ignored. `exec` must run something under
   command (one that sends, moves or files) must be started with `--for-real`,
   and with no rehearsal mode: a timer that says `--dry-run` would quietly
   never send.
+- **The check-in beat's grant is declared, not generated.** `run-checkin`
+  builds it by hand, where it can be reviewed line by line with its reasons.
+  `scripts/lanes --check` runs that code with the box's paths and compares
+  the result with every lane's `beat_grants`, both ways:
+  - a grant no lane declares fails, so a capability nobody signed for can't
+    ship
+  - a declared grant that isn't given fails too
+  - widening a grant (`--check` to `--check:*`) shows as one of each
+
+  checkin declares the fleet-wide tools, and each lane declares its own
+  check. A test also holds the checkin skill's credential-check list to the
+  declared `--check` grants. Each granted command still needs its row in
+  the bash guard's policy table (`test_lanes.py` checks that).
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
 

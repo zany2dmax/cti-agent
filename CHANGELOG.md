@@ -79,6 +79,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   isn't in `commands.manifest`, or is an effect command started without
   `--for-real`.
 
+  **The check-in beat's grant is declared lane by lane.** Each lane's
+  `beat_grants` names what it adds to the beat's grant: checkin the
+  fleet-wide tools, and each other lane its own `--check` or `--dry-run`.
+  `scripts/lanes --check` builds the grant the way `run-checkin` does and
+  fails on any difference either way. So a new or widened grant can't ship
+  without its lane declaring it, and `task ship` enforces this. The grant
+  itself is unchanged and still written by hand in `run-checkin`.
+
 - **No real site or scan names in the repository.** Code comments, tests,
   a timer comment, the RUNBOOK, `fleet.env.example` and older CHANGELOG
   entries named real locations, business units and scan titles as examples;

@@ -466,6 +466,12 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 # leave for the operator. That one is the operator's. NOT post either:
 # post names its own sender, so a beat could sign a line as @operator (an
 # answer the next beat acts on) or @systemd. `say` posts as @you, always.
+#
+# EVERY GRANT BELOW IS DECLARED BY A LANE (beat_grants in fleet-kit/lanes/*.toml:
+# the fleet-wide tools by checkin, a lane's own check by that lane), and
+# scripts/lanes --check, in task ship, fails on any difference either way. A
+# new grant needs its lane to sign for it, and its guard row in
+# cmd/checkin-bash-guard/policy.go.
 ALLOWED_TOOLS=""
 for sub in say read tail resolve expire; do
   ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}Bash($FLEET_CODE/bin/fleet-board $sub:*)"
