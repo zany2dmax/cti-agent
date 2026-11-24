@@ -1,0 +1,18 @@
+# The vmscan lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "vmscan"
+handles = ["@vmscan"]
+summary = "The weekly VM scan report: which scheduled scans ran, and which networks in the network sheet no scan reached."
+
+[[unit]]
+name = "vmscan"
+description = "CTI vulnerability-scan weekly report (the two Qualys VM weeklies combined)"
+exec = "/opt/cti-agent/bin/run-vmscan --for-real"
+timeout = 900
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Weekly Qualys VM scan report"
+on_calendar = "Mon *-*-* 08:00:00"
+persistent = true

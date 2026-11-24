@@ -1,0 +1,18 @@
+# The patchtuesday lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "patchtuesday"
+handles = ["@patchtuesday"]
+summary = "The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by hand for now; its timer is off on purpose."
+
+[[unit]]
+name = "patchtuesday"
+description = "CTI monthly Microsoft Patch Tuesday synopsis"
+exec = "/opt/cti-agent/bin/run-patchtuesday --for-real"
+timeout = 1800
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Monthly Patch Tuesday synopsis, the morning after"
+on_calendar = "Wed *-*-09..15 07:30:00"
+persistent = true

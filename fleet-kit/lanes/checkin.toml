@@ -1,0 +1,27 @@
+# The checkin lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "checkin"
+handles = []
+summary = "The orchestrator's heartbeat: one /checkin beat of the Claude Code agent that watches the other lanes."
+
+[[unit]]
+name = "checkin"
+description = "CTI orchestrator heartbeat (one /checkin beat)"
+exec = "/opt/cti-agent/bin/run-checkin --for-real"
+timeout = 1800
+nice = 15
+# The orchestrator reads the system journal through fleet-journal.
+extra = """
+# The orchestrator is allowed to run journalctl, and without this it
+# would be allowed to run a command that returns nothing: reading the
+# SYSTEM journal needs group membership, not just execute permission.
+# cti-agent-alert@.service already had this; the heartbeat did not, so
+# journalctl stayed "blocked" even after the tool allowlist landed.
+SupplementaryGroups=systemd-journal
+"""
+
+[unit.timer]
+description = "CTI orchestrator heartbeat every 2 hours"
+on_boot = "5min"
+on_unit_active = "2h"
+persistent = false

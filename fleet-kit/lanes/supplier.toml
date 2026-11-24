@@ -1,0 +1,18 @@
+# The supplier lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "supplier"
+handles = ["@supplier"]
+summary = "Supplier requests from the supplier mailbox, judged for third-party risk, with Jira Kanban items."
+
+[[unit]]
+name = "supplier"
+description = "CTI supplier-request lane (judge each new supplier request, file Kanban items, email one digest)"
+exec = "/opt/cti-agent/bin/run-supplier --for-real"
+timeout = 1800
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Supplier-request lane, daily 07:45 local"
+on_calendar = "*-*-* 07:45:00"
+persistent = true

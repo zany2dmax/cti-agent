@@ -11,18 +11,18 @@ Wants=network-online.target
 Type=oneshot
 User=ctiagent
 Group=ctiagent
-
-# 0077, so a lane that writes with a bare open() cannot land a world- or
-# group-readable file. Under systemd's default 0022 the Python lanes' digest
-# HTML and enriched-*.json - which carries host names - were 0644. Every lane
-# is Go now and sets 0600 itself; this stays as the floor for the runners and
-# for anything added later.
 # The orchestrator is allowed to run journalctl, and without this it
 # would be allowed to run a command that returns nothing: reading the
 # SYSTEM journal needs group membership, not just execute permission.
 # cti-agent-alert@.service already had this; the heartbeat did not, so
 # journalctl stayed "blocked" even after the tool allowlist landed.
 SupplementaryGroups=systemd-journal
+
+# 0077, so a lane that writes with a bare open() cannot land a world- or
+# group-readable file. Under systemd's default 0022 the Python lanes' digest
+# HTML and enriched-*.json - which carries host names - were 0644. Every lane
+# is Go now and sets 0600 itself; this stays as the floor for the runners and
+# for anything added later.
 UMask=0077
 
 # FHS layout. Nothing lives under /home, which is what lets ProtectHome=yes

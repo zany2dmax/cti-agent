@@ -513,6 +513,7 @@ tasks:
       - scripts/quiet-step.sh bandit task bandit
       - scripts/quiet-step.sh lint:shell task lint:shell
       - scripts/quiet-step.sh sbom task sbom
+      - scripts/quiet-step.sh lane:check task lane:check
       - scripts/quiet-step.sh release:check task release:check
       - scripts/quiet-step.sh push git push
       - 'echo "task ship: every step passed, and the push went out: $(git rev-parse --short HEAD)"'
@@ -527,6 +528,20 @@ tasks:
     # red, and the file is a build artifact (dist/ is not committed).
     cmds:
       - python3 scripts/sbom.py
+
+  lane:check:
+    desc: "Fail if a systemd unit is out of date with its lane manifest (fleet-kit/lanes/*.toml)"
+    # The units are generated from the lane manifests (docs/lane-manifest.md).
+    # A hand edit to a unit, or a manifest changed without --write, would ship
+    # a unit that no longer says what its manifest does.
+    cmds:
+      - python3 scripts/lanes --check
+
+  lane:write:
+    desc: "Regenerate the systemd units from the lane manifests, then the settings blocks in them"
+    cmds:
+      - python3 scripts/lanes --write
+      - python3 scripts/settings-manifest --write
 
   release:check:
     desc: "Fail if the latest tag's own commit has no CHANGELOG section for it, or a cheat sheet for another release"

@@ -1,0 +1,18 @@
+# The appscan lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "appscan"
+handles = ["@appscan"]
+summary = "The weekly application-security report from the web app scanner's results, with Jira tickets per application."
+
+[[unit]]
+name = "appscan"
+description = "CTI application-security weekly report"
+exec = "/opt/cti-agent/bin/run-appscan --for-real"
+timeout = 3600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Weekly application-security report, Friday 07:30 local"
+on_calendar = "Fri *-*-* 07:30:00"
+persistent = true

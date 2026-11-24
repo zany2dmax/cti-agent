@@ -1,0 +1,18 @@
+# The appowners lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "appowners"
+handles = ["@appowners"]
+summary = "Each application's scan report, sent to its owners the morning after the scan."
+
+[[unit]]
+name = "appowners"
+description = "CTI application scan reports to their owners, daily"
+exec = "/opt/cti-agent/bin/run-appowners --for-real"
+timeout = 3600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Application scan reports to their owners, daily 07:15"
+on_calendar = "*-*-* 07:15:00"
+persistent = true

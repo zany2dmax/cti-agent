@@ -1,0 +1,18 @@
+# The mailbox lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "mailbox"
+handles = ["@mailbox"]
+summary = "Mailbox housekeeping: file processed advisories away after the digest has read them."
+
+[[unit]]
+name = "mailbox"
+description = "CTI mailbox cleanup (archive processed, delete auto-replies)"
+exec = "/opt/cti-agent/bin/run-mailbox-cleanup --for-real"
+timeout = 600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "CTI mailbox cleanup, once a day after the digest"
+on_calendar = "*-*-* 07:00:00"
+persistent = false

@@ -1,0 +1,18 @@
+# The domains lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "domains"
+handles = ["@domains"]
+summary = "The weekly domains check: registrar, DNS, web and mail records, plus one Jira ticket for IT."
+
+[[unit]]
+name = "domains"
+description = "CTI weekly domains check (registrar, DNS, web, mail records)"
+exec = "/opt/cti-agent/bin/run-domains --for-real"
+timeout = 3600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Weekly domains check, Tuesday 08:00 local"
+on_calendar = "Tue *-*-* 08:00:00"
+persistent = true

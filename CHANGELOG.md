@@ -39,6 +39,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
+- **The systemd units are generated from lane manifests**
+  ([docs/lane-manifest.md](docs/lane-manifest.md)). Each lane is described
+  once, in `fleet-kit/lanes/<lane>.toml`: its handles, a summary, and per unit
+  the description, command, timeout, nice level, audit log and any extra
+  lines. `scripts/lanes --write` writes every lane's `.service` from one
+  template. The settings and credentials blocks inside each unit stay owned
+  by `scripts/settings-manifest`.
+
+  The timers stay hand-written, because each one carries its reasons, but
+  `scripts/lanes --check` fails when a timer's unit, description, schedule or
+  `Persistent=` disagrees with its manifest. `task ship` runs it as
+  `lane:check`, and `task lane:write` regenerates both kinds of blocks. Ten
+  of the eleven lane units come out byte for byte as before. The checkin
+  unit's journal-group lines moved from the middle of the UMask comment to
+  just after `Group=`; nothing systemd reads changed. This is the first step
+  of making a lane one file instead of eight.
+
 - **No real site or scan names in the repository.** Code comments, tests,
   a timer comment, the RUNBOOK, `fleet.env.example` and older CHANGELOG
   entries named real locations, business units and scan titles as examples;

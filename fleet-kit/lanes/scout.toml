@@ -1,0 +1,17 @@
+# The scout lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "scout"
+handles = ["@scout"]
+summary = "Poll advisory feeds for CVEs the mail has not mentioned yet, to feed the digest."
+
+[[unit]]
+name = "scout"
+description = "CTI scout sweep (poll advisory feeds)"
+exec = "/opt/cti-agent/bin/cti-scout --feeds /etc/cti-agent/feeds.txt --out /var/lib/cti-agent/state/scout-latest.json --days 3"
+timeout = 900
+nice = 15
+
+[unit.timer]
+description = "CTI scout sweep every 4 hours"
+on_calendar = "*-*-* 00,04,08,12,16,20:15:00"
+persistent = true

@@ -1,0 +1,31 @@
+# The digest lane. docs/lane-manifest.md has the schema; scripts/lanes --write
+# generates its systemd unit(s) from this file. Edit here, never the unit.
+lane = "digest"
+handles = ["@ingest", "@enrich", "@brief"]
+summary = "The daily threat-intel digest: read the CTI mail, enrich every CVE with exposure on our hosts, and send the brief; on Mondays, the weekly rollup."
+
+[[unit]]
+name = "digest"
+description = "CTI daily digest (ingest, enrich, brief, send)"
+exec = "/opt/cti-agent/bin/run-digest daily --for-real"
+timeout = 3600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Daily CTI digest at 06:00 local"
+on_calendar = "*-*-* 06:00:00"
+persistent = true
+
+[[unit]]
+name = "weekly"
+description = "CTI weekly rollup"
+exec = "/opt/cti-agent/bin/run-digest weekly --for-real"
+timeout = 3600
+nice = 10
+audit_log = true
+
+[unit.timer]
+description = "Weekly CTI rollup, Monday 07:00 local"
+on_calendar = "Mon *-*-* 07:00:00"
+persistent = true
