@@ -3,6 +3,8 @@
 lane = "checkin"
 handles = []
 summary = "The orchestrator's heartbeat: one /checkin beat of the Claude Code agent that watches the other lanes."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: run-credcheck's report becomes the check-in lane's health report"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["CHECKIN_", "FLEET_BUDGET_"]

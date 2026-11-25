@@ -52,6 +52,7 @@ rather than the fleet:
 org/                         (or /etc/cti-agent/org/ on a box)
   README.md                  for people; not installed
   recipe.md                  what this fork added to the core, one line each; not installed
+  expected-gaps.txt          the gaps this organization chose (lane health); installed for the lanes
   orchestrator.md            added after the orchestrator's CLAUDE.md
   agents/supplier.md         added after agents/supplier/CLAUDE.md
   agents/triage-reader.md    added after agents/triage-reader/CLAUDE.md
@@ -70,6 +71,37 @@ with `/checkin` only, so mention an org skill in `orchestrator.md` if the beat
 should use it.
 
 `examples/org-pack/` is a sanitized example of each file.
+
+### expected-gaps.txt: gaps by design
+
+Each lane's health report ([lane-manifest.md](lane-manifest.md#the-health-contract))
+lists what the lane didn't cover. This file is where the organization says
+which of those gaps it chose, and why:
+
+```
+lane | subject | kind | reason | until=YYYY-MM-DD
+appscan | Example Staging | not_scanned | a copy of production, scanned on demand before each release
+appscan | id:100000001 | * | retired; kept in the scanner for its history | until=2027-03-31
+```
+
+- **The subject** is the name the lane reports, or `id:<ID>` for a source id.
+- **The kind** is one of the lane's gap kinds (its manifest's `[health]
+  kinds`), or `*` for any.
+- **A gap a line covers is "by design",** with the reason, and the check-in
+  never escalates it. Every other gap is an accident until somebody adds a
+  line.
+- **Every line needs a reason.** An `until=` date makes the exception lapse:
+  after it, the gap is an accident again, and the check-in gets a reminder a
+  week before.
+- **A line that matches nothing is reported too,** so a stale exception
+  doesn't linger.
+
+It's in the pack, not on the box, because declaring a gap is accepting a
+risk. In a fork, the file's git history records who accepted which risk and
+when. `org-pack check` refuses a malformed line before anything is
+installed, and the installer puts the file, root-owned, in
+`/opt/cti-agent/share/expected-gaps.txt`, so no lane can declare its own gaps
+expected. Only the lanes read it, never the model.
 
 ## Where it lives
 

@@ -3,6 +3,7 @@
 
     python3 -m unittest discover -s fleet-kit/tests
 """
+import datetime
 import importlib.machinery
 import importlib.util
 import io
@@ -54,7 +55,7 @@ class Doctor(unittest.TestCase):
 
     def test_every_check_reports(self):
         rc, c = self.run_it()
-        self.assertEqual(set(c), {"version", "settings", "units", "timers", "credentials", "app audit",
+        self.assertEqual(set(c), {"version", "settings", "units", "timers", "credentials", "lane health",
                                   "org pack", "beat files"})
         self.assertEqual(c["version"][0], "OK")
         self.assertIn("installed v9.9", c["version"][1])
@@ -159,19 +160,29 @@ class Doctor(unittest.TestCase):
                     self.m, "run", lambda cmd, out=result + "\n", **kw: self.m.subprocess.CompletedProcess(cmd, 0, out, "")):
                 self.assertEqual(self.m.check_settings()[0], want)
 
-    def test_the_app_audit(self):
+    def test_lane_health(self):
+        share = self.dir / "opt/cti-agent/share"
+        (share / "health.list").write_text("# lanes\nappscan\tappaudit\t26\tnot_scanned,held\n")
         # FLEET_LANES=checkin,digest here: the appscan lane is not in use.
-        self.assertEqual(self.m.check_app_audit(self.m.settings())[0], "OK")
+        self.assertEqual(self.m.check_lane_health(self.m.settings()),
+                         ("OK", "no lane this box runs has a health report yet"))
         (self.dir / "etc/cti-agent/fleet.env").write_text("FLEET_LANES=checkin,appscan\n")
         vals = self.m.settings()
-        state, detail = self.m.check_app_audit(vals)
+        state, detail = self.m.check_lane_health(vals)
         self.assertEqual(state, "WARN")
-        self.assertIn("run-appaudit", detail)
-        rep = self.dir / "var/lib/cti-agent/reports/appscan-audit.json"
-        rep.write_text('{"apps": [{"id": "1"}, {"id": "2"}], "problems": 1}')
-        self.assertEqual(self.m.check_app_audit(vals), ("OK", "2 web app(s), 1 need a look (the check-in escalates them)"))
-        rep.write_text('{"generated": "x", "error": "the scanner is unreachable"}')
-        self.assertEqual(self.m.check_app_audit(vals)[0], "WARN")
+        self.assertIn("appscan: no readable report (cti-agent-appaudit.service writes it)", detail)
+        rep = self.dir / "var/lib/cti-agent/reports/health/appscan.json"
+        rep.parent.mkdir(parents=True)
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        rep.write_text(json.dumps({"schema": "cti-lane-health/1", "lane": "appscan", "generated": now,
+                                   "gaps": [{"subject": "A", "kind": "not_scanned", "expected": False},
+                                            {"subject": "B", "kind": "not_scanned", "expected": True}]}))
+        self.assertEqual(self.m.check_lane_health(vals),
+                         ("OK", "1 lane report(s) current; 1 gap(s) open that are not by design (the check-in escalates them)"))
+        rep.write_text(json.dumps({"schema": "cti-lane-health/1", "generated": "2026-01-01T00:00:00Z", "gaps": []}))
+        self.assertIn("over 26h old", self.m.check_lane_health(vals)[1])
+        rep.write_text(json.dumps({"schema": "cti-lane-health/1", "generated": now, "error": "the scanner is unreachable"}))
+        self.assertIn("could not work out its health", self.m.check_lane_health(vals)[1])
 
     def test_no_version_file_is_a_fail(self):
         (self.dir / "etc/cti-agent/version").unlink()

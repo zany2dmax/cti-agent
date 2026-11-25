@@ -205,6 +205,8 @@ class AScratchCopy(unittest.TestCase):
         self.m.VERDICT_LANES, self.m.EXAMPLES = self.dir / "lanes_gen.go", self.dir / "fleet.d.example"
         shutil.copy(REPO / "docs" / "lanes.md", self.dir / "lanes.md")
         self.m.REFERENCE = self.dir / "lanes.md"
+        shutil.copy(REPO / "fleet-kit" / "fleet" / "health.list", self.dir / "health.list")
+        self.m.HEALTH_LIST = self.dir / "health.list"
 
     def check(self):
         return self.m.main(["--check"])
@@ -247,6 +249,7 @@ class AScratchCopy(unittest.TestCase):
         (self.lanes / "newlane.toml").write_text('''lane = "newlane"
 handles = []
 summary = "x"
+health_exempt = "a test lane"
 [[unit]]
 name = "newlane"
 description = "A new lane"
@@ -274,6 +277,7 @@ nice = 10
         (self.lanes / "newlane.toml").write_text('''lane = "newlane"
 handles = ["@newlane"]
 summary = "x"
+health_exempt = "a test lane"
 [orchestrator]
 order = 99
 runs = "`$FLEET_CODE/bin/cti-new`"

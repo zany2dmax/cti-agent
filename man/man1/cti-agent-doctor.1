@@ -35,14 +35,15 @@ Today's credential report
 .RI ( /var/lib/cti\-agent/reports/credcheck.txt ):
 every check ok, and written in the last 26 hours.
 .TP
-.B app audit
-When the appscan lane is in use, today's application-security audit
-.RI ( /var/lib/cti\-agent/reports/appscan\-audit.json ,
-written by
-.BR run\-appaudit (1)):
-present, readable, not an error, and written in the last 26 hours. Says how
-many web applications need a look. A WARN, never a FAIL: what the audit lists
-is the check-in's to escalate.
+.B lane health
+Every lane this box runs that has a health report
+.RI ( /opt/cti\-agent/share/health.list ,
+from the lane manifests) has a current one in
+.IR /var/lib/cti\-agent/reports/health/<lane>.json :
+present, readable, not an error, and no older than its lane allows. Says how
+many gaps are open that nobody declared by design. A WARN, never a FAIL: the
+gaps are the check-in's to escalate
+.RB ( fleet\-health (1)).
 .TP
 .B org pack
 The org pack the installer uses, when there is one, passes

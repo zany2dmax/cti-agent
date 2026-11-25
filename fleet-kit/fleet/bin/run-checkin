@@ -551,7 +551,29 @@ board_before="${board_before:-0}"
 find "$BEAT_COUNTS_DIR" -name '*.json' -mtime +7 -delete 2>/dev/null || true
 SETTINGS_ARGS=()
 [ -f "$CHECKIN_SETTINGS" ] && SETTINGS_ARGS=(--settings "$CHECKIN_SETTINGS")
-CLAUDE_ARGS=(-p "/checkin" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default
+
+# LANE HEALTH, ONCE (internal/health, cmd/fleet-health). Each lane writes
+# reports/health/<lane>.json; reading them all every beat would spend tokens
+# on the same reports a dozen times a day. So this compares them with what
+# earlier beats were told and puts only the difference in the beat's prompt:
+# a new gap, one that cleared, a report gone missing or stale. A quiet day is
+# one line. The state is saved after a beat that finished, so a failed beat's
+# changes are offered again. The block is data the lanes wrote, one line per
+# item and bounded; names in it come from outside the fleet.
+HEALTH_TOOL="$FLEET_CODE/bin/fleet-health"
+HEALTH_PENDING="$FLEET_HOME/state/health-pending.json"
+rm -f "$HEALTH_PENDING"
+if [ -x "$HEALTH_TOOL" ]; then
+  health_block="$("$HEALTH_TOOL" delta --pending "$HEALTH_PENDING" --home "$FLEET_HOME" \
+                   --list "$FLEET_CODE/share/health.list" 2>/dev/null | head -c 8000)" \
+    || health_block="LANE HEALTH: could not be read this beat (fleet-health failed); say so in the verdict."
+else
+  health_block="LANE HEALTH: not available ($HEALTH_TOOL is not installed)."
+fi
+[ -n "$health_block" ] || health_block="LANE HEALTH: could not be read this beat (fleet-health printed nothing)."
+CLAUDE_ARGS=(-p "/checkin
+
+$health_block" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --permission-mode default
   --setting-sources project ${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"}
   --strict-mcp-config
   --allowedTools "$ALLOWED_TOOLS" --disallowedTools "$DISALLOWED_TOOLS")
@@ -594,6 +616,14 @@ else
 fi
 set -e
 echo "[run-checkin $(date '+%F %H:%M:%S')] beat finished rc=$rc"
+# The beat saw this delta: save the state, so the next beat is told only what
+# changes after it. A beat that failed keeps the old state, and the next one
+# is told again.
+if [ "$rc" -eq 0 ] && [ -s "$HEALTH_PENDING" ] && [ -x "$HEALTH_TOOL" ]; then
+  "$HEALTH_TOOL" commit --pending "$HEALTH_PENDING" --home "$FLEET_HOME" \
+    || echo "[run-checkin $(date '+%F %H:%M:%S')] health: state not saved; the next beat is told these changes again" >&2
+fi
+rm -f "$HEALTH_PENDING"
 
 # Did the beat do more than a beat does? Two signals, both read here and not by
 # the model: a limit the guard enforced (the counter file's "tripped" list), and

@@ -39,24 +39,47 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
-- **The heartbeat finds web applications nobody scanned.** A new unit of the
-  appscan lane, `run-appaudit` (`cti-agent-appaudit.timer`, daily 08:30), runs
-  `cti-appscan --audit` over the last 8 days. It writes
-  `reports/appscan-audit.txt` and `.json`: every web app in the scanner, its
-  owner, its newest scan, its last owner report and a `kind`.
-  - The heartbeat reads the JSON once a day (it already had
-    `Read(reports/**)`, so no new grant and no new secret in its unit). It
-    sends one escalation listing every application with no scan, remembers
-    the set, and re-raises it only when an application joins.
-  - Held, ownerless and unfinished scans are tracked without repeating the
-    lanes' own alerts.
-  - The audit runs with the appscan lane's credentials, in its own unit, for
-    the same reason the credential checks do.
-  - `cti-appscan --audit-json FILE` writes the JSON. The beat's verdict
-    accounts for `appaudit` like every other unit.
-  - `cti-agent-doctor` gains an `app audit` check.
-  - The installer turns the timer on with the heartbeat's and an AppSec
-    timer.
+- **Every lane reports its health, and the heartbeat is told what changed,
+  once** ([docs/lane-manifest.md](docs/lane-manifest.md#the-health-contract)).
+  A lane now says what it *didn't* cover, so the fleet can tell a gap someone
+  chose from one nobody noticed.
+  - **The contract** (`internal/health`, schema `cti-lane-health/1`): each
+    lane writes `reports/health/<lane>.json` with what it should have covered,
+    what it did, and one gap per subject it missed, each with a `kind`.
+  - **Gaps by design live in the org pack:** `expected-gaps.txt`, one
+    `lane | subject | kind | reason | until=DATE` per line. A gap a line
+    covers is reported as expected, with its reason. Any other gap is an
+    accident. An `until=` date makes an exception lapse, with a reminder a
+    week before, and a line that matches nothing is reported.
+    `org-pack check` refuses a malformed line, and the installer puts the
+    file root-owned in `share/`, so no lane can declare its own gaps
+    expected. It's a risk acceptance, so in a fork its git history records
+    who accepted what.
+  - **The manifest requires it.** Every lane has a `[health]` table (the
+    unit that writes the report, how old it may get, its gap kinds) or a
+    `health_exempt = "<why>"`. `lane:check` fails a lane with neither. The
+    generated `health.list` carries the contracts to the box, and
+    `docs/lanes.md` shows each lane's.
+  - **The beat reads nothing each beat.** Before every beat, `fleet-health
+    delta` (new) compares the reports with what earlier beats were told, and
+    `run-checkin` puts only the difference in the beat's prompt: a new
+    accident, one that cleared, a report gone missing, stale or back, a
+    declaration expiring or matching nothing. A quiet day is one line.
+    `fleet-health commit` records it after a beat that finished, so a failed
+    beat's changes are offered again. The orchestrator's rules for it are
+    core ("Lane health"), so a new lane needs no notes of its own.
+  - **appscan is the first lane:** `run-appaudit`, a new unit of the appscan
+    lane (`cti-agent-appaudit.timer`, daily 08:30), runs
+    `cti-appscan --audit --health-out` over 8 days. It writes
+    `reports/health/appscan.json` and the table in
+    `reports/appscan-audit.txt`, every web app in the scanner with its
+    owner, newest scan and last owner report. It runs with the appscan
+    lane's credentials; the beat's unit gains no grant and no secret. The
+    installer turns the timer on with the heartbeat's and an AppSec timer.
+    The other lanes say `health_exempt = "planned for 2.1: ..."`, naming
+    what each will report.
+  - `cti-agent-doctor` gains a `lane health` check, and `fleet-health show`
+    prints every lane's report.
 
 - **The weekly AppSec report lists the applications that weren't scanned.** A
   new section, NOT SCANNED THIS WEEK, names every application set up in the

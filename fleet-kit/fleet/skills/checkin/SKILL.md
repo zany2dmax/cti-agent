@@ -93,7 +93,7 @@ What you owe the schedule instead is **checking it happened**:
 | Patch Tuesday sent (from the Thursday after Patch Tuesday) | `fleet-db was-sent <YYYY-MM> patchtuesday` | Run by hand for now, so nothing fails loudly if it is forgotten. Not sent: remind the operator once, naming the month (CHEATSHEET.md section 7a) |
 | Timers still enabled | `$FLEET_CODE/bin/fleet-timers --all` | A disabled timer is silent forever. Tell the operator - except a lane `fleet-timers` lists under "Off on purpose" (this box does not run it), `cti-agent-patchtuesday.timer`, which is off on purpose for now, and `cti-agent-vmscan.timer` if the operator has not turned it on yet (if disabled, ask once whether that is still intended) |
 | Credentials still work (once a day) | Read `$FLEET_HOME/reports/credcheck.txt`: `cti-agent-credcheck.timer` writes it at 05:30, one line per check (lane, command, `ok` or `FAIL`, the check's last line), for the lanes this box runs. You do not run the checks: their secrets are not in your unit | A `FAIL` line means that lane's next run will fail or be degraded: one escalation naming the lane and the line, then track it on the board until it reads `ok`. No report, or one not from today: one board line (the credcheck timer is off or failing), and say so in the verdict |
-| AppSec audit (daily, after 08:30) | Read `$FLEET_HOME/reports/appscan-audit.json`: `cti-agent-appaudit.timer` writes it, every web app in the scanner with its `kind` (`sent`, `not_scanned`, `pending`, `held`, ...) and `problem` | Follow "Application-security audit" in CLAUDE.md: one escalation listing every `not_scanned` app, remembered and tracked, re-raised only when the set grows. No report from today, or an `error`: one board line |
+| Lanes still cover what they should | The `LANE HEALTH` block at the top of this prompt: what changed in the lanes' health reports since the last beat. Usually "no changes". Open `$FLEET_HOME/reports/health/<lane>.json` only for the full list behind a change | Follow "Lane health" in CLAUDE.md: one escalation per lane for its new accidents, a board line for a missing, stale or `error` report, nothing for gaps by design. Never re-raise what an earlier beat was told |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
 **You cannot re-run the pipeline yourself** - no runner is on your grant,
@@ -225,8 +225,8 @@ against what the guard counted, so report what you did, not what you meant to.
     {"lane": "appowners", "state": "held", "note": "1 report held; the runner already raised the HOLD"},
     {"lane": "supplier", "state": "ok"},
     {"lane": "scout", "state": "ok"},
-    {"lane": "appscan", "state": "not_due"},
-    {"lane": "appaudit", "state": "held", "note": "3 apps not scanned; escalated 11-24, unchanged"},
+    {"lane": "appscan", "state": "held", "note": "3 web apps not scanned; escalated 11-24, unchanged"},
+    {"lane": "appaudit", "state": "ok"},
     {"lane": "domains", "state": "not_due"},
     {"lane": "vmscan", "state": "not_due"},
     {"lane": "patchtuesday", "state": "off"}
@@ -249,9 +249,11 @@ against what the guard counted, so report what you did, not what you meant to.
   something back), `failed`, `off` (disabled on purpose, like patchtuesday, or
   listed by `fleet-timers` as off on purpose: those must be `off`), or
   `unknown` (you could not tell). `note` is optional, one short phrase.
-  For `appaudit`: `ok` is today's report read with no app needing a look,
-  `held` that it lists some (say how many in `note`), `failed` an `error` or
-  no report from today after 09:00, and `not_due` before 08:30.
+  A lane with a health report (`appscan` today) takes its state from the
+  `LANE HEALTH` block: `held` with accidents open (how many, in `note`),
+  `failed` when its report is missing, stale or an `error`. `appaudit` is the
+  unit that writes `appscan`'s report: `ok` when it ran, `failed` when the
+  block says the report is missing or stale.
 - `credential_checks`: `ran` (you read today's report this beat), `already_today`, or `skipped` (no report from today).
 - `escalations`: one `{"subject": "...", "why": "..."}` per `cti-alert
   --for-real` you ran this beat; `[]` if none. `status` is `escalated` exactly

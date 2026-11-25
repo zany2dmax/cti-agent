@@ -14,8 +14,9 @@ The checks, each OK, WARN or FAIL:
                patchtuesday's is off on purpose and is only a WARN
   credentials  today's credential report (reports/credcheck.txt): every check
                ok, and written in the last 26 hours
-  app audit    today's application-security audit (reports/appscan-audit.json)
-               ran, when the appscan lane is in use; how many apps need a look
+  lane health  every lane with a health report (share/health.list) that this box
+               runs has a current one (reports/health/<lane>.json), and how many
+               gaps are open that nobody declared by design
   org pack     the org pack the installer uses (a fork's org/ in the kit, or
                /etc/cti-agent/org), when there is one, passes org-pack check
   beat files   run-checkin's own integrity audit of the orchestrator's files
@@ -161,26 +162,43 @@ def check_credentials():
     return "OK", f"{len(rows)} check(s) ok"
 
 
-def check_app_audit(vals):
-    """The audit the check-in reads to find web apps nobody scanned. A WARN,
-    never a FAIL: what it lists is the check-in's to escalate."""
+def check_lane_health(vals):
+    """The lanes' health reports (internal/health): each one this box runs is
+    present, current for its lane and not an error. A WARN, never a FAIL: the
+    gaps a report lists are the check-in's to escalate."""
+    lst = CODE / "share" / "health.list"
+    if not lst.is_file():
+        return "WARN", f"no {lst}: rerun the installer"
     use = lanes_in_use(vals)
-    if use and "appscan" not in use:
-        return "OK", "the appscan lane is not in use"
-    rep = HOME / "reports" / "appscan-audit.json"
-    if not rep.is_file():
-        return "WARN", f"no {rep}: cti-agent-appaudit.timer has not run (sudo cti-agent run-appaudit)"
-    age = dt.datetime.now() - dt.datetime.fromtimestamp(rep.stat().st_mtime)
-    try:
-        f = json.loads(rep.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return "WARN", f"{rep} is not readable JSON"
-    if f.get("error"):
-        return "WARN", f"the audit could not run: {str(f['error'])[:200]}"
-    apps, problems = len(f.get("apps") or []), int(f.get("problems") or 0)
-    if age > REPORT_MAX_AGE:
-        return "WARN", f"the report is {age.days}d {age.seconds // 3600}h old: is the appaudit timer on?"
-    return "OK", f"{apps} web app(s), {problems} need a look (the check-in escalates them)"
+    now = dt.datetime.now(dt.timezone.utc)
+    bad, lanes, accidents = [], 0, 0
+    for ln in lst.read_text(encoding="utf-8").splitlines():
+        if not ln.strip() or ln.startswith("#"):
+            continue
+        f = ln.split("\t")
+        if len(f) != 4:
+            continue
+        lane, unit, hours = f[0], f[1], f[2]
+        if use and lane not in use:
+            continue
+        lanes += 1
+        rep = HOME / "reports" / "health" / f"{lane}.json"
+        try:
+            r = json.loads(rep.read_text(encoding="utf-8"))
+            gen = dt.datetime.fromisoformat(str(r.get("generated", "")).replace("Z", "+00:00"))
+        except (OSError, ValueError):
+            bad.append(f"{lane}: no readable report (cti-agent-{unit}.service writes it)")
+            continue
+        if r.get("error"):
+            bad.append(f"{lane}: could not work out its health: {str(r['error'])[:120]}")
+        elif (now - gen).total_seconds() > int(hours) * 3600:
+            bad.append(f"{lane}: its report is over {hours}h old (is cti-agent-{unit}.timer on?)")
+        accidents += sum(1 for g in r.get("gaps") or [] if not g.get("expected"))
+    if bad:
+        return "WARN", "; ".join(bad)
+    if lanes == 0:
+        return "OK", "no lane this box runs has a health report yet"
+    return "OK", f"{lanes} lane report(s) current; {accidents} gap(s) open that are not by design (the check-in escalates them)"
 
 
 def check_org_pack():
@@ -232,7 +250,7 @@ def main(argv=None, out=sys.stdout):
     results = []
     for name, fn in (("version", check_version), ("settings", check_settings), ("units", check_units),
                      ("timers", lambda: check_timers(vals)), ("credentials", check_credentials),
-                     ("app audit", lambda: check_app_audit(vals)),
+                     ("lane health", lambda: check_lane_health(vals)),
                      ("org pack", check_org_pack), ("beat files", check_beat_files)):
         try:
             state, detail = fn()

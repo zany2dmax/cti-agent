@@ -50,6 +50,7 @@ class TheExamplePack(Base):
         self.assertIn("README.md", names)
         self.assertIn("recipe.md", names)
         self.assertIn("orchestrator.md", names)
+        self.assertIn("expected-gaps.txt", names)
         for agent in sorted(d.name for d in (CORE / "agents").iterdir() if d.is_dir()):
             self.assertIn(f"agents/{agent}.md", names, "the example has no notes for a core agent")
         self.assertTrue(any(re.fullmatch(r"skills/[a-z0-9-]+/SKILL\.md", n) for n in names), "no example skill")
@@ -68,6 +69,16 @@ class Refusals(Base):
     def test_an_unknown_file(self):
         (self.pack / "orchestrator.txt").write_text("x")
         self.assert_refused("orchestrator.txt: not part of an org pack")
+
+    def test_a_malformed_declared_gap(self):
+        # Refused before anything is installed: a skipped line would turn a
+        # chosen gap into an accident, or the reverse, without a word.
+        for bad in ("appscan | Staging | not_scanned\n",               # no reason
+                    "AppScan | Staging | not_scanned | why\n",        # not a lane name
+                    "appscan | Staging | not_scanned | why | until=next week\n"):
+            with self.subTest(line=bad):
+                (self.pack / "expected-gaps.txt").write_text("# ok\n" + bad)
+                self.assert_refused("expected-gaps.txt: line 2 is not lane | subject | kind | reason")
 
     def test_a_misspelt_folder(self):
         (self.pack / "agent").mkdir()

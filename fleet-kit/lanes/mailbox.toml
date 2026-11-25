@@ -3,6 +3,8 @@
 lane = "mailbox"
 handles = ["@mailbox"]
 summary = "Mailbox housekeeping: file processed advisories away after the digest has read them."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: the mail left with no processing record"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["MAILBOX_", "FLEET_MAILBOX_"]

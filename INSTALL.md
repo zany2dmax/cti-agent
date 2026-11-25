@@ -355,7 +355,7 @@ Each line says what to do. The usual fixes:
 | `timers` WARN | a lane in `FLEET_LANES` has its timer off | turn it on ([step 9](#9-turn-on-the-timers)), or run onboard again without that lane, then update |
 | `credentials` WARN | no report yet, or it's more than 26 hours old | `sudo cti-agent run-credcheck`; check that `cti-agent-credcheck.timer` is on |
 | `credentials` FAIL | a login failed; the line names the lane and the command | run that command's `--check` by hand; store a new secret with `sudo cti-agent-secrets set NAME` |
-| `app audit` WARN | the application-security audit hasn't run, couldn't reach the scanner, or is over 26 hours old | `sudo cti-agent run-appaudit`; check that `cti-agent-appaudit.timer` is on |
+| `lane health` WARN | a lane's health report is missing, stale or an error; the line names the lane and the unit that writes it | run that unit by hand (`sudo cti-agent run-appaudit` for appscan); check that its timer is on. `sudo cti-agent fleet-health show` lists every lane's report |
 | `org pack` FAIL | the org pack failed its checks: not root-owned, writable by others, or a file it doesn't know; or there are two, a fork's `org/` in the kit and `/etc/cti-agent/org` | fix what the line names ([docs/org-pack.md](docs/org-pack.md)) |
 | `beat files` FAIL | the orchestrator's files failed the check-in's own audit | run the installer again, then `sudo cti-agent run-checkin --dry-run` |
 

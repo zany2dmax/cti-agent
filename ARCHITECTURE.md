@@ -4,7 +4,7 @@ Two pages. The first answers *why would I want this*; the second, *how does it
 actually work*. For the full argument see
 [AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md). After them come three
 reference sections for people reading the code: the design decisions that will
-surprise you, the twenty-six binaries, and the project layout.
+surprise you, the twenty-seven binaries, and the project layout.
 
 ---
 
@@ -309,9 +309,10 @@ is the join across them; the rest report on their own.
 - **Will tomorrow's runs get past their logins?** — `run-credcheck`, daily at
   05:30 in its own unit: every in-use lane's `--check`, one line each in
   `reports/credcheck.txt`, which the heartbeat reads
-- **Was every web application scanned, and did its owner hear?** —
-  `run-appaudit`, daily at 08:30 in the appscan lane's unit:
-  `reports/appscan-audit.json`, which the heartbeat reads and escalates from
+- **Is any lane missing something nobody chose to miss?** — each lane's
+  health report, `reports/health/<lane>.json`, matched to the org's declared
+  gaps; the heartbeat is handed only what changed. In 2.0, appscan's:
+  `run-appaudit`, daily at 08:30, every web app scanned or not
 - **Can we show what the fleet did?** — the audit trail: one RFC 5424 syslog
   line for every mail sent or moved, every Jira write and every owners change,
   kept 120 days and forwardable to a SIEM
@@ -437,7 +438,7 @@ sensitivity](docs/guides/operations.md#13-report-sensitivity).
 
 ---
 
-## The twenty-six binaries
+## The twenty-seven binaries
 
 | Binary | Run by | Purpose |
 |---|---|---|
@@ -456,6 +457,7 @@ sensitivity](docs/guides/operations.md#13-report-sensitivity).
 | `cti-jira` | `run-digest`, between enrich and brief; `run-domains`, before the send (the email names the lock-down ticket) | Files one Jira ticket per confirmed KEV, Sev5, CVSS 9.0+ or QDS 91+ CVE, with every QID and host, and tracks it by a label on the ticket so the same CVE is never ticketed twice. `--domains-actions` files the domains lane's DNS changes as one lock-down ticket, commenting on the open one only when the list changed. Writes nothing — no ticket, comment or attachment — without `--for-real` and a project in `JIRA_ALLOW_CREATE`. `--vmscan-fixes` does the same for the VM scan lane's spreadsheet corrections (one help-desk ticket for the network team). `--from-enriched --follow-up` re-checks every open ticket against the scanner each morning and writes the FLEET TICKETS map the digest lists. `--appscan-tickets` files one ticket per web application, only when `WAS_TICKETS=1`, and `--appscan-test <id>` files one unassigned, untracked `[TEST]` ticket to rehearse it. Optional `JIRA_CLOUD_ID` routes API calls through the Atlassian gateway for a scoped service-account token; `--check` also reports each Jira permission the fleet uses |
 | `cti-triage` | `run-digest`, daily, when `TRIAGE_ENABLED=1` (`--batch`); by hand | Advisory triage. A no-tools reader model lists each advisory's vendors, products, versions and ATT&CK techniques (`cti-subjects/2`); code removes what the advisory does not support; the rest is looked up in Falcon (installed apps and how many hosts are below the fixed version, hosts that saw each indicator, alerts naming each technique in 30 days). A no-tools judge rates each subject likely, possible, unlikely or unknown from those facts alone, citing them; code drops invented facts, corrects unsupported verdicts and prints sightings first. Writes the FLEET ADVISORIES section and the day's model cost; a failure costs the section, never the digest. `--facts-file`, `--judgement-file` and `--show-judge-input` replay a run without paying |
 | `cti-falcon` | by hand | The CrowdStrike Falcon API client's own command. `--check` makes one `limit=1` read per scope (Hosts, Assets, IOC Management, Alerts), prints counts and revokes its token. `--find-app NAME` and `--new-apps DAYS` read Falcon Discover: installed applications with host, version and platform counts, and applications first seen in the window (with host type, exposure, criticality and Falcon's suspicious flag). Never prints a host name or ID. Follows no redirects, and only to a published Falcon API host. `cti-triage` uses the same client (`internal/falcon`) |
+| `fleet-health` | `run-checkin`, before and after each beat; by hand (`show`) | Reads the lanes' health reports (`reports/health/<lane>.json`, `internal/health`) and hands the beat only what changed since its last beat: a new gap nobody declared, one that cleared, a report gone missing or stale. Saves what was told after a beat that finished. `show` prints every lane's report, one line each |
 | `cti-checkin-verdict` | `run-checkin`, after each beat | Checks the `cti-checkin/1` verdict the beat ends with: strict parsing, then against the counts `checkin-bash-guard` kept (alerts, board and memory writes), which the model cannot change. Saves it in `state/verdicts/`; a missing, invalid or contradicted verdict is one INFO board line a day for each kind |
 | `cti-checkin-check` | `run-checkin`, around each beat | The runner's file checks: the beat's settings run checkin-bash-guard as the Bash hook with hooks on (else no beat), no Claude Code config file sets a risky key (steering audit), and which limits the guard enforced (trips). Replaced three python3 heredocs |
 | `checkin-bash-guard` | Claude Code, before every Bash call a beat makes (PreToolUse hook) | Refuses shell syntax, holds each granted command to its argument table, and counts the beat's calls against its limits (PrimeSec 39260, Scenarios 223 and 224). Exit 2 blocks the call; any failure blocks it too. Replaced the Python script of the same name |
@@ -475,10 +477,19 @@ sensitivity](docs/guides/operations.md#13-report-sensitivity).
 
 `run-appaudit` (bash, `cti-agent-appaudit.timer`, daily 08:30) runs
 `cti-appscan --audit` as the appscan lane, with its secrets, and writes
-`reports/appscan-audit.txt` and `.json`: every web application in the scanner,
-whether a scan covered it in the last 8 days and whether its owner got a
-report. The heartbeat reads it and escalates the applications nobody scanned,
-which no lane's own output shows.
+`reports/appscan-audit.txt` and the appscan lane's health report,
+`reports/health/appscan.json`: every web application in the scanner, whether
+a scan covered it in the last 8 days and whether its owner got a report.
+
+**Every lane reports its health** (`internal/health`): what it should have
+covered, what it did, and each gap, in `reports/health/<lane>.json`. A gap
+the organization declared in its org pack's `expected-gaps.txt` is by
+design; any other is an accident. Before each beat, `fleet-health` hands the
+heartbeat only what changed in those reports, so each accident reaches the
+model once and a quiet day costs one line. The lane manifest requires a
+`[health]` table or a stated `health_exempt`, so no lane ships without
+saying what it covers. Only appscan has a report in 2.0; the rest follow in
+2.1.
 
 Two root tools in `fleet-kit/bin/` (Python, installed in `/usr/local/sbin`)
 set up and check a box: `cti-agent-onboard` asks which lanes the box runs,
@@ -492,14 +503,14 @@ runs it at the end of every update.
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
 
-All twenty-six are stdlib-only. `go.mod` has no dependencies, and adding one would make
+All twenty-seven are stdlib-only. `go.mod` has no dependencies, and adding one would make
 a C toolchain or a large generated tree a build-time requirement on the
 deployment host. `task sbom` proves it: every `task ship` writes a CycloneDX
 SBOM and fails if a dependency has crept in, and every GitHub Release carries
 one.
 
 ```bash
-task build              # all twenty-six into bin/
+task build              # all twenty-seven into bin/
 task test               # Go tests + Python lane tests
 task ship               # fmt, build, test, lint, scan, gosec, govulncheck, ruff, bandit, shellcheck, then push
 task --list             # everything else
@@ -545,6 +556,7 @@ cmd/cti-appreport/             the scanner's own per-application report, for the
 cmd/cti-triage/                advisory triage: reader, Falcon lookups, judge, FLEET ADVISORIES
 cmd/cti-falcon/                the CrowdStrike Falcon client's check, and app inventory from Discover
 cmd/cti-checkin-verdict/       checks each heartbeat's cti-checkin/1 verdict against the guard's counts
+cmd/fleet-health/              the lanes' health reports for the heartbeat: only what changed
 cmd/cti-checkin-check/         run-checkin's file checks: guard wired, steering audit, trips
 cmd/checkin-bash-guard/        the heartbeat's Bash hook: syntax, argument table, per-beat limits
 cmd/fleet-trace/               beat traces, the journal timeline, model cost
@@ -565,6 +577,7 @@ cmd/cti-patchtuesday/          monthly Microsoft Patch Tuesday synopsis
 
 internal/config/               environment/config loading, per-command requirements
 internal/fleetenv/             the single fleet.env reader every command uses
+internal/health/               the lane health contract: the report, the org's declared gaps, the delta
 internal/version/              the build stamp every command reports
 internal/safelog/              makes attacker-influenced text safe for a log record
 internal/cli/                  the --dry-run / --for-real rule every command that changes something follows

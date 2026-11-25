@@ -168,15 +168,24 @@ The order and reasoning are in [HARNESS.md](HARNESS.md).
 
 ## The platform
 
-- **A health report for each lane that can go quiet.** The AppSec audit
-  (`run-appaudit`, `reports/appscan-audit.json`) is the pattern: a read-only
-  unit with the lane's own credentials writes what the lane *didn't* cover,
-  and the heartbeat reads it. With no new grant and no secret in the beat's
-  unit, it escalates once and tracks the problem. Candidates: VM scan
-  schedules that stopped launching between Monday reports, domains in
-  `domains.txt` the weekly check couldn't reach, feeds the scout hasn't heard
-  from. Each one is a `[[unit]]` in its lane's manifest, a JSON report, and a
-  section in the orchestrator's instructions.
+- **A health report for every other lane (2.1).** The contract shipped in
+  2.0 (`internal/health`, the manifest's `[health]`, `fleet-health`, the org
+  pack's `expected-gaps.txt`), and appscan has a report. The rest carry
+  `health_exempt = "planned for 2.1: ..."`, saying what each will report:
+  - checkin: the credential checks, so `run-credcheck`'s report goes through
+    the same delta, and the beat stops reading `credcheck.txt` itself
+  - digest: the advisory mail read, and the CVEs the scanner couldn't map
+  - scout: the feeds that have gone silent
+  - patchtuesday: a month whose synopsis wasn't sent
+  - domains: domains in `domains.txt` the weekly check couldn't reach
+  - vmscan: scan schedules that didn't launch, networks no scan reaches
+  - supplier: requests whose form couldn't be read
+  - mailbox: mail left with no processing record
+
+  Each one adds a `[health]` table in place of `health_exempt`, and
+  a report written with `internal/health`. When a lane's report covers what
+  its journal check did, that lane's row in the check-in skill's Scheduled
+  work table can go.
 - **Narrow each unit's secrets from "could read" to "does read."** The grants
   are generated from which programs a unit could run, so most lanes get more
   than they use (the check-in was narrowed by hand in 2.0). Do it one lane at

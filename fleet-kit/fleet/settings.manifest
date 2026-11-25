@@ -337,7 +337,7 @@ file: checkin
 
 key: FLEET_CODE
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appaudit.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-doctor cti-agent-domains.service cti-agent-mailbox.service cti-agent-onboard cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-journal fleet-mode.sh fleet-owners fleet-timers installer model-lane.sh run-appaudit run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appaudit.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-doctor cti-agent-domains.service cti-agent-mailbox.service cti-agent-onboard cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-health fleet-journal fleet-mode.sh fleet-owners fleet-timers installer model-lane.sh org-pack run-appaudit run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
 key: FLEET_DEV_EMAIL
@@ -373,12 +373,12 @@ file: core
 
 key: FLEET_HOME
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appaudit.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-doctor cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-check cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-lock cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appaudit run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appaudit.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-doctor cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-check cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-lock cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-health fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appaudit run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
 key: FLEET_LANES
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: cti-agent-doctor cti-agent-onboard cti-checkin-check cti-checkin-verdict fleet-config fleet-timers installer run-credcheck
+readers: cti-agent-doctor cti-agent-onboard cti-checkin-check cti-checkin-verdict fleet-config fleet-health fleet-timers installer run-credcheck
 file: core
 
 key: FLEET_LOCK_WAIT_SECONDS

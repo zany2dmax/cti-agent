@@ -40,6 +40,7 @@ The orchestrator's heartbeat: one /checkin beat of the Claude Code agent that wa
 - **A new setting goes in that file** when its name starts with `CHECKIN_`, `FLEET_BUDGET_`.
 - **Secrets its programs read:** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID`.
 - **Credential check,** daily by `run-credcheck`: `cti-mailer --check`, `cti-jira --check`
+- **Health report:** none yet (planned for 2.1: run-credcheck's report becomes the check-in lane's health report).
 - **The check-in may run:** `Bash(fleet-board say:*)`, `Bash(fleet-board read:*)`, `Bash(fleet-board tail:*)`, `Bash(fleet-board resolve:*)`, `Bash(fleet-board expire:*)`, `Bash(fleet-db recent:*)`, `Bash(fleet-db findings:*)`, `Bash(fleet-db was-sent:*)`, `Bash(fleet-db rollup:*)`, `Bash(fleet-db remember:*)`, `Bash(fleet-db task:*)`, `Bash(fleet-db mail:*)`, `Bash(fleet-db ack:*)`, `Bash(fleet-db vacuum:*)`, `Bash(cti-budget status:*)`, `Bash(cti-kev:*)`, `Bash(fleet-timers:*)`, `Bash(cti-alert:*)`, `Bash(fleet-journal:*)`, `Read(reports/**)`, `Read(logs/**)`, `Read(archive/**)`
 
 ## digest
@@ -57,6 +58,7 @@ The daily threat-intel digest: read the CTI mail, enrich every CVE with exposure
 - **Settings in `fleet.d/digest.env`** (with the shared ones in `00-core.env`): `TRIAGE_BLIND_SPOTS`, `TRIAGE_ENABLED`, `TRIAGE_JUDGE_INSTRUCTIONS`, `TRIAGE_JUDGE_MODEL`, `TRIAGE_MAX_PER_RUN`, `TRIAGE_MODEL`, `TRIAGE_READER_INSTRUCTIONS`, `TRIAGE_SENDERS`.
 - **A new setting goes in that file** when its name starts with `DIGEST_CC`, `DIGEST_SKIP_SUBJECTS`, `VM_ALLOW_TO`, `FLEET_ALLOW_TO`, `TRIAGE_`.
 - **Secrets its programs read:** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `FALCON_BASE_URL`, `FALCON_CLIENT_ID`, `FALCON_CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `REPORT_REDACTION_SALT`, `TENANT_ID`.
+- **Health report:** none yet (planned for 2.1: the advisory mail read and the CVEs the scanner could not map).
 
 ## scout
 
@@ -71,6 +73,7 @@ Poll advisory feeds for CVEs the mail has not mentioned yet, to feed the digest.
 
 - **Settings:** none of its own; the shared ones in `00-core.env`.
 - **Secrets its programs read:** none.
+- **Health report:** none yet (planned for 2.1: the feeds that have gone silent).
 
 ## patchtuesday
 
@@ -85,6 +88,7 @@ The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by
 
 - **Settings:** none of its own; the shared ones in `00-core.env`.
 - **Secrets its programs read:** `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
+- **Health report:** none yet (planned for 2.1: a month whose synopsis was not sent).
 
 ## appscan
 
@@ -102,6 +106,7 @@ The weekly application-security report from the web app scanner's results, with 
 - **A new setting goes in that file** when its name starts with `WAS_`, `APPSCAN_`.
 - **Secrets its programs read:** `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
 - **Credential check,** daily by `run-credcheck`: `cti-appreport --check`
+- **Health report:** `reports/health/appscan.json`, written by `cti-agent-appaudit`, stale after 26h; gap kinds `not_scanned`, `pending`, `held`, `no_owner`, `unconfirmed`, `incomplete`, `login_failed`, `unreachable`.
 
 ## appowners
 
@@ -117,6 +122,7 @@ Each application's scan report, sent to its owners the morning after the scan.
 - **Settings in `fleet.d/appowners.env`** (with the shared ones in `00-core.env`): `WAS_OWNER_CC`.
 - **A new setting goes in that file** when its name starts with `WAS_OWNER_CC`, `OWNER_ALLOW_DOMAINS`.
 - **Secrets its programs read:** `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
+- **Health report:** none yet (covered by the appscan lane's health report: its audit lists each web app's last owner report).
 
 ## domains
 
@@ -133,6 +139,7 @@ The weekly domains check: registrar, DNS, web and mail records, plus one Jira ti
 - **A new setting goes in that file** when its name starts with `DOMAINS_`, `DOM_`, `PROOFPOINT_POD_`, `JIRA_DOMAINS_`.
 - **Secrets its programs read:** `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `GODADDY_PAT`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `POD_API_TOKEN`, `POD_CLUSTER_ID`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
 - **Credential check,** daily by `run-credcheck`: `cti-domains --check`
+- **Health report:** none yet (planned for 2.1: the domains in domains.txt the weekly check could not reach).
 
 ## vmscan
 
@@ -149,6 +156,7 @@ The weekly VM scan report: which scheduled scans ran, and which networks in the 
 - **A new setting goes in that file** when its name starts with `VMSCAN_`, `NETNOTES_`, `NETRULES_`, `SUBNETS_`, `JIRA_VMSCAN_`.
 - **Secrets its programs read:** `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
 - **Credential check,** daily by `run-credcheck`: `cti-vmscan --check`
+- **Health report:** none yet (planned for 2.1: scan schedules that did not launch, and networks no scan reaches).
 
 ## supplier
 
@@ -164,6 +172,7 @@ Supplier requests from the supplier mailbox, judged for third-party risk, with J
 - **Settings in `fleet.d/supplier.env`** (with the shared ones in `00-core.env`): `SUPPLIER_ADDRESS`, `SUPPLIER_ALLOW_TO`, `SUPPLIER_BOARD_NAME`, `SUPPLIER_BOARD_URL`, `SUPPLIER_FOLDER`, `SUPPLIER_FORM_TYPES`, `SUPPLIER_HOLD_PHRASES`, `SUPPLIER_INTERNAL_DOMAINS`, `SUPPLIER_JIRA_STATUS`, `SUPPLIER_JIRA_TYPE`, `SUPPLIER_MEANING`, `SUPPLIER_MODEL`, `SUPPLIER_OWNER_EMAIL`, `SUPPLIER_QUESTION`, `SUPPLIER_SEEN_FILE`, `SUPPLIER_TECH_TERMS`, `SUPPLIER_TO`, `SUPPLIER_TPRM`, `SUPPLIER_UNSURE_TEXT`, `SUPPLIER_WINDOW_DAYS`.
 - **A new setting goes in that file** when its name starts with `SUPPLIER_`.
 - **Secrets its programs read:** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `NVD_API_KEY`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
+- **Health report:** none yet (planned for 2.1: requests whose form could not be read).
 
 ## mailbox
 
@@ -179,3 +188,4 @@ Mailbox housekeeping: file processed advisories away after the digest has read t
 - **Settings in `fleet.d/mailbox.env`** (with the shared ones in `00-core.env`): `FLEET_MAILBOX_BACKLOG_THRESHOLD`, `FLEET_MAILBOX_TIME`.
 - **A new setting goes in that file** when its name starts with `MAILBOX_`, `FLEET_MAILBOX_`.
 - **Secrets its programs read:** `CLIENT_ID`, `CLIENT_SECRET`, `JIRA_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_CLOUD_ID`, `JIRA_EMAIL`, `QUALYS_BASE_URL`, `QUALYS_PASSWORD`, `QUALYS_USERNAME`, `TENANT_ID`.
+- **Health report:** none yet (planned for 2.1: the mail left with no processing record).

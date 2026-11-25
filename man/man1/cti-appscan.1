@@ -250,15 +250,27 @@ mailbox joined to the scan list); the last report is the owners lane's
 .IR $FLEET_HOME/state/appowners\-sent.json ),
 read only. Nothing is sent or recorded. Needs the scanner's credentials.
 .TP
-.BI \-\-audit\-json " FILE"
+.BI \-\-expected\-gaps " FILE"
 With
 .BR \-\-audit :
-also write the audit as JSON to
-.IR FILE :
-each application's id, name, owner, newest scan, verdict, a
+the organization's declared gaps, one per line:
+.IR "lane | subject | kind | reason [| until=YYYY-MM-DD]" .
+A gap a line covers is reported as by design, with its reason. Default:
+.IR /opt/cti\-agent/share/expected\-gaps.txt ,
+which the installer puts there from the org pack. A malformed file is an
+error, not "no declarations".
+.TP
+.BI \-\-health\-out " FILE"
+With
+.BR \-\-audit :
+also write the appscan lane's health report to
+.I FILE
+(schema
+.BR cti\-lane\-health/1 ):
+every web application counted, and a gap for each that needs a look, with a
 .B kind
-code (sent, pending, held, no_owner, not_scanned, unconfirmed, incomplete,
-login_failed, unreachable) and whether it needs a look. What
+(not_scanned, pending, held, no_owner, unconfirmed, incomplete, login_failed,
+unreachable) and whether a declaration makes it expected. What
 .BR run\-appaudit (1)
 writes for the check-in.
 .TP

@@ -1,10 +1,11 @@
 package appscan
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/health"
 )
 
 var auditApps = []App{
@@ -120,25 +121,38 @@ func TestTheAuditGivesEveryApplicationAVerdict(t *testing.T) {
 	}
 }
 
-// The JSON the check-in reads: every app, with a kind it can key on, and the
-// count of those that need a look.
-func TestTheAuditJSONGivesTheCheckInAKindPerApp(t *testing.T) {
-	owners, _, _ := ParseOwners(strings.NewReader("id:1 | a@example.com\nid:2 | b@example.com\n"))
+// The lane's health report: a gap per app that needs a look, and the
+// organization's declarations make a gap expected and the row by design.
+func TestTheAuditWritesTheLanesHealthReport(t *testing.T) {
+	owners, _, _ := ParseOwners(strings.NewReader("id:1 | a@example.com\nid:2 | b@example.com\nid:3 | c@example.com\nid:4 | d@example.com\nid:5 | e@example.com\n"))
 	rows := Audit(auditApps, auditWeek(t), owners, DeliveredLog{})
-	var f AuditFile
-	if err := json.Unmarshal(AuditJSON(rows, 8*24*time.Hour, time.Date(2026, 11, 25, 8, 30, 0, 0, time.UTC)), &f); err != nil {
+	decls, err := health.ParseDeclarations(strings.NewReader("appscan | Staging | not_scanned | scanned on demand only\n"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if f.WindowDays != 8 || len(f.Apps) != len(auditApps) || f.Problems != len(auditApps) {
-		t.Fatalf("file %+v", f)
+	r := HealthReport(rows, decls, 8*24*time.Hour, time.Date(2026, 11, 25, 8, 30, 0, 0, time.UTC))
+	if r.Lane != "appscan" || r.Of != 5 || r.WindowHours != 192 {
+		t.Fatalf("%+v", r)
 	}
-	kinds := map[string]string{}
-	for _, a := range f.Apps {
-		kinds[a.Name] = a.Kind
+	kinds := map[string]health.Gap{}
+	for _, g := range r.Gaps {
+		kinds[g.Subject] = g
 	}
-	for name, want := range map[string]string{"Careers": "not_scanned", "Shop": "pending", "Academy": "no_owner"} {
-		if kinds[name] != want {
-			t.Errorf("%s: kind %q, want %q", name, kinds[name], want)
+	if g := kinds["Careers"]; g.Kind != "not_scanned" || g.Expected || g.ID != "3" {
+		t.Errorf("Careers: %+v", g)
+	}
+	if g := kinds["Staging"]; !g.Expected {
+		t.Errorf("Staging is declared: %+v", g)
+	}
+	if g := kinds["Academy"]; g.Kind != "unconfirmed" {
+		t.Errorf("Academy: %+v", g)
+	}
+	for _, row := range rows {
+		if row.App.Name == "Staging" && (row.Problem || !strings.Contains(row.Verdict, "by design: scanned on demand only")) {
+			t.Errorf("the Staging row: %+v", row)
 		}
+	}
+	if !strings.Contains(RenderAudit(rows, 8*24*time.Hour), "by design") {
+		t.Error("the table does not show the declared gap as by design")
 	}
 }

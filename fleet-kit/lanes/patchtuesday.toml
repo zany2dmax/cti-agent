@@ -3,6 +3,8 @@
 lane = "patchtuesday"
 handles = ["@patchtuesday"]
 summary = "The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by hand for now; its timer is off on purpose."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: a month whose synopsis was not sent"
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

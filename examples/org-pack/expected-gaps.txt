@@ -1,0 +1,14 @@
+# The gaps this organization chose not to cover. Each lane's health report
+# (internal/health) marks a gap a line here covers as "by design", with the
+# reason; every other gap is an accident, and the check-in escalates it.
+#
+#   lane | subject | kind | reason | until=YYYY-MM-DD
+#
+# subject is the name the lane reports, or id:<ID> for a source id (a web
+# app's id in the scanner). kind is one of the lane's gap kinds
+# (fleet-kit/lanes/<lane>.toml, [health] kinds), or * for any. until= is
+# optional: after that date the gap is an accident again, and the check-in is
+# reminded a week before. A line that matches nothing is reported too, so a
+# stale exception does not linger. Invented examples:
+appscan | Example Staging | not_scanned | a copy of production, scanned on demand before each release
+appscan | id:100000001 | * | retired; kept in the scanner for its history | until=2027-03-31

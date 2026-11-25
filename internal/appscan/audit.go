@@ -1,12 +1,13 @@
 package appscan
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/health"
 )
 
 // UNSCANNED APPLICATIONS AND THE AUDIT
@@ -136,44 +137,6 @@ func verdict(r AuditRow) (string, string, bool) {
 	}
 }
 
-// AuditFile is the audit as JSON, for the check-in (reports/appscan-audit.json,
-// written daily by run-appaudit). Every string is one line, controls removed.
-type AuditFile struct {
-	Generated  time.Time      `json:"generated"`
-	WindowDays int            `json:"windowDays"`
-	Apps       []AuditFileApp `json:"apps"`
-	Problems   int            `json:"problems"`
-}
-
-// AuditFileApp is one application in AuditFile.
-type AuditFileApp struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Owner    string `json:"owner,omitempty"`
-	LastScan string `json:"lastScan,omitempty"` // YYYY-MM-DD, the newest in the window
-	Kind     string `json:"kind"`
-	Verdict  string `json:"verdict"`
-	Problem  bool   `json:"problem"`
-}
-
-// AuditJSON is rows as an AuditFile.
-func AuditJSON(rows []AuditRow, window time.Duration, now time.Time) []byte {
-	f := AuditFile{Generated: now.UTC(), WindowDays: int(window / (24 * time.Hour)), Apps: []AuditFileApp{}}
-	for _, r := range rows {
-		a := AuditFileApp{ID: oneLineName(r.App.ID), Name: oneLineName(r.App.Name), Owner: oneLineName(r.Owner),
-			Kind: r.Kind, Verdict: oneLineName(r.Verdict), Problem: r.Problem}
-		if d := scanDate(r); d != "-" && d != "?" {
-			a.LastScan = d
-		}
-		if r.Problem {
-			f.Problems++
-		}
-		f.Apps = append(f.Apps, a)
-	}
-	b, _ := json.MarshalIndent(f, "", "  ")
-	return append(b, '\n')
-}
-
 // scanDate is the row's newest scan as YYYY-MM-DD, "-" for none, "?" when
 // the scan carries no time.
 func scanDate(r AuditRow) string {
@@ -231,4 +194,29 @@ func windowText(d time.Duration) string {
 		return fmt.Sprintf("%d days", n)
 	}
 	return d.String()
+}
+
+// HealthReport is the appscan lane's health report (internal/health): every
+// web app in the scanner, a gap for each one that needs a look, matched to
+// the organization's declarations. It also marks the rows a declaration
+// covers as by design, so the table and the report agree.
+func HealthReport(rows []AuditRow, decls []health.Declaration, window time.Duration, now time.Time) health.Report {
+	r := health.New("appscan", now)
+	r.WindowHours = int(window / time.Hour)
+	r.Of = len(rows)
+	idx := map[string]int{}
+	for i, row := range rows {
+		if row.Problem {
+			idx[row.Kind+"|"+strings.ToLower(strings.Join(strings.Fields(health.Clean(row.App.Name, 160)), " "))] = i
+			r.Add(row.App.Name, row.App.ID, row.Kind, row.Verdict)
+		}
+	}
+	r.Apply(decls, now)
+	for _, g := range r.Gaps {
+		if i, ok := idx[g.Key()]; ok && g.Expected {
+			rows[i].Problem = false
+			rows[i].Verdict += " - by design: " + g.Why
+		}
+	}
+	return r
 }

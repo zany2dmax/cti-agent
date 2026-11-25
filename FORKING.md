@@ -102,6 +102,21 @@ name. A fork's pack and `/etc/cti-agent/org/` at once is refused too. The
 layout and every rule: [docs/org-pack.md](docs/org-pack.md) and
 [RUNBOOK 11p](docs/guides/configuration.md#11p-the-org-pack).
 
+### Gaps by design
+
+Each lane reports what it didn't cover: a web app nobody scanned, a domain
+the weekly check couldn't reach. The check-in escalates every such gap,
+unless your org pack's `expected-gaps.txt` says it's on purpose, with a
+reason (and, if it should lapse, an `until=` date):
+
+```
+appscan | Example Staging | not_scanned | a copy of production, scanned on demand only
+```
+
+That's the fork's record of the risks it accepted. Commit it in `org/` with
+the rest of the pack. [docs/org-pack.md](docs/org-pack.md#expected-gapstxt-gaps-by-design)
+has the format.
+
 ## Choosing lanes
 
 Run only the lanes you have tools for. On the box, `FLEET_LANES` lists them,

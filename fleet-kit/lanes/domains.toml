@@ -3,6 +3,8 @@
 lane = "domains"
 handles = ["@domains"]
 summary = "The weekly domains check: registrar, DNS, web and mail records, plus one Jira ticket for IT."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: the domains in domains.txt the weekly check could not reach"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["DOMAINS_", "DOM_", "PROOFPOINT_POD_", "JIRA_DOMAINS_"]

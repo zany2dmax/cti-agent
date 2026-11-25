@@ -3,6 +3,8 @@
 lane = "scout"
 handles = ["@scout"]
 summary = "Poll advisory feeds for CVEs the mail has not mentioned yet, to feed the digest."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: the feeds that have gone silent"
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

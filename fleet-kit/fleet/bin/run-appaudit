@@ -5,25 +5,29 @@
 # Runs cti-appscan --audit over the last 8 days (a weekly schedule, plus a day
 # of slack) and writes the result where the beat reads it:
 #
-#   $FLEET_HOME/reports/appscan-audit.txt    the table, for a person
-#   $FLEET_HOME/reports/appscan-audit.json   each app's kind and verdict, for the beat
+#   $FLEET_HOME/reports/appscan-audit.txt     the table, for a person
+#   $FLEET_HOME/reports/health/appscan.json   the lane's health report
+#                                             (internal/health), for the beat
 #
 # Every web application the scanner defines, with its owner, its newest scan
 # and the owners lane's last report for it. An application with no scan in
 # the window is the case nothing else shows: the weekly report and the owners
-# lane both start from the scans that ran.
+# lane both start from the scans that ran. A gap the organization declared in
+# its org pack's expected-gaps.txt (a test host scanned on demand, say) is
+# reported as by design, with its reason; every other gap is an accident.
 #
 # WHY A UNIT OF ITS OWN. The audit needs the scanner's login and reads the
 # mailbox; the check-in unit holds neither, by design (it reads untrusted
 # mail and drives a model). So this runs as the appscan lane, with that
-# lane's credentials, and the beat only reads the files (Read(reports/**)).
+# lane's credentials. run-checkin hands the beat what changed in the report
+# (fleet-health delta), so the beat reads nothing itself.
 #
 # Read-only: the scanner and the mailbox are read, nothing is sent, filed or
 # recorded, and the owners lane's delivered log is only read. It writes only
 # the two reports (0600, atomically). It exits 0 when it has written them,
-# whatever they say - including an audit that could not run, which the JSON
-# records as "error" for the beat to escalate once, rather than a failed unit
-# that mails every day.
+# whatever they say - including an audit that could not run, which the health
+# report records as "error" for the beat to escalate once, rather than a
+# failed unit that mails every day.
 set -euo pipefail
 # shellcheck source=../share/fleet-mode.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
@@ -53,22 +57,23 @@ export FLEET_HOME FLEET_CODE
 
 APPSCAN="$FLEET_CODE/bin/cti-appscan"
 TXT="$FLEET_HOME/reports/appscan-audit.txt"
-JSON="$FLEET_HOME/reports/appscan-audit.json"
-mkdir -p "$FLEET_HOME/reports"
+JSON="$FLEET_HOME/reports/health/appscan.json"
+mkdir -p "$FLEET_HOME/reports/health"
+chmod 0700 "$FLEET_HOME/reports/health" 2>/dev/null || true
 
 tmp="$(mktemp "$FLEET_HOME/reports/.appaudit.XXXXXX")"
 trap 'rm -f "$tmp" "$tmp.json" "$tmp.err" "$tmp.txt.new"' EXIT
 now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 rc=0
 "$APPSCAN" --audit --since 192h --delivered-log "$FLEET_HOME/state/appowners-sent.json" \
-  --audit-json "$tmp.json" > "$tmp" 2> "$tmp.err" < /dev/null || rc=$?
+  --health-out "$tmp.json" > "$tmp" 2> "$tmp.err" < /dev/null || rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$tmp.json" ]; then
   # The reason, from cti-appscan's own last line (it prints names and
   # counts, never a credential's value), as one JSON-safe line.
   why="$(grep -v '^[[:space:]]*$' "$tmp.err" | tail -1 | tr -cd '[:print:]' | sed 's/["\\]//g' | cut -c1-300 || true)"
   why="${why:-cti-appscan --audit exited $rc}"
   printf '# run-appaudit %s: the audit could not run: %s\n' "$now" "$why" > "$tmp"
-  printf '{\n  "generated": "%s",\n  "error": "%s"\n}\n' "$now" "$why" > "$tmp.json"
+  printf '{\n  "schema": "cti-lane-health/1",\n  "lane": "appscan",\n  "generated": "%s",\n  "of": 0,\n  "covered": 0,\n  "gaps": [],\n  "error": "%s"\n}\n' "$now" "$why" > "$tmp.json"
   echo "run-appaudit: the audit could not run: $why" >&2
 else
   { printf '# run-appaudit %s - every web app in the scanner, its owner, newest scan and last owner report\n' "$now"

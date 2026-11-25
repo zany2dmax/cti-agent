@@ -47,6 +47,17 @@ order, and run `task ship` at the end.
    - one `[[unit]]` per service, with `exec` starting
      `/opt/cti-agent/bin/`, plus a `[unit.timer]`
 
+   - **`[health]`: its health report,** or `health_exempt = "<why>"`.
+     `scripts/lanes --check` refuses a lane with neither. The report is
+     `reports/health/<lane>.json`, built with `internal/health`: what the
+     lane should have covered (every domain, every feed, every web app), what
+     it did, and one gap per subject it missed, with a `kind` you list in the
+     manifest. Name the unit that writes it (`written_by`) and how old it may
+     get (`fresh_hours`). The check-in's rules for it are core, so the lane
+     needs no orchestrator notes for its health. What this fleet chose not to
+     cover goes in its org pack's `expected-gaps.txt`, never in the lane's
+     code.
+
    Don't add `beat_grants` unless the check-in must run something of the
    lane's. Nothing the beat runs may read a secret, and a test holds the
    check-in unit to a Claude credential and Graph.

@@ -3,6 +3,8 @@
 lane = "vmscan"
 handles = ["@vmscan"]
 summary = "The weekly VM scan report: which scheduled scans ran, and which networks in the network sheet no scan reached."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: scan schedules that did not launch, and networks no scan reaches"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["VMSCAN_", "NETNOTES_", "NETRULES_", "SUBNETS_", "JIRA_VMSCAN_"]

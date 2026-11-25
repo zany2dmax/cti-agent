@@ -3,6 +3,8 @@
 lane = "digest"
 handles = ["@ingest", "@enrich", "@brief"]
 summary = "The daily threat-intel digest: read the CTI mail, enrich every CVE with exposure on our hosts, and send the brief; on Mondays, the weekly rollup."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: the advisory mail read and the CVEs the scanner could not map"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["DIGEST_CC", "DIGEST_SKIP_SUBJECTS", "VM_ALLOW_TO", "FLEET_ALLOW_TO", "TRIAGE_"]

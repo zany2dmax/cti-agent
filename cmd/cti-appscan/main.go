@@ -35,6 +35,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/health"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/ticketref"
@@ -110,9 +111,11 @@ func run() int {
 			"and the owners lane's last report for it (from --delivered-log, default "+
 			"$FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads "+
 			"the mailbox and the scanner only - nothing is sent or recorded")
-	auditJSON := flag.String("audit-json", "",
-		"with --audit: also write the audit as JSON here (each app's kind, verdict and whether it "+
-			"needs a look), for the check-in")
+	healthOut := flag.String("health-out", "",
+		"with --audit: also write the appscan lane's health report here (internal/health: a gap per "+
+			"web app that needs a look, each matched to --expected-gaps), for the check-in")
+	expectedGaps := flag.String("expected-gaps", health.DefaultDeclarations(),
+		"with --audit: the organization's declared gaps (the org pack's expected-gaps.txt, installed)")
 	flag.Parse()
 
 	if *commitDelivered != "" {
@@ -184,7 +187,7 @@ func run() int {
 			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
 			if *audit {
-				return doAudit(ctx, api, scans, *deliveredLog, *since, *auditJSON)
+				return doAudit(ctx, api, scans, *deliveredLog, *since, *healthOut, *expectedGaps)
 			}
 			if deliverOnly {
 				saveSeen(*seenOut, seen)
@@ -1037,7 +1040,7 @@ func shortSubject(s string) string {
 // the owners lane's last entry for it. It prints and exits; nothing is sent
 // or recorded, and the delivered log is only read.
 func doAudit(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult, logPath string,
-	window time.Duration, jsonOut string) int {
+	window time.Duration, healthOut, gapsPath string) int {
 	lister, ok := sc.(appscan.AppLister)
 	if !ok {
 		return die("--audit: the %s scanner cannot list its applications", sc.Name())
@@ -1064,10 +1067,17 @@ func doAudit(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult
 		}
 	}
 	rows := appscan.Audit(apps, scans, owners, delivered)
-	if jsonOut != "" {
-		// #nosec G703 -- the runner's own report path
-		if err := os.WriteFile(jsonOut, appscan.AuditJSON(rows, window, time.Now()), 0o600); err != nil {
-			return die("--audit-json: %s", safelog.Line(err.Error()))
+	// The organization's declared gaps. Unreadable or malformed is an error,
+	// not "none": a skipped declaration would turn a chosen gap into an
+	// accident, or an accident into a chosen one.
+	decls, err := health.LoadDeclarations(gapsPath)
+	if err != nil {
+		return die("--expected-gaps: %s", safelog.Line(err.Error()))
+	}
+	rep := appscan.HealthReport(rows, decls, window, time.Now())
+	if healthOut != "" {
+		if err := health.Write(healthOut, rep); err != nil {
+			return die("--health-out: %s", safelog.Line(err.Error()))
 		}
 	}
 	fmt.Print(appscan.RenderAudit(rows, window))

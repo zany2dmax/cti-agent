@@ -3,6 +3,8 @@
 lane = "supplier"
 handles = ["@supplier"]
 summary = "Supplier requests from the supplier mailbox, judged for third-party risk, with Jira Kanban items."
+# No lane health report yet (internal/health, docs/lane-manifest.md).
+health_exempt = "planned for 2.1: requests whose form could not be read"
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["SUPPLIER_"]

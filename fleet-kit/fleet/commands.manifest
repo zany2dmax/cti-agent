@@ -67,7 +67,8 @@ risk: --commit-delivered writes
 risk: --commit-seen writes
 risk: --stamp-tickets writes
 flag: --audit | print every web app the scanner defines with its owner, its newest scan in --since and the owners lane's last report for it (from --delivered-log, default $FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads the mailbox and the scanner only - nothing is sent or recorded
-flag: --audit-json STRING | with --audit: also write the audit as JSON here (each app's kind, verdict and whether it needs a look), for the check-in
+flag: --expected-gaps STRING | with --audit: the organization's declared gaps (the org pack's expected-gaps.txt, installed)
+flag: --health-out STRING | with --audit: also write the appscan lane's health report here (internal/health: a gap per web app that needs a look, each matched to --expected-gaps), for the check-in
 flag: --auth-fail-out STRING | write one line per scan whose configured credential failed to authenticate; the runner alerts the operator when this file is non-empty. Absent or empty means every credential worked.
 flag: --commit-delivered STRING | record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit
 flag: --commit-seen STRING | record a --seen-out file in the processed log the mailbox cleanup reads, so those notifications can be archived; then exit
@@ -378,6 +379,18 @@ sub: was-sent | exit 0 if a digest already went out
 sub: last-sent | when the newest digest of a kind went out (--hours: how long ago)
 sub: scout | the CVEs already known, or record feed mentions (cti-scout)
 sub: vacuum | compact the database
+
+command: fleet-health
+about: The lanes' health reports for the check-in: what changed since the last beat (run-checkin calls it), or every lane's report for a person
+runs: local
+risk: --pending writes
+sub: delta | the beat's LANE HEALTH block: what changed since the last beat; the next state to --pending
+sub: commit | save --pending as the state, once the beat has finished
+sub: show | every lane's report, one line each
+flag: --home STRING | the fleet's home: reports/health and state/ under it
+flag: --list STRING | the lanes' health contracts, generated from the lane manifests
+flag: --pending STRING | delta: write the next state here; commit: the state to save
+flag: --state STRING | the state file (default HOME/state/health-seen.json)
 
 command: fleet-journal
 about: Read the journal of cti-agent units (the orchestrator's only way to it)

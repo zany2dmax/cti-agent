@@ -120,6 +120,13 @@ tracked.
 the hand-kept fields (secret or not, when required, the default). A test
 fails when the code, the example and the manifest disagree.
 
+**Every lane reports its health, or says why not.** A lane's manifest has a
+`[health]` table naming the unit that writes `reports/health/<lane>.json`
+(what it should have covered, what it did, each gap), or a
+`health_exempt = "<why>"`. `lane:check` fails with neither. Build the report
+with `internal/health`. Never put one fleet's chosen gaps in a lane's code:
+they go in that fleet's org pack ([docs/lane-manifest.md](docs/lane-manifest.md#the-health-contract)).
+
 **A CHANGELOG entry under `## Unreleased`.** Say what changed and why, in
 the subsection it belongs to (Added, Changed, Fixed, Security), and what an
 operator has to do on update, if anything. Not checked by a test.

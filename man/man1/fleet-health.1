@@ -1,0 +1,94 @@
+.TH FLEET-HEALTH 1 "2026-11-25" "cti-agent" "CTI Agent Fleet"
+.SH NAME
+fleet-health \- the lanes' health reports, for the check-in and for a person
+.SH SYNOPSIS
+.B fleet\-health delta \-\-pending
+.I FILE
+.RB [ \-\-home
+.IR DIR ]
+.RB [ \-\-list
+.IR FILE ]
+.RB [ \-\-state
+.IR FILE ]
+.br
+.B fleet\-health commit \-\-pending
+.I FILE
+.RB [ \-\-home
+.IR DIR ]
+.RB [ \-\-state
+.IR FILE ]
+.br
+.B fleet\-health show
+.RB [ \-\-home
+.IR DIR ]
+.RB [ \-\-list
+.IR FILE ]
+.SH DESCRIPTION
+Every lane is held to one contract: it writes
+.I $FLEET_HOME/reports/health/<lane>.json
+(schema
+.BR cti\-lane\-health/1 )
+with what it should have covered, what it did, and each gap. A gap the
+organization declared on purpose, in its org pack's
+.I expected\-gaps.txt
+with a reason, is marked by design; every other gap is an accident.
+.PP
+.B delta
+compares each report with what earlier check-in beats were told (the state
+file) and prints only the difference, as the
+.B LANE HEALTH
+block
+.BR run\-checkin (1)
+puts at the top of the beat's prompt: a new accident, one that cleared, a
+report that went missing, stale or came back, and a declaration that is
+about to expire or matches nothing. With nothing changed it prints one line.
+The state the beat will have been told is written to
+.BR \-\-pending .
+.PP
+.B commit
+saves that state, once the beat has finished, so each change reaches the
+model once. A beat that failed is not committed, and the next beat is told
+the same changes.
+.PP
+.B show
+prints every lane's report, one line each: coverage, open accidents, gaps by
+design, and age.
+.PP
+It reads only the fleet's own files: the reports, the lanes' health
+contracts
+.RI ( $FLEET_CODE/share/health.list ,
+generated from the lane manifests),
+.B FLEET_LANES
+(lanes this box does not run are skipped) and the state file. It sends
+nothing.
+.SH OPTIONS
+.TP
+.BI \-\-home " DIR"
+The fleet's home, with reports/health and state/ under it. Default:
+.B $FLEET_HOME
+or /var/lib/cti\-agent.
+.TP
+.BI \-\-list " FILE"
+The lanes' health contracts. Default:
+.IR $FLEET_CODE/share/health.list .
+.TP
+.BI \-\-pending " FILE"
+.BR delta :
+write the next state here.
+.BR commit :
+the state to save.
+.TP
+.BI \-\-state " FILE"
+The state file. Default:
+.IR $FLEET_HOME/state/health\-seen.json .
+.SH EXIT STATUS
+0 on success; 1 when the lane list or a file it must write cannot be used;
+2 for a bad command line.
+.SH EXAMPLES
+.nf
+sudo cti\-agent fleet\-health show
+.fi
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR run\-appaudit (1),
+.BR cti\-agent\-doctor (1)

@@ -1196,7 +1196,7 @@ class TestFileShape(unittest.TestCase):
 
     def _checkin_box(self, overrides=None, plant=(), claude_json=None,
                      guard="#!/bin/sh\ncat >/dev/null\nexit 2\n", settings=None, extra_env=None,
-                     trace=False, stream=None, claude_rc=0, verdict=None, home_files=None):
+                     trace=False, stream=None, claude_rc=0, verdict=None, home_files=None, health=None):
         """A fake Linux box for run-checkin: a FLEET_CODE laid out the way
         install-fedora.sh lays it out, read-only to this test's user, and a
         fake stat(1) that reports root ownership unless told otherwise.
@@ -1221,6 +1221,8 @@ class TestFileShape(unittest.TestCase):
             p.mkdir(parents=True)
         ran = d / "ran"
         shutil.copy(root / "fleet-kit" / "fleet" / "bin" / "run-checkin", code / "bin" / "run-checkin")
+        if health is not None:
+            (code / "bin" / "fleet-health").write_text(health.replace("RAN", str(ran)))
         # Sourced by every runner that changes something (the "say how" rule).
         shutil.copy(root / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh",
                     code / "share" / "fleet-mode.sh")
@@ -1338,6 +1340,30 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertIn("REFUSING to start", r.stderr)
                 self.assertNotIn("claude cwd", ran)
+
+    def test_the_beat_is_told_lane_health_changes_once(self):
+        """run-checkin puts fleet-health's delta in the beat's prompt, so the
+        model reads no report itself; and it saves the state only after a
+        beat that finished, so a failed beat's changes are offered again."""
+        stub = ('#!/bin/sh\necho "fleet-health $1" >> RAN\n'
+                'if [ "$1" = delta ]; then\n'
+                '  while [ $# -gt 0 ]; do [ "$1" = --pending ] && { shift; mkdir -p "$(dirname "$1")"; echo "{}" > "$1"; }; shift; done\n'
+                '  echo "LANE HEALTH - changes since the last beat"; echo "appscan: new not_scanned: Careers"\nfi\n')
+        r, ran = self._checkin_box(health=stub)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("arg /checkin", ran)
+        self.assertIn("appscan: new not_scanned: Careers", ran, "the delta did not reach the beat's prompt")
+        self.assertLess(ran.index("fleet-health delta"), ran.index("appscan: new not_scanned"))
+        self.assertIn("fleet-health commit", ran)
+
+        r, ran = self._checkin_box(health=stub, claude_rc=1)
+        self.assertIn("fleet-health delta", ran)
+        self.assertNotIn("fleet-health commit", ran, "a failed beat's changes were marked as told")
+
+        # No fleet-health installed: the beat is told so, and still runs.
+        r, ran = self._checkin_box()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("LANE HEALTH: not available", ran)
 
     def test_the_heartbeat_starts_on_a_correct_layout(self):
         """The check must also let a correct box beat - a fail-closed check
@@ -3478,7 +3504,7 @@ class RunnersToDev(unittest.TestCase):
         stub = self.code / "bin" / "cti-appscan"
         stub.write_text('#!/usr/bin/env bash\necho "cti-appscan $*" >> "$STUB_LOG"\n'
                         'if [ -n "${AUDIT_FAIL:-}" ]; then echo \'die: the "scanner" is unreachable\' >&2; exit 1; fi\n'
-                        'while [ $# -gt 0 ]; do [ "$1" = --audit-json ] && { shift; echo \'{"apps": []}\' > "$1"; }; shift; done\n'
+                        'while [ $# -gt 0 ]; do [ "$1" = --health-out ] && { shift; echo \'{"schema": "cti-lane-health/1"}\' > "$1"; }; shift; done\n'
                         'echo "22 web application(s) in the scanner; scans in the last 8 days; 13 need a look"\n')
         stub.chmod(0o755)
         reports = self.home / "reports"
@@ -3487,9 +3513,9 @@ class RunnersToDev(unittest.TestCase):
         call = [c for c in calls if c.startswith("cti-appscan ")][0]
         self.assertIn("--audit --since 192h", call)
         self.assertIn(f"--delivered-log {self.home}/state/appowners-sent.json", call)
-        txt, js = reports / "appscan-audit.txt", reports / "appscan-audit.json"
+        txt, js = reports / "appscan-audit.txt", reports / "health" / "appscan.json"
         self.assertIn("13 need a look", txt.read_text())
-        self.assertEqual(json.loads(js.read_text()), {"apps": []})
+        self.assertEqual(json.loads(js.read_text()), {"schema": "cti-lane-health/1"})
         for f in (txt, js):
             self.assertEqual(oct(f.stat().st_mode & 0o777), "0o600", f.name)
         self.assertEqual(sorted(p.name for p in reports.iterdir() if p.name.startswith(".")), [],
@@ -3503,6 +3529,7 @@ class RunnersToDev(unittest.TestCase):
             self.base = base
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         j = json.loads(js.read_text())
+        self.assertEqual((j["schema"], j["lane"]), ("cti-lane-health/1", "appscan"))
         self.assertIn("unreachable", j["error"])
         self.assertNotIn('"', j["error"], "a quote reached the JSON unescaped")
         self.assertIn("could not run", txt.read_text())

@@ -55,6 +55,23 @@ on_calendar = "*-*-* 00,04,08,12,16,20:15:00"   # or on_boot and on_unit_active
 persistent = true
 ```
 
+Every lane also declares its **health report**, or why it has none: exactly
+one of these, or `scripts/lanes --check` fails.
+
+```toml
+# The lane health contract (internal/health): what the lane should have
+# covered, what it did, and each gap, in reports/health/<lane>.json.
+[health]
+written_by = "appaudit"         # one of this lane's units
+fresh_hours = 26                # older than this, the report is itself a gap
+kinds = ["not_scanned", "held"] # the gap kinds it reports
+
+# ...or, until it has one:
+health_exempt = "planned for 2.1: the feeds that have gone silent"
+```
+
+See [The health contract](#the-health-contract) below.
+
 Every key is checked. An unknown key is refused by name, because a misspelt
 key would otherwise be silently ignored. `exec` must run something under
 `/opt/cti-agent/bin/`, and a unit name may appear in only one lane.
@@ -105,6 +122,10 @@ key would otherwise be silently ignored. `exec` must run something under
   check. A test also holds the checkin skill's credential-check list to the
   declared `--check` grants. Each granted command still needs its row in
   the bash guard's policy table (`test_lanes.py` checks that).
+- **`fleet-kit/fleet/health.list`**: each lane's health contract (its
+  report's unit, freshness and gap kinds), installed in
+  `/opt/cti-agent/share/` for `fleet-health` and `cti-agent-doctor`. Lanes
+  with `health_exempt` are left out.
 - **`fleet-kit/fleet/lanes.list`**: each lane, its units and the
   credential checks `run-credcheck` runs for it, one tab-separated line a lane. It
   goes to `/opt/cti-agent/share/` for the tools on the box that don't read
@@ -130,6 +151,37 @@ key would otherwise be silently ignored. `exec` must run something under
   program can read it.
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
+
+## The health contract
+
+Every lane says what it *didn't* cover, so the check-in can tell a gap
+somebody chose from one nobody noticed. The pieces:
+
+- **The report.** The unit named by `written_by` writes
+  `reports/health/<lane>.json` (schema `cti-lane-health/1`, built with
+  `internal/health`): how many subjects the lane should have covered (`of`),
+  how many it did (`covered`), and one gap per subject it missed, each with a
+  `kind` from the manifest. A lane that couldn't work out its health at all
+  writes `error` instead. In Go: `health.New`, `Add` per gap, `Apply` with the
+  declarations, then `Write`.
+- **What this organization chose.** The org pack's `expected-gaps.txt`
+  ([org-pack.md](org-pack.md)) declares gaps by design, each with a reason and
+  an optional `until=` date. `Apply` marks a gap a declaration covers as
+  `expected`, with its reason. Every other gap is an accident.
+- **The check-in reads it once.** `fleet-kit/fleet/health.list`, generated
+  from the manifests, lists each lane's report, unit, freshness and kinds.
+  Before each beat, `fleet-health delta` puts only what changed since the
+  last beat in the beat's prompt. That's a new accident, one that cleared,
+  or a report gone missing or stale. `fleet-health commit` records it after
+  a beat that finished. The orchestrator's rules for it are core, in
+  `fleet-kit/fleet/CLAUDE.md` "Lane health", so a new lane needs no
+  orchestrator notes for its health.
+- **The doctor** checks every report a box should have: present, current
+  and not an error.
+
+`health_exempt` is for a lane that has no report yet. Its reason is printed
+in [lanes.md](lanes.md). That keeps "no report" declared too, never an
+accident.
 
 ## Adding a lane
 

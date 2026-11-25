@@ -11,6 +11,14 @@ setting_prefixes = ["WAS_", "APPSCAN_"]
 # writes the result where the beat reads it: would this lane get past its logins?
 credential_checks = ["cti-appreport"]
 
+# The lane health report (internal/health): every web app in the scanner,
+# and each one not scanned, held, ownerless or unfinished, written daily by
+# the appaudit unit to reports/health/appscan.json.
+[health]
+written_by = "appaudit"
+fresh_hours = 26
+kinds = ["not_scanned", "pending", "held", "no_owner", "unconfirmed", "incomplete", "login_failed", "unreachable"]
+
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]
 order = 4
