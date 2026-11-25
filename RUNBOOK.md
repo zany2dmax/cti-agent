@@ -2632,12 +2632,39 @@ On the Mac, in `~/code/cti-agent`, clean and on `main`:
    reads the files as committed at the tag: it fails if the tag's CHANGELOG
    has no section for it, or the stamp line at the tag or at HEAD names
    another release. So a tag made before the `Release 1.6.7` commit, or a
-   stamp left uncommitted, stops the ship before anything is pushed. The fix
-   is to move the tag onto the release commit:
-   `git tag -d 1.6.7 && git tag -a 1.6.7 -m "Release 1.6.7"`.
+   stamp left uncommitted, stops the ship before anything is pushed. Since
+   the tag has not left the Mac yet, the fix is to move it onto the release
+   commit: `git tag -d 1.6.7 && git tag -a 1.6.7 -m "Release 1.6.7"`. Once a
+   tag is pushed it never moves (below).
 4. About a minute later the release is on the Releases page, with its SBOM under
    Assets. If not, look at **Actions → Release**.
 5. Update the box: `sudo cti-agent-update --for-real`.
+
+### A pushed tag never moves
+
+A box's `cti-agent-update` pulls tags, and a tag that moved under it stops the
+update with "would clobber existing tag" (`moved_tag_help` prints the fix for
+that box). So a tag that is wrong once pushed is never moved or deleted: cut
+the next version instead (`2.0-rc4` after a bad `2.0-rc3`), with its own
+CHANGELOG heading. The old tag and its release stay as they are.
+
+GitHub can enforce this with a tag ruleset that refuses updating or deleting
+any tag. It changes the repository's settings, so the repository's owner
+creates it once, by hand (a fork's owner does the same for the fork):
+
+```bash
+gh api -X POST repos/OWNER/REPO/rulesets --input - <<'JSON'
+{"name": "release tags never move", "target": "tag", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
+ "rules": [{"type": "deletion"}, {"type": "update"}]}
+JSON
+```
+
+Check it with `gh api repos/OWNER/REPO/rulesets`. New tags are still
+allowed; only moving or deleting one is refused, for everyone including the
+owner. `scripts/scrub-history.sh` ends with `git push --force origin --tags`,
+which the ruleset refuses: set the ruleset's enforcement to **Disabled**
+(Settings → Rules → Rulesets) for the force-push, then back to **Active**.
 
 ### When it fails
 

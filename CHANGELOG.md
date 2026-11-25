@@ -39,6 +39,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **A pushed tag never moves, and RUNBOOK 11i says so.** A wrong tag gets the
+  next version (a new rc), not a moved tag, since a moved tag stops every
+  box's update. 11i now gives the one `gh api` command that makes a GitHub
+  tag ruleset refusing tag updates and deletions, for the repository's owner
+  to run once, and says how to pause it for `scripts/scrub-history.sh`.
+  `release:check` already stops a tag made before its release commit.
+
 - **The fleet can be installed somewhere other than the FHS paths**
   ([docs/layout.md](docs/layout.md)). A fork commits a `layout.env`, which
   upstream never ships. It sets the code, config, state and log directories,
