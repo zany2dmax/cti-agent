@@ -11,7 +11,10 @@ package main
 // cti-appreport, cti-domains or cti-vmscan expect a refusal ("not a command a
 // beat may run") since 2026-11-25, when the credential checks moved to their
 // own unit (run-credcheck) and off the beat's grant. Every other case is the
-// Python's answer, unchanged.
+// Python's answer, unchanged. The same day the cases that call
+// cti-patchtuesday or cti-mailbox (their --dry-run previews, dropped from the
+// grant for the secrets they put in the beat's unit) were changed the same
+// way, refusals only.
 
 import (
 	"bytes"

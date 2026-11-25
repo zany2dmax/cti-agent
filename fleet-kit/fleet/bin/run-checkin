@@ -442,10 +442,11 @@ trap 'rmdir "$LOCK" 2>/dev/null || true; rm -f "$beat_log"' EXIT
 #                           - every runner either sends mail or moves it.
 #                             Timers own those; a beat that needs one re-run
 #                             escalates with the exact command for a person.
-#   cti-mailbox (bare)      - moves mail, so only the exact command
-#                             `cti-mailbox --dry-run` is granted below, with no
-#                             :* after it. Moving mail is a scheduled decision,
-#                             not a beat-time one.
+#   cti-mailbox, cti-patchtuesday
+#                           - not even their --dry-run any more: a preview reads
+#                             the mailbox and the scanner, so the grant put the
+#                             Graph, Jira and Qualys secrets in this unit. The
+#                             operator runs either by hand when it is needed.
 #   anything outside this list - including a plain shell.
 #
 # PER SUBCOMMAND, NOT PER BINARY. `fleet-db:*` granted `fleet-db sent`, which
@@ -486,10 +487,6 @@ done
 # results could talk the brake out of engaging.
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-budget status:*)"
 ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-kev:*)"
-# Rendering only. cti-patchtuesday refuses --mark-sent with --dry-run, so no
-# invocation that starts with --dry-run can change state.
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-patchtuesday --dry-run:*)"
-ALLOWED_TOOLS="$ALLOWED_TOOLS,Bash($FLEET_CODE/bin/cti-mailbox --dry-run)"
 # NOT the credential checks (cti-mailer --check and each lane's). They run in
 # their own unit, cti-agent-credcheck (run-credcheck), with the lanes' secrets,
 # and write the result to $FLEET_HOME/reports/credcheck.txt, which the beat

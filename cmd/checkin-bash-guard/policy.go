@@ -366,15 +366,6 @@ func exactly(want ...string) func([]string) string {
 	}
 }
 
-func polPatchTuesday(a []string) string {
-	if len(a) == 0 || a[0] != "--dry-run" {
-		return "must start with --dry-run"
-	}
-	return flags(a[1:], map[string]check{
-		"--month":    rx(`[0-9]{4}-(0[1-9]|1[0-2])`, "YYYY-MM"),
-		"--max-rows": intIn(0, 1000)}, "--subject-only")
-}
-
 func polJournal(a []string) string {
 	units := 0
 	for i := 0; i < len(a); {
@@ -422,15 +413,15 @@ func polTimers(a []string) string {
 }
 
 var policy = map[string]func([]string) string{
-	"fleet-board":      polBoard,
-	"fleet-db":         polDB,
-	"cti-alert":        polAlert,
-	"cti-kev":          polKEV,
-	"cti-budget":       exactly("status"),
-	"cti-patchtuesday": polPatchTuesday,
-	"cti-mailbox":      exactly("--dry-run"),
-	"fleet-journal":    polJournal,
-	"fleet-timers":     polTimers,
+	"fleet-board": polBoard,
+	"fleet-db":    polDB,
+	"cti-alert":   polAlert,
+	"cti-kev":     polKEV,
+	"cti-budget":  exactly("status"),
+	// Not cti-patchtuesday or cti-mailbox, not even --dry-run: a preview reads
+	// the scanner and the mailbox, so the grant put those secrets in the beat.
+	"fleet-journal": polJournal,
+	"fleet-timers":  polTimers,
 	// Not the credential checks (cti-mailer --check and each lane's): they
 	// run in cti-agent-credcheck, and the beat reads reports/credcheck.txt.
 }

@@ -1989,8 +1989,6 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             b + "fleet-db task list", b + "fleet-db ack 12", b + "fleet-db vacuum",
             b + "fleet-db mail inbox ingest",
             b + "cti-budget status", b + "cti-kev --horizon 14", b + "cti-kev",
-            b + "cti-patchtuesday --dry-run --month 2026-11",
-            b + "cti-mailbox --dry-run",
             b + "fleet-timers --all", b + "fleet-timers 'cti-agent-*'",
             b + "fleet-journal -u cti-agent-domains.service --since today --no-pager",
             b + "fleet-journal -u 'cti-agent-*' --since '-3h' -n 200 --no-pager",
@@ -2025,6 +2023,7 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
             b + "cti-patchtuesday --mark-sent", b + "cti-patchtuesday --dry-run --out /tmp/x",
             b + "cti-patchtuesday --dry-run --url-msrc http://example.test",
             b + "cti-patchtuesday --month 2026-11 --dry-run",
+            b + "cti-patchtuesday --dry-run --month 2026-11", b + "cti-mailbox --dry-run",
             b + "cti-mailbox", b + "cti-mailbox --dry-run --for-real",
             b + "fleet-timers --host=user@box", b + "fleet-timers ssh",
             b + "fleet-journal -u sshd", b + "fleet-journal --cursor-file x -u cti-agent-x",
@@ -2667,21 +2666,21 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         ):
             self.assertFalse(self._allowed(rules, cmd), f"granted: {cmd}")
 
-    def test_the_mailbox_plan_is_granted_only_as_a_dry_run(self):
-        """cti-mailbox moves mail unless --dry-run, so the grant is that exact
-        command: not the bare one, not --for-real, nothing appended."""
+    def test_neither_preview_is_granted(self):
+        """cti-mailbox and cti-patchtuesday are not on the grant, not even as
+        --dry-run: a preview reads the mailbox and the scanner, so granting
+        one put the Graph, Jira and Qualys secrets in the beat's unit."""
         rules = self._orchestrator_grant()
         F = "$FLEET_CODE"
-        self.assertTrue(self._allowed(rules, f"{F}/bin/cti-mailbox --dry-run"))
-        for cmd in (f"{F}/bin/cti-mailbox", f"{F}/bin/cti-mailbox --for-real",
-                    f"{F}/bin/cti-mailbox --dry-run --lookback 8760h"):
+        for cmd in (f"{F}/bin/cti-mailbox --dry-run", f"{F}/bin/cti-mailbox",
+                    f"{F}/bin/cti-patchtuesday --dry-run", f"{F}/bin/cti-patchtuesday --dry-run --month 2026-11"):
             self.assertFalse(self._allowed(rules, cmd), f"granted: {cmd}")
 
     def test_dry_run_cannot_mark_a_manifest_sent(self):
-        """The grant is `cti-patchtuesday --dry-run:*`, which is safe only if
-        no invocation starting with --dry-run can write. --mark-sent's branch
-        returns before --dry-run is looked at, so the refusal has to come
-        first."""
+        """No invocation starting with --dry-run can write: --mark-sent's
+        branch returns before --dry-run is looked at, so the refusal has to
+        come first. (Once the beat's grant relied on it; the operator's
+        rehearsals still do.)"""
         root = pathlib.Path(__file__).resolve().parents[2]
         src = (root / "cmd" / "cti-patchtuesday" / "main.go").read_text(encoding="utf-8")
         guard = src.find("if *markSent && *dryRun {")

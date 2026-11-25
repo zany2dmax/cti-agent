@@ -46,15 +46,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   five checks itself, which put every lane's secrets in the unit that reads
   untrusted mail. Now:
   - those grants and their bash-guard rows are gone
-  - the checkin unit imports 13 secrets, not 21
+  - so are the beat's two previews, `cti-mailbox --dry-run` and
+    `cti-patchtuesday --dry-run`, which read the mailbox, Jira and the
+    scanner; ask the operator to run one when a beat needs it
+  - the checkin unit imports six secrets, not 21: the three Claude
+    credential names (one is stored) and Graph's three, for `cti-alert`. A
+    test holds it to exactly that set
   - the checks' secrets are in `cti-agent-credcheck.service`
 
   A report line that contains a stored credential's value is withheld
   whole. The checks each lane has are a new manifest field,
   `credential_checks`. The installer turns the credcheck timer on with the
-  check-in's. The guard's golden test now expects refusals for the ten calls
-  to those five commands; every other case is unchanged. Tested in
-  `fleet-kit/tests/test_credcheck.py`.
+  check-in's. The guard's golden test now expects refusals for the 22 calls
+  to those seven commands; every other case is unchanged. The beat's eval
+  scenarios now give it the report, where they used to fake checks for it to
+  run. Tested in `fleet-kit/tests/test_credcheck.py`.
 
 - **`FLEET_LANES`: run only some lanes.** List the lanes a box runs,
   comma-separated, by their manifest names. Unset still means every lane.

@@ -102,9 +102,14 @@ class Fakes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             b = ev.build_fleet(sc, Path(d))
             env = {"FLEET_HOME": str(b.home), "PATH": "/usr/bin:/bin"}
-            p = subprocess.run([str(b.code / "bin" / "cti-jira"), "--check"], env=env,
-                               capture_output=True, text=True, check=False)
-            self.assertEqual((p.returncode, p.stdout), (1, "jira: 401\n"))
+            # The beat runs no check now: a scenario's checks become the
+            # credential report run-credcheck would have written at 05:30.
+            report = (b.home / "reports" / "credcheck.txt").read_text()
+            self.assertIn("checkin\tcti-jira\tFAIL\tjira: 401\n", report)
+            self.assertIn("vmscan\tcti-vmscan\tok\t", report)
+            sc2 = dict(sc, credcheck_report=False)
+            with tempfile.TemporaryDirectory() as d2:
+                self.assertFalse((ev.build_fleet(sc2, Path(d2)).home / "reports" / "credcheck.txt").exists())
             p = subprocess.run([str(b.code / "bin" / "fleet-journal"), "-u",
                                 "cti-agent-nothing.service", "--since", "today"], env=env,
                                capture_output=True, text=True, check=False)
@@ -114,7 +119,7 @@ class Fakes(unittest.TestCase):
                                capture_output=True, text=True, check=False)
             self.assertIn("eval fake", p.stdout)
             calls = [json.loads(x) for x in (b.home / "eval" / "calls.jsonl").read_text().splitlines()]
-            self.assertEqual([c[0] for c in calls], ["cti-jira", "fleet-journal", "cti-alert"])
+            self.assertEqual([c[0] for c in calls], ["fleet-journal", "cti-alert"])
 
 
 class Scoring(unittest.TestCase):

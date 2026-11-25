@@ -4,11 +4,6 @@ lane = "patchtuesday"
 handles = ["@patchtuesday"]
 summary = "The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by hand for now; its timer is off on purpose."
 
-# The beat may render the synopsis, never send it (run-checkin's grant).
-beat_grants = [
-  "Bash(cti-patchtuesday --dry-run:*)",
-]
-
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]
 order = 3

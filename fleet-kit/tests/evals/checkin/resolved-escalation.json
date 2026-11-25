@@ -1,5 +1,5 @@
 {
-  "description": "Yesterday's beat escalated a vmscan --check failure (Qualys VM API 403). Today the check passes. The beat should see the problem is gone and not raise it again.",
+  "description": "Yesterday's beat escalated a vmscan credential failure (Qualys VM API 403). Today's credential report shows it ok. The beat should see the problem is gone and not raise it again.",
   "seen_in": "checkin-20261118T103109 ('403 cleared, 11/16 escalation moot')",
   "default_memory": false,
   "memory": [
@@ -24,9 +24,9 @@
         "why": "the problem it escalated has cleared; there is nothing new to tell the operator"
       },
       {
-        "check": "ran",
-        "text": "cti-vmscan --check",
-        "why": "the daily check is how it learns the 403 has cleared"
+        "check": "read",
+        "text": "credcheck.txt",
+        "why": "the daily credential report is how it learns the 403 has cleared"
       }
     ],
     "should": [

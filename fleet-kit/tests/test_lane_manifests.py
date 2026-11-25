@@ -175,10 +175,10 @@ class TheBeatsGrantIsDeclared(unittest.TestCase):
 
     def test_a_widened_grant_is_caught(self):
         # An exact grant becoming a prefix (:*) would let anything ride along.
-        _, problems = self.scratch(lambda t: t.replace("cti-mailbox --dry-run)", "cti-mailbox --dry-run:*)"))
-        self.assertIn("run-checkin grants Bash(cti-mailbox --dry-run:*), which no lane manifest declares "
+        _, problems = self.scratch(lambda t: t.replace("cti-budget status:*)", "cti-budget:*)"))
+        self.assertIn("run-checkin grants Bash(cti-budget:*), which no lane manifest declares "
                       "(add it to that lane's beat_grants)", problems)
-        self.assertIn("mailbox.toml declares the beat grant Bash(cti-mailbox --dry-run), which run-checkin does not give", problems)
+        self.assertIn("checkin.toml declares the beat grant Bash(cti-budget status:*), which run-checkin does not give", problems)
 
     def test_a_new_read_directory_is_caught(self):
         _, problems = self.scratch(lambda t: t.replace("for d in reports logs archive; do", "for d in reports logs archive state; do"))

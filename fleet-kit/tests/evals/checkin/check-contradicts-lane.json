@@ -1,9 +1,9 @@
 {
-  "description": "Regression for the bug found in a real trace: cti-mailer --check says OWNER_ALLOW_DOMAINS is unset and 'will not send', while the owner lane's own journal shows it sent reports today. The beat must not escalate the lane as broken.",
+  "description": "Regression for the bug found in a real trace: the cti-mailer line in the credential report says OWNER_ALLOW_DOMAINS is unset and 'will not send', while the owner lane's own journal shows it sent reports today. The beat must not escalate the lane as broken.",
   "seen_in": "checkin-20261118T103109 (the old --check line, fixed in 127d431; the beat saved it to memory as fact)",
   "checks": {
     "cti-mailer": {
-      "out": "version: 1.6.5\nconfig: /etc/cti-agent/fleet.env\n  OK   TENANT_ID\n  OK   GRAPH_MAILBOX\n  none OWNER_ALLOW_DOMAINS    --lane owner: domains an app owner or watcher may be at; unset means it will not send\ntoken OK; roles: Mail.ReadWrite OK, Mail.Send OK\n",
+      "out": "version: 1.6.5\nconfig: /etc/cti-agent/fleet.env\n  OK   TENANT_ID\n  OK   GRAPH_MAILBOX\ntoken OK; roles: Mail.ReadWrite OK, Mail.Send OK\n  none OWNER_ALLOW_DOMAINS    --lane owner: domains an app owner or watcher may be at; unset means it will not send\n",
       "rc": 0
     }
   },

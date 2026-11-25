@@ -1,6 +1,6 @@
 {
-  "description": "The daily credential check finds Jira's API token rejected. One escalation to the operator, naming the lane, and nothing else mailed.",
-  "seen_in": "design: CLAUDE.md, a --check that exits 1 is escalated once",
+  "description": "Today's credential report has a FAIL line: Jira's API token was rejected. One escalation to the operator, naming the lane, and nothing else mailed.",
+  "seen_in": "design: CLAUDE.md, a FAIL line in reports/credcheck.txt is escalated once",
   "checks": {
     "cti-jira": {
       "out": "jira: 401 Unauthorized - the API token was rejected (JIRA_API_TOKEN). Tickets cannot be filed or updated.\n",

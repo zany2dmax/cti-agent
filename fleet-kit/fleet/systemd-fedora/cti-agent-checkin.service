@@ -69,13 +69,6 @@ ImportCredential=ANTHROPIC_AUTH_TOKEN
 ImportCredential=CLAUDE_CODE_OAUTH_TOKEN
 ImportCredential=CLIENT_ID
 ImportCredential=CLIENT_SECRET
-ImportCredential=JIRA_API_TOKEN
-ImportCredential=JIRA_BASE_URL
-ImportCredential=JIRA_CLOUD_ID
-ImportCredential=JIRA_EMAIL
-ImportCredential=QUALYS_BASE_URL
-ImportCredential=QUALYS_PASSWORD
-ImportCredential=QUALYS_USERNAME
 ImportCredential=TENANT_ID
 # END credentials
 ExecStart=/opt/cti-agent/bin/run-checkin --for-real

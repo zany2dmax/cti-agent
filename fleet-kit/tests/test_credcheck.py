@@ -90,5 +90,16 @@ class RunCredcheck(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class TheCheckinUnitHoldsOnlyWhatTheBeatNeeds(unittest.TestCase):
+    def test_its_credentials_are_one_claude_token_and_graph_for_alerts(self):
+        # The beat reads untrusted mail. It needs a Claude credential to run,
+        # and Graph for cti-alert, its one way to reach a person; every other
+        # secret it once held came from a check or a preview it no longer runs.
+        unit = (FLEET / "systemd-fedora" / "cti-agent-checkin.service").read_text(encoding="utf-8")
+        got = {ln.split("=", 1)[1] for ln in unit.splitlines() if ln.startswith("ImportCredential=")}
+        self.assertEqual(got, {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+                               "CLIENT_ID", "CLIENT_SECRET", "TENANT_ID"})
+
+
 if __name__ == "__main__":
     unittest.main()
