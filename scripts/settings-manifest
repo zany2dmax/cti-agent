@@ -300,7 +300,11 @@ def program_texts():
     for d in (kit / "bin", kit / "lanes", kit / "share"):
         for p in sorted(d.iterdir()):
             if p.is_file():
-                out[p.name] = p.read_text(encoding="utf-8", errors="ignore")
+                # Comment lines are prose: "the code is in /opt/cti-agent" in a
+                # comment read as a call to the cti-agent wrapper, and gave
+                # the check-in's unit every secret that wrapper can read.
+                text = p.read_text(encoding="utf-8", errors="ignore")
+                out[p.name] = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     return out
 
 

@@ -92,7 +92,7 @@ What you owe the schedule instead is **checking it happened**:
 | VM scan report (weekly, on the timer's day: Monday unless `FLEET_VMSCAN_DAY` sets another; `fleet-timers --all` shows its next run) | `$FLEET_CODE/bin/fleet-journal -u cti-agent-vmscan.service --since today --no-pager` | Nothing today is normal on any other day. On its day (the LAST column of `fleet-timers --all` moved to today), no `[run-vmscan] done` line: post to the board. `[NO RESULT]` in the subject: a scheduled scan had not finished, so the report day may be too early - note it, and the second week running, tell the operator. A `Not run this week:` line names the part that could not run |
 | Patch Tuesday sent (from the Thursday after Patch Tuesday) | `fleet-db was-sent <YYYY-MM> patchtuesday` | Run by hand for now, so nothing fails loudly if it is forgotten. Not sent: remind the operator once, naming the month (CHEATSHEET.md section 7a) |
 | Timers still enabled | `$FLEET_CODE/bin/fleet-timers --all` | A disabled timer is silent forever. Tell the operator - except a lane `fleet-timers` lists under "Off on purpose" (this box does not run it), `cti-agent-patchtuesday.timer`, which is off on purpose for now, and `cti-agent-vmscan.timer` if the operator has not turned it on yet (if disabled, ask once whether that is still intended) |
-| Credentials still work (once a day, and after a login failure in a journal) | `$FLEET_CODE/bin/cti-mailer --check`, `cti-jira --check`, `cti-appreport --check`, `cti-domains --check`, `cti-vmscan --check`: each exactly that, nothing after `--check`. Skip the ones `fleet-timers` lists under "Skip their credential checks" | Exit 1 means that lane's next run will fail or be degraded. One escalation naming the lane and the check's last line, then track it on the board until it passes |
+| Credentials still work (once a day) | Read `$FLEET_HOME/reports/credcheck.txt`: `cti-agent-credcheck.timer` writes it at 05:30, one line per check (lane, command, `ok` or `FAIL`, the check's last line), for the lanes this box runs. You do not run the checks: their secrets are not in your unit | A `FAIL` line means that lane's next run will fail or be degraded: one escalation naming the lane and the line, then track it on the board until it reads `ok`. No report, or one not from today: one board line (the credcheck timer is off or failing), and say so in the verdict |
 | Scout is finding things | `fleet-db recent` | A feed dead for over a day is a blind spot that looks like good news |
 
 **You cannot re-run the pipeline yourself** - no runner is on your grant,
@@ -247,7 +247,7 @@ against what the guard counted, so report what you did, not what you meant to.
   something back), `failed`, `off` (disabled on purpose, like patchtuesday, or
   listed by `fleet-timers` as off on purpose: those must be `off`), or
   `unknown` (you could not tell). `note` is optional, one short phrase.
-- `credential_checks`: `ran` (this beat), `already_today`, or `skipped`.
+- `credential_checks`: `ran` (you read today's report this beat), `already_today`, or `skipped` (no report from today).
 - `escalations`: one `{"subject": "...", "why": "..."}` per `cti-alert
   --for-real` you ran this beat; `[]` if none. `status` is `escalated` exactly
   when this is not empty.

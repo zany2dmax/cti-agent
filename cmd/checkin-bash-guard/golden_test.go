@@ -6,6 +6,12 @@ package main
 // and out of each kind of quote, odd hook input) and for nine sequences of
 // calls in one beat against the per-beat counter. The Go guard must give the
 // same answer to every one.
+//
+// One deliberate change since: the ten cases that call cti-mailer, cti-jira,
+// cti-appreport, cti-domains or cti-vmscan expect a refusal ("not a command a
+// beat may run") since 2026-11-25, when the credential checks moved to their
+// own unit (run-credcheck) and off the beat's grant. Every other case is the
+// Python's answer, unchanged.
 
 import (
 	"bytes"

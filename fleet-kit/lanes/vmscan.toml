@@ -7,10 +7,9 @@ summary = "The weekly VM scan report: which scheduled scans ran, and which netwo
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["VMSCAN_", "NETNOTES_", "NETRULES_", "SUBNETS_", "JIRA_VMSCAN_"]
 
-# The beat checks that the Graph and scanner logins still work.
-beat_grants = [
-  "Bash(cti-vmscan --check)",
-]
+# Run daily by run-credcheck (the checkin lane's credcheck unit), which
+# writes the result where the beat reads it: would this lane get past its logins?
+credential_checks = ["cti-vmscan"]
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

@@ -70,6 +70,12 @@ section: 10. MAILBOX CLEANUP WINDOW
 readers: cti-agent cti-alert cti-appscan cti-audit cti-jira cti-mailbox cti-mailer cti-supplier cti-vmscan
 file: core
 
+key: CHECKIN_CREDCHECK_TIMEOUT
+section: 7. CLAUDE CODE - the heartbeat lane only
+readers: run-credcheck
+code-default: 120
+file: checkin
+
 key: CHECKIN_MAX_ALERTS
 section: 7. CLAUDE CODE - the heartbeat lane only
 readers: checkin-bash-guard
@@ -325,7 +331,7 @@ file: checkin
 
 key: FLEET_CODE
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-onboard cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-journal fleet-mode.sh fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-onboard cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-settings cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-config fleet-journal fleet-mode.sh fleet-owners fleet-timers installer model-lane.sh run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
 key: FLEET_DEV_EMAIL
@@ -345,13 +351,13 @@ file: core
 
 key: FLEET_ENV
 section: 3. PATHS - re-check these on every box
-readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-secrets cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan fleet-config fleet-owners installer model-lane.sh run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 default-conflict: '/etc/cti-agent/fleet.env' | 'fleet.env'
 file: core
 
 key: FLEET_FEEDS
 section: 3. PATHS - re-check these on every box
-readers: cti-agent cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan installer run-checkin run-digest
+readers: cti-agent cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-domains cti-enrich cti-falcon cti-jira cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan installer run-checkin run-digest
 file: core
 
 key: FLEET_GROUP
@@ -361,12 +367,12 @@ file: core
 
 key: FLEET_HOME
 section: 3. PATHS - re-check these on every box
-readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-check cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-lock cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appowners run-appscan run-checkin run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
+readers: checkin-bash-guard cti-agent cti-agent-alert@.service cti-agent-appowners.service cti-agent-appscan.service cti-agent-checkin.service cti-agent-credcheck.service cti-agent-digest.service cti-agent-domains.service cti-agent-mailbox.service cti-agent-patchtuesday.service cti-agent-scout.service cti-agent-supplier.service cti-agent-vmscan.service cti-agent-weekly.service cti-alert cti-appreport cti-appscan cti-audit cti-brief cti-budget cti-checkin-check cti-checkin-verdict cti-domains cti-enrich cti-falcon cti-jira cti-kev cti-lock cti-mailbox cti-mailer cti-patchtuesday cti-podprobe cti-scout cti-supplier cti-triage cti-vmscan dev-run fleet-board fleet-db fleet-mode.sh fleet-owners fleet-trace installer model-lane.sh run-appowners run-appscan run-checkin run-credcheck run-digest run-domains run-mailbox-cleanup run-patchtuesday run-supplier run-vmscan
 file: core
 
 key: FLEET_LANES
 section: 4. RECIPIENTS AND THE SEND GATE - required
-readers: cti-agent-onboard cti-checkin-check cti-checkin-verdict fleet-config fleet-timers installer
+readers: cti-agent-onboard cti-checkin-check cti-checkin-verdict fleet-config fleet-timers installer run-credcheck
 file: core
 
 key: FLEET_LOCK_WAIT_SECONDS
@@ -870,8 +876,7 @@ file: digest
 key: TRIAGE_ENABLED
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-brief cti-triage run-digest
-file: core
-file-why: wanted digest, also read by the mailbox lane(s)
+file: digest
 
 key: TRIAGE_JUDGE_INSTRUCTIONS
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -886,14 +891,12 @@ file: digest
 key: TRIAGE_MAX_PER_RUN
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-triage run-digest
-file: core
-file-why: wanted digest, also read by the mailbox lane(s)
+file: digest
 
 key: TRIAGE_MODEL
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-triage installer
-file: core
-file-why: wanted digest, also read by the mailbox lane(s)
+file: digest
 
 key: TRIAGE_READER_INSTRUCTIONS
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -903,8 +906,7 @@ file: digest
 key: TRIAGE_SENDERS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent cti-triage run-digest
-file: core
-file-why: wanted digest, also read by the mailbox lane(s)
+file: digest
 
 key: VMSCAN_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required

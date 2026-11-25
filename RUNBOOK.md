@@ -510,6 +510,14 @@ the next.
    sudo systemctl enable --now cti-agent-checkin.timer
    ```
 
+   The next install turns on `cti-agent-credcheck.timer` with it: the daily
+   credential checks, whose report the heartbeat reads (it doesn't run them
+   itself). To have one today:
+
+   ```bash
+   sudo systemctl enable --now cti-agent-credcheck.timer
+   ```
+
 5. **Trim `/etc/cti-agent/feeds.txt` to vendors you run, then:**
 
    ```bash
@@ -567,6 +575,7 @@ The rest of the lanes, with the gate before each, are in the table below.
 | 2 | `cti-agent-weekly.timer` | the threat-intel Monday roll-up | one daily digest delivered successfully |
 | 3 | `cti-agent-scout.timer` | vendor advisory sweep | the digest is stable |
 | 4 | `cti-agent-checkin.timer` | orchestrator heartbeat | Claude Code installed, budget ceilings set |
+| 4a | `cti-agent-credcheck.timer` | the credential checks, daily 05:30; the heartbeat reads its report | none: read-only. The installer turns it on with the heartbeat's timer |
 | 5 | `cti-agent-patchtuesday.timer` | monthly synopsis | a `--month` replay against an email you already sent. **Leave it disabled for now** and run the lane by hand ([section 11](#11-the-monthly-patch-tuesday-lane)) |
 | 6 | `cti-agent-mailbox.timer` | mailbox cleanup | [section 10](#10-rolling-out-mailbox-cleanup) — several dry runs |
 | 7 | `cti-agent-appscan.timer` | weekly application-security report | `WAS_TO` **and** `WAS_ALLOW_TO` both set, and one `--dry-run` whose rendered HTML you have opened |

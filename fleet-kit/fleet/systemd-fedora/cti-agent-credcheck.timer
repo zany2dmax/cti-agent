@@ -1,0 +1,17 @@
+[Unit]
+Description=CTI credential checks, daily 05:30
+
+[Timer]
+# Before the 06:00 digest, so a login that lapsed overnight is in the report
+# the first check-in of the day reads, and the operator hears about it before
+# the morning's lanes fail on it. The installer turns this on with the
+# check-in's timer: the check-in no longer runs the checks itself.
+OnCalendar=*-*-* 05:30:00
+AccuracySec=1min
+# A missed day is caught up on boot: the check-in otherwise reads a report
+# that is a day old, and says so.
+Persistent=true
+Unit=cti-agent-credcheck.service
+
+[Install]
+WantedBy=timers.target

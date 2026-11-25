@@ -8,6 +8,8 @@ summary = "The orchestrator's heartbeat: one /checkin beat of the Claude Code ag
 setting_prefixes = ["CHECKIN_", "FLEET_BUDGET_"]
 # The check-in runs every lane's credential check, so it loads every lane's file.
 all_settings = true
+# The fleet-wide logins, checked daily by run-credcheck with each lane's own.
+credential_checks = ["cti-mailer", "cti-jira"]
 
 # What the beat may run (run-checkin's ALLOWED_TOOLS): the fleet-wide tools.
 # Bash(x) is $FLEET_CODE/bin/x, Read(d/**) is $FLEET_HOME/d. Each lane
@@ -29,8 +31,6 @@ beat_grants = [
   "Bash(fleet-db vacuum:*)",
   "Bash(cti-budget status:*)",
   "Bash(cti-kev:*)",
-  "Bash(cti-mailer --check)",
-  "Bash(cti-jira --check)",
   "Bash(fleet-timers:*)",
   "Bash(cti-alert:*)",
   "Bash(fleet-journal:*)",
@@ -60,3 +60,17 @@ description = "CTI orchestrator heartbeat every 2 hours"
 on_boot = "5min"
 on_unit_active = "2h"
 persistent = false
+
+# The credential checks the check-in reads: its own unit, so their secrets are
+# not in the beat's (run-credcheck). Read-only; writes reports/credcheck.txt.
+[[unit]]
+name = "credcheck"
+description = "CTI credential checks (would each lane get past its logins?)"
+exec = "/opt/cti-agent/bin/run-credcheck"
+timeout = 900
+nice = 15
+
+[unit.timer]
+description = "CTI credential checks, daily 05:30"
+on_calendar = "*-*-* 05:30:00"
+persistent = true

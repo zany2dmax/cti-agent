@@ -1,0 +1,62 @@
+.TH RUN-CREDCHECK 1 "2026-11-25" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+run-credcheck \- would each lane get past its logins? (the check-in reads the answer)
+.SH SYNOPSIS
+.B run\-credcheck
+.SH DESCRIPTION
+Runs the credential check of every lane this box runs
+.RB ( FLEET_LANES ,
+from
+.IR $FLEET_CODE/share/lanes.list ):
+the fleet-wide
+.B cti\-mailer \-\-check
+and
+.BR "cti\-jira \-\-check" ,
+and each lane's own, such as
+.BR "cti\-vmscan \-\-check" .
+Each makes one or two read-only calls and writes nothing. It writes one line
+per check to
+.IR $FLEET_HOME/reports/credcheck.txt :
+.PP
+.nf
+lane<TAB>command<TAB>ok|FAIL<TAB>the check's last line
+.fi
+.PP
+The check-in reads that file instead of running the checks itself, so the
+lanes' secrets are in this unit
+.RB ( cti\-agent\-credcheck.service ),
+not in the unit that reads untrusted mail and drives a model.
+.PP
+A line that contains the value of any credential this unit was given is
+withheld whole. The checks print names and counts, never values; this is the
+net under that. A lane list naming a command this runner does not know is
+refused for that line.
+.PP
+.B cti\-agent\-credcheck.timer
+runs it daily at 05:30, before the digest. The installer turns the timer on
+with the check-in's.
+.SH OPTIONS
+None: it reads the lanes in use from
+.B FLEET_LANES
+and the checks from the lane list.
+.SH ENVIRONMENT
+.TP
+.B FLEET_LANES
+The lanes this box runs; unset, every lane.
+.TP
+.B CHECKIN_CREDCHECK_TIMEOUT
+Seconds each check may take before it is reported as timed out. Default 120.
+.SH EXAMPLES
+.nf
+sudo cti\-agent run\-credcheck
+cat /var/lib/cti\-agent/reports/credcheck.txt
+.fi
+.SH EXIT STATUS
+0 once the report is written, whatever the checks found: a failed check is
+the check-in's to escalate once, not a failed unit that alerts every day. 1
+when the lane list is missing, 2 for a usage error.
+.SH SEE ALSO
+.BR run\-checkin (1),
+.BR cti\-mailer (1),
+.BR cti\-jira (1),
+.BR fleet\-timers (1)

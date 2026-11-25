@@ -421,10 +421,6 @@ func polTimers(a []string) string {
 	return ""
 }
 
-// The credential checks: `--check` and nothing else, so no flag that sends,
-// writes or files can ride along.
-var polCheck = exactly("--check")
-
 var policy = map[string]func([]string) string{
 	"fleet-board":      polBoard,
 	"fleet-db":         polDB,
@@ -435,11 +431,8 @@ var policy = map[string]func([]string) string{
 	"cti-mailbox":      exactly("--dry-run"),
 	"fleet-journal":    polJournal,
 	"fleet-timers":     polTimers,
-	"cti-mailer":       polCheck,
-	"cti-jira":         polCheck,
-	"cti-appreport":    polCheck,
-	"cti-domains":      polCheck,
-	"cti-vmscan":       polCheck,
+	// Not the credential checks (cti-mailer --check and each lane's): they
+	// run in cti-agent-credcheck, and the beat reads reports/credcheck.txt.
 }
 
 // ── per-beat limits (Scenario-224) ─────────────────────────────────────────

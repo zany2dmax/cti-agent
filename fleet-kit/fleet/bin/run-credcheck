@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# run-credcheck - would the next run of each lane get past its logins?
+#
+# Runs every credential check of the lanes this box runs (FLEET_LANES, from
+# $FLEET_CODE/share/lanes.list: the fleet-wide cti-mailer and cti-jira, and
+# each lane's own, such as cti-vmscan --check), and writes one line per check
+# to $FLEET_HOME/reports/credcheck.txt for the check-in to read:
+#
+#   lane<TAB>command<TAB>ok|FAIL<TAB>the check's last line
+#
+# WHY A UNIT OF ITS OWN. The check-in used to run these itself, which put every
+# lane's secrets in the unit that reads untrusted mail and drives a model -
+# for checks that need no model. Here they run with the lanes' credentials
+# (cti-agent-credcheck.service imports what these commands read) and the beat
+# only reads the result.
+#
+# A check's last line is its own summary ("OK: authenticated as ...", or why it
+# failed). A line that contains the value of any credential this unit was
+# given is withheld, whole: the checks are written to print names and counts,
+# never values, and this is the net under that.
+#
+# Read-only: each check makes one or two read-only calls and writes nothing;
+# this writes only the report (0600, atomically). It exits 0 when it has
+# written the report, whatever the checks found: a failed check is the
+# check-in's to escalate once, not a failed unit that mails every day.
+set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+if [ $# -ne 0 ]; then
+  echo "usage: run-credcheck" >&2
+  exit 2
+fi
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+# See run-digest: fleet.env must not overwrite the layout the unit injected.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+for _f in ${FLEET_ENV_FILES:-}; do
+  # shellcheck source=/dev/null
+  if [ -f "$_f" ]; then . "$_f"; fi
+done
+set +a
+# Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
+fleet_secrets_from_credentials
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+export FLEET_HOME FLEET_CODE
+
+# The checks this runs, by path: a lane list naming any other command is
+# refused, and scripts/settings-manifest grants this unit the credentials
+# these read from these paths. A test keeps it equal to the lanes'
+# credential_checks.
+CHECKS=(
+  "$FLEET_CODE/bin/cti-mailer"
+  "$FLEET_CODE/bin/cti-jira"
+  "$FLEET_CODE/bin/cti-appreport"
+  "$FLEET_CODE/bin/cti-domains"
+  "$FLEET_CODE/bin/cti-vmscan"
+)
+known_check() {
+  local k
+  for k in ${CHECKS[@]+"${CHECKS[@]}"}; do [ "$k" = "$FLEET_CODE/bin/$1" ] && return 0; done
+  return 1
+}
+
+LIST="$FLEET_CODE/share/lanes.list"
+OUT="$FLEET_HOME/reports/credcheck.txt"
+TIMEOUT="${CHECKIN_CREDCHECK_TIMEOUT:-120}"
+[ -r "$LIST" ] || { echo "run-credcheck: no lane list at $LIST" >&2; exit 1; }
+mkdir -p "$FLEET_HOME/reports"
+
+lanes="${FLEET_LANES:-}"
+lanes="${lanes// /}"
+in_use() {
+  [ -z "$lanes" ] && return 0
+  case ",$lanes," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+
+# withhold LINE - LINE, or a notice in its place when it holds a credential's
+# value. Values shorter than 8 characters are not compared (they would match
+# ordinary words); none of the fleet's secrets is that short.
+withhold() {
+  local line="$1" f v d="${CREDENTIALS_DIRECTORY:-}"
+  if [ -n "$d" ] && [ -d "$d" ]; then
+    for f in "$d"/*; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      v="$(head -c 65536 "$f")"
+      if [ "${#v}" -ge 8 ] && [[ "$line" == *"$v"* ]]; then
+        printf '%s' "[line withheld: it contained a credential's value]"
+        return
+      fi
+    done
+  fi
+  printf '%s' "$line"
+}
+
+tmp="$(mktemp "$FLEET_HOME/reports/.credcheck.XXXXXX")"
+trap 'rm -f "$tmp" "$tmp.out"' EXIT
+{
+  printf '# run-credcheck %s - lane, command, ok or FAIL, the check'"'"'s last line\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  while IFS=$'\t' read -r lane _units checks _rest; do
+    case "$lane" in ''|'#'*) continue ;; esac
+    in_use "$lane" || continue
+    [ -n "$checks" ] && [ "$checks" != "-" ] || continue
+    for c in ${checks//,/ }; do
+      case "$c" in *[!a-z0-9-]*) continue ;; esac
+      if ! known_check "$c"; then
+        printf '%s\t%s\tFAIL\t%s\n' "$lane" "$c" "not one of run-credcheck's checks; not run"
+        continue
+      fi
+      rc=0
+      timeout "$TIMEOUT" "$FLEET_CODE/bin/$c" --check > "$tmp.out" 2>&1 < /dev/null || rc=$?
+      last="$(grep -v '^[[:space:]]*$' "$tmp.out" | tail -1 | tr -d '\r' | cut -c1-300 || true)"
+      if [ "$rc" -eq 0 ]; then state=ok; else state="FAIL"; fi
+      [ "$rc" -eq 124 ] && last="timed out after ${TIMEOUT}s"
+      printf '%s\t%s\t%s\t%s\n' "$lane" "$c" "$state" "$(withhold "$last")"
+    done
+  done < "$LIST"
+} > "$tmp"
+chmod 0600 "$tmp"
+mv -f "$tmp" "$OUT"
+fails="$(grep -c "$(printf '\tFAIL\t')" "$OUT" || true)"
+echo "run-credcheck: $(($(grep -vc '^#' "$OUT" || true))) check(s), ${fails:-0} failed - $OUT"

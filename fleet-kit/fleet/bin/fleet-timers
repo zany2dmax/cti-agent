@@ -56,8 +56,7 @@ rc=0
 "$SYSTEMCTL" "${args[@]}" -- "${patterns[@]}" || rc=$?
 
 # The lanes this box does not run (FLEET_LANES), said after the list so the
-# check-in does not report their timers as disabled by mistake, or run their
-# credential checks. From the installed lane list; nothing when FLEET_LANES
+# check-in does not report their timers as disabled by mistake. From the installed lane list; nothing when FLEET_LANES
 # is unset (every lane runs) or the list is missing.
 lanes="${FLEET_LANES:-}"
 # The code path always ends in a slash here: scripts/settings-manifest reads
@@ -70,19 +69,15 @@ if [ -n "$lanes" ] && [ -r "$list" ]; then
   case "$lanes" in
     *[!a-z0-9,\ -]*) echo "fleet-timers: FLEET_LANES has characters a lane name does not; not read" ;;
     *)
-      off="" skip=""
-      while IFS=$'\t' read -r lane _units checks _rest; do
+      off=""
+      while IFS=$'\t' read -r lane _rest; do
         case "$lane" in ''|'#'*) continue ;; esac
         case ",${lanes// /}," in *",$lane,"*) continue ;; esac
         off="$off $lane"
-        if [ -n "$checks" ] && [ "$checks" != "-" ]; then
-          for c in ${checks//,/ }; do skip="$skip $c --check"; done
-        fi
       done < "$list"
       if [ -n "$off" ]; then
         echo
         echo "Off on purpose (not in FLEET_LANES):$off. Their timers are off and need no report; their verdict state is off."
-        echo "Skip their credential checks:${skip:- none}."
       fi ;;
   esac
 fi

@@ -535,7 +535,7 @@ fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief
 fleet-kit/fleet/lanes/         feeds.txt, the feed list cti-scout polls (no code)
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-appscan,
                                run-appowners, run-vmscan, run-supplier, run-domains,
-                               run-mailbox-cleanup, fleet-board, fleet-db, fleet-owners,
+                               run-mailbox-cleanup, run-credcheck, fleet-board, fleet-db, fleet-owners,
                                fleet-journal, fleet-timers, fleet-config
 fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shares),
                                fleet-mode.sh, the CLI's usage and tab completion

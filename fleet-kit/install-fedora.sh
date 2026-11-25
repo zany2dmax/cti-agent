@@ -1748,6 +1748,16 @@ if [ -n "$LANES_IN_USE" ] && command -v systemctl >/dev/null; then
   done
 fi
 
+# The check-in reads the credential checks' report instead of running them
+# (run-credcheck, its own unit, so their secrets are not in the beat's). A
+# check-in without its credcheck timer would read no report, so the one turns
+# the other on. Read-only: it writes only reports/credcheck.txt.
+if command -v systemctl >/dev/null && [ "$(unit_state cti-agent-checkin.timer)" = enabled ] \
+    && [ "$(unit_state cti-agent-credcheck.timer)" != enabled ] && lane_in_use checkin; then
+  info "cti-agent-credcheck.timer: turning on with the check-in's timer (the check-in reads its report)"
+  run systemctl enable --now cti-agent-credcheck.timer
+fi
+
 if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
   bold "Timer status"
   _enabled_any=0

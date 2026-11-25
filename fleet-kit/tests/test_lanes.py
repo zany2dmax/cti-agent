@@ -4505,12 +4505,11 @@ fi
 
 
 class TestHeartbeatCredentialChecks(unittest.TestCase):
-    """The beat may run five credential checks, and nothing else of those
-    commands. They are why it is not granted the lanes' --dry-run, which prints
-    recipients and inbound subjects, spends the Qualys budget and writes state
-    the real runs read. cti-mailer is the recipient gate every send goes
-    through: one extra argument after --check (--to, --lane) would make the
-    grant a way to address mail."""
+    """The beat no longer runs the credential checks: they put every lane's
+    secrets in its unit, the one that reads untrusted mail. run-credcheck runs
+    them in cti-agent-credcheck, and the beat reads reports/credcheck.txt
+    (Read(reports/**) on its grant). None of the five is granted, the guard
+    refuses each, and the skill reads the report."""
 
     CHECKS = ("cti-mailer", "cti-jira", "cti-appreport", "cti-domains", "cti-vmscan")
     BIN = "/opt/cti-agent/bin/"
@@ -4522,28 +4521,24 @@ class TestHeartbeatCredentialChecks(unittest.TestCase):
         return subprocess.run([str(guard)], input=payload,
                               capture_output=True, text=True, check=False, env=env)
 
-    def test_each_check_is_allowed_exactly(self):
+    def test_the_guard_refuses_each_check(self):
         for c in self.CHECKS:
             with self.subTest(cmd=c):
                 r = self.guard(self.BIN + c + " --check")
-                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.returncode, 2, f"{c} --check was let through")
+                self.assertIn("is not a command a beat may run", r.stderr)
 
-    def test_nothing_rides_along_with_a_check(self):
-        for cmd in ("cti-mailer --check --to someone@example.com", "cti-mailer --lane was --for-real",
-                    "cti-mailer", "cti-jira --check --for-real", "cti-jira --test-ticket --for-real",
-                    "cti-appreport --app-id 1", "cti-domains --check --out /tmp/x",
-                    "cti-domains", "cti-vmscan --commit-seen x.json", "cti-vmscan --check --since 1h"):
-            with self.subTest(cmd=cmd):
-                r = self.guard(self.BIN + cmd)
-                self.assertEqual(r.returncode, 2, f"{cmd} was let through")
-
-    def test_the_grant_is_the_exact_command(self):
+    def test_run_checkin_grants_none_of_them(self):
         src = (KIT / "fleet" / "bin" / "run-checkin").read_text(encoding="utf-8")
         for c in self.CHECKS:
             with self.subTest(cmd=c):
-                self.assertIn(f"Bash($FLEET_CODE/bin/{c} --check)", src)
-                self.assertNotIn(f"Bash($FLEET_CODE/bin/{c}:*)", src)
-                self.assertNotIn(f"Bash($FLEET_CODE/bin/{c} --check:*)", src)
+                self.assertNotIn(f"Bash($FLEET_CODE/bin/{c}", src)
+
+    def test_the_skill_reads_the_report(self):
+        skill = (KIT / "fleet" / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
+        row = next(l for l in skill.splitlines() if l.startswith("| Credentials still work"))
+        self.assertIn("reports/credcheck.txt", row)
+        self.assertNotIn("--check`", row.split("|")[2], "the skill still tells the beat to run a check")
 
     def test_the_owner_lane_handle_can_be_addressed(self):
         r = self.guard(self.BIN + 'fleet-board say @appowners INFO "held scan tracked"')
@@ -4758,7 +4753,7 @@ class AuditTrailUnits(unittest.TestCase):
     UNITS = KIT / "fleet" / "systemd-fedora"
     WITH = ("alert@", "appowners", "appscan", "digest", "domains", "mailbox",
             "patchtuesday", "supplier", "vmscan", "weekly")
-    WITHOUT = ("checkin", "scout")
+    WITHOUT = ("checkin", "credcheck", "scout")
 
     def test_the_units_that_change_things_get_the_log_directory(self):
         for name in self.WITH:

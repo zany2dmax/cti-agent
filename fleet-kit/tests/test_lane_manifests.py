@@ -147,13 +147,16 @@ class TheBeatsGrantIsDeclared(unittest.TestCase):
         self.assertEqual(m.grant_problems(m.load_all()), [])
         self.assertGreaterEqual(len(m.actual_grants()), 20)
 
-    def test_the_skills_credential_checks_are_the_declared_ones(self):
+    def test_run_credcheck_knows_exactly_the_declared_checks(self):
+        # Its CHECKS list is what the settings generator grants its unit from,
+        # and what it refuses anything outside of.
         m = module()
-        checks = sorted(g[len("Bash("):-len(" --check)")] for g in m.declared_grants(m.load_all()) if g.endswith(" --check)"))
-        skill = (REPO / "fleet-kit" / "fleet" / "skills" / "checkin" / "SKILL.md").read_text(encoding="utf-8")
-        row = next(line for line in skill.splitlines() if line.startswith("| Credentials still work"))
-        named = sorted(set(re.findall(r"`(?:\$FLEET_CODE/bin/)?([a-z-]+) --check`", row)))
-        self.assertEqual(named, checks, "the checkin skill's credential checks differ from the declared grants")
+        declared = sorted({c for lane in m.load_all().values() for c in lane.get("credential_checks", [])})
+        src = (REPO / "fleet-kit" / "fleet" / "bin" / "run-credcheck").read_text(encoding="utf-8")
+        block = src[src.index("CHECKS=("):src.index(")", src.index("CHECKS=("))]
+        listed = sorted(re.findall(r'"\$FLEET_CODE/bin/([a-z-]+)"', block))
+        self.assertEqual(listed, declared)
+        self.assertFalse([g for g in m.declared_grants(m.load_all()) if "--check" in g], "a --check is still a beat grant")
 
     def scratch(self, edit):
         d = pathlib.Path(tempfile.mkdtemp())
@@ -171,11 +174,11 @@ class TheBeatsGrantIsDeclared(unittest.TestCase):
                                     "(add it to that lane's beat_grants)"])
 
     def test_a_widened_grant_is_caught(self):
-        # --check becoming --check:* would let anything ride along after it.
-        _, problems = self.scratch(lambda t: t.replace("cti-vmscan --check)", "cti-vmscan --check:*)"))
-        self.assertIn("run-checkin grants Bash(cti-vmscan --check:*), which no lane manifest declares "
+        # An exact grant becoming a prefix (:*) would let anything ride along.
+        _, problems = self.scratch(lambda t: t.replace("cti-mailbox --dry-run)", "cti-mailbox --dry-run:*)"))
+        self.assertIn("run-checkin grants Bash(cti-mailbox --dry-run:*), which no lane manifest declares "
                       "(add it to that lane's beat_grants)", problems)
-        self.assertIn("vmscan.toml declares the beat grant Bash(cti-vmscan --check), which run-checkin does not give", problems)
+        self.assertIn("mailbox.toml declares the beat grant Bash(cti-mailbox --dry-run), which run-checkin does not give", problems)
 
     def test_a_new_read_directory_is_caught(self):
         _, problems = self.scratch(lambda t: t.replace("for d in reports logs archive; do", "for d in reports logs archive state; do"))

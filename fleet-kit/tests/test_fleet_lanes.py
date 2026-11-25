@@ -103,12 +103,11 @@ class FleetTimers(unittest.TestCase):
         r = self.run_it(None)
         self.assertEqual((r.returncode, r.stdout), (0, "TIMERS\n"))
 
-    def test_the_off_lanes_and_their_checks_are_named(self):
+    def test_the_off_lanes_are_named(self):
         r = self.run_it("checkin,digest,scout,vmscan")
         self.assertEqual(r.returncode, 0)
         self.assertIn("Off on purpose (not in FLEET_LANES): patchtuesday appscan appowners domains supplier mailbox.", r.stdout)
-        self.assertIn("Skip their credential checks: cti-appreport --check cti-domains --check.", r.stdout)
-        self.assertNotIn("cti-vmscan --check", r.stdout)
+        self.assertNotIn("--check", r.stdout, "the beat runs no credential check any more")
 
     def test_a_value_with_odd_characters_is_not_read(self):
         r = self.run_it("digest;rm -rf /")

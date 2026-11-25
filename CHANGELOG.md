@@ -39,6 +39,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The credential checks run in their own unit, not the check-in's.**
+  `run-credcheck` (`cti-agent-credcheck.timer`, daily 05:30) runs every
+  in-use lane's `--check`, and writes one line per check to
+  `reports/credcheck.txt`, which the check-in reads. The beat used to run the
+  five checks itself, which put every lane's secrets in the unit that reads
+  untrusted mail. Now:
+  - those grants and their bash-guard rows are gone
+  - the checkin unit imports 13 secrets, not 21
+  - the checks' secrets are in `cti-agent-credcheck.service`
+
+  A report line that contains a stored credential's value is withheld
+  whole. The checks each lane has are a new manifest field,
+  `credential_checks`. The installer turns the credcheck timer on with the
+  check-in's. The guard's golden test now expects refusals for the ten calls
+  to those five commands; every other case is unchanged. Tested in
+  `fleet-kit/tests/test_credcheck.py`.
+
 - **`FLEET_LANES`: run only some lanes.** List the lanes a box runs,
   comma-separated, by their manifest names. Unset still means every lane.
   For each lane left out:
@@ -95,6 +112,16 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   Proofpoint or CrowdStrike now runs every lane cleanly.
 
 ### Fixed
+
+- **A comment is not a call.** `scripts/settings-manifest` read
+  `/opt/cti-agent` in a runner's comment as a call to the `cti-agent`
+  wrapper, and granted that runner every secret the wrapper reads. That's how
+  `run-checkin` had Falcon's keys, and `run-mailbox-cleanup` the Claude
+  tokens and Falcon's. Shell and Python comment lines no longer count. One
+  result: `TRIAGE_ENABLED`, `TRIAGE_MAX_PER_RUN`, `TRIAGE_MODEL` and
+  `TRIAGE_SENDERS` now belong in `fleet.d/digest.env`, not `00-core.env`.
+  `fleet-config check` reports one left in core as in the wrong file. It's
+  still read there, so nothing breaks before you move it.
 
 - **The `fleet.d` example files are in git.** `.gitignore` ignores every
   `*.env` (to keep real settings out), so the generated

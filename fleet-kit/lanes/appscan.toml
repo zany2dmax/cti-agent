@@ -7,10 +7,9 @@ summary = "The weekly application-security report from the web app scanner's res
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["WAS_", "APPSCAN_"]
 
-# The beat checks that the scanner logins still work (run-checkin's grant).
-beat_grants = [
-  "Bash(cti-appreport --check)",
-]
+# Run daily by run-credcheck (the checkin lane's credcheck unit), which
+# writes the result where the beat reads it: would this lane get past its logins?
+credential_checks = ["cti-appreport"]
 
 # The orchestrator's lane table row (fleet-kit/fleet/CLAUDE.md, generated).
 [orchestrator]

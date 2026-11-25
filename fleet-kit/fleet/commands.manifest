@@ -483,6 +483,10 @@ flag: --month YYYY-MM | a past release: --dry-run replays it; --for-real needs F
 flag: --for-real | send the synopsis and mark it sent
 flag: --resend | with --for-real: send a release that was already sent
 
+command: run-credcheck
+about: Every in-use lane's credential check (--check), written to reports/credcheck.txt for the check-in
+runs: local
+
 command: run-supplier
 about: Supplier-request lane: judge each new supplier request, file a Kanban item for the critical or unsure ones, email one digest
 runs: effect
