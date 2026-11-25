@@ -1941,6 +1941,7 @@ fleet-kit/
 ├── bin/dev-run                    local runner: doctor/ingest/enrich/brief/send
 ├── bin/cti-agent-secrets          root tool: move secrets and logins into systemd credentials (status/import/set/remove)
 ├── bin/cti-agent-settings         root tool: split fleet.env into fleet.d/ core + one file per lane (status/split)
+├── bin/cti-agent-onboard          root tool: set up a box - its lanes (FLEET_LANES), their settings, their secrets
 ├── bin/org-pack                   find, check and apply the org pack (docs/org-pack.md); the installer runs it
 └── fleet/
     ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate

@@ -1,0 +1,90 @@
+.TH CTI-AGENT-ONBOARD 1 "2026-11-25" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-agent-onboard \- set up a box: which lanes it runs, their settings, their secrets
+.SH SYNOPSIS
+.B sudo cti\-agent\-onboard
+.BR \-\-dry\-run " | " \-\-for\-real
+.RB [ \-\-lanes
+.IR LANE ,...]
+.SH DESCRIPTION
+Run it after
+.BR install\-fedora.sh ,
+on a new box or when adding a lane. It asks three things, in order.
+.PP
+.B The lanes.
+Which lanes this box runs, by the names in
+.IR /opt/cti\-agent/share/lanes.list .
+The answer becomes
+.B FLEET_LANES
+(left unset when every lane is chosen). Enter keeps what is set.
+.PP
+.B The settings.
+Each setting a chosen lane's programs read that is still empty and is one to
+fill in: required in
+.IR settings.manifest ,
+or set (not commented out) in the lane's example in
+.IR /opt/cti\-agent/share/fleet.d.example/ .
+The example's comment is shown first; Enter leaves the setting as it is. A
+setting named for another lane (another lane's prefix) is not asked, even when
+a shared program can read it.
+.PP
+.B The secrets.
+Each secret the chosen lanes read
+.RI ( lane\-settings.list )
+that is not stored yet. The check-in's Claude credential is offered as one
+choice, since it needs exactly one. Yes runs
+.B cti\-agent\-secrets set
+.IR NAME ,
+which reads the value with no echo and stores it as a systemd credential:
+values never pass through this program. The list is what the programs could
+read, so it can name a secret a lane needs only with an option on; store only
+the ones this box uses.
+.PP
+Then it runs
+.B fleet\-config check
+and prints its result line.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Say what would be asked and written: the lanes, the empty settings, the
+secrets not stored. Asks nothing and writes nothing.
+.TP
+.B \-\-for\-real
+Ask, then write the settings and store the secrets. Root only.
+.TP
+.BI \-\-lanes " LANE,..."
+The lanes this box runs, comma-separated, instead of asking.
+.SH FILES
+It writes where the box keeps its settings: on a split box the
+.I /etc/cti\-agent/fleet.d/
+file each setting belongs in
+.RB ( file:
+in
+.IR settings.manifest ),
+else
+.IR /etc/cti\-agent/fleet.env .
+A setting's line is replaced, a commented-out one is uncommented, anything
+else is appended with the example's comment. Each file keeps its owner and
+mode (root:ctiagent 0640) and is replaced atomically. A value with a quote, a
+backslash, a $ or a newline is refused; one with a space is quoted.
+.SH EXAMPLES
+A new box that runs the digest, the scout feeds and the check-in only:
+.PP
+.nf
+sudo cti\-agent\-onboard \-\-dry\-run \-\-lanes checkin,digest,scout
+sudo cti\-agent\-onboard \-\-for\-real \-\-lanes checkin,digest,scout
+.fi
+.PP
+Adding a lane later: run it again with the lane added, then enable its timer
+as RUNBOOK section 9 says. Dropping one: run it again without the lane, then
+\fBsudo cti\-agent\-update \-\-for\-real\fR, which turns that lane's timer off.
+.SH EXIT STATUS
+0 when done (whatever
+.B fleet\-config check
+says), 1 when the fleet or its settings are not installed, 2 for a usage
+error or a name that is no lane.
+.SH SEE ALSO
+.BR cti\-agent\-secrets (1),
+.BR cti\-agent\-settings (1),
+.BR fleet\-config (1),
+.BR fleet\-timers (1)

@@ -111,6 +111,17 @@ key would otherwise be silently ignored. `exec` must run something under
   TOML: the installer, `fleet-timers` and `fleet-config`, which use it for
   `FLEET_LANES`. `internal/checkin/lanes_gen.go` also maps each unit to its
   lane, for the verdict.
+- **`fleet-kit/fleet/fleet.d.example/`**: `fleet.env.example` cut into the
+  files a split box keeps, one per lane plus `00-core.env`, each setting with
+  its comment. Secrets and logins are left out. `cti-agent-onboard` takes
+  each setting's comment and file from here, and `task lane:write` runs the
+  lane generator again after the settings one, because these follow
+  `settings.manifest`.
+- **`fleet-kit/fleet/lane-settings.list`** (written by
+  `scripts/settings-manifest`, not this): per lane, the settings and secrets
+  its programs read, for `cti-agent-onboard`. A setting named for another
+  lane (by its prefix) is left out of a lane's list, even when a shared
+  program can read it.
 - `cti-agent-alert@.service` is not a lane; it is the failure handler every
   unit names, and it stays hand-written.
 

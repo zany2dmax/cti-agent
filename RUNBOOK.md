@@ -449,6 +449,14 @@ sudo git -C "$D" log --oneline -1
 One primitive at a time. Each of these should run, and be read, before the next
 one is enabled.
 
+**Start with `sudo cti-agent-onboard --for-real`.** It asks which lanes the
+box runs, then each empty setting those lanes need (with the example's
+comment), then offers each secret they read that is not stored yet. It writes
+the answers where the box keeps its settings and ends with
+`fleet-config check`. `--dry-run` shows the same without asking or writing.
+In a fork, the `/onboard` Claude Code skill (`.claude/skills/onboard`) walks
+through it with you. See `cti-agent-onboard(1)`.
+
 **A box that does not run every lane** sets `FLEET_LANES` in
 `fleet.d/00-core.env`: the lanes it runs, comma-separated, by the names in
 `/opt/cti-agent/share/lanes.list`. The installer then:

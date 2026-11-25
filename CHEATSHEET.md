@@ -357,6 +357,8 @@ sudo cti-agent-secrets remove NAME              # go back: programs fall back to
 sudo cti-agent-settings status                  # step 3: is fleet.env split into fleet.d/ yet?
 sudo cti-agent-settings split --dry-run         # the plan, key names only; refuses while a secret is still in fleet.env
 sudo cti-agent-settings split --for-real        # write fleet.d/ (core + one file per lane), move fleet.env aside
+sudo cti-agent-onboard --dry-run                # which lanes run, which of their settings are empty, which secrets unstored
+sudo cti-agent-onboard --for-real               # choose the lanes (FLEET_LANES), fill their settings, store their secrets
 journalctl -u 'cti-manual-*' -n 50              # hand runs, once a secret is stored (see below)
 ```
 

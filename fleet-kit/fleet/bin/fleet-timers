@@ -71,7 +71,7 @@ if [ -n "$lanes" ] && [ -r "$list" ]; then
     *[!a-z0-9,\ -]*) echo "fleet-timers: FLEET_LANES has characters a lane name does not; not read" ;;
     *)
       off="" skip=""
-      while IFS=$'\t' read -r lane _units checks; do
+      while IFS=$'\t' read -r lane _units checks _rest; do
         case "$lane" in ''|'#'*) continue ;; esac
         case ",${lanes// /}," in *",$lane,"*) continue ;; esac
         off="$off $lane"

@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""cti-agent-onboard - set up a box: which lanes it runs, their settings, their secrets.
+
+    sudo cti-agent-onboard --dry-run              what it would ask and write; asks nothing
+    sudo cti-agent-onboard --for-real             ask, then write the settings and store the secrets
+    sudo cti-agent-onboard --for-real --lanes digest,scout
+
+Run it after install-fedora.sh, on a new box or when adding a lane. It asks:
+
+  1. Which lanes this box runs (FLEET_LANES). Enter keeps what is set, or all.
+  2. Each setting those lanes need that is still empty: the lines a lane's
+     example file (/opt/cti-agent/share/fleet.d.example) leaves uncommented.
+     The example's comment is shown first. Enter leaves a setting as it is.
+  3. Each secret those lanes' programs read (credentials.map) that is not
+     stored yet: yes runs `cti-agent-secrets set NAME`, which reads it with no
+     echo and stores it as a systemd credential. Values never pass through
+     this program.
+
+Then it runs `fleet-config check` and prints its result.
+
+It writes where the box keeps its settings: the fleet.d file each setting
+belongs in (settings.manifest's file:) on a split box, else fleet.env. A
+setting's existing line is replaced, a commented-out one is uncommented, and
+anything else is appended with the example's comment. Each file keeps its
+owner and mode (root:ctiagent 0640) and is replaced atomically. It never
+writes a secret into a file, never prints a value it did not just read from
+the operator, and refuses a value with a quote, a newline or a $ in it.
+
+Root only: it writes /etc. Not a fleet command (no cti-agent wrapper), so it
+is not in the command manifest; it has its own man page and completion.
+"""
+import argparse
+import os
+import pathlib
+import re
+import subprocess  # nosec B404
+import sys
+import tempfile
+
+CONF = pathlib.Path(os.environ.get("CTI_CONF_DIR", "/etc/cti-agent"))
+CODE = pathlib.Path(os.environ.get("FLEET_CODE") or "/opt/cti-agent/")
+STORE = pathlib.Path(os.environ.get("CTI_CREDSTORE", "/etc/credstore.encrypted"))
+SECRETS_TOOL = os.environ.get("CTI_AGENT_SECRETS", "/usr/local/sbin/cti-agent-secrets")
+KEY_LINE = re.compile(r"^(#?)\s?([A-Z][A-Z0-9_]{2,})=(.*)$")
+LANE_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
+SHOW_COMMENT = 12  # lines of a setting's comment shown before its prompt
+# The check-in needs exactly one of these (run-checkin refuses two): offered as one choice.
+MODEL_TOKENS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def lanes():
+    """[(lane, units, programs, summary)] from the installed lanes.list."""
+    out = []
+    for ln in (CODE / "share" / "lanes.list").read_text(encoding="utf-8").splitlines():
+        if not ln.strip() or ln.startswith("#"):
+            continue
+        f = ln.split("\t")
+        out.append((f[0], f[1].split(","), f[3].split(",") if len(f) > 4 else [], f[-1]))
+    return out
+
+
+def manifest():
+    """{key: {"file": "00-core.env" | "<lane>.env" | None, "is_secret": bool, "credential": bool}}."""
+    out, cur = {}, None
+    for line in (CODE / "settings.manifest").read_text(encoding="utf-8").splitlines():
+        field, _, value = line.partition(":")
+        field, value = field.strip(), value.strip()
+        if field == "key":
+            cur = out.setdefault(value, {"file": None, "is_secret": False, "credential": False})
+        elif cur is not None and field == "file":
+            cur["file"] = "00-core.env" if value == "core" else f"{value}.env"
+        elif cur is not None and field in ("secret", "credential") and value == "yes":
+            cur["is_secret" if field == "secret" else field] = True
+    return out
+
+
+def examples():
+    """{file: [(key, active, comment lines)]} from the installed examples."""
+    out = {}
+    d = CODE / "share" / "fleet.d.example"
+    for p in sorted(d.glob("*.env")):
+        items, comments = [], []
+        for raw in p.read_text(encoding="utf-8").splitlines()[4:]:  # past the header
+            m = KEY_LINE.match(raw.strip())
+            if m:
+                items.append((m.group(2), m.group(1) == "", comments))
+                comments = []
+            elif raw.startswith("#"):
+                comments.append(raw)
+            else:
+                comments = []
+        out[p.name] = items
+    return out
+
+
+def lane_needs():
+    """{lane: (settings, secrets)} from the installed lane-settings.list."""
+    out = {}
+    for ln in (CODE / "share" / "lane-settings.list").read_text(encoding="utf-8").splitlines():
+        if ln.strip() and not ln.startswith("#"):
+            lane, settings, secrets = (ln.split("\t") + ["-", "-"])[:3]
+            out[lane] = ([] if settings == "-" else settings.split(","), [] if secrets == "-" else secrets.split(","))
+    return out
+
+
+def required(man_path):
+    """{key: rule} for settings settings.manifest marks required."""
+    out, cur = {}, None
+    for line in man_path.read_text(encoding="utf-8").splitlines():
+        field, _, value = line.partition(":")
+        if field.strip() == "key":
+            cur = value.strip()
+        elif cur and field.strip() == "required":
+            out[cur] = value.strip()
+    return out
+
+
+def layout():
+    """("split", fleet.d) or ("single", fleet.env), or None before the installer has run."""
+    if (CONF / "fleet.d" / "00-core.env").is_file() and not (CONF / "fleet.env").is_file():
+        return "split", CONF / "fleet.d"
+    if (CONF / "fleet.env").is_file():
+        return "single", CONF / "fleet.env"
+    return None
+
+
+def settings_files(kind, where):
+    if kind == "single":
+        return [where]
+    return [where / "00-core.env"] + sorted(p for p in where.glob("*.env") if p.name != "00-core.env")
+
+
+def unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        return v[1:-1]
+    return v
+
+
+def current(kind, where):
+    """{key: value} as the units would read them: later files and lines win."""
+    vals = {}
+    for p in settings_files(kind, where):
+        if p.is_file():
+            for raw in p.read_text(encoding="utf-8", errors="replace").splitlines():
+                m = KEY_LINE.match(raw.strip())
+                if m and m.group(1) == "":
+                    vals[m.group(2)] = unquote(m.group(3))
+    return vals
+
+
+def target(kind, where, key, man):
+    if kind == "single":
+        return where
+    return where / (man.get(key, {}).get("file") or "00-core.env")
+
+
+def render_value(v):
+    if any(c in v for c in "\"'$`\\\n\r"):
+        raise ValueError("a value may not hold a quote, a backslash, a $ or a newline")
+    return f'"{v}"' if re.search(r"\s", v) else v
+
+
+def set_line(text, key, value, comment):
+    """text with KEY set to value: its first active line replaced, else its
+    first commented-out line, else appended with comment."""
+    lines = text.splitlines()
+    for active in (True, False):
+        for i, raw in enumerate(lines):
+            m = KEY_LINE.match(raw.strip())
+            if m and m.group(2) == key and (m.group(1) == "") == active:
+                lines[i] = f"{key}={value}"
+                return "\n".join(lines) + "\n"
+    block = ([""] if lines and lines[-1].strip() else []) + comment + [f"{key}={value}"]
+    return "\n".join(lines + block) + "\n"
+
+
+def write_file(path, text, gid):
+    """Replace path atomically, keeping its owner and mode (0640 root:ctiagent for a new one)."""
+    st = path.stat() if path.exists() else None
+    fd, tmp = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, (st.st_mode & 0o777) if st else 0o640)
+        if os.geteuid() == 0:
+            os.chown(tmp, st.st_uid if st else 0, st.st_gid if st else gid)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def parse_lanes(value, known):
+    names = [n for n in value.replace(" ", "").split(",") if n]
+    bad = [n for n in names if n not in known or not LANE_RE.match(n)]
+    if bad:
+        raise ValueError(f"not a lane: {', '.join(bad)} (the lanes: {' '.join(known)})")
+    return names
+
+
+def plan(chosen, vals, man, ex, needs, req):
+    """(settings to ask [(file, key, comment)], secrets not stored [name]).
+
+    A setting is asked when a chosen lane's programs read it, it is empty,
+    and it is one to fill in: required (settings.manifest), or set rather than
+    commented out in the examples. Optional settings stay as they are."""
+    wanted = {k for n in chosen for k in needs.get(n, ([], []))[0]}
+    wanted |= {k for k, rule in req.items() if rule == "always"}
+    active = {key: (f, comment, is_on) for f, items in ex.items() for key, is_on, comment in items}
+    ask = []
+    for key in sorted(wanted, key=lambda k: (active.get(k, ("~", [], False))[0], k)):
+        if vals.get(key) or man.get(key, {}).get("is_secret") or man.get(key, {}).get("credential"):
+            continue
+        f, comment, is_on = active.get(key, ("00-core.env", [], False))
+        rule = req.get(key, "")
+        need = rule == "always" or (rule.startswith("if ") and _holds(rule[3:], vals, req))
+        if is_on or need:
+            ask.append((f, key, comment))
+    secrets = sorted({s for n in chosen for s in needs.get(n, ([], []))[1]})
+    missing = [s for s in secrets if not (STORE / s).exists()]
+    return ask, missing
+
+
+def _holds(cond, vals, req):
+    k, _, want = cond.partition("=")
+    return vals.get(k.strip(), "").lower() == want.strip().lower()
+
+
+def main(argv=None, out=sys.stdout, err=sys.stderr, ask=input):
+    ap = argparse.ArgumentParser(prog="cti-agent-onboard", description="Set up a box: lanes, settings, secrets.")
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="say what would be asked and written; ask nothing")
+    mode.add_argument("--for-real", action="store_true", help="ask, then write the settings and store the secrets")
+    ap.add_argument("--lanes", help="the lanes this box runs, comma-separated (skips that question)")
+    a = ap.parse_args(argv)
+
+    def p(s=""):
+        print(s, file=out)
+
+    if a.for_real and os.geteuid() != 0 and "CTI_CONF_DIR" not in os.environ:
+        print("cti-agent-onboard: run with sudo (it writes /etc)", file=err)
+        return 2
+    where = layout()
+    if where is None:
+        print(f"cti-agent-onboard: no settings in {CONF} yet - run install-fedora.sh first", file=err)
+        return 1
+    kind, path = where
+    try:
+        all_lanes, man, ex, needs = lanes(), manifest(), examples(), lane_needs()
+        req = required(CODE / "settings.manifest")
+    except OSError as e:
+        print(f"cti-agent-onboard: {e} - is the fleet installed in {CODE}?", file=err)
+        return 1
+    known = [n for n, *_ in all_lanes]
+    vals = current(kind, path)
+    p(f"Settings: {path} ({'one fleet.d file per lane' if kind == 'split' else 'one file'})")
+
+    # 1. The lanes.
+    now = vals.get("FLEET_LANES", "")
+    try:
+        if a.lanes is not None:
+            chosen = parse_lanes(a.lanes, known)
+        elif a.dry_run:
+            chosen = parse_lanes(now, known) or known
+        else:
+            p("\nThe lanes:")
+            for n, _u, _ps, summary in all_lanes:
+                p(f"  {n:<13} {summary}")
+            reply = ask(f"\nLanes this box runs, comma-separated [{now or 'all'}]: ").strip()
+            chosen = parse_lanes(reply or now, known) or known
+    except ValueError as e:
+        print(f"cti-agent-onboard: {e}", file=err)
+        return 2
+    lanes_value = "" if sorted(chosen) == sorted(known) else ",".join(n for n in known if n in chosen)
+    p(f"\nLanes: {', '.join(chosen)}" + ("" if lanes_value else " (all: FLEET_LANES unset)"))
+
+    todo, missing = plan(chosen, vals, man, ex, needs, req)
+    models = [s for s in MODEL_TOKENS if s in missing]
+    have_model = any((STORE / s).exists() for s in MODEL_TOKENS)
+    missing = [s for s in missing if s not in MODEL_TOKENS]
+    if have_model:
+        models = []
+
+    def where_to(key):
+        return f" -> {target(kind, path, key, man).name}" if kind == "split" else ""
+
+    if a.dry_run:
+        if lanes_value != now:
+            p(f"  would set FLEET_LANES={lanes_value or '(unset)'}{where_to('FLEET_LANES')}")
+        p(f"\n{len(todo)} setting(s) these lanes need are empty, and would be asked:")
+        for _f, key, _c in todo:
+            p(f"  {key}{where_to(key)}")
+        p(f"\n{len(missing)} secret(s) these lanes read are not stored, and would be offered:")
+        for s in missing:
+            p(f"  {s}")
+        if models:
+            p(f"  one Claude credential for the check-in: {' or '.join(models)}")
+        return 0
+
+    # 2. The settings. Collected first, written once per file.
+    edits = {}
+    if lanes_value != now:
+        if lanes_value:
+            edits.setdefault(target(kind, path, "FLEET_LANES", man), []).append(("FLEET_LANES", lanes_value, []))
+        else:
+            p("  FLEET_LANES is set; all lanes were chosen - delete its line to run every lane")
+    if todo:
+        p(f"\n{len(todo)} setting(s) are empty. Enter leaves one as it is.")
+    for _f, key, comment in todo:
+        p("")
+        for line in comment[-SHOW_COMMENT:]:
+            p(line)
+        while True:
+            reply = ask(f"{key}= ").strip()
+            if not reply:
+                break
+            try:
+                edits.setdefault(target(kind, path, key, man), []).append((key, render_value(reply), comment))
+                break
+            except ValueError as e:
+                p(f"  {e}; try again, or Enter to skip")
+    gid = (path if kind == "split" else path.parent).stat().st_gid
+    for file, items in edits.items():
+        text = file.read_text(encoding="utf-8") if file.exists() else ""
+        for key, value, comment in items:
+            text = set_line(text, key, value, comment)
+        write_file(file, text, gid)
+        p(f"wrote {file}: {', '.join(k for k, _v, _c in items)}")
+
+    # 3. The secrets. One Claude credential, then the rest one by one.
+    if models:
+        p("\nThe check-in needs one Claude credential:")
+        for i, m in enumerate(models, 1):
+            p(f"  {i}. {m}")
+        reply = ask(f"Which one to store now? [1-{len(models)}, Enter for none] ").strip()
+        if reply.isdigit() and 1 <= int(reply) <= len(models):
+            missing.insert(0, models[int(reply) - 1])
+            p(f"  {models[int(reply) - 1]}: you will be asked for it below")
+    if missing:
+        p(f"\n{len(missing)} secret(s) these lanes read are not stored yet. Store only the ones this box uses.")
+    for s in missing:
+        if ask(f"Store {s} now? [y/N] ").strip().lower() in ("y", "yes"):
+            r = subprocess.run([SECRETS_TOOL, "set", s], check=False)  # nosec B603
+            if r.returncode != 0:
+                p(f"  {s} was not stored (cti-agent-secrets exited {r.returncode})")
+
+    # 4. The check.
+    fc = CODE / "bin" / "fleet-config"
+    if fc.exists():
+        p("\nfleet-config check:")
+        r = subprocess.run([sys.executable, str(fc), "check"], capture_output=True, text=True, check=False)  # nosec B603
+        last = [ln for ln in r.stdout.splitlines() if ln.startswith("result:")]
+        p("  " + (last[-1] if last else (r.stderr.strip() or "no result")))
+        p("  sudo cti-agent fleet-config check   shows the details")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

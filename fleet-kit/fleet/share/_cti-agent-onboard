@@ -1,0 +1,20 @@
+#compdef cti-agent-onboard
+# zsh completion for cti-agent-onboard. Installed by install-fedora.sh into
+# site-functions. Works under sudo. A test (test_lanes.py, SbinTools) fails
+# when these flags differ from the tool's own.
+_cti-agent-onboard() {
+  local -a d lanes
+  if [[ "${words[CURRENT-1]}" == --lanes ]]; then
+    lanes=(${(f)"$(awk -F'\t' '!/^#/ && NF {print $1}' @CODE_DIR@/share/lanes.list 2>/dev/null)"})
+    _values -s , 'lane' $lanes
+    return
+  fi
+  if ! (( ${words[(I)(--dry-run|--for-real)]} )); then
+    d=("--dry-run   -- what would be asked and written; asks nothing")
+    compadd -V required/safe -X "%B%F{green}REQUIRED, one of - SAFE: writes nothing%f%b" -d d -- --dry-run
+    d=("--for-real  -- ask, then write the settings and store the secrets")
+    compadd -V required/changes -X "%B%F{red}REQUIRED, one of - CHANGES THE SETTINGS%f%b" -d d -- --for-real
+  fi
+  (( ${words[(I)--lanes]} )) || compadd -- --lanes
+}
+_cti-agent-onboard "$@"

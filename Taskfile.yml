@@ -542,6 +542,8 @@ tasks:
     cmds:
       - python3 scripts/lanes --write
       - python3 scripts/settings-manifest --write
+      # Again: the fleet.d examples follow the settings manifest just written.
+      - python3 scripts/lanes --write
 
   release:check:
     desc: "Fail if the latest tag's own commit has no CHANGELOG section for it, or a cheat sheet for another release"

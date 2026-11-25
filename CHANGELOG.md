@@ -55,6 +55,30 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   `/opt/cti-agent/share/` for the tools on the box that don't read TOML, and
   a unit-to-lane map for the verdict. Tested in
   `fleet-kit/tests/test_fleet_lanes.py` and `internal/checkin`.
+- **`cti-agent-onboard`: set up a box.** A new root tool, with a man page
+  and completions, that you run after the installer. In order, it:
+  1. asks which lanes the box runs, and sets `FLEET_LANES`
+  2. asks each empty setting those lanes need, showing the example's
+     comment first
+  3. offers one Claude credential for the check-in, then each secret the
+     lanes read that isn't stored yet, through `cti-agent-secrets set`, so
+     values never pass through it
+  4. runs `fleet-config check`
+
+  It writes where the box keeps its settings, whether one `fleet.env` or the
+  `fleet.d` file each setting belongs in. It keeps each file's owner and
+  mode, and refuses values with quotes, `$`, backslashes or newlines.
+  `--dry-run` asks and writes nothing. The installer's new-box message now
+  points to it.
+
+  Three generated files support it:
+  - `fleet-kit/fleet/fleet.d.example/`, from the lane generator
+  - `fleet-kit/fleet/lane-settings.list`, from the settings generator
+  - a programs column in `lanes.list`
+
+  A `/onboard` Claude Code skill (`.claude/skills/onboard`) walks an operator
+  through it, and never handles a secret in the conversation. Tested in
+  `fleet-kit/tests/test_onboard.py`.
 
 ### Changed
 
