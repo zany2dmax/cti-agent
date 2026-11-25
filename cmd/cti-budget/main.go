@@ -29,6 +29,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/budget"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 )
 
 const (
@@ -65,7 +66,7 @@ func loadLedger(s *budget.Store, stderr *os.File) (*budget.Ledger, bool) {
 	}
 	if l == nil {
 		_, _ = fmt.Fprintf(stderr, "cti-budget: cannot read the ledger at %s - "+
-			"refusing to guess; fix its ownership (ctiagent, 0600) or move it aside\n", s.Path)
+			"refusing to guess; fix its ownership (%s, 0600) or move it aside\n", s.Path, layout.User)
 		return nil, false
 	}
 	return l, true

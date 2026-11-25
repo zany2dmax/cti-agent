@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/zany2dmax/cti-agent/internal/layout"
 )
 
 // WHERE THE OWNERS COME FROM
@@ -232,7 +234,7 @@ func (o Owners) AllowedDomains() (domains []string, managed bool) {
 
 // ownersDir is where fleet-owners keeps owners.db and writes owners.json. A
 // variable for the tests, not a setting (see the top of this file).
-var ownersDir = "/etc/cti-agent"
+var ownersDir = layout.ConfDir
 
 // OwnersSnapshotPath is owners.json.
 func OwnersSnapshotPath() string { return filepath.Join(ownersDir, "owners.json") }

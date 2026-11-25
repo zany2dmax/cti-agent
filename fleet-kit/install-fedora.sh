@@ -75,18 +75,43 @@ _on_exit() {
 }
 trap _on_exit EXIT
 
-CODE_DIR=/opt/cti-agent
-CONF_DIR=/etc/cti-agent
-STATE_DIR=/var/lib/cti-agent
-LOG_DIR=/var/log/cti-agent   # the audit trail (cti-audit(1)); systemd units also create it
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# WHERE THE FLEET GOES (layout.sh, docs/layout.md): CODE_DIR, CONF_DIR,
+# STATE_DIR, LOG_DIR (the audit trail; systemd units also create it), the
+# service account FLEET_USER and FLEET_GROUP, and AGENT_REPO, the Go source
+# to build. The FHS layout unless a fork's layout.env says otherwise; the
+# source is this kit's own git remote, so a fork's box builds the fork.
+# shellcheck source=layout.sh
+. "$SRC/layout.sh"
+layout_load "$SRC/.." || { echo "install-fedora.sh: fix layout.env first; nothing was changed" >&2; bail 1; }
 MAN_DIR=/usr/local/share/man/man1   # every command's man page
 UNIT_DIR=/etc/systemd/system
-FLEET_USER=ctiagent
-FLEET_GROUP=ctiagent
 # Where secrets live as systemd credentials (RUNBOOK 11n); ImportCredential= reads it.
 CREDSTORE_DIR=/etc/credstore.encrypted
-AGENT_REPO=https://github.com/zany2dmax/cti-agent
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# relocate_install - rewrite the default paths and account name in every text
+# file this install put down, to the layout's (layout_relocate_files). Nothing
+# on the FHS layout. Run after each group of files, and safe to run again: a
+# rewritten file has nothing left to rewrite.
+relocate_install() {
+  [ -n "${LAYOUT_RELOCATED:-}" ] || return 0
+  if [ "$MODE" = dryrun ]; then
+    info "would rewrite the installed files for the layout ($CODE_DIR, $CONF_DIR, $STATE_DIR, $LOG_DIR, $FLEET_USER)"
+    return 0
+  fi
+  local f
+  local -a files=()
+  while IFS= read -r -d '' f; do files+=("$f"); done < <(
+    { [ -d "$CODE_DIR" ] && find "$CODE_DIR" -path "$CODE_DIR/agent" -prune -o -type f -print0
+      find "$UNIT_DIR" -maxdepth 2 -path "$UNIT_DIR/cti-agent-*" -type f -print0 2>/dev/null
+      find /usr/local/sbin /usr/local/bin -maxdepth 1 -name 'cti-agent*' -type f -print0 2>/dev/null
+      find "$MAN_DIR" -maxdepth 1 \( -name 'cti-*' -o -name 'fleet-*' -o -name 'run-*' -o -name 'dev-run*' -o -name 'checkin-*' \) -type f -print0 2>/dev/null
+      find /usr/share/bash-completion/completions /usr/share/zsh/site-functions -maxdepth 1 \
+           \( -name 'cti-agent*' -o -name '_cti-agent*' \) -type f -print0 2>/dev/null
+    } || true)
+  layout_relocate_files ${files[@]+"${files[@]}"}
+  ok "rewrote the installed files for the layout (${#files[@]} looked at)"
+}
 
 # Refuse to run from inside the tree this script itself pulls.
 #
@@ -104,14 +129,14 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # perfectly good staging directories, so the first version of this guard
 # refused them. A prefix is not a path.
 case "$SRC" in
-  /opt/cti-agent|/opt/cti-agent/*)
+  "$CODE_DIR"|"$CODE_DIR"/*)
     echo "REFUSING: this script is running from $SRC, inside the tree it pulls." >&2
     echo "" >&2
     echo "Clone the kit somewhere outside the installed layout and run it there:" >&2
     echo "  sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit" >&2
     echo "  sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh --for-real" >&2
     echo "" >&2
-    echo "Why: this installer runs 'git -C /opt/cti-agent/agent pull' partway" >&2
+    echo "Why: this installer runs 'git -C $CODE_DIR/agent pull' partway" >&2
     echo "through, so from here it would install files from the new tree using" >&2
     echo "logic from the old script." >&2
     echo "" >&2
@@ -337,6 +362,14 @@ case "$SEMODE" in
   Permissive) warn "SELinux: Permissive - denials are logged, not enforced" ;;
   *)          info "SELinux: $SEMODE" ;;
 esac
+if [ -n "${LAYOUT_RELOCATED:-}" ]; then
+  warn "layout.env moves the fleet to $CODE_DIR, $CONF_DIR, $STATE_DIR, $LOG_DIR, account $FLEET_USER"
+  if [ "$SEMODE" = Enforcing ]; then
+    warn "SELinux is Enforcing: off the FHS paths the default policy may label them wrongly."
+    info "  If a lane fails with a permission error, label them like the defaults, for example:"
+    info "    sudo semanage fcontext -a -e /opt/cti-agent $CODE_DIR && sudo restorecon -R $CODE_DIR"
+  fi
+fi
 
 # The org pack (docs/org-pack.md): this organization's notes for the prompts,
 # and its extra skills, kept out of the core files so an upstream pull never
@@ -386,7 +419,7 @@ timer_lane() {
 
 # org_compose CORE NAME OUT - CORE with the pack's NAME file appended, into OUT.
 org_compose() {
-  "$SRC/bin/org-pack" compose "$1" "${ORG_PACK:+$ORG_PACK/$2}" > "$3"
+  "$SRC/bin/org-pack" compose "$1" "${ORG_PACK:+$ORG_PACK/$2}" | layout_relocate > "$3"
 }
 
 # ───────────────────────────────────────────────────── service account ───────
@@ -693,6 +726,7 @@ info "checkin-settings.json -> $CODE_DIR"
 # is moved to a root-only quarantine folder and named, so the operator can
 # read it. run-checkin refuses to beat while any of it is present, and the
 # verification block below runs run-checkin --audit to prove it is gone.
+relocate_install
 bold "Audit: Claude Code files in the service account's reach"
 QUARANTINE="$CONF_DIR/quarantine/$(date +%Y%m%d-%H%M%S)"
 LEGACY_HASH="$STATE_DIR/.claude/CLAUDE.md.installed-sha256"
@@ -830,6 +864,7 @@ else
       -e "s#^REPORT_PATH=.*#REPORT_PATH=$STATE_DIR/reports/raw-latest.md#" \
       -e "s#^CTI_AGENT_DIR=.*#CTI_AGENT_DIR=$CODE_DIR/agent#" \
       "$CONF_DIR/fleet.env"
+    layout_relocate_files "$CONF_DIR/fleet.env"
   fi
   warn "created $CONF_DIR/fleet.env with PLACEHOLDER secrets - edit it now"
 fi
@@ -854,7 +889,7 @@ else
   info "$CONF_DIR/domains.txt not present - the domains lane will not run until it is"
   info "  one domain per line, 'send' after those that send mail; root:$FLEET_GROUP 0640"
 fi
-info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo '0640 root:ctiagent')"
+info "mode $(stat -c '%a %U:%G' "$CONF_DIR/fleet.env" 2>/dev/null || echo "0640 root:$FLEET_GROUP")"
 
 # ────────────────────────────────────────────────────── outbound connectivity ───
 # Every connectivity check in one place, after config so the hosts fleet.env
@@ -957,6 +992,11 @@ if [ "$MODE" != dryrun ]; then
   BUILD_COMMIT="$( cd "$AGENT_SRC" && git rev-parse HEAD 2>/dev/null || echo unknown )"
   BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   LDFLAGS="-X $VERSION_PKG.Tag=$BUILD_TAG -X $VERSION_PKG.Commit=$BUILD_COMMIT -X $VERSION_PKG.Built=$BUILD_TIME"
+  # And where the fleet is (internal/layout), so every binary's defaults match
+  # this box. The same values on the FHS layout as the code's own defaults.
+  LAYOUT_PKG=github.com/zany2dmax/cti-agent/internal/layout
+  LDFLAGS="$LDFLAGS -X $LAYOUT_PKG.CodeDir=$CODE_DIR -X $LAYOUT_PKG.ConfDir=$CONF_DIR"
+  LDFLAGS="$LDFLAGS -X $LAYOUT_PKG.StateDir=$STATE_DIR -X $LAYOUT_PKG.LogDir=$LOG_DIR -X $LAYOUT_PKG.User=$FLEET_USER"
   info "building $BUILD_TAG ($(printf '%.12s' "$BUILD_COMMIT"))"
   case "$BUILD_TAG" in
     *-dirty)
@@ -1566,6 +1606,10 @@ VERSIONEOF
   ok "recorded $CONF_DIR/version"
 fi
 
+relocate_install
+if [ -n "${LAYOUT_RELOCATED:-}" ] && [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
+  systemctl daemon-reload   # the units were rewritten after the reload above
+fi
 bold "Verification"
 # Settings: fleet.env, or the per-lane files it was split into.
 # A path that cannot work is not a warning. The previous run reported three

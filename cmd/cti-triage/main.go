@@ -57,6 +57,7 @@ import (
 
 	"github.com/zany2dmax/cti-agent/internal/falcon"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/triage"
 )
@@ -259,7 +260,7 @@ func agentFile(env, agent string) string {
 	}
 	code := strings.TrimSpace(os.Getenv("FLEET_CODE"))
 	if code == "" {
-		code = "/opt/cti-agent"
+		code = layout.CodeDir
 	}
 	return filepath.Join(code, "agents", agent, "CLAUDE.md")
 }

@@ -39,6 +39,27 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The fleet can be installed somewhere other than the FHS paths**
+  ([docs/layout.md](docs/layout.md)). A fork commits a `layout.env`, which
+  upstream never ships. It sets the code, config, state and log directories,
+  the service account, and the repository to build.
+  - `fleet-kit/layout.sh` reads the file and never sources it, checks every
+    value, and refuses paths the units hide, nesting, and paths that hold a
+    default path.
+  - The installer stamps every Go binary with the layout (`internal/layout`,
+    by `-X`). It also rewrites the installed copies of its text files, and
+    turns the units' `StateDirectory=`/`LogsDirectory=` into
+    `ReadWritePaths=` for a moved state or log directory.
+  - The updater's snapshot and rollback follow the layout.
+  - Unset, every path is what it was, and nothing on an existing box changes.
+  - A test fails when any Go file outside `internal/layout` names one of
+    these paths.
+
+  **Also, a fork's box now builds the fork.** The installer took the Go
+  source from a hard-coded upstream URL, so a fork's box built upstream's
+  code. It now uses the kit's own `origin`, or `LAYOUT_REPO`. Tested in
+  `fleet-kit/tests/test_layout.py` and `test_update.py`.
+
 - **Updates can be undone, and the box can be checked.**
   - **A snapshot before every install.** `cti-agent-update --for-real` now
     snapshots what the installer replaces, before it runs:

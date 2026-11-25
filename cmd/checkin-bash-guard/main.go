@@ -54,6 +54,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/pyfmt"
 )
 
@@ -75,7 +76,7 @@ func run(stdin io.Reader, stderr io.Writer, getenv func(string) string, argv0 st
 			_, _ = fmt.Fprintf(stderr, "checkin-bash-guard: %s\n", reason)
 		}
 	}()
-	g := guard{getenv: getenv, binDirs: map[string]bool{filepath.Dir(argv0): true, "/opt/cti-agent/bin": true}}
+	g := guard{getenv: getenv, binDirs: map[string]bool{filepath.Dir(argv0): true, filepath.Join(layout.CodeDir, "bin"): true}}
 	raw, err := io.ReadAll(stdin)
 	switch {
 	case err != nil:

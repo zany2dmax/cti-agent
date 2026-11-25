@@ -51,11 +51,11 @@ set -euo pipefail
 
 R="${CTI_UPDATE_ROOT:-}"
 SNAPS="$R/var/lib/cti-agent-update"
-CODE="$R/opt/cti-agent"
-CONF="$R/etc/cti-agent"
 UNITS="$R/etc/systemd/system"
-STATE_DB="$R/var/lib/cti-agent/state/memory.db"
 KEEP=3
+# CODE, CONF and STATE_DB follow the kit's layout (layout.sh); set in main,
+# once the kit is known.
+CODE="" CONF="" STATE_DB=""
 
 # A release tag moved upstream with the branch history intact: only the tag
 # needs replacing. Printed, never run: moving a release is a decision, and a
@@ -71,7 +71,7 @@ moved_tag_help() {
     echo
     for t in "$@"; do
       echo "  sudo git -C $kit tag -d $t"
-      echo "  sudo git -C /opt/cti-agent/agent tag -d $t"
+      echo "  sudo git -C $CODE_DIR/agent tag -d $t"
     done
     echo "  sudo cti-agent-update --for-real"
   } >&2
@@ -189,8 +189,8 @@ run the update again:
   sudo git -C $kit status --short          # must print nothing
   sudo git -C $kit fetch --force --tags origin
   sudo git -C $kit reset --hard '@{u}'
-  sudo git -C /opt/cti-agent/agent fetch --force --tags origin
-  sudo git -C /opt/cti-agent/agent reset --hard '@{u}'
+  sudo git -C $CODE_DIR/agent fetch --force --tags origin
+  sudo git -C $CODE_DIR/agent reset --hard '@{u}'
   sudo cti-agent-update --dry-run
 
 If you did not rewrite it, stop: find out who did before resetting anything.
@@ -203,6 +203,10 @@ main() {
   kit="$(cd "$here/.." && pwd)"                          # the repository root
   # shellcheck source=fleet/share/fleet-mode.sh
   . "$here/fleet/share/fleet-mode.sh"
+  # shellcheck source=layout.sh
+  . "$here/layout.sh"
+  layout_load "$kit" || { echo "update-fedora: fix layout.env first; nothing was fetched or installed" >&2; exit 1; }
+  CODE="$R$CODE_DIR" CONF="$R$CONF_DIR" STATE_DB="$R$STATE_DIR/state/memory.db"
 
   local dry="" real="" back=""
   for a in "$@"; do
@@ -222,7 +226,7 @@ main() {
   # installer pulls, the second half of an update would be new files driven by an
   # old script.
   case "$here" in
-    /opt/cti-agent|/opt/cti-agent/*)
+    "$CODE_DIR"|"$CODE_DIR"/*)
       echo "REFUSING: running from $here, inside the tree the installer pulls." >&2
       echo "Use the kit checkout instead: /root/cti-agent-kit/fleet-kit/update-fedora.sh" >&2
       exit 2 ;;

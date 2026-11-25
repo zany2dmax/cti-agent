@@ -38,6 +38,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/emailkit"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/sanitize"
 )
 
@@ -278,7 +279,7 @@ func errText(err error) string {
 // postToBoard appends one line to the fleet message board, so the
 // orchestrator surfaces the failure on its next heartbeat even if email fails.
 func postToBoard(f failure) bool {
-	code := envOr("FLEET_CODE", "/opt/cti-agent")
+	code := envOr("FLEET_CODE", layout.CodeDir)
 	board := filepath.Join(code, "bin", "fleet-board")
 	if _, err := os.Stat(board); err != nil {
 		return false

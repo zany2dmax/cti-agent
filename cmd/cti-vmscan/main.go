@@ -38,6 +38,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/config"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/mailbox"
 	"github.com/zany2dmax/cti-agent/internal/netmap"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
@@ -391,7 +392,7 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	rules := netmap.Rules{}
 	rulesPath := strings.TrimSpace(os.Getenv("NETRULES_FILE"))
 	if rulesPath == "" {
-		rulesPath = "/etc/cti-agent/netrules.txt"
+		rulesPath = layout.Conf("netrules.txt")
 	}
 	// #nosec G304 G703 -- the operator's own rules file, root-owned, named in fleet.env.
 	if b, err := os.ReadFile(rulesPath); err == nil {
@@ -407,7 +408,7 @@ func coverage(ctx context.Context, cfg config.Config, g *graph.Client, week vmsc
 	cleanup := netmap.Hygiene(rows, all, questions)
 	notesPath := strings.TrimSpace(os.Getenv("NETNOTES_FILE"))
 	if notesPath == "" {
-		notesPath = "/etc/cti-agent/sheet-notes.txt"
+		notesPath = layout.Conf("sheet-notes.txt")
 	}
 	// #nosec G304 G703 -- the operator's own notes file, root-owned, named in fleet.env.
 	if b, err := os.ReadFile(notesPath); err == nil {

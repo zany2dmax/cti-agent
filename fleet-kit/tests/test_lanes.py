@@ -5299,6 +5299,10 @@ class SbinTools(unittest.TestCase):
         inst = (KIT / "install-fedora.sh").read_text()
         layout = inst[inst.index('bold "Layout"'):inst.index('bold "Installing code"')]
         consts = dict(re.findall(r"(?m)^([A-Z_]+)=(\S+)", inst))
+        # The layout's defaults (fleet-kit/layout.sh) for the directories it sets.
+        lay = dict(re.findall(r"(?m)^LAYOUT_DEF_([A-Z]+)=(\S+)", (KIT / "layout.sh").read_text()))
+        consts.update({"CODE_DIR": lay["CODE"], "CONF_DIR": lay["CONF"], "STATE_DIR": lay["STATE"],
+                       "LOG_DIR": lay["LOG"], "FLEET_USER": lay["USER"], "FLEET_GROUP": lay["USER"]})
         for k, v in consts.items():
             layout = layout.replace("$" + k, v)
         runbook = (self.REPO / "RUNBOOK.md").read_text()

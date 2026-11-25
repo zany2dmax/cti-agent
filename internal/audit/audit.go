@@ -68,6 +68,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
@@ -80,7 +81,7 @@ const (
 )
 
 // DefaultDir is where the Fedora layout keeps the audit trail.
-const DefaultDir = "/var/log/cti-agent"
+var DefaultDir = layout.LogDir
 
 // DefaultRetainDays is how long the cleanup keeps audit files.
 const DefaultRetainDays = 120

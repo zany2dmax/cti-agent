@@ -44,6 +44,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/cli"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
 	"github.com/zany2dmax/cti-agent/internal/graph"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/mailer"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 	"github.com/zany2dmax/cti-agent/internal/version"
@@ -576,7 +577,7 @@ var optional = [][2]string{
 
 // versionManifest is written by install-fedora.sh beside fleet.env, so a
 // binary can be compared against what the last install believed it put there.
-const versionManifest = "/etc/cti-agent/version"
+var versionManifest = layout.Conf("version")
 
 // reportVersion prints what this binary is, and whether it matches the
 // install record.

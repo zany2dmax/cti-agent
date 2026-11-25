@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/layout"
 )
 
 // WHO OWNS EACH APPLICATION
@@ -87,7 +89,7 @@ type Owners struct {
 }
 
 // DefaultOwnersFile is where the file lives unless APPSCAN_OWNERS_FILE says.
-const DefaultOwnersFile = "/etc/cti-agent/app-owners.txt"
+var DefaultOwnersFile = layout.Conf("app-owners.txt")
 
 // OwnersPath is APPSCAN_OWNERS_FILE or the default.
 func OwnersPath() string {

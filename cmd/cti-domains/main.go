@@ -35,6 +35,7 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/domains/godaddy"
 	"github.com/zany2dmax/cti-agent/internal/domains/podgw"
 	"github.com/zany2dmax/cti-agent/internal/fleetenv"
+	"github.com/zany2dmax/cti-agent/internal/layout"
 	"github.com/zany2dmax/cti-agent/internal/safelog"
 )
 
@@ -79,7 +80,7 @@ func defaultInventory() string {
 	if s := strings.TrimSpace(os.Getenv("DOMAINS_FILE")); s != "" {
 		return s
 	}
-	return "/etc/cti-agent/domains.txt"
+	return layout.Conf("domains.txt")
 }
 
 func run() int {

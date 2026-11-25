@@ -34,6 +34,7 @@ class UpdateFedora(unittest.TestCase):
         self.kit = self.tmp / "kit"
         (self.kit / "fleet-kit" / "fleet" / "share").mkdir(parents=True)
         shutil.copy(ROOT / "fleet-kit" / "update-fedora.sh", self.kit / "fleet-kit" / "update-fedora.sh")
+        shutil.copy(ROOT / "fleet-kit" / "layout.sh", self.kit / "fleet-kit" / "layout.sh")
         shutil.copy(ROOT / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh",
                     self.kit / "fleet-kit" / "fleet" / "share" / "fleet-mode.sh")
         write_installer(self.kit, "one")
@@ -286,6 +287,34 @@ exit 7
         self.assertEqual(db.execute("SELECT v FROM m").fetchone()[0], "written since", "a hand rollback kept the lanes' writes")
         db.close()
 
+    def test_a_relocated_layout_is_what_is_snapshotted(self):
+        (self.kit / "layout.env").write_text("LAYOUT_CODE_DIR=/srv/fleet/code\nLAYOUT_CONF_DIR=/srv/fleet/etc\n"
+                                             "LAYOUT_STATE_DIR=/srv/fleet/state\nLAYOUT_LOG_DIR=/srv/fleet/log\n")
+        git(self.kit, "add", "layout.env")
+        git(self.kit, "commit", "-q", "-m", "the fork's layout")
+        git(self.kit, "push", "-q", "origin", "main")
+        b = self.root
+        for d in ("srv/fleet/code/bin", "srv/fleet/etc"):
+            (b / d).mkdir(parents=True)
+        (b / "srv/fleet/code/bin/cti-scout").write_text("relocated binary\n")
+        (b / "srv/fleet/etc/fleet.env").write_text("X=1\n")
+        r = self.run_update("--for-real")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        snap = sorted((b / "var/lib/cti-agent-update").iterdir())[-1]
+        import tarfile
+        with tarfile.open(snap / "code.tgz") as t:
+            self.assertIn("./bin/cti-scout", t.getnames())
+        with tarfile.open(snap / "conf.tgz") as t:
+            self.assertIn("./fleet.env", t.getnames())
+        self.assertFalse((snap / "memory.db").exists(), "the FHS state was snapshotted, not the layout's")
+
+    def test_a_bad_layout_stops_it_before_the_fetch(self):
+        (self.kit / "layout.env").write_text("LAYOUT_CODE_DIR=relative\n")
+        r = self.run_update("--dry-run")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("an absolute path", r.stderr)
+        self.assertIn("nothing was fetched or installed", r.stderr)
+
     def test_rollback_needs_a_mode_and_a_snapshot(self):
         self.assertEqual(self.run_update("--rollback").returncode, 2)
         r = self.run_update("--rollback", "--for-real")
@@ -318,7 +347,7 @@ exit 7
     def test_it_will_not_run_from_inside_the_tree_the_installer_pulls(self):
         # The guard is a path check; exercise it on the path alone.
         src = (ROOT / "fleet-kit" / "update-fedora.sh").read_text(encoding="utf-8")
-        self.assertIn("/opt/cti-agent|/opt/cti-agent/*", src)
+        self.assertIn('"$CODE_DIR"|"$CODE_DIR"/*)', src)  # the layout's code directory
 
     def test_the_installer_leaves_the_update_command_on_the_box(self):
         inst = (ROOT / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")

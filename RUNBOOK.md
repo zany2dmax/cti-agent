@@ -79,6 +79,9 @@ would look. The installer prints the same list under **Layout**.
 
 ---
 
+A fork that installs elsewhere sets these paths and the account in a
+`layout.env`; see [docs/layout.md](docs/layout.md). This table is the default.
+
 ## Before you start
 
 | You need | Why | Notes |

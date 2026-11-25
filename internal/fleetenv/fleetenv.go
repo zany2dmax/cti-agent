@@ -23,11 +23,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zany2dmax/cti-agent/internal/layout"
 )
 
 // DefaultHome is where the Fedora layout keeps state, used only to locate
 // fleet.env when FLEET_ENV is unset.
-const DefaultHome = "/var/lib/cti-agent"
+var DefaultHome = layout.StateDir
 
 // Path returns the fleet.env location: FLEET_ENV if set, else fleet.env under
 // FLEET_HOME, else under DefaultHome.

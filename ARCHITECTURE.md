@@ -497,6 +497,7 @@ internal/pyfmt/                values written as the Python lanes wrote them (10
 internal/pyjson/               JSON with its key order kept, written as Python's json.dumps did (fleet-trace)
 internal/product/              what a CVE is about: CISA KEV, NVD CPE, or the scanner's titles
 internal/kev/                  deadline bands, present-only filtering
+internal/layout/               where the fleet is installed (code, config, state, log dirs, account), stamped at build
 internal/jira/                 Jira client and the one-ticket-per-CVE policy
 internal/patchtuesday/         release dates, source parsing, exposure, QQL, manifest
 internal/mailbox/              processed-message log and the cleanup decision table
