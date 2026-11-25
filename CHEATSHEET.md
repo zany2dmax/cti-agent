@@ -395,7 +395,8 @@ journalctl -u 'cti-manual-*' -n 50              # hand runs, once a secret is st
   unit with the same grants as that command's timer. You see its output and exit
   code as usual; the journal records it as `cti-manual-*`, with who ran it.
 - **After the split,** edit the file a setting belongs in (`fleet-config check`
-  flags one in the wrong file under `IN THE WRONG FILE`). The old file is kept as
+  flags one the lane can't see under `IN THE WRONG FILE`, and a lane's
+  setting left in core, still read, under `IN CORE`). The old file is kept as
   `fleet.env.pre-split-<time>`, root-only; moving it back and removing `fleet.d`
   undoes the split.
 - **A missing credential is skipped, never an error:** a program that cannot

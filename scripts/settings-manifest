@@ -97,7 +97,7 @@ NAMES_SECRETS_ONLY = {"checkin-bash-guard", "cti-agent-onboard"}  # onboard name
 # a new secret does not credit the guard with reading it.
 SECRET_NAME = re.compile(r"(SECRET|TOKEN|PASSWORD|_PAT$|API_KEY|SALT)")
 # Hand-kept fields, in the order they are written.
-KEPT = ("secret", "credential", "lane", "required", "default", "note")
+KEPT = ("secret", "credential", "lane", "required", "ask", "default", "note")
 
 KEY_LINE = re.compile(r'^#?\s?([A-Z][A-Z0-9_]{2,})=("[^"]*"|\'[^\']*\'|\S*)\s*$')
 SECTION = re.compile(r"^# ══ (.+?) ═")
@@ -256,6 +256,10 @@ HEADER = """\
 #              username, the API host); it moves into a credential with its
 #              secret, so a lane that does not use that system never sees it
 #   required:  always | if KEY=VALUE  - fleet-config check reports it missing
+#   ask:       yes - a lane cannot do its job without it (its recipients, the
+#              allowlist they must pass, where its input lives), though a
+#              lane left unarmed is not an error. cti-agent-onboard asks it,
+#              with the required ones, when the lane is chosen
 #   default:   VALUE - what the code uses when the key is unset; a setting
 #              equal to it can be removed. Overrides code-default when both
 #              are present, for defaults the scanner cannot see

@@ -219,6 +219,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **`cti-agent-onboard` asks only what a lane can't run without.** It asked
+  every empty setting the example has uncommented, so on a working box it
+  wanted 20 answers, most of them for settings with a default (`CLAUDE_BIN`,
+  `CHECKIN_MODEL`, `MAILBOX_MIN_AGE_HOURS`). It now asks the required ones
+  and those marked with a new `settings.manifest` field, `ask: yes`. That
+  covers each lane's recipients and their allowlist, the VM scan's network
+  sheet, the supplier mailbox and the owners' allowed domains. `ask` doesn't
+  make `fleet-config check` require the setting, so a lane left unarmed on
+  purpose is still not an error.
+- **A lane's setting left in core is a WARN, not a FAIL.** Every unit loads
+  `00-core.env`, so the lane still reads it. `fleet-config check` lists it
+  under `IN CORE, BELONGS IN A LANE'S FILE`, and no longer counts it as a
+  problem, and `cti-agent-doctor` shows a WARN. A setting the lane that needs
+  it can't see, in another lane's file, is still a problem.
+
 - **`cti-agent-doctor`'s beat-files check no longer fails on every box.** It
   ran `run-checkin --audit` as root. The audit refuses any orchestrator file
   the account running it can write, and root can write them all, so the
@@ -246,8 +261,8 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   tokens and Falcon's. Shell and Python comment lines no longer count. One
   result: `TRIAGE_ENABLED`, `TRIAGE_MAX_PER_RUN`, `TRIAGE_MODEL` and
   `TRIAGE_SENDERS` now belong in `fleet.d/digest.env`, not `00-core.env`.
-  `fleet-config check` reports one left in core as in the wrong file. It's
-  still read there, so nothing breaks before you move it.
+  `fleet-config check` lists one left in core to move. It's still read
+  there, so nothing breaks before you move it.
 
 - **The `fleet.d` example files are in git.** `.gitignore` ignores every
   `*.env` (to keep real settings out), so the generated

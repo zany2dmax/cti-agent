@@ -907,7 +907,8 @@ Secrets and logins belong in systemd credentials, not either
 
 The `TRIAGE_*` settings (advisory triage) belong in `fleet.d/digest.env`, not
 `00-core.env`. One left in core is still read, and `fleet-config check` lists
-it under `IN THE WRONG FILE`.
+it under `IN CORE, BELONGS IN A LANE'S FILE`, which `cti-agent-doctor` shows as
+a WARN, not a FAIL.
 
 **Check your work rather than discovering a gap one lane at a time:**
 

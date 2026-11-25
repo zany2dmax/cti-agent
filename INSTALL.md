@@ -123,8 +123,11 @@ installed. Fix the cause and run it again: it's safe to re-run. More in
 1. **Which lanes this box runs.** The answer becomes `FLEET_LANES`. Leave out
    any lane whose tools you don't have: the installer turns its timer off, and
    the check-in treats it as off, not broken.
-2. **Each empty setting those lanes need.** It shows the example's comment
-   first. Enter leaves a setting as it is.
+2. **Each empty setting those lanes can't run without.** That means the
+   required ones (the mailbox, the operator, the digest's recipients) and
+   each lane's recipients and their allowlist. A setting with a default isn't
+   asked; set it later in its `fleet.d` file if you want another value. It
+   shows the example's comment first. Enter leaves a setting as it is.
 3. **Each secret those lanes read that isn't stored yet.** It offers one
    Claude credential for the check-in first. A yes runs
    `cti-agent-secrets set NAME`, which reads the value with no echo and stores

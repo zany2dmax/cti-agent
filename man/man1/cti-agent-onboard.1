@@ -20,11 +20,19 @@ The answer becomes
 .PP
 .B The settings.
 Each setting a chosen lane's programs read that is still empty and is one to
-fill in: required in
-.IR settings.manifest ,
-or set (not commented out) in the lane's example in
-.IR /opt/cti\-agent/share/fleet.d.example/ .
-The example's comment is shown first; Enter leaves the setting as it is. A
+fill in: marked
+.B required
+or
+.B ask: yes
+in
+.IR settings.manifest .
+.B ask: yes
+marks what a lane cannot do its job without: its recipients and the
+allowlist they must pass, the VM scan's network sheet, the supplier
+mailbox. A setting with a default, or an optional one, is not asked. The
+example's comment
+.RI ( /opt/cti\-agent/share/fleet.d.example/ )
+is shown first; Enter leaves the setting as it is. A
 setting named for another lane (another lane's prefix) is not asked, even when
 a shared program can read it.
 .PP

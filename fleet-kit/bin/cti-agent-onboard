@@ -104,7 +104,8 @@ def lane_needs():
 
 
 def required(man_path):
-    """{key: rule} for settings settings.manifest marks required."""
+    """{key: rule} for the settings to ask: those settings.manifest marks
+    required (always, or if KEY=VALUE), and those marked ask: yes ("ask")."""
     out, cur = {}, None
     for line in man_path.read_text(encoding="utf-8").splitlines():
         field, _, value = line.partition(":")
@@ -112,6 +113,8 @@ def required(man_path):
             cur = value.strip()
         elif cur and field.strip() == "required":
             out[cur] = value.strip()
+        elif cur and field.strip() == "ask" and value.strip() == "yes":
+            out.setdefault(cur, "ask")
     return out
 
 
@@ -205,8 +208,10 @@ def plan(chosen, vals, man, ex, needs, req):
     """(settings to ask [(file, key, comment)], secrets not stored [name]).
 
     A setting is asked when a chosen lane's programs read it, it is empty,
-    and it is one to fill in: required (settings.manifest), or set rather than
-    commented out in the examples. Optional settings stay as they are."""
+    and it is one to fill in: required (settings.manifest), or marked ask:
+    yes (a lane cannot do its job without it). Everything else has a default
+    or is optional, and stays as it is: an uncommented line in the example is
+    not a reason to ask."""
     wanted = {k for n in chosen for k in needs.get(n, ([], []))[0]}
     wanted |= {k for k, rule in req.items() if rule == "always"}
     active = {key: (f, comment, is_on) for f, items in ex.items() for key, is_on, comment in items}
@@ -214,10 +219,10 @@ def plan(chosen, vals, man, ex, needs, req):
     for key in sorted(wanted, key=lambda k: (active.get(k, ("~", [], False))[0], k)):
         if vals.get(key) or man.get(key, {}).get("is_secret") or man.get(key, {}).get("credential"):
             continue
-        f, comment, is_on = active.get(key, ("00-core.env", [], False))
+        f, comment, _ = active.get(key, ("00-core.env", [], False))
         rule = req.get(key, "")
-        need = rule == "always" or (rule.startswith("if ") and _holds(rule[3:], vals, req))
-        if is_on or need:
+        need = rule in ("always", "ask") or (rule.startswith("if ") and _holds(rule[3:], vals, req))
+        if need:
             ask.append((f, key, comment))
     secrets = sorted({s for n in chosen for s in needs.get(n, ([], []))[1]})
     missing = [s for s in secrets if not (STORE / s).exists()]

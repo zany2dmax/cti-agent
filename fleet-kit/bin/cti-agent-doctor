@@ -90,7 +90,9 @@ def check_settings():
     if not m:
         return "FAIL", (r.stderr.strip().splitlines() or ["fleet-config check printed no result"])[-1]
     n = int(m.group(1))
-    return ("OK" if n == 0 else "FAIL"), line[len("result: "):] + ("" if n == 0 else " - sudo cti-agent fleet-config check")
+    # A setting in core that belongs in a lane's file is still read: a WARN.
+    state = "FAIL" if n else ("WARN" if " to move out of core" in line else "OK")
+    return state, line[len("result: "):] + ("" if state == "OK" else " - sudo cti-agent fleet-config check")
 
 
 def systemctl():

@@ -32,7 +32,9 @@ the fleet's own check-in agent, which never runs it.
    ```
 
    It prints the lanes the box runs now, the empty settings those lanes
-   need, and the secrets not stored yet. Nothing is written.
+   can't run without (required, or `ask: yes` in `settings.manifest`), and
+   the secrets not stored yet. Nothing is written. Settings with a default
+   are not listed: they need no answer.
 
 2. **Choose the lanes.** Go through `fleet-kit/fleet/lanes.list` with the
    operator: each line is a lane and its summary. Ask what they have:

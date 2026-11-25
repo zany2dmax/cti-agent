@@ -12,6 +12,10 @@
 #              username, the API host); it moves into a credential with its
 #              secret, so a lane that does not use that system never sees it
 #   required:  always | if KEY=VALUE  - fleet-config check reports it missing
+#   ask:       yes - a lane cannot do its job without it (its recipients, the
+#              allowlist they must pass, where its input lives), though a
+#              lane left unarmed is not an error. cti-agent-onboard asks it,
+#              with the required ones, when the lane is chosen
 #   default:   VALUE - what the code uses when the key is unset; a setting
 #              equal to it can be removed. Overrides code-default when both
 #              are present, for defaults the scanner cannot see
@@ -256,11 +260,13 @@ key: DOM_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-mailer installer run-domains
 file: domains
+ask: yes
 
 key: DOM_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-mailer installer run-domains
 file: domains
+ask: yes
 
 key: FALCON_BASE_URL
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -655,6 +661,7 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appreport cti-appscan cti-jira cti-mailer cti-vmscan fleet-owners run-appowners
 file: core
 file-why: wanted appowners, also read by the appscan, digest, domains, vmscan lane(s)
+ask: yes
 
 key: POD_API_TOKEN
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -742,11 +749,13 @@ key: SUBNETS_DRIVE_ID
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer cti-vmscan
 file: vmscan
+ask: yes
 
 key: SUBNETS_ITEM_ID
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-vmscan
 file: vmscan
+ask: yes
 
 key: SUBNETS_SHEET
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -757,11 +766,13 @@ key: SUPPLIER_ADDRESS
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-agent-supplier.timer cti-supplier installer run-supplier
 file: supplier
+ask: yes
 
 key: SUPPLIER_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-supplier
 file: supplier
+ask: yes
 
 key: SUPPLIER_BOARD_NAME
 section: not in fleet.env.example
@@ -846,6 +857,7 @@ key: SUPPLIER_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-supplier
 file: supplier
+ask: yes
 
 key: SUPPLIER_TPRM
 section: not in fleet.env.example
@@ -912,6 +924,7 @@ key: VMSCAN_ALLOW_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
 file: vmscan
+ask: yes
 
 key: VMSCAN_EXTRA_LABELS
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -933,6 +946,7 @@ key: VMSCAN_TO
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-mailer installer run-vmscan
 file: vmscan
+ask: yes
 
 key: VMSCAN_USER_OCTET
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -951,6 +965,7 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appscan cti-mailer installer run-appscan
 file: core
 file-why: wanted appscan, also read by the appowners lane(s)
+ask: yes
 
 key: WAS_ATTACH_REPORT
 section: 4. RECIPIENTS AND THE SEND GATE - required
@@ -974,3 +989,4 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-appscan cti-mailer installer run-appscan
 file: core
 file-why: wanted appscan, also read by the appowners lane(s)
+ask: yes

@@ -91,18 +91,20 @@ class Onboard(unittest.TestCase):
     def test_the_answers_are_written_and_nothing_secret(self):
         rc, out, err, asked = self.run_it(["--for-real"], {
             "Lanes this box runs": "checkin,digest,scout",
-            "DIGEST_TO=": "soc@example.com",
+            "DIGEST_TO=": "soc@example.com, ir@example.com",
             "GRAPH_MAILBOX=": "cti@example.com",
-            "FLEET_ATTRIBUTION=": "Example Org security, two words",
             "Which one to store": "1",
             "Store CLAUDE_CODE_OAUTH_TOKEN": "y",
             "Store ": "n",
         })
         self.assertEqual(rc, 0, err)
         self.assertEqual(self.value(self.env, "FLEET_LANES"), "checkin,digest,scout")
-        self.assertEqual(self.value(self.env, "DIGEST_TO"), "soc@example.com")
+        self.assertEqual(self.value(self.env, "DIGEST_TO"), '"soc@example.com, ir@example.com"')
         self.assertEqual(self.value(self.env, "GRAPH_MAILBOX"), "cti@example.com")
-        self.assertEqual(self.value(self.env, "FLEET_ATTRIBUTION"), '"Example Org security, two words"')
+        # Optional settings, and ones with a default, are not asked, even when
+        # the example has them uncommented and empty.
+        for optional in ("FLEET_ATTRIBUTION=", "CLAUDE_BIN=", "CHECKIN_MODEL=", "MAILBOX_MIN_AGE_HOURS="):
+            self.assertFalse(any(q.lstrip().startswith(optional) for q in asked), optional)
         # The commented-out FLEET_LANES line was the one set, not a second line added.
         text = self.env.read_text()
         self.assertEqual(text.count("FLEET_LANES="), 1)
@@ -112,6 +114,17 @@ class Onboard(unittest.TestCase):
         self.assertNotIn("set ANTHROPIC_API_KEY", self.calls.read_text())
         self.assertIn("fleet-config check:", out)
         self.assertFalse(any(p.startswith("DOMAINS_") for p in asked))
+
+    def test_a_lane_is_asked_what_it_cannot_run_without(self):
+        # ask: yes in settings.manifest: the domains lane's recipients and their allowlist.
+        rc, out, err, _ = self.run_it(["--dry-run", "--lanes", "checkin,domains"])
+        self.assertEqual(rc, 0, err)
+        block = out.split("would be asked:", 1)[1].split("\n\n", 1)[0]
+        listed = {ln.split()[0] for ln in block.splitlines() if ln.strip()}
+        self.assertIn("DOM_TO", listed)
+        self.assertIn("DOM_ALLOW_TO", listed)
+        for has_a_default in ("DOMAINS_SMTP_PORT", "DOMAINS_DNS_SERVERS", "CLAUDE_BIN", "CHECKIN_MODEL"):
+            self.assertNotIn(has_a_default, listed)
 
     def test_a_value_it_cannot_write_safely_is_asked_again(self):
         rc, out, _, _ = self.run_it(["--for-real", "--lanes", "checkin,digest"], {

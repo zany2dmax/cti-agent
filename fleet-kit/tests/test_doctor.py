@@ -149,6 +149,15 @@ class Doctor(unittest.TestCase):
         self.assertEqual(state, "WARN")
         self.assertIn("runuser", detail)
 
+    def test_a_setting_to_move_out_of_core_is_a_warn(self):
+        # Still read where it is, so not a FAIL; a real problem still is.
+        for result, want in (("result: 0 problem(s); 2 to move out of core; 0 setting(s) can be removed", "WARN"),
+                             ("result: 1 problem(s); 2 to move out of core; 0 setting(s) can be removed", "FAIL"),
+                             ("result: 0 problem(s); 0 setting(s) can be removed (3 would remain)", "OK")):
+            with self.subTest(result=result), mock.patch.object(
+                    self.m, "run", lambda cmd, out=result + "\n", **kw: self.m.subprocess.CompletedProcess(cmd, 0, out, "")):
+                self.assertEqual(self.m.check_settings()[0], want)
+
     def test_no_version_file_is_a_fail(self):
         (self.dir / "etc/cti-agent/version").unlink()
         self.assertEqual(self.run_it()[1]["version"][0], "FAIL")

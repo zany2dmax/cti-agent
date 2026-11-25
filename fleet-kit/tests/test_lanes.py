@@ -5180,10 +5180,25 @@ class SettingsPerLane(unittest.TestCase):
         r = self.config("check", "--json")
         self.assertEqual(r.returncode, 1)
         j = json.loads(r.stdout)
-        self.assertIn({"key": "DOM_TO", "in": "00-core.env", "belongs_in": "domains.env"}, j["misplaced"])
+        # In core it is still read by the domains lane: to move, not a problem.
+        self.assertIn({"key": "DOM_TO", "in": "00-core.env", "belongs_in": "domains.env"}, j["in_core"])
+        self.assertNotIn("DOM_TO", [m["key"] for m in j["misplaced"]])
         self.assertTrue(any(x["refers_to"] == "DOM_ALLOW_TO" and "does not load" in x["why"]
                             for x in j["late_references"]), j["late_references"])
         self.assertEqual(j["duplicates"]["GRAPH_MAILBOX"], ["00-core.env:1", "supplier.env:2"])
+
+    def test_a_lane_setting_left_in_core_is_to_move_not_a_problem(self):
+        # Every unit loads core, so the lane still reads it: the box works.
+        d = self.conf / "fleet.d"
+        d.mkdir()
+        (d / "00-core.env").write_text("GRAPH_MAILBOX=m\nDOM_TO=x\n")
+        r = self.config("check", "--json")
+        j = json.loads(r.stdout)
+        self.assertEqual(j["misplaced"], [])
+        self.assertIn({"key": "DOM_TO", "in": "00-core.env", "belongs_in": "domains.env"}, j["in_core"])
+        text = self.config("check").stdout
+        self.assertIn("IN CORE, BELONGS IN A LANE'S FILE", text)
+        self.assertIn("1 to move out of core", text)
 
     def test_every_unit_loads_core_and_its_own_file_and_the_checkin_all(self):
         units = KIT / "fleet" / "systemd-fedora"

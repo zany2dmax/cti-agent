@@ -278,13 +278,16 @@ def check(paths, manifest):
                 and last_file[key].parent.name == "fleet.d" and last_file[name].parent.name == "fleet.d"):
             late.append({"line": lab, "key": key, "refers_to": name,
                          "why": f"set in {src}, which the lane reading {dst} does not load"})
-    # After the split, a setting in the wrong file is seen by the wrong lanes,
-    # or not by the lane that needs it.
-    misplaced = []
+    # After the split, a setting in the wrong file is not seen by the lane
+    # that needs it: a problem. One in core that belongs in a lane's file is
+    # still seen by that lane, since every unit loads core; only other lanes
+    # see it too, so it is to move, not a problem (in_core).
+    misplaced, in_core = [], []
     for k, path in sorted(last_file.items()):
         want = expected_file(manifest.get(k, {}))
         if path.parent.name == "fleet.d" and want and path.name != want:
-            misplaced.append({"key": k, "in": path.name, "belongs_in": want})
+            (in_core if path.name == "00-core.env" else misplaced).append(
+                {"key": k, "in": path.name, "belongs_in": want})
     at_default, empty, missing = [], [], []
     # A lane this box does not run (FLEET_LANES) needs none of its settings.
     use, no_lane = lanes_in_use(values.get("FLEET_LANES", ""), lane_list())
@@ -321,6 +324,7 @@ def check(paths, manifest):
         "helpers": helpers,
         "late_references": late,
         "misplaced": misplaced,
+        "in_core": in_core,
         "at_default": at_default,
         "empty": empty,
         "secrets_set": secrets,
@@ -355,8 +359,12 @@ def print_check(r, out):
         for k, ns in r["duplicates"].items():
             p(f"  {k}  ({', '.join(map(str, ns))})")
     if r["misplaced"]:
-        p(f"\nIN THE WRONG FILE - the lanes that need it will not see it, or others will: {len(r['misplaced'])}")
+        p(f"\nIN THE WRONG FILE - the lane that needs it will not see it: {len(r['misplaced'])}")
         for m in r["misplaced"]:
+            p(f"  {m['key']}  (in {m['in']}, belongs in {m['belongs_in']})")
+    if r.get("in_core"):
+        p(f"\nIN CORE, BELONGS IN A LANE'S FILE - still read, but every lane sees it; move it: {len(r['in_core'])}")
+        for m in r["in_core"]:
             p(f"  {m['key']}  (in {m['in']}, belongs in {m['belongs_in']})")
     if r["late_references"]:
         p(f"\nREFERENCES THAT EXPAND TO NOTHING - bash reads top to bottom: {len(r['late_references'])}")
@@ -388,7 +396,8 @@ def print_check(r, out):
       " Every lane's environment holds these; each is read by:")
     for s in r["secrets_set"]:
         p(f"  {s['key']:<26} {', '.join(s['readers']) or 'nothing'}")
-    p(f"\nresult: {problems} problem(s); {removable} setting(s) can be removed"
+    to_move = f"; {len(r['in_core'])} to move out of core" if r.get("in_core") else ""
+    p(f"\nresult: {problems} problem(s){to_move}; {removable} setting(s) can be removed"
       f" ({r['settings'] - removable} would remain)")
 
 
