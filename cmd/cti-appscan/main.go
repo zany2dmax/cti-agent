@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -104,6 +105,11 @@ func run() int {
 		"the owners lane's record of the last scan sent or held per application")
 	commitDelivered := flag.String("commit-delivered", "",
 		"record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit")
+	audit := flag.Bool("audit", false,
+		"print every web app the scanner defines with its owner, its newest scan in --since "+
+			"and the owners lane's last report for it (from --delivered-log, default "+
+			"$FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads "+
+			"the mailbox and the scanner only - nothing is sent or recorded")
 	flag.Parse()
 
 	if *commitDelivered != "" {
@@ -174,6 +180,9 @@ func run() int {
 			scans = reconcile(ctx, api, scans, windowStart)
 			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
+			if *audit {
+				return doAudit(ctx, api, scans, *deliveredLog, *since)
+			}
 			if deliverOnly {
 				saveSeen(*seenOut, seen)
 				return writeDeliveries(*deliveriesOut, *deliveredLog, scans)
@@ -190,6 +199,10 @@ func run() int {
 	} else {
 		seen = append(seen, scheduledClaims(msgs, scans)...)
 		scans = newestPerApp(scans)
+	}
+	if *audit {
+		return die("--audit needs the scanner's credentials (QUALYS_BASE_URL, QUALYS_USERNAME and " +
+			"QUALYS_PASSWORD), and not --no-detail: it lists the scanner's applications")
 	}
 	if *deliveriesOut != "" {
 		if deliverOnly {
@@ -209,11 +222,26 @@ func run() int {
 		}
 	}
 
-	render := appscan.Render
-	if *ticketSlot {
-		render = appscan.RenderWithTicketSlot
+	// Every web app the scanner defines, read once: for NOT SCANNED THIS WEEK
+	// in the report, and the tickets' owner checks below. Nil when it could
+	// not be read, and the report then leaves that section out.
+	var apps []appscan.App
+	appsRead := false
+	if lister, _ := newScanner(cfg).(appscan.AppLister); lister != nil && !*noDetail {
+		if a, err := lister.Apps(ctx); err != nil {
+			logf("warn   : web app list unavailable, so unscanned apps are not listed: %s", safelog.Line(err.Error()))
+		} else {
+			apps, appsRead = a, true
+			if apps == nil {
+				apps = []appscan.App{}
+			}
+			if n := len(appscan.NotScannedApps(apps, scans)); n > 0 {
+				logf("apps   : %d of %d web app(s) in the scanner had no scan in the window - see NOT SCANNED THIS WEEK",
+					n, len(apps))
+			}
+		}
 	}
-	block := render(scans, time.Now())
+	block := appscan.RenderReport(scans, apps, time.Now(), *ticketSlot)
 
 	if *subjectOnly {
 		fmt.Println(block.Subject)
@@ -231,43 +259,39 @@ func run() int {
 		tf := appscan.BuildTickets(scans, owners, time.Now())
 		// Every web app the scanner defines, not only this week's scans:
 		// an application nobody owns is a ticket nobody will be assigned.
-		if lister, _ := newScanner(cfg).(appscan.AppLister); lister != nil && !*noDetail {
-			if apps, err := lister.Apps(ctx); err != nil {
-				logf("warn   : web app list unavailable, owners not checked: %s", safelog.Line(err.Error()))
-			} else {
-				for _, a := range apps {
-					if id := strings.TrimSpace(a.ID); id != "" {
-						tf.ScannerApps = append(tf.ScannerApps, id)
-					}
+		if appsRead {
+			for _, a := range apps {
+				if id := strings.TrimSpace(a.ID); id != "" {
+					tf.ScannerApps = append(tf.ScannerApps, id)
 				}
-				sort.Strings(tf.ScannerApps)
-				sites, asOf := loadSites()
-				_, unowned, stale := appscan.OwnersSkeleton(apps, sites, owners)
-				for _, a := range unowned {
-					tf.Unowned = append(tf.Unowned, a.Name)
+			}
+			sort.Strings(tf.ScannerApps)
+			sites, asOf := loadSites()
+			_, unowned, stale := appscan.OwnersSkeleton(apps, sites, owners)
+			for _, a := range unowned {
+				tf.Unowned = append(tf.Unowned, a.Name)
+			}
+			gap, proxied := appscan.Coverage(sites, apps, owners)
+			for _, s := range gap {
+				ns := appscan.NotScanned{Domain: s.Domain, URL: s.URL}
+				if w, ok := owners.ForSite(s.Domain); ok {
+					ns.Owner = w.Email
 				}
-				gap, proxied := appscan.Coverage(sites, apps, owners)
-				for _, s := range gap {
-					ns := appscan.NotScanned{Domain: s.Domain, URL: s.URL}
-					if w, ok := owners.ForSite(s.Domain); ok {
-						ns.Owner = w.Email
-					}
-					tf.NotScanned = append(tf.NotScanned, ns)
-				}
-				for _, p := range proxied {
-					tf.ViaStandIn = append(tf.ViaStandIn, appscan.ViaStandIn{Domain: p.Site.Domain,
-						AppID: p.App.ID, AppName: p.App.Name, AppHost: appscan.HostOf(p.App.URL)})
-				}
-				tf.SitesAsOf = asOf
-				if n := len(tf.NotScanned); n > 0 {
-					logf("coverage: %d live website(s) with no web app in the scanner - see NOT SCANNED", n)
-				}
-				if len(unowned) > 0 {
-					logf("owners : %d web app(s) with no owner - run cti-appscan --list-apps", len(unowned))
-				}
-				for _, s := range stale {
-					logf("owners : %s matches no web app in the scanner", safelog.Line(s))
-				}
+				tf.NotScanned = append(tf.NotScanned, ns)
+			}
+			for _, p := range proxied {
+				tf.ViaStandIn = append(tf.ViaStandIn, appscan.ViaStandIn{Domain: p.Site.Domain,
+					AppID: p.App.ID, AppName: p.App.Name, AppHost: appscan.HostOf(p.App.URL)})
+			}
+			tf.SitesAsOf = asOf
+			if n := len(tf.NotScanned); n > 0 {
+				logf("coverage: %d live website(s) with no web app in the scanner - see NOT SCANNED", n)
+			}
+			if len(unowned) > 0 {
+				logf("owners : %d web app(s) with no owner - run cti-appscan --list-apps", len(unowned))
+			}
+			for _, s := range stale {
+				logf("owners : %s matches no web app in the scanner", safelog.Line(s))
 			}
 		}
 		for _, t := range tf.Tickets {
@@ -1003,4 +1027,39 @@ func shortSubject(s string) string {
 		s = s[:60] + "..."
 	}
 	return s
+}
+
+// doAudit is --audit: every web app the scanner defines, joined to its owner,
+// its newest scan in the window (the same scans the weekly report reads) and
+// the owners lane's last entry for it. It prints and exits; nothing is sent
+// or recorded, and the delivered log is only read.
+func doAudit(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult, logPath string,
+	window time.Duration) int {
+	lister, ok := sc.(appscan.AppLister)
+	if !ok {
+		return die("--audit: the %s scanner cannot list its applications", sc.Name())
+	}
+	apps, err := lister.Apps(ctx)
+	if err != nil {
+		return die("--audit: the scanner's application list: %s", safelog.Line(err.Error()))
+	}
+	owners, ownersFrom, err := loadOwners()
+	if err != nil {
+		logf("warn   : owners unreadable (%s), so every app shows no owner: %s",
+			safelog.Line(ownersFrom), safelog.Line(err.Error()))
+	}
+	if logPath == "" {
+		if home := os.Getenv("FLEET_HOME"); home != "" {
+			logPath = filepath.Join(home, "state", "appowners-sent.json")
+		}
+	}
+	var delivered appscan.DeliveredLog
+	if logPath != "" {
+		if delivered, err = appscan.LoadDeliveredLog(logPath); err != nil {
+			logf("warn   : %s unreadable, so no report is shown as sent: %s",
+				safelog.Line(logPath), safelog.Line(err.Error()))
+		}
+	}
+	fmt.Print(appscan.RenderAudit(appscan.Audit(apps, scans, owners, delivered), window))
+	return exitOK
 }

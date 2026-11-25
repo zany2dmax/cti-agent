@@ -67,18 +67,30 @@ const maxDetail = 12
 // themselves name attacker-reachable paths on our own sites. Neither belongs
 // in an anchor.
 func Render(week []ScanResult, weekEnding time.Time) Block {
-	return renderReport(week, weekEnding, false)
+	return renderReport(week, nil, weekEnding, false)
+}
+
+// RenderReport is the weekly report with every application the scanner
+// defines (apps), so the ones with no scan this week are listed under NOT
+// SCANNED THIS WEEK. A nil apps means the list could not be read, and the
+// section is left out rather than shown empty. slot is RenderWithTicketSlot's.
+func RenderReport(week []ScanResult, apps []App, weekEnding time.Time, slot bool) Block {
+	return renderReport(week, apps, weekEnding, slot)
 }
 
 // RenderWithTicketSlot is Render plus an invisible slot for
 // StampTickets: the per-application Jira tickets, filed after rendering and
 // before the send.
 func RenderWithTicketSlot(week []ScanResult, weekEnding time.Time) Block {
-	return renderReport(week, weekEnding, true)
+	return renderReport(week, nil, weekEnding, true)
 }
 
-func renderReport(week []ScanResult, weekEnding time.Time, slot bool) Block {
+func renderReport(week []ScanResult, apps []App, weekEnding time.Time, slot bool) Block {
 	r := &report{weekEnding: weekEnding, org: orgName(), slot: slot}
+	if apps != nil {
+		r.appsKnown, r.totalApps = true, len(apps)
+		r.notScanned = NotScannedApps(apps, week)
+	}
 	r.scans = append([]ScanResult(nil), week...)
 	sortScans(r.scans)
 
@@ -133,7 +145,17 @@ type report struct {
 	weekEnding time.Time
 	org        string
 	slot       bool // leave a TicketsSlot for StampTickets
+	// The applications the scanner defines with no scan this week. Known only
+	// when the scanner's application list was read (appsKnown).
+	notScanned []App
+	appsKnown  bool
+	totalApps  int
 }
+
+// notScannedWhy explains NOT SCANNED THIS WEEK, once.
+const notScannedWhy = "These applications are set up in the scanner, but no scan of them ran this " +
+	"week, so nothing above covers them and their owners got no report. Usually the scan " +
+	"schedule is missing, switched off, or less often than weekly. The scanner is where to look."
 
 // orgName is the banner label, shared with the daily brief's FLEET_ORG.
 //
@@ -418,6 +440,15 @@ func faultLine(s ScanResult) (head, detail string) {
 				"previous run. This is a scanner problem rather than an application "+
 				"one - the fleet operator has been alerted.",
 				which, s.LinksCrawled, s.ScanCounts.Urgent)
+	}
+	if BareFinished(s.Status) {
+		// Qualys's notice says Finished, but the run is not in the scan list
+		// (or the list could not be read), so the fleet cannot confirm it ran
+		// to completion. "did not complete (FINISHED)" read as a contradiction.
+		return fmt.Sprintf("%s - finished, but not confirmed in the scan list", s.App),
+			"The scanner's notice says this scan finished, but its run was not found in the " +
+				"scanner's scan list (or the list could not be read), so the fleet cannot confirm " +
+				"it ran to completion. No counts are reported; check the scan in the scanner."
 	}
 	return fmt.Sprintf("%s - scan did not complete (%s)", s.App, s.Status),
 		"Counts from a partial crawl describe a measurement that was never " +
@@ -728,6 +759,14 @@ func (r *report) text() string {
 		fmt.Fprintf(&b, "\n  %s\n", unnotifiedWhy)
 	}
 
+	if len(r.notScanned) > 0 {
+		section(&b, fmt.Sprintf("NOT SCANNED THIS WEEK (%d of %d)", len(r.notScanned), r.totalApps))
+		for _, a := range r.notScanned {
+			fmt.Fprintf(&b, "  %-28s %s\n", oneLineName(a.Name), oneLineName(a.URL))
+		}
+		fmt.Fprintf(&b, "\n  %s\n", notScannedWhy)
+	}
+
 	section(&b, "CHANGED THIS WEEK")
 	worth, lowerOnly := r.changed()
 	if len(worth) == 0 {
@@ -871,6 +910,19 @@ func (r *report) html() string {
 			itemHTML(&b, s.App+" \u2014 "+s.Auth.Label()+" \u2014 "+unnotifiedNote(s))
 		}
 		itemHTML(&b, unnotifiedWhy)
+	}
+
+	// In the scanner, but no scan this week: no report reached its owner.
+	if len(r.notScanned) > 0 {
+		sectionHTML(&b, fmt.Sprintf("NOT SCANNED THIS WEEK (%d of %d)", len(r.notScanned), r.totalApps), "#4a5568")
+		for _, a := range r.notScanned {
+			line := oneLineName(a.Name)
+			if u := oneLineName(a.URL); u != "" {
+				line += " \u2014 " + u
+			}
+			itemHTML(&b, line)
+		}
+		itemHTML(&b, notScannedWhy)
 	}
 
 	// Changed this week.

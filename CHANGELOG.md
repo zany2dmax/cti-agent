@@ -37,6 +37,23 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Added
+
+- **The weekly AppSec report lists the applications that weren't scanned.** A
+  new section, NOT SCANNED THIS WEEK, names every application set up in the
+  scanner that no scan covered in the week. It also says that those
+  applications' owners got no report. Before, the report started from the
+  scans that ran, so a schedule switched off or never set up in Qualys was
+  invisible. On one box that was 13 of 22 applications in a week. The section
+  needs the scanner's application list, which the run now reads once and
+  shares with the ticket checks. When the list can't be read, the section is
+  left out, not shown empty.
+- **`cti-appscan --audit`**: every web application in the scanner, one line
+  each, with its owner on file, its newest scan in `--since`, the owners
+  lane's last report for it, and a verdict. Problems come first, marked `!`.
+  It reads the same scans as the weekly report and the owners lane's
+  delivered log, read-only; nothing is sent or recorded.
+
 ### Security
 
 - **The scanner's report is redacted before anything is written, and staged
@@ -98,6 +115,13 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   cited "BACKLOG" for shipped work now cite their RUNBOOK section.
 
 ### Fixed
+
+- **"did not complete (FINISHED)" now says what happened.** When Qualys's
+  notice says a scan finished but the run isn't in its scan list (or the
+  list can't be read), the report says "finished, but not confirmed in the
+  scan list". It explains the fleet can't confirm the run, where it used to
+  print a status that contradicted itself. The owners lane's hold and the
+  report use one shared test for it.
 
 - **`cti-appreport --list-ids` lists every web application in the scanner.**
   It read only the newest weekly tickets file, which is written only with

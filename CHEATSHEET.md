@@ -185,6 +185,7 @@ sudo cti-agent run-digest daily --to-dev
 sudo cti-agent run-digest weekly --to-dev
 sudo cti-agent run-appscan --to-dev            # auth-failure alert comes to you too; previews each app's Jira ticket
 sudo cti-agent cti-appscan --list-apps > /tmp/app-owners.txt   # owners file from Qualys, plus site: lines for live sites nothing scans
+sudo cti-agent cti-appscan --audit       # every web app: owner, last scan, last owner report, and what needs a look (! first)
 # application owners live in owners.db (RUNBOOK 11f); edit them with fleet-owners, as root:
 sudo cti-agent fleet-owners list                                  # every app: id, scanner name, owner, watchers, covers
 sudo cti-agent fleet-owners sync                                  # ask Qualys: names, apps with no owner, site: rows now scanned

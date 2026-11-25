@@ -232,6 +232,24 @@ with
 .BR \-\-subject\-only .
 Default:\~not written.
 .TP
+.B \-\-audit
+Print every web application the scanner defines, one line each: its id,
+name and owner on file, the date of its newest scan in the
+.B \-\-since
+window, and a verdict, then exit. The verdict is one of: report sent (with
+the date); not scanned in this window (check the application's schedule in
+the scanner); scanned, but no owner on file; the scan did not finish, its
+login failed, or no host answered; the scanner says it finished but the run
+is not in its scan list; held by the owners lane (with the reason); or
+scanned, report not sent yet. Applications that need a look are marked
+.B !
+and listed first. The scans are the ones the weekly report reads (the
+mailbox joined to the scan list); the last report is the owners lane's
+.B \-\-delivered\-log
+(default
+.IR $FLEET_HOME/state/appowners\-sent.json ),
+read only. Nothing is sent or recorded. Needs the scanner's credentials.
+.TP
 .B \-\-list\-apps
 Print a complete
 .I app\-owners.txt

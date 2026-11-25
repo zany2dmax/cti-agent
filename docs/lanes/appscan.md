@@ -729,6 +729,11 @@ the mailbox on the scan reference. The run logs one line saying what it found:
   completion email never arrived — usually a scan with no notification
   configured. They have no counts; the report says so rather than printing
   zeroes.
+- **NOT SCANNED THIS WEEK** lists every application set up in the scanner that
+  no scan covered in the window, so it has no counts above and its owner got
+  no report. Usually its schedule is missing, switched off, or less often than
+  weekly. It needs the scanner's application list; when that can't be read,
+  the section is left out, not shown empty.
 - Discovery scans, scans still running, and on-demand runs that failed or were
   cancelled with no email are skipped. A **scheduled** scan that fails to log
   in is a fault and alerts you, email or not.
@@ -774,6 +779,7 @@ The Qualys Report API element names are not verified against a live account in
 this repository, so test on the box in this order before turning it on:
 
 ```bash
+sudo cti-agent cti-appscan --audit                         # every web app: owner, last scan, last report, verdict
 sudo cti-agent cti-appreport --list-ids                    # every web app id in the scanner; one API call
 sudo cti-agent cti-appreport --check                       # credentials, API budget
 sudo cti-agent cti-appreport --app-id <id> --dump-request  # the body it would send; nothing sent

@@ -66,6 +66,7 @@ runs: local
 risk: --commit-delivered writes
 risk: --commit-seen writes
 risk: --stamp-tickets writes
+flag: --audit | print every web app the scanner defines with its owner, its newest scan in --since and the owners lane's last report for it (from --delivered-log, default $FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads the mailbox and the scanner only - nothing is sent or recorded
 flag: --auth-fail-out STRING | write one line per scan whose configured credential failed to authenticate; the runner alerts the operator when this file is non-empty. Absent or empty means every credential worked.
 flag: --commit-delivered STRING | record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit
 flag: --commit-seen STRING | record a --seen-out file in the processed log the mailbox cleanup reads, so those notifications can be archived; then exit

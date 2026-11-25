@@ -134,7 +134,7 @@ func BuildDeliveries(scans []ScanResult, owners Owners, done DeliveredLog, now t
 			URL: strings.TrimSpace(s.AppURL), Started: s.Started, Duration: s.Duration,
 			LinksCrawled: s.LinksCrawled, ScanDelta: s.ScanDelta, Launch: s.Launch, Caveat: s.Caveat}
 		switch {
-		case !s.Complete && strings.EqualFold(strings.Join(strings.Fields(s.Status), ""), "finished"):
+		case !s.Complete && BareFinished(s.Status):
 			// The newer notice format, which needs the scan list to confirm
 			// it - and the list had no matching run, or was unreachable (a
 			// matched run that did not confirm it rewrites the status to say
