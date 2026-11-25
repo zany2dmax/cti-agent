@@ -380,8 +380,10 @@ func RedactReport(zipped []byte) (name string, body []byte, err error) {
 		if strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || clean == ".." {
 			return "", nil, fmt.Errorf("the report has an entry outside the archive (%q)", f.Name)
 		}
-		total += int64(f.UncompressedSize64) // #nosec G115 -- bounded just below
-		if total > MaxReportBytes {
+		// The declared size is the archive's claim, checked before it is
+		// trusted and never added up as a signed number (a huge one would
+		// wrap); the total counts the bytes actually read.
+		if f.UncompressedSize64 > MaxReportBytes {
 			return "", nil, fmt.Errorf("the report unzips to over %d MB", MaxReportBytes>>20)
 		}
 		rc, err := f.Open()
@@ -393,13 +395,26 @@ func RedactReport(zipped []byte) (name string, body []byte, err error) {
 		if err != nil {
 			return "", nil, err
 		}
+		total += int64(len(b))
+		if total > MaxReportBytes {
+			return "", nil, fmt.Errorf("the report unzips to over %d MB", MaxReportBytes>>20)
+		}
+		switch strings.ToLower(path.Ext(clean)) {
+		case ".html", ".htm", ".css", ".js", ".txt", ".xml", ".json", ".csv", ".svg":
+			// The expressions match UTF-8 text only: a file in another
+			// encoding (UTF-16, say) would pass through unchecked.
+			if !utf8.Valid(b) {
+				return "", nil, fmt.Errorf("the report's %s is not UTF-8 text, so it cannot be checked for a session", path.Base(clean))
+			}
+		}
 		switch strings.ToLower(path.Ext(clean)) {
 		case ".html", ".htm":
 			htmls++
 			b = []byte(RedactURL(Redact(string(b))))
-		case ".css", ".js", ".txt", ".xml", ".json", ".csv":
+		case ".css", ".js", ".txt", ".xml", ".json", ".csv", ".svg":
+			// SVG is text, so it can carry a header like any other.
 			b = []byte(RedactURL(Redact(string(b))))
-		case ".png", ".gif", ".jpg", ".jpeg", ".svg", ".ico", ".woff", ".woff2", ".ttf":
+		case ".png", ".gif", ".jpg", ".jpeg", ".ico", ".woff", ".woff2", ".ttf":
 		default:
 			// Unknown content cannot be checked for a session, so it is
 			// left out rather than mailed unchecked.

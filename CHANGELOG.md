@@ -37,6 +37,53 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ## Unreleased
 
+### Security
+
+- **The scanner's report is redacted before anything is written, and staged
+  in PrivateTmp** (PrimeSec findings on the AppSec report attachment). With
+  `WAS_ATTACH_REPORT=1`, `cti-appreport` wrote Qualys's report archive
+  unchanged, and it holds the scan account's session cookies. `cti-jira` then
+  attached that file to the application's Jira ticket.
+  - `WriteReport`, the only way a report reaches the disk, now runs the
+    archive through `RedactReport` first and writes only the redacted copy.
+    A report it can't redact isn't kept. The raw archive exists only in
+    memory, so a run killed at any point leaves nothing raw behind: a test
+    SIGKILLs a run between two reports and checks every file it left.
+  - `run-appscan` and `run-appowners` stage their reports and covering
+    emails in a temporary directory, not `state/`. Under the timer that is
+    the unit's PrivateTmp, which systemd removes however the run ends. A
+    real run also clears leftovers: every reports directory in `state/`, and
+    day-old ones in the temporary directory.
+  - The ticket text now says the session cookies and login headers were
+    removed, where it used to say the attachment included them.
+  - `LoadReport` redacts again whatever it loads, so a reports directory
+    left in `state/` by a killed run of an older version can't be attached
+    raw.
+  - From an independent review of the change, three shapes the redaction
+    missed: an SVG entry was kept unredacted, though it's text; a header
+    name and its value in two table cells, the name with a colon
+    (`<td>Cookie:</td><td>…</td>`), kept the value; and a text entry that
+    isn't UTF-8 (UTF-16, say) passed through unchecked. SVG is now redacted,
+    the cell shape caught, and non-UTF-8 text refuses the report.
+  - `RedactReport` no longer adds up the archive's declared entry sizes as
+    signed numbers, where a size near 2^63 wrapped negative and slipped past
+    the limit. It refuses a declared size over the limit and counts the bytes
+    it actually reads.
+
+  The other redaction gaps those findings named (mid-line quoted cookies,
+  JSON-keyed tokens, wider URL token forms, the probe output) were already
+  closed by earlier changes; the new tests cover the quoted mid-line case.
+
+- **Fixed issues found by PrimeSec AI:**
+  - Attack vector 10786478 (Medium) - scan-account session cookies in the
+    scanner's own report, attached unredacted to Jira tickets (the entry
+    above)
+  - Attack vector 10786453 (Medium) - raw scanner report carrying
+    scan-account session cookies is attached to Jira tickets (the entry
+    above)
+  - Attack vector 10969088 (Low) - oversized ZIP entry size wraps the
+    aggregate report size guard in RedactReport (the entry above)
+
 ### Changed
 
 - **BACKLOG.md holds only what is left.** Work that shipped in 2.0 is out of

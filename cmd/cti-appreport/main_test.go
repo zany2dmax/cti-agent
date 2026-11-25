@@ -1,9 +1,12 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +24,7 @@ import (
 type fakeFetcher struct {
 	asked []string
 	fail  map[string]error
+	body  []byte // the archive every report returns; nil is a real one with a scan session in it
 }
 
 func (f *fakeFetcher) Name() string { return "fake-dast" }
@@ -30,7 +34,38 @@ func (f *fakeFetcher) AppReport(_ context.Context, r appscan.ReportRequest) (app
 	if err := f.fail[r.AppID]; err != nil {
 		return appscan.Report{}, err
 	}
-	return appscan.Report{Provider: f.Name(), AppID: r.AppID, App: r.App, Body: []byte("PK\x03\x04" + r.AppID)}, nil
+	body := f.body
+	if body == nil {
+		// The scanner's report is made while logged in as the scan account,
+		// so it carries that session, mid-line and quoted, as Prime found.
+		var err error
+		body, err = appscan.ZipOne("report.html", []byte("<html><p>app "+r.AppID+
+			"</p><td>Set-Cookie: sid=\"SCANSESSION-"+r.AppID+"\"; Path=/</td></html>"), time.Now())
+		if err != nil {
+			return appscan.Report{}, err
+		}
+	}
+	return appscan.Report{Provider: f.Name(), AppID: r.AppID, App: r.App, Body: body}, nil
+}
+
+// unzipped is the text of every file in a zip, for asserting on its content.
+func unzipped(t *testing.T, b []byte) string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		t.Fatalf("not a zip: %v", err)
+	}
+	var out strings.Builder
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		out.Write(c)
+	}
+	return out.String()
 }
 
 func targets(ids ...string) []target {
@@ -41,6 +76,23 @@ func targets(ids ...string) []target {
 	return out
 }
 
+// A report that cannot be redacted (here, one with no HTML in it) is not kept:
+// it is a failure, and nothing is written for it.
+func TestAReportThatCannotBeRedactedIsNotKept(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "reports")
+	raw, err := appscan.ZipOne("cookies.bin", []byte("sid=SCANSESSION"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, failed := fetchAll(context.Background(), &fakeFetcher{body: raw}, dir, targets("7"), 10, false, time.Minute)
+	if failed != 1 || !strings.Contains(m.Failed["id:7"], "could not be redacted") {
+		t.Fatalf("failed %d: %+v", failed, m.Failed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, appscan.ReportFile("id:7"))); !os.IsNotExist(err) {
+		t.Fatalf("a report that could not be redacted was written: %v", err)
+	}
+}
+
 func TestFetchAllWritesReportsAndManifest(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "reports")
 	f := &fakeFetcher{fail: map[string]error{"2": fmt.Errorf("scanner said no")}}
@@ -49,8 +101,19 @@ func TestFetchAllWritesReportsAndManifest(t *testing.T) {
 		t.Fatalf("failed %d manifest %+v", failed, m)
 	}
 	r, ok, err := appscan.LoadReport(dir, "id:3", "3")
-	if err != nil || !ok || string(r.Body) != "PK\x03\x043" {
-		t.Fatalf("load: %v %v %q", ok, err, r.Body)
+	if err != nil || !ok {
+		t.Fatalf("load: %v %v", ok, err)
+	}
+	if text := unzipped(t, r.Body); !strings.Contains(text, "app 3") || strings.Contains(text, "SCANSESSION") {
+		t.Fatalf("the written report is not the redacted one: %q", text)
+	}
+	// Nothing in the directory holds the session: the raw archive is never written.
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		if bytes.Contains(b, []byte("SCANSESSION")) || (appscan.IsZip(b) && strings.Contains(unzipped(t, b), "SCANSESSION")) {
+			t.Fatalf("%s holds the scan session", e.Name())
+		}
 	}
 	if _, ok, _ := appscan.LoadReport(dir, "id:2", "2"); ok {
 		t.Fatal("a failed report loads")

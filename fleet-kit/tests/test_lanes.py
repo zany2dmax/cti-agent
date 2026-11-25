@@ -3180,7 +3180,11 @@ class RunnersToDev(unittest.TestCase):
             "STUB_LOG": str(self.log),
             "CTI_AGENT_DIR": str(agent),
             "GRAPH_MAILBOX": "fleet@example.com",
+            # The runners stage reports in a temporary directory (the unit's
+            # PrivateTmp under systemd); here, the test's own.
+            "TMPDIR": str(root / "tmp"),
         }
+        (root / "tmp").mkdir(exist_ok=True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -3440,6 +3444,32 @@ class RunnersToDev(unittest.TestCase):
                 self.assertEqual("--for-real" in calls[jira], real,
                                  f"{args}: Jira written on a run that must not write: {calls[jira]}")
                 self.assertIn("--ticket-slot", calls[idx(lambda c: c.startswith("cti-appscan --out"))])
+
+    def test_appscan_stages_the_scanner_reports_outside_state(self):
+        """The scanner reports go to a temporary directory (the unit's
+        PrivateTmp), are gone when the run ends, and a real run clears what
+        earlier runs left: every reports directory in state/ (from before
+        the move), and day-old ones in the temporary directory."""
+        tmp = pathlib.Path(self.base["TMPDIR"])
+        legacy = self.home / "state" / "appscan-reports-2026-11-20" / "cti-appscan-1.zip"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"PK\x03\x04")
+        stale = tmp / "cti-appscan-reports.OLDRUN"
+        stale.mkdir()
+        os.utime(stale, (0, 0))
+        fresh = tmp / "cti-appscan-reports.OTHERRUN"
+        fresh.mkdir()
+        r, calls = self.run_lane("run-appscan", "--for-real", env="WAS_TICKETS=1\nWAS_ATTACH_REPORT=1\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        fetch = [c for c in calls if c.startswith("cti-appreport --tickets")]
+        self.assertEqual(len(fetch), 1, calls)
+        reports = fetch[0].split("--out-dir ", 1)[1].split()[0]
+        self.assertTrue(reports.startswith(str(tmp) + "/cti-appscan-reports."), reports)
+        self.assertNotIn(str(self.home / "state"), reports)
+        self.assertFalse(pathlib.Path(reports).exists(), "the reports outlived the run")
+        self.assertFalse(legacy.parent.exists(), "a reports directory left in state/ was kept")
+        self.assertFalse(stale.exists(), "a day-old temporary reports directory was kept")
+        self.assertTrue(fresh.exists(), "another run's current directory was removed")
 
     def test_appowners_is_off_until_armed(self):
         r, calls = self.run_lane("run-appowners", "--for-real")
@@ -3881,8 +3911,11 @@ class DryRunsLeaveTheRealRunAlone(unittest.TestCase):
                 self.assertIn(f"--deliveries-out {out}/appowners-plan-", plan)
                 self.assertIn(f"--delivered-log {self.home}/state/appowners-sent.json", plan,
                               "the rehearsal must plan from the real delivered log")
-                self.assertIn(f"--out-dir {out}/appowners-",
-                              [c for c in calls if c.startswith("cti-appreport ")][0])
+                # The work directory is a temporary one (PrivateTmp under the
+                # timer), never state/, and gone when the run ends.
+                work = [c for c in calls if c.startswith("cti-appreport ")][0].split("--out-dir ", 1)[1].split()[0]
+                self.assertTrue(work.startswith(self.base["TMPDIR"] + "/cti-appowners."), work)
+                self.assertFalse(pathlib.Path(work).exists(), "the work directory outlived the run")
                 self.assertFalse(any("--commit-delivered" in c for c in calls), calls)
                 self.assertUntouched(old)
                 self.assertEqual(list(out.iterdir()), [], "the rehearsal's reports were not deleted")

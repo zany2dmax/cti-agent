@@ -491,16 +491,17 @@ func kb(n int) string {
 }
 
 // reportNote is the line that tells the reader the scanner's report is
-// attached, and what it is - including that it carries the scan account's
-// session cookies, which is why it stays inside the project.
+// attached, and what it is: the redacted copy (WriteReport), still a list of
+// the application's open weaknesses, which is why it stays inside the project.
 func reportNote(has bool, file string) string {
 	if !has {
 		return ""
 	}
 	return "\n\n*Attached:* " + wikiEscape(file) + " - the scanner's own report for this application " +
 		"(zipped HTML: open vulnerabilities, with the request and response the scanner used for each; " +
-		"potential findings are marked *Potential* there too). It includes session cookies from the " +
-		"scan account - do not forward it outside this project."
+		"potential findings are marked *Potential* there too). The scan account's session cookies and " +
+		"login headers have been removed. It lists this application's open weaknesses - do not forward " +
+		"it outside this project."
 }
 
 // addWatchers adds each email in app-owners.txt's watchers= as a watcher.

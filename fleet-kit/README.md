@@ -1759,8 +1759,9 @@ file, has `cti-appreport` fetch the scanner's report only for applications whose
 ticket will be filed or commented, runs `cti-jira --for-real --appscan-reports`
 to attach them, then deletes the reports. The scanner is chosen by
 `APPSCAN_REPORT_PROVIDER` (default `qualys-was`) behind `appscan.ReportFetcher`.
-The reports contain the scan account's session cookies, so they are `0600`,
-deleted from the scanner on download and from local state after attaching.
+The scanner's reports contain the scan account's session cookies, so only a
+redacted copy is ever written (`0600`, in the unit's PrivateTmp); each is
+deleted from the scanner on download and locally after attaching.
 Qualys API use is metered from its response headers (`QUALYS_RL_RESERVE`,
 `QUALYS_RL_MAX_WAIT`). It never stops the email: no report, no attachment. Test
 it by hand first, in the order in RUNBOOK 11f.

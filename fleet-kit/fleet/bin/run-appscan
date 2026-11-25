@@ -137,18 +137,30 @@ JIRA="$FLEET_CODE/bin/cti-jira"
 rm -f "$TICKETS" "$TICKETREF"
 # The scanner's own report per application, attached to the ticket when
 # WAS_ATTACH_REPORT=1. Fetched only for tickets about to be filed or
-# commented (PLAN is a cti-jira preview), and deleted after cti-jira: each
-# report carries the scan account's session cookies.
+# commented (PLAN is a cti-jira preview), and deleted after cti-jira.
+# cti-appreport writes only the redacted copy (the scanner's archive carries
+# the scan account's session), and into a temporary directory, not state/:
+# under the timer that is the unit's PrivateTmp, which systemd removes when
+# the run ends however it ends, a SIGKILL included.
 APPREPORT="$FLEET_CODE/bin/cti-appreport"
 PLAN="$OUTDIR/appscan-tickets-plan-$STAMP.json"
-REPORTS="$OUTDIR/appscan-reports-$STAMP"
-rm -rf "$PLAN" "$REPORTS"
-# And on every way out - a timeout or SIGTERM included - plus any left by an
-# earlier run that was killed before it could clean up.
+rm -f "$PLAN"
+REPORTS="$(mktemp -d "${TMPDIR:-/tmp}/cti-appscan-reports.XXXXXX")" \
+  || fail "could not make a temporary directory for the scanner reports"
+# And on every way out - a timeout or SIGTERM included.
 trap 'rm -rf "$PLAN" "$REPORTS"' EXIT
-# Real runs only: a rehearsal deletes nothing in state/.
+# Real runs only (a rehearsal deletes nothing in state/): what earlier runs
+# left. Reports directories in state/ are from before they moved to the
+# temporary directory, so all go, whatever their age. In the temporary
+# directory, those over a day old: under the timer that is this run's own
+# PrivateTmp, so this only matters for a hand run (sudo cti-agent has no
+# PrivateTmp), whose killed leftovers in /tmp the next hand run clears.
+# What any leftover holds is the redacted copy: WriteReport never writes the
+# raw archive.
 if [ "$OUTDIR" = "$STATE" ]; then
-  find "$STATE" -maxdepth 1 -name 'appscan-reports-*' -type d -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+  find "$STATE" -maxdepth 1 -name 'appscan-reports-*' -type d -exec rm -rf {} + 2>/dev/null || true
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'cti-appscan-reports.*' -type d -user "$(id -u)" -mtime +0 \
+    ! -path "$REPORTS" -exec rm -rf {} + 2>/dev/null || true
 fi
 REPORTARGS=()
 

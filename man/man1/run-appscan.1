@@ -90,8 +90,10 @@ so only applications whose ticket will be filed or commented get a report.
 .B cti\-jira
 then runs with
 .BR "\-\-for\-real \-\-appscan\-reports" ,
-and the reports directory and plan are deleted afterwards: the reports
-carry session cookies. A failure, or a missing
+and the reports directory and plan are deleted afterwards. The reports are
+redacted copies (the scan session removed), staged in a temporary
+directory: the unit's PrivateTmp, which systemd removes however the run
+ends. A failure, or a missing
 .BR cti\-appreport ,
 is logged and the tickets go out without a report.
 .TP

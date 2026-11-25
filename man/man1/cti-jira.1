@@ -491,8 +491,9 @@ a
 output directory. Each application's zipped scanner report listed in
 .IR DIR /reports.json
 is attached when its ticket is filed and when its findings change; the
-ticket text then says it is attached and that it contains scan-account
-session cookies. An application with no listed report is filed or commented
+ticket text then says it is attached, that the scan account's session
+cookies and login headers were removed, and not to forward it outside the
+project. An application with no listed report is filed or commented
 as usual. The reports are not deleted by this command.
 Without
 .B \-\-for\-real

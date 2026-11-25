@@ -139,8 +139,12 @@ STAMP="$(date -u +%Y-%m-%dT%H%M)"
 LOG="$STATE/appowners-sent.json"
 PLAN="$OUTDIR/appowners-plan-$STAMP.json"
 # The fetched reports and covering emails. Deleted on every way out: even
-# redacted, a report is a list of our unfixed weaknesses.
-WORK="$OUTDIR/appowners-$STAMP"
+# redacted, a report is a list of our unfixed weaknesses. In a temporary
+# directory, not state/: under the timer that is the unit's PrivateTmp,
+# which systemd removes when the run ends however it ends, a SIGKILL
+# included.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/cti-appowners.XXXXXX")" \
+  || fail "could not make a temporary directory for the owners' reports"
 SENT="$WORK/sent.tsv"
 # The scan notices this run read, for the mailbox cleanup. Recorded after a
 # real send, and only for the scans that were sent (--only-sent), and only the
@@ -150,9 +154,13 @@ SEEN="$OUTDIR/appowners-seen-$STAMP.json"
 trap 'rm -rf "$PLAN" "$WORK" "$SEEN"' EXIT
 # Leftovers of a real run that was killed. Real runs only: a rehearsal deletes
 # nothing in state/.
+# In the temporary directory, day-old ones: a hand run's (sudo cti-agent has
+# no PrivateTmp), since a timer run's /tmp is its own.
 if [ -n "$REAL" ]; then
   find "$STATE" -maxdepth 1 \( -name 'appowners-20*' -o -name 'appowners-seen-*' \) -mtime +0 \
     -exec rm -rf {} + 2>/dev/null || true
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'cti-appowners.*' -type d -user "$(id -u)" -mtime +0 \
+    ! -path "$WORK" -exec rm -rf {} + 2>/dev/null || true
 fi
 
 # 48 hours, not 24: a run that fails or is late does not lose a day's scans.

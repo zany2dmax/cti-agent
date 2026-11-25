@@ -124,7 +124,12 @@ type ReportsManifest struct {
 // ManifestName is the manifest's file name inside the reports directory.
 const ManifestName = "reports.json"
 
-// WriteReport writes one report (0600) and returns its manifest entry.
+// WriteReport writes one report (0600) and returns its manifest entry. The
+// scanner's archive was produced while logged in as the scan account and
+// carries that session, so it is redacted first (RedactReport) and only the
+// redacted copy is ever written: the raw archive never reaches the disk, and
+// a report that cannot be redacted is not kept at all. What is written, and
+// what cti-jira attaches, is a zip of the redacted report.
 func WriteReport(dir, appKey string, r Report) (Report, error) {
 	if !IsZip(r.Body) {
 		return r, fmt.Errorf("the %s report for %q is not a zip archive", r.Provider, r.App)
@@ -133,12 +138,33 @@ func WriteReport(dir, appKey string, r Report) (Report, error) {
 		return r, fmt.Errorf("the %s report for %q is %d MB - over the %d MB limit",
 			r.Provider, r.App, len(r.Body)>>20, MaxReportBytes>>20)
 	}
+	clean, err := redactedZip(r.Body, r.Generated)
+	if err != nil {
+		return r, fmt.Errorf("the %s report for %q could not be redacted, so it was not kept: %w", r.Provider, r.App, err)
+	}
+	r.Body = clean
 	r.File = ReportFile(appKey)
 	r.Bytes = len(r.Body)
 	if err := writeNew(filepath.Join(dir, r.File), r.Body); err != nil {
 		return r, err
 	}
 	return r, nil
+}
+
+// redactedZip is the archive with every file redacted (RedactReport), as a
+// zip: what WriteReport writes and what LoadReport hands to cti-jira.
+func redactedZip(raw []byte, modified time.Time) ([]byte, error) {
+	name, clean, err := RedactReport(raw)
+	if err != nil {
+		return nil, err
+	}
+	if name == "report.zip" {
+		return clean, nil
+	}
+	if modified.IsZero() {
+		modified = time.Now()
+	}
+	return ZipOne(name, clean, modified)
 }
 
 // writeNew writes a fresh 0600 file, never through whatever is already at
@@ -223,6 +249,12 @@ func LoadReport(dir, appKey, appID string) (Report, bool, error) {
 	if !IsZip(body) {
 		return Report{}, false, fmt.Errorf("%s is not a zip archive", r.File)
 	}
-	r.Body = body
+	// Redacted again on the way out, whatever wrote it: a reports directory
+	// from before WriteReport redacted (a killed run's leftover) holds the
+	// raw archive, and attaching is the last chance to catch it.
+	if body, err = redactedZip(body, r.Generated); err != nil {
+		return Report{}, false, fmt.Errorf("%s could not be redacted, so it is not attached: %w", r.File, err)
+	}
+	r.Body, r.Bytes = body, len(body)
 	return r, true, nil
 }

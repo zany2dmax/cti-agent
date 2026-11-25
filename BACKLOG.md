@@ -8,8 +8,7 @@ is real, not before. Finished work moves out of this file into
 
 ## Before 2.0 final
 
-The reuse work for 2.0 is built. What is left is checking it, plus one open
-security finding.
+The reuse work for 2.0 is built. What is left is checking it.
 
 - **A clean-box install.** Follow [INSTALL.md](INSTALL.md) on a scratch Fedora
   VM until `cti-agent-doctor` shows no FAIL. It has only been run as an
@@ -18,16 +17,23 @@ security finding.
   `org/` pack, a `layout.env` and a `FLEET_LANES` subset. The doctor should
   check the fork's pack, the paths should be relocated, and the lanes left
   out should stay off.
-- **Scanner report staging (PrimeSec Top-228).** Stage scanner reports in
-  `PrivateTmp`, promote them after redaction, clean up orphans on start,
-  extend the scrub list; test with a killed run. Needs an Opus review
-  (credential scrubbing).
 - **A new check-in eval baseline** (`task eval:checkin`). The one in
   HARNESS.md (2026-11-18) is from before the beat stopped running the
   credential checks, so its turns and cost no longer compare.
 - **The GitHub tag ruleset** on the repository, by its owner (the command is
   in [development.md §11i](docs/guides/development.md#a-pushed-tag-never-moves)),
   and a leak check of the whole tree for organization names.
+
+## Hardening
+
+- **Redaction of encoded sessions in the scanner's report** (from the review
+  of the report staging change, 2026-11-25). Still passed through: a folded
+  header continuation inside `<pre>`, a base64-encoded `Cookie` outside the
+  verbose XML's own tags (in a `<pre>` or `<td>`), and a percent-encoded
+  `Cookie%3A%20...` in plain text. What it covers today is in
+  `internal/appscan/redact.go`. Also: a `TMPDIR` set in `fleet.env` moves the
+  runners' staging out of PrivateTmp, so the runners could ignore one from
+  there.
 
 ## Interfaces
 

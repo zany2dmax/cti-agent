@@ -74,8 +74,12 @@ func TestPotentialCalloutSurvivesALongConfirmedList(t *testing.T) {
 func writeReports(t *testing.T, key string) string {
 	t.Helper()
 	dir := t.TempDir()
+	raw, err := appscan.ZipOne("report.html", []byte("<html>Portal findings</html>"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	r, err := appscan.WriteReport(dir, key, appscan.Report{Provider: "qualys-was", AppID: "101",
-		App: "Portal", Body: []byte("PK\x03\x04zip"), Generated: time.Now()})
+		App: "Portal", Body: raw, Generated: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}

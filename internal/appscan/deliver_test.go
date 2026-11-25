@@ -3,6 +3,8 @@ package appscan
 import (
 	"archive/zip"
 	"bytes"
+	"hash/crc32"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -320,5 +322,109 @@ func TestTheScanResultsTitleTakesTheOrganisationWithoutTheProductName(t *testing
 		if got := scanResultsTitle(in); got != want {
 			t.Errorf("scanResultsTitle(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// WriteReport is the only way a report reaches the disk, and it writes the
+// redacted copy: the scan session in the scanner's archive is never written.
+func TestWriteReportWritesOnlyTheRedactedReport(t *testing.T) {
+	dir := t.TempDir()
+	r, err := WriteReport(dir, "id:5", Report{Provider: "qualys-was", AppID: "5", App: "Shop",
+		Body: zipOf(t, map[string]string{"report.html": reportWithSession})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, r.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, text, err := RedactReport(b)
+	if err != nil || name != "report.html" {
+		t.Fatalf("the written report is not a zip of the report: %q %v", name, err)
+	}
+	for _, live := range []string{"live-session-value", "live-token", "also-live", "abc123"} {
+		if bytes.Contains(b, []byte(live)) || strings.Contains(string(text), live) {
+			t.Errorf("%s was written", live)
+		}
+	}
+	if r.Bytes != len(b) {
+		t.Errorf("the manifest says %d bytes, the file has %d", r.Bytes, len(b))
+	}
+}
+
+// An entry that declares a size near 2^63 is refused: added up as a signed
+// number it would wrap negative and slip past the total's limit.
+func TestAHugeDeclaredSizeIsRefused(t *testing.T) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	fw, err := w.CreateRaw(&zip.FileHeader{Name: "report.html", Method: zip.Store,
+		UncompressedSize64: 1 << 63, CompressedSize64: 4, CRC32: crc32.ChecksumIEEE([]byte("<p/>"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("<p/>")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := RedactReport(buf.Bytes()); err == nil || !strings.Contains(err.Error(), "unzips to over") {
+		t.Fatalf("a 2^63-byte entry was accepted: %v", err)
+	}
+}
+
+// From the review of the staging change: shapes a scan session can take in
+// the scanner's archive that redaction must still catch.
+func TestTheReportsOtherShapesAreRedactedOrRefused(t *testing.T) {
+	// SVG is text: kept, and redacted like the HTML.
+	_, body, err := RedactReport(zipOf(t, map[string]string{"report.html": "<p>ok</p>",
+		"chart.svg": "<svg><text>Cookie: sid=SVGSESSION</text></svg>"}))
+	if err != nil || bytes.Contains(body, []byte("SVGSESSION")) {
+		t.Errorf("the SVG kept its session (err %v)", err)
+	}
+	// A header name and its value in two table cells, the name with a colon.
+	got := Redact(`<tr><td>Cookie:</td><td>JSESSIONID=CELLSESSION</td></tr>`)
+	if strings.Contains(got, "CELLSESSION") {
+		t.Errorf("a header split across cells kept its value: %s", got)
+	}
+	// Text in an encoding the expressions cannot read is refused, not passed.
+	utf16 := []byte{0xff, 0xfe}
+	for _, r := range "Cookie: sid=WIDESESSION" {
+		utf16 = append(utf16, byte(r), 0)
+	}
+	if _, _, err := RedactReport(zipOf(t, map[string]string{"report.html": string(utf16)})); err == nil ||
+		!strings.Contains(err.Error(), "not UTF-8") {
+		t.Errorf("a UTF-16 report was accepted: %v", err)
+	}
+}
+
+// A report written before WriteReport redacted (a killed run's leftover) is
+// redacted again when it is loaded to be attached.
+func TestLoadReportRedactsWhatItLoads(t *testing.T) {
+	dir := t.TempDir()
+	raw := zipOf(t, map[string]string{"report.html": reportWithSession})
+	if err := os.WriteFile(filepath.Join(dir, ReportFile("id:9")), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := ReportsManifest{Provider: "qualys-was", Reports: map[string]Report{
+		"id:9": {Provider: "qualys-was", AppID: "9", App: "Old", File: ReportFile("id:9"), Bytes: len(raw)}}}
+	if err := WriteManifest(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := LoadReport(dir, "id:9", "9")
+	if err != nil || !ok {
+		t.Fatalf("load: %v %v", ok, err)
+	}
+	_, text, err := RedactReport(r.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, live := range []string{"live-session-value", "live-token", "also-live"} {
+		if bytes.Contains(r.Body, []byte(live)) || strings.Contains(string(text), live) {
+			t.Errorf("%s would be attached", live)
+		}
+	}
+	if r.Bytes != len(r.Body) {
+		t.Errorf("Bytes %d for %d", r.Bytes, len(r.Body))
 	}
 }

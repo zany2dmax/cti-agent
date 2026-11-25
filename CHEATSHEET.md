@@ -201,7 +201,7 @@ sudo cti-agent fleet-owners check                                 # what would s
 #   (files an unassigned "[TEST]" ticket; delete it in Jira and rm -rf /tmp/report afterwards)
 #   weekly comment refused with an HTML 403? find the text: cti-jira --appscan-tickets <file> --appscan-test 1234 --appscan-comment-probe CR-NNN [--for-real]  (on a [TEST] ticket only)
 #   rehearse closing a retired app's ticket: cti-jira --appscan-close-test CR-NNN [--for-real]  (only a [TEST] ticket; needs JIRA_ALLOW_CLOSE)
-#   then WAS_ATTACH_REPORT=1 in fleet.env; reports carry session cookies, deleted after attaching
+#   then WAS_ATTACH_REPORT=1 in fleet.env; only redacted reports are kept, in PrivateTmp, deleted after attaching
 sudo cti-agent run-domains --to-dev
 sudo cti-agent run-patchtuesday --to-dev
 sudo cti-agent run-patchtuesday --month 2026-09 --to-dev   # replay to yourself, no --for-real needed

@@ -13,8 +13,8 @@ import (
 // A scanner's evidence is the HTTP it sent and received while logged in as
 // the scan account: its Cookie, Set-Cookie and Authorization headers are a
 // working session. Anything this fleet writes from that evidence - a probe
-// dump, ticket text - goes through Redact first. (The scanner's own report,
-// attached as-is, is the exception, and the ticket says so.)
+// dump, ticket text, the scanner's own report (RedactReport) - goes through
+// Redact first.
 
 var (
 	// A secret header and any folded continuation lines after it.
@@ -46,6 +46,11 @@ func Redact(s string) string {
 }
 
 func redactHeaders(s string) string {
+	// A header name alone in a table cell, its value in the next cell, runs
+	// first: the inline pass below would turn "Cookie:" into a redacted
+	// header and leave the next cell's value standing. (Run again below for
+	// the cells the other passes shape.)
+	s = headerCellRE.ReplaceAllString(s, "${1}[redacted by cti-agent]")
 	s = secretHeaderRE.ReplaceAllString(s, "$1 [redacted by cti-agent]")
 	// The same headers mid-line - a header dump on one line, an echo inside
 	// HTML - and token-shaped JSON values, which no line anchor catches.
@@ -99,7 +104,7 @@ var (
 	digestRE = regexp.MustCompile(`(?i)(\bdigest\s+)(?:username|realm|nonce|response)\s*=[^<\r\n]*`)
 	// cell boundary: </td><td ...> (or th), whitespace allowed.
 	headerCellRE = regexp.MustCompile(
-		`(?i)(<t[dh][^>]*>\s*(?:cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*</t[dh]>\s*<t[dh][^>]*>)[^<]*`)
+		`(?i)(<t[dh][^>]*>\s*(?:cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token)\s*:?\s*</t[dh]>\s*<t[dh][^>]*>)[^<]*`)
 	cookieDumpRE = regexp.MustCompile(
 		`(?i)(\$_COOKIE\[\s*['"]?[^\]'"<]{1,128}['"]?\s*\]\s*(?:</t[dh]>\s*<t[dh][^>]*>|=>|=)?\s*)[^<\r\n]+`)
 	sessionNameRE = regexp.MustCompile(

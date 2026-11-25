@@ -103,9 +103,12 @@ folded away at the bottom. Request headers are never read. Cookie values,
 session identifiers, tokens and login headers are removed; the payloads that
 prove a finding are kept, so developers can reproduce it.
 .PP
-.B The weekly ticket reports carry the scan account's session cookies
-(the scanner records the requests it sent). Treat the directory like a
-credential: files are written 0600 in a directory created 0700, the report
+.B The scanner's report carries the scan account's session cookies
+(the scanner records the requests it sent), so only a redacted copy is
+written: cookies, login headers and tokens are removed first, and a report
+that cannot be redacted is not kept. The raw archive never reaches the disk.
+It is still a list of the application's open weaknesses: files are written
+0600 in a directory created 0700, the report
 is deleted from the scanner after download (unless
 .BR \-\-keep ),
 and

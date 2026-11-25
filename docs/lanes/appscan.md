@@ -474,13 +474,14 @@ errors (often a host or WAF blocking the scanner).
 
 **What is sent.** A short covering email (open findings by severity, what this
 scan found, authenticated or not, and a do-not-forward note) with the report
-attached as HTML, or as a zip when Qualys's report has images or other files.
-Every text file in the report goes through the same redaction as the probe
-output (`Cookie`, `Set-Cookie`, `Authorization` and similar headers, token
-fields in JSON, session and token parameters in URLs); a file type it cannot
-check is left out. A report over 3 MB after redaction is not attached and the
-email says so - send that one by hand. The unredacted zip is deleted as soon as
-it is redacted, and the whole working directory when the run ends.
+attached as HTML. The fleet builds that report itself from the scanner's
+findings (`appscan.RenderOwnerReport`); Qualys's own archive is never fetched
+for it. Each finding's request and response go through the same redaction as
+the probe output (`Cookie`, `Set-Cookie`, `Authorization` and similar headers,
+token fields in JSON, session and token parameters in URLs). A report over
+3 MB is not attached and the email says so - send that one by hand. The
+working directory is in the unit's PrivateTmp and is deleted when the run
+ends.
 
 **Each scan is sent once.** `$FLEET_HOME/state/appowners-sent.json` holds the
 last scan sent or held per application, written only after a real send. The
@@ -762,9 +763,12 @@ this works without `WAS_ATTACH_REPORT`.
 create, poll, download as HTML_ZIPPED, delete) and `cti-jira --appscan-reports`
 attaches it when the ticket is filed or its findings change. Each report is
 about five API calls, so only the applications about to be filed or commented
-are fetched. **The report contains the scan account's session cookies**: it is
-`0600` in a `0700` directory, deleted from Qualys after download, and the
-runner deletes the directory after `cti-jira` has attached it.
+are fetched. **The scanner's report contains the scan account's session
+cookies**, so `cti-appreport` writes only a redacted copy: cookies, login
+headers and tokens are removed before anything reaches the disk, and a report
+that can't be redacted isn't kept. The copy is `0600` in a `0700` directory in
+the unit's PrivateTmp, the report is deleted from Qualys after download, and
+the runner deletes the directory after `cti-jira` has attached it.
 
 The Qualys Report API element names are not verified against a live account in
 this repository, so test on the box in this order before turning it on:

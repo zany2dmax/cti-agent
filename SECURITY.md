@@ -487,11 +487,20 @@ through, which is one more reason the tickets' audience matters.
 `WAS_ATTACH_REPORT=1` the AppSec lane fetches Qualys's per-application report
 (`cti-appreport`) and attaches it to the application's Jira ticket. That report
 holds the request and response behind each finding, which includes **the scan
-account's session cookies**. So it is: written `0600` in a directory created
-`0700`; deleted from Qualys immediately after download; deleted from local
-state by `run-appscan` once `cti-jira` has attached it; fetched only for
-tickets about to be filed or commented; and off by default. The ticket says it
-is attached and that it contains cookies, so whoever opens it knows. The
+account's session cookies**. So:
+- **Only a redacted copy is written.** `WriteReport` runs the archive through
+  `RedactReport` (cookies, login headers, tokens in URLs and JSON) before
+  anything reaches the disk, and keeps no report it can't redact. The raw
+  archive exists only in memory, so a run killed at any point leaves nothing
+  raw behind; a test kills one with SIGKILL to prove it.
+- **It's staged in PrivateTmp, not state.** `run-appscan` writes the reports
+  `0600` in a `0700` temporary directory, which under the timer is the unit's
+  PrivateTmp: systemd removes it when the run ends, however it ends. A real
+  run also clears reports directories earlier runs left.
+- It's deleted from Qualys right after download, fetched only for tickets
+  about to be filed or commented, and off by default.
+- The ticket says what is attached, that the session was removed, and not to
+  forward it outside the project. The
 rehearsal ticket (`cti-jira --appscan-test`) is unassigned and untracked by
 state, but still attaches the cookies-bearing report: delete it in Jira, and the
 local copy, when done. The
