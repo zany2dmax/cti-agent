@@ -1,0 +1,17 @@
+[Unit]
+Description=CTI application-security audit, daily 08:30
+
+[Timer]
+# After the owners lane's 07:15 run, so "report sent" covers this morning's
+# mail, and before most of the day's check-ins read it. Daily, not weekly:
+# a schedule switched off in the scanner shows up within a day of the scan
+# it should have run, not at Friday's report.
+OnCalendar=*-*-* 08:30:00
+AccuracySec=1min
+# A missed day is caught up on boot: the check-in otherwise reads a report
+# that is a day old, and says so.
+Persistent=true
+Unit=cti-agent-appaudit.service
+
+[Install]
+WantedBy=timers.target

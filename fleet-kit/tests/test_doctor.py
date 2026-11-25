@@ -54,7 +54,8 @@ class Doctor(unittest.TestCase):
 
     def test_every_check_reports(self):
         rc, c = self.run_it()
-        self.assertEqual(set(c), {"version", "settings", "units", "timers", "credentials", "org pack", "beat files"})
+        self.assertEqual(set(c), {"version", "settings", "units", "timers", "credentials", "app audit",
+                                  "org pack", "beat files"})
         self.assertEqual(c["version"][0], "OK")
         self.assertIn("installed v9.9", c["version"][1])
         self.assertEqual(c["beat files"][0], "OK")
@@ -157,6 +158,20 @@ class Doctor(unittest.TestCase):
             with self.subTest(result=result), mock.patch.object(
                     self.m, "run", lambda cmd, out=result + "\n", **kw: self.m.subprocess.CompletedProcess(cmd, 0, out, "")):
                 self.assertEqual(self.m.check_settings()[0], want)
+
+    def test_the_app_audit(self):
+        # FLEET_LANES=checkin,digest here: the appscan lane is not in use.
+        self.assertEqual(self.m.check_app_audit(self.m.settings())[0], "OK")
+        (self.dir / "etc/cti-agent/fleet.env").write_text("FLEET_LANES=checkin,appscan\n")
+        vals = self.m.settings()
+        state, detail = self.m.check_app_audit(vals)
+        self.assertEqual(state, "WARN")
+        self.assertIn("run-appaudit", detail)
+        rep = self.dir / "var/lib/cti-agent/reports/appscan-audit.json"
+        rep.write_text('{"apps": [{"id": "1"}, {"id": "2"}], "problems": 1}')
+        self.assertEqual(self.m.check_app_audit(vals), ("OK", "2 web app(s), 1 need a look (the check-in escalates them)"))
+        rep.write_text('{"generated": "x", "error": "the scanner is unreachable"}')
+        self.assertEqual(self.m.check_app_audit(vals)[0], "WARN")
 
     def test_no_version_file_is_a_fail(self):
         (self.dir / "etc/cti-agent/version").unlink()

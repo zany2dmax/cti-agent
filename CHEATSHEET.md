@@ -49,6 +49,7 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 | Go source the installer builds from (root's clone) | `/opt/cti-agent/agent` |
 | Kit you install from (runners, units, lanes) | a root-owned clone, `/root/cti-agent-kit` (not under `/home`) |
 | Today's credential checks | `/var/lib/cti-agent/reports/credcheck.txt` |
+| Today's AppSec audit | `/var/lib/cti-agent/reports/appscan-audit.txt` (and `.json`, which the heartbeat reads) |
 | Update snapshots, last three (root only) | `/var/lib/cti-agent-update/` |
 
 ## 2. The one-minute health check
@@ -72,6 +73,7 @@ sudo cti-agent fleet-db recent               # memory, open tasks, finding count
 sudo cti-agent fleet-board tail 20           # what the fleet said recently
 sudo cti-agent cti-budget status             # heartbeat ceilings and cooldown
 sudo cat /var/lib/cti-agent/reports/credcheck.txt   # credential checks: lane, command, ok|FAIL, last line
+sudo cat /var/lib/cti-agent/reports/appscan-audit.txt   # every web app: scanned? owner? report sent? (! = needs a look)
 ```
 
 All good looks like: `cti-agent-doctor: 0 FAIL`, no failed units, every timer
@@ -126,6 +128,7 @@ split), then `sudo cti-agent-update --for-real`.
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
 | Credential checks | `cti-agent-credcheck` (on with the heartbeat) | every day 05:30 | nobody (`reports/credcheck.txt`) |
+| AppSec audit | `cti-agent-appaudit` (on with the heartbeat and an AppSec timer) | every day 08:30 | nobody (`reports/appscan-audit.*`); the heartbeat escalates |
 
 A failed unit emails the operator automatically (`cti-agent-alert@`).
 

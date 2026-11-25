@@ -3471,6 +3471,47 @@ class RunnersToDev(unittest.TestCase):
         self.assertFalse(stale.exists(), "a day-old temporary reports directory was kept")
         self.assertTrue(fresh.exists(), "another run's current directory was removed")
 
+    def test_appaudit_writes_the_reports_the_check_in_reads(self):
+        """run-appaudit runs cti-appscan --audit and writes its table and JSON
+        to reports/, 0600; an audit that cannot run is written as an error,
+        and the unit still exits 0 (the beat escalates it, once)."""
+        stub = self.code / "bin" / "cti-appscan"
+        stub.write_text('#!/usr/bin/env bash\necho "cti-appscan $*" >> "$STUB_LOG"\n'
+                        'if [ -n "${AUDIT_FAIL:-}" ]; then echo \'die: the "scanner" is unreachable\' >&2; exit 1; fi\n'
+                        'while [ $# -gt 0 ]; do [ "$1" = --audit-json ] && { shift; echo \'{"apps": []}\' > "$1"; }; shift; done\n'
+                        'echo "22 web application(s) in the scanner; scans in the last 8 days; 13 need a look"\n')
+        stub.chmod(0o755)
+        reports = self.home / "reports"
+        r, calls = self.run_lane("run-appaudit")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        call = [c for c in calls if c.startswith("cti-appscan ")][0]
+        self.assertIn("--audit --since 192h", call)
+        self.assertIn(f"--delivered-log {self.home}/state/appowners-sent.json", call)
+        txt, js = reports / "appscan-audit.txt", reports / "appscan-audit.json"
+        self.assertIn("13 need a look", txt.read_text())
+        self.assertEqual(json.loads(js.read_text()), {"apps": []})
+        for f in (txt, js):
+            self.assertEqual(oct(f.stat().st_mode & 0o777), "0o600", f.name)
+        self.assertEqual(sorted(p.name for p in reports.iterdir() if p.name.startswith(".")), [],
+                         "a temporary file was left in reports/")
+
+        base = dict(self.base)
+        self.base["AUDIT_FAIL"] = "1"
+        try:
+            r, _ = self.run_lane("run-appaudit")
+        finally:
+            self.base = base
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        j = json.loads(js.read_text())
+        self.assertIn("unreachable", j["error"])
+        self.assertNotIn('"', j["error"], "a quote reached the JSON unescaped")
+        self.assertIn("could not run", txt.read_text())
+        self.assertEqual(self.run_lane_args("run-appaudit", "--for-real").returncode, 2)
+
+    def run_lane_args(self, runner, *args):
+        return subprocess.run(["bash", str(KIT / "fleet" / "bin" / runner), *args],
+                              env=self.base, capture_output=True, text=True, timeout=60, check=False)
+
     def test_appowners_is_off_until_armed(self):
         r, calls = self.run_lane("run-appowners", "--for-real")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -4785,7 +4826,7 @@ class AuditTrailUnits(unittest.TestCase):
     UNITS = KIT / "fleet" / "systemd-fedora"
     WITH = ("alert@", "appowners", "appscan", "digest", "domains", "mailbox",
             "patchtuesday", "supplier", "vmscan", "weekly")
-    WITHOUT = ("checkin", "credcheck", "scout")
+    WITHOUT = ("checkin", "credcheck", "appaudit", "scout")
 
     def test_the_units_that_change_things_get_the_log_directory(self):
         for name in self.WITH:

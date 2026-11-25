@@ -39,6 +39,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **The heartbeat finds web applications nobody scanned.** A new unit of the
+  appscan lane, `run-appaudit` (`cti-agent-appaudit.timer`, daily 08:30), runs
+  `cti-appscan --audit` over the last 8 days. It writes
+  `reports/appscan-audit.txt` and `.json`: every web app in the scanner, its
+  owner, its newest scan, its last owner report and a `kind`.
+  - The heartbeat reads the JSON once a day (it already had
+    `Read(reports/**)`, so no new grant and no new secret in its unit). It
+    sends one escalation listing every application with no scan, remembers
+    the set, and re-raises it only when an application joins.
+  - Held, ownerless and unfinished scans are tracked without repeating the
+    lanes' own alerts.
+  - The audit runs with the appscan lane's credentials, in its own unit, for
+    the same reason the credential checks do.
+  - `cti-appscan --audit-json FILE` writes the JSON. The beat's verdict
+    accounts for `appaudit` like every other unit.
+  - `cti-agent-doctor` gains an `app audit` check.
+  - The installer turns the timer on with the heartbeat's and an AppSec
+    timer.
+
 - **The weekly AppSec report lists the applications that weren't scanned.** A
   new section, NOT SCANNED THIS WEEK, names every application set up in the
   scanner that no scan covered in the week. It also says that those

@@ -309,6 +309,9 @@ is the join across them; the rest report on their own.
 - **Will tomorrow's runs get past their logins?** — `run-credcheck`, daily at
   05:30 in its own unit: every in-use lane's `--check`, one line each in
   `reports/credcheck.txt`, which the heartbeat reads
+- **Was every web application scanned, and did its owner hear?** —
+  `run-appaudit`, daily at 08:30 in the appscan lane's unit:
+  `reports/appscan-audit.json`, which the heartbeat reads and escalates from
 - **Can we show what the fleet did?** — the audit trail: one RFC 5424 syslog
   line for every mail sent or moved, every Jira write and every owners change,
   kept 120 days and forwardable to a SIEM
@@ -470,6 +473,13 @@ sensitivity](docs/guides/operations.md#13-report-sensitivity).
 `reports/credcheck.txt` for the heartbeat. `cti-mailer --check`, `cti-jira
 --check` and each lane's own check run there, not in the beat.
 
+`run-appaudit` (bash, `cti-agent-appaudit.timer`, daily 08:30) runs
+`cti-appscan --audit` as the appscan lane, with its secrets, and writes
+`reports/appscan-audit.txt` and `.json`: every web application in the scanner,
+whether a scan covered it in the last 8 days and whether its owner got a
+report. The heartbeat reads it and escalates the applications nobody scanned,
+which no lane's own output shows.
+
 Two root tools in `fleet-kit/bin/` (Python, installed in `/usr/local/sbin`)
 set up and check a box: `cti-agent-onboard` asks which lanes the box runs,
 fills the settings they need and stores their secrets through
@@ -626,7 +636,7 @@ fleet-kit/update-fedora.sh     cti-agent-update: snapshot, install, roll back on
 fleet-kit/fleet/lanes/         feeds.txt, the feed list cti-scout polls (no code)
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-appscan,
                                run-appowners, run-vmscan, run-supplier, run-domains,
-                               run-mailbox-cleanup, run-credcheck, fleet-board, fleet-db, fleet-owners,
+                               run-mailbox-cleanup, run-credcheck, run-appaudit, fleet-board, fleet-db, fleet-owners,
                                fleet-journal, fleet-timers, fleet-config
 fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shares),
                                fleet-mode.sh, the CLI's usage and tab completion

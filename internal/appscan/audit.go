@@ -1,6 +1,7 @@
 package appscan
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -66,6 +67,10 @@ type AuditRow struct {
 	Scan    *ScanResult
 	Report  *DeliveredEntry // the owners lane's newest entry for it
 	Verdict string
+	// Kind is the verdict as a code, for the check-in to key on: sent,
+	// pending, held, no_owner, not_scanned, unconfirmed, incomplete,
+	// login_failed or unreachable.
+	Kind string
 	// Problem is true when somebody should act: not scanned, no owner, a
 	// scan that did not finish, a held or missing report.
 	Problem bool
@@ -89,7 +94,7 @@ func Audit(apps []App, week []ScanResult, owners Owners, delivered DeliveredLog)
 		} else if e, ok := delivered[strings.TrimSpace(a.ID)]; ok {
 			r.Report = &e
 		}
-		r.Verdict, r.Problem = verdict(r)
+		r.Verdict, r.Kind, r.Problem = verdict(r)
 		rows = append(rows, r)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -101,34 +106,88 @@ func Audit(apps []App, week []ScanResult, owners Owners, delivered DeliveredLog)
 	return rows
 }
 
-func verdict(r AuditRow) (string, bool) {
+func verdict(r AuditRow) (string, string, bool) {
 	if r.Scan == nil {
 		why := "not scanned in this window - check its schedule in the scanner"
 		if r.Report != nil && r.Report.Status == "sent" {
 			why += fmt.Sprintf(" (last report sent %s)", r.Report.At.UTC().Format("2006-01-02"))
 		}
-		return why, true
+		return why, "not_scanned", true
 	}
 	s := *r.Scan
 	matched := r.Report != nil && r.Report.Ref == ScanRef(s)
 	switch {
 	case r.Owner == "":
-		return "scanned, but no owner on file - its reports are held", true
+		return "scanned, but no owner on file - its reports are held", "no_owner", true
 	case !s.Complete && BareFinished(s.Status):
-		return "the scanner says it finished, but the run is not in its scan list - not confirmed, no report", true
+		return "the scanner says it finished, but the run is not in its scan list - not confirmed, no report", "unconfirmed", true
 	case !s.Complete:
-		return "scan did not finish (" + orUnknown(s.Status) + ") - no report", true
+		return "scan did not finish (" + orUnknown(s.Status) + ") - no report", "incomplete", true
 	case s.Auth.Failed():
-		return "the scan's login failed (" + orUnknown(s.Auth.Status) + ")", true
+		return "the scan's login failed (" + orUnknown(s.Auth.Status) + ")", "login_failed", true
 	case s.Unreachable():
-		return "no host answered the scan - nothing was tested", true
+		return "no host answered the scan - nothing was tested", "unreachable", true
 	case matched && r.Report.Status == "sent":
-		return "report sent " + r.Report.At.UTC().Format("2006-01-02"), false
+		return "report sent " + r.Report.At.UTC().Format("2006-01-02"), "sent", false
 	case matched:
-		return r.Report.Status, true
+		return r.Report.Status, "held", true
 	default:
-		return "scanned, report not sent yet", true
+		return "scanned, report not sent yet", "pending", true
 	}
+}
+
+// AuditFile is the audit as JSON, for the check-in (reports/appscan-audit.json,
+// written daily by run-appaudit). Every string is one line, controls removed.
+type AuditFile struct {
+	Generated  time.Time      `json:"generated"`
+	WindowDays int            `json:"windowDays"`
+	Apps       []AuditFileApp `json:"apps"`
+	Problems   int            `json:"problems"`
+}
+
+// AuditFileApp is one application in AuditFile.
+type AuditFileApp struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Owner    string `json:"owner,omitempty"`
+	LastScan string `json:"lastScan,omitempty"` // YYYY-MM-DD, the newest in the window
+	Kind     string `json:"kind"`
+	Verdict  string `json:"verdict"`
+	Problem  bool   `json:"problem"`
+}
+
+// AuditJSON is rows as an AuditFile.
+func AuditJSON(rows []AuditRow, window time.Duration, now time.Time) []byte {
+	f := AuditFile{Generated: now.UTC(), WindowDays: int(window / (24 * time.Hour)), Apps: []AuditFileApp{}}
+	for _, r := range rows {
+		a := AuditFileApp{ID: oneLineName(r.App.ID), Name: oneLineName(r.App.Name), Owner: oneLineName(r.Owner),
+			Kind: r.Kind, Verdict: oneLineName(r.Verdict), Problem: r.Problem}
+		if d := scanDate(r); d != "-" && d != "?" {
+			a.LastScan = d
+		}
+		if r.Problem {
+			f.Problems++
+		}
+		f.Apps = append(f.Apps, a)
+	}
+	b, _ := json.MarshalIndent(f, "", "  ")
+	return append(b, '\n')
+}
+
+// scanDate is the row's newest scan as YYYY-MM-DD, "-" for none, "?" when
+// the scan carries no time.
+func scanDate(r AuditRow) string {
+	if r.Scan == nil {
+		return "-"
+	}
+	t := r.Scan.Finished
+	if t.IsZero() {
+		t = r.Scan.Started
+	}
+	if t.IsZero() {
+		return "?"
+	}
+	return t.UTC().Format("2006-01-02")
 }
 
 // RenderAudit is the audit as plain text: a table, then a count of each kind
@@ -146,17 +205,7 @@ func RenderAudit(rows []AuditRow, window time.Duration) string {
 	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "APP ID\tAPPLICATION\tOWNER\tLAST SCAN\tVERDICT")
 	for _, r := range rows {
-		scan := "-"
-		if r.Scan != nil {
-			t := r.Scan.Finished
-			if t.IsZero() {
-				t = r.Scan.Started
-			}
-			scan = "?"
-			if !t.IsZero() {
-				scan = t.UTC().Format("2006-01-02")
-			}
-		}
+		scan := scanDate(r)
 		owner := r.Owner
 		if owner == "" {
 			owner = "-"

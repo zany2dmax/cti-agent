@@ -1806,6 +1806,17 @@ if command -v systemctl >/dev/null && [ "$(unit_state cti-agent-checkin.timer)" 
   run systemctl enable --now cti-agent-credcheck.timer
 fi
 
+# Likewise the application-security audit (run-appaudit, the appscan lane's
+# unit): the check-in reads its report to find web apps nobody scanned. On
+# when the check-in's timer is, and an AppSec timer is (so the scanner is set
+# up). Read-only: it writes only reports/appscan-audit.txt and .json.
+if command -v systemctl >/dev/null && [ "$(unit_state cti-agent-checkin.timer)" = enabled ] \
+    && [ "$(unit_state cti-agent-appaudit.timer)" != enabled ] && lane_in_use appscan \
+    && { [ "$(unit_state cti-agent-appowners.timer)" = enabled ] || [ "$(unit_state cti-agent-appscan.timer)" = enabled ]; }; then
+  info "cti-agent-appaudit.timer: turning on with the check-in's and the AppSec timers (the check-in reads its report)"
+  run systemctl enable --now cti-agent-appaudit.timer
+fi
+
 if [ "$MODE" != dryrun ] && command -v systemctl >/dev/null; then
   bold "Timer status"
   _enabled_any=0

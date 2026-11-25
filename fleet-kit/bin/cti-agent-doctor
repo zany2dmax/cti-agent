@@ -14,6 +14,8 @@ The checks, each OK, WARN or FAIL:
                patchtuesday's is off on purpose and is only a WARN
   credentials  today's credential report (reports/credcheck.txt): every check
                ok, and written in the last 26 hours
+  app audit    today's application-security audit (reports/appscan-audit.json)
+               ran, when the appscan lane is in use; how many apps need a look
   org pack     the org pack the installer uses (a fork's org/ in the kit, or
                /etc/cti-agent/org), when there is one, passes org-pack check
   beat files   run-checkin's own integrity audit of the orchestrator's files
@@ -159,6 +161,28 @@ def check_credentials():
     return "OK", f"{len(rows)} check(s) ok"
 
 
+def check_app_audit(vals):
+    """The audit the check-in reads to find web apps nobody scanned. A WARN,
+    never a FAIL: what it lists is the check-in's to escalate."""
+    use = lanes_in_use(vals)
+    if use and "appscan" not in use:
+        return "OK", "the appscan lane is not in use"
+    rep = HOME / "reports" / "appscan-audit.json"
+    if not rep.is_file():
+        return "WARN", f"no {rep}: cti-agent-appaudit.timer has not run (sudo cti-agent run-appaudit)"
+    age = dt.datetime.now() - dt.datetime.fromtimestamp(rep.stat().st_mtime)
+    try:
+        f = json.loads(rep.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "WARN", f"{rep} is not readable JSON"
+    if f.get("error"):
+        return "WARN", f"the audit could not run: {str(f['error'])[:200]}"
+    apps, problems = len(f.get("apps") or []), int(f.get("problems") or 0)
+    if age > REPORT_MAX_AGE:
+        return "WARN", f"the report is {age.days}d {age.seconds // 3600}h old: is the appaudit timer on?"
+    return "OK", f"{apps} web app(s), {problems} need a look (the check-in escalates them)"
+
+
 def check_org_pack():
     # The pack the installer uses, found the way it finds it (org-pack find):
     # a fork's org/ in the kit, or /etc/cti-agent/org on a box installed from
@@ -208,6 +232,7 @@ def main(argv=None, out=sys.stdout):
     results = []
     for name, fn in (("version", check_version), ("settings", check_settings), ("units", check_units),
                      ("timers", lambda: check_timers(vals)), ("credentials", check_credentials),
+                     ("app audit", lambda: check_app_audit(vals)),
                      ("org pack", check_org_pack), ("beat files", check_beat_files)):
         try:
             state, detail = fn()

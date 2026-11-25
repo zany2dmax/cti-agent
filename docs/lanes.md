@@ -17,7 +17,7 @@ more than this to run has an operating guide in [lanes/](lanes/).
 | [`digest`](#digest) | The daily threat-intel digest: read the CTI mail, enrich every CVE with exposure on our hosts, and send the brief; on Mondays, the weekly rollup. | digest, weekly |
 | [`scout`](#scout) | Poll advisory feeds for CVEs the mail has not mentioned yet, to feed the digest. | scout |
 | [`patchtuesday`](#patchtuesday) | The monthly Microsoft Patch Tuesday synopsis, with exposure on our hosts. Run by hand for now; its timer is off on purpose. | patchtuesday |
-| [`appscan`](#appscan) | The weekly application-security report from the web app scanner's results, with Jira tickets per application. | appscan |
+| [`appscan`](#appscan) | The weekly application-security report from the web app scanner's results, with Jira tickets per application. | appscan, appaudit |
 | [`appowners`](#appowners) | Each application's scan report, sent to its owners the morning after the scan. | appowners |
 | [`domains`](#domains) | The weekly domains check: registrar, DNS, web and mail records, plus one Jira ticket for IT. | domains |
 | [`vmscan`](#vmscan) | The weekly VM scan report: which scheduled scans ran, and which networks in the network sheet no scan reached. | vmscan |
@@ -96,6 +96,7 @@ The weekly application-security report from the web app scanner's results, with 
 | Unit | Runs | Schedule | Time limit |
 |---|---|---|---|
 | `cti-agent-appscan` | `run-appscan --for-real` | `Fri *-*-* 07:30:00`, catches up after downtime | 60 min |
+| `cti-agent-appaudit` | `run-appaudit` | `*-*-* 08:30:00`, catches up after downtime | 15 min |
 
 - **Settings in `fleet.d/appscan.env`** (with the shared ones in `00-core.env`): `WAS_ATTACH_REPORT`, `WAS_TICKETS`.
 - **A new setting goes in that file** when its name starts with `WAS_`, `APPSCAN_`.

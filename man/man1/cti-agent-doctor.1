@@ -35,6 +35,15 @@ Today's credential report
 .RI ( /var/lib/cti\-agent/reports/credcheck.txt ):
 every check ok, and written in the last 26 hours.
 .TP
+.B app audit
+When the appscan lane is in use, today's application-security audit
+.RI ( /var/lib/cti\-agent/reports/appscan\-audit.json ,
+written by
+.BR run\-appaudit (1)):
+present, readable, not an error, and written in the last 26 hours. Says how
+many web applications need a look. A WARN, never a FAIL: what the audit lists
+is the check-in's to escalate.
+.TP
 .B org pack
 The org pack the installer uses, when there is one, passes
 .BR "org\-pack check \-\-root\-owned" .

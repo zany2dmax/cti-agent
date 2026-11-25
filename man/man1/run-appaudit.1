@@ -1,0 +1,49 @@
+.TH RUN-APPAUDIT 1 "2026-11-25" "cti-agent" "CTI Agent Fleet"
+.SH NAME
+run-appaudit \- was every web application scanned, and did its owner get a report?
+.SH SYNOPSIS
+.B run\-appaudit
+.SH DESCRIPTION
+Runs
+.B cti\-appscan \-\-audit
+over the last 8 days and writes the result for the check-in to read:
+.TP
+.I $FLEET_HOME/reports/appscan\-audit.txt
+every web application the scanner defines, one line each: its id, name,
+owner, newest scan and a verdict, the ones that need a look first;
+.TP
+.I $FLEET_HOME/reports/appscan\-audit.json
+the same, with each application's
+.B kind
+code, for the check-in.
+.PP
+An application with no scan in the window is the case nothing else shows:
+the weekly AppSec report and the owners lane both start from the scans that
+ran. The check-in escalates those once, by name, and tracks them on the
+board.
+.PP
+It runs as the appscan lane, with that lane's credentials
+.RB ( cti\-agent\-appaudit.service ),
+because the audit needs the scanner's login and reads the mailbox, and the
+check-in's unit holds neither. The check-in only reads the files.
+.PP
+Read-only: the scanner and the mailbox are read, the owners lane's delivered
+log is read, and nothing is sent, filed or recorded. It writes only the two
+reports, 0600, atomically. An audit that cannot run (the scanner
+unreachable, say) is written to the JSON as
+.B error
+with the reason, for the check-in to escalate once.
+.SH OPTIONS
+None. It takes no mode: it changes nothing but its own reports.
+.SH EXIT STATUS
+0 when the reports were written, whatever they say, including an audit that
+could not run; 2 for any argument; otherwise 1.
+.SH EXAMPLES
+.nf
+sudo cti\-agent run\-appaudit
+sudo cat /var/lib/cti\-agent/reports/appscan\-audit.txt
+.fi
+.SH SEE ALSO
+.BR cti\-appscan (1),
+.BR run\-appowners (1),
+.BR run\-credcheck (1)

@@ -67,6 +67,7 @@ risk: --commit-delivered writes
 risk: --commit-seen writes
 risk: --stamp-tickets writes
 flag: --audit | print every web app the scanner defines with its owner, its newest scan in --since and the owners lane's last report for it (from --delivered-log, default $FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads the mailbox and the scanner only - nothing is sent or recorded
+flag: --audit-json STRING | with --audit: also write the audit as JSON here (each app's kind, verdict and whether it needs a look), for the check-in
 flag: --auth-fail-out STRING | write one line per scan whose configured credential failed to authenticate; the runner alerts the operator when this file is non-empty. Absent or empty means every credential worked.
 flag: --commit-delivered STRING | record this file's key<TAB>ref<TAB>status lines in --delivered-log, then exit
 flag: --commit-seen STRING | record a --seen-out file in the processed log the mailbox cleanup reads, so those notifications can be archived; then exit
@@ -483,6 +484,10 @@ flag: --to-dev | test send to FLEET_DEV_EMAIL only
 flag: --month YYYY-MM | a past release: --dry-run replays it; --for-real needs FLEET_CONFIRM_RESEND=MONTH too
 flag: --for-real | send the synopsis and mark it sent
 flag: --resend | with --for-real: send a release that was already sent
+
+command: run-appaudit
+about: Every web app in the scanner, whether a scan covered it and its owner got a report, written to reports/appscan-audit.txt and .json for the check-in
+runs: local
 
 command: run-credcheck
 about: Every in-use lane's credential check (--check), written to reports/credcheck.txt for the check-in

@@ -110,6 +110,9 @@ func run() int {
 			"and the owners lane's last report for it (from --delivered-log, default "+
 			"$FLEET_HOME/state/appowners-sent.json), and a verdict on each, then exit; reads "+
 			"the mailbox and the scanner only - nothing is sent or recorded")
+	auditJSON := flag.String("audit-json", "",
+		"with --audit: also write the audit as JSON here (each app's kind, verdict and whether it "+
+			"needs a look), for the check-in")
 	flag.Parse()
 
 	if *commitDelivered != "" {
@@ -181,7 +184,7 @@ func run() int {
 			seen = append(seen, scheduledClaims(msgs, scans)...)
 			scans = newestPerApp(scans)
 			if *audit {
-				return doAudit(ctx, api, scans, *deliveredLog, *since)
+				return doAudit(ctx, api, scans, *deliveredLog, *since, *auditJSON)
 			}
 			if deliverOnly {
 				saveSeen(*seenOut, seen)
@@ -1034,7 +1037,7 @@ func shortSubject(s string) string {
 // the owners lane's last entry for it. It prints and exits; nothing is sent
 // or recorded, and the delivered log is only read.
 func doAudit(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult, logPath string,
-	window time.Duration) int {
+	window time.Duration, jsonOut string) int {
 	lister, ok := sc.(appscan.AppLister)
 	if !ok {
 		return die("--audit: the %s scanner cannot list its applications", sc.Name())
@@ -1060,6 +1063,13 @@ func doAudit(ctx context.Context, sc appscan.Scanner, scans []appscan.ScanResult
 				safelog.Line(logPath), safelog.Line(err.Error()))
 		}
 	}
-	fmt.Print(appscan.RenderAudit(appscan.Audit(apps, scans, owners, delivered), window))
+	rows := appscan.Audit(apps, scans, owners, delivered)
+	if jsonOut != "" {
+		// #nosec G703 -- the runner's own report path
+		if err := os.WriteFile(jsonOut, appscan.AuditJSON(rows, window, time.Now()), 0o600); err != nil {
+			return die("--audit-json: %s", safelog.Line(err.Error()))
+		}
+	}
+	fmt.Print(appscan.RenderAudit(rows, window))
 	return exitOK
 }

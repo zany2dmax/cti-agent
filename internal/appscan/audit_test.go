@@ -1,6 +1,7 @@
 package appscan
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,29 @@ func TestTheAuditGivesEveryApplicationAVerdict(t *testing.T) {
 		"APP ID", "! not scanned", "a@example.com"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("audit text lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// The JSON the check-in reads: every app, with a kind it can key on, and the
+// count of those that need a look.
+func TestTheAuditJSONGivesTheCheckInAKindPerApp(t *testing.T) {
+	owners, _, _ := ParseOwners(strings.NewReader("id:1 | a@example.com\nid:2 | b@example.com\n"))
+	rows := Audit(auditApps, auditWeek(t), owners, DeliveredLog{})
+	var f AuditFile
+	if err := json.Unmarshal(AuditJSON(rows, 8*24*time.Hour, time.Date(2026, 11, 25, 8, 30, 0, 0, time.UTC)), &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.WindowDays != 8 || len(f.Apps) != len(auditApps) || f.Problems != len(auditApps) {
+		t.Fatalf("file %+v", f)
+	}
+	kinds := map[string]string{}
+	for _, a := range f.Apps {
+		kinds[a.Name] = a.Kind
+	}
+	for name, want := range map[string]string{"Careers": "not_scanned", "Shop": "pending", "Academy": "no_owner"} {
+		if kinds[name] != want {
+			t.Errorf("%s: kind %q, want %q", name, kinds[name], want)
 		}
 	}
 }

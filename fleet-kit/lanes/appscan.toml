@@ -30,3 +30,19 @@ audit_log = true
 description = "Weekly application-security report, Friday 07:30 local"
 on_calendar = "Fri *-*-* 07:30:00"
 persistent = true
+
+# The daily audit the check-in reads: every web app in the scanner, whether a
+# scan covered it and whether its owner got a report. Its own unit, with this
+# lane's credentials, so the beat's unit needs none (run-appaudit). Read-only;
+# writes reports/appscan-audit.txt and .json.
+[[unit]]
+name = "appaudit"
+description = "CTI application-security audit (was every web app scanned and reported?)"
+exec = "/opt/cti-agent/bin/run-appaudit"
+timeout = 900
+nice = 15
+
+[unit.timer]
+description = "CTI application-security audit, daily 08:30"
+on_calendar = "*-*-* 08:30:00"
+persistent = true

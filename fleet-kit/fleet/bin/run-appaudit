@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# run-appaudit - which web applications were scanned, and did their owners get
+# a report? Daily, for the check-in to read.
+#
+# Runs cti-appscan --audit over the last 8 days (a weekly schedule, plus a day
+# of slack) and writes the result where the beat reads it:
+#
+#   $FLEET_HOME/reports/appscan-audit.txt    the table, for a person
+#   $FLEET_HOME/reports/appscan-audit.json   each app's kind and verdict, for the beat
+#
+# Every web application the scanner defines, with its owner, its newest scan
+# and the owners lane's last report for it. An application with no scan in
+# the window is the case nothing else shows: the weekly report and the owners
+# lane both start from the scans that ran.
+#
+# WHY A UNIT OF ITS OWN. The audit needs the scanner's login and reads the
+# mailbox; the check-in unit holds neither, by design (it reads untrusted
+# mail and drives a model). So this runs as the appscan lane, with that
+# lane's credentials, and the beat only reads the files (Read(reports/**)).
+#
+# Read-only: the scanner and the mailbox are read, nothing is sent, filed or
+# recorded, and the owners lane's delivered log is only read. It writes only
+# the two reports (0600, atomically). It exits 0 when it has written them,
+# whatever they say - including an audit that could not run, which the JSON
+# records as "error" for the beat to escalate once, rather than a failed unit
+# that mails every day.
+set -euo pipefail
+# shellcheck source=../share/fleet-mode.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../share/fleet-mode.sh"
+if [ $# -ne 0 ]; then
+  echo "usage: run-appaudit" >&2
+  exit 2
+fi
+
+FLEET_HOME="${FLEET_HOME:-$HOME/fleet}"
+FLEET_ENV="${FLEET_ENV:-$FLEET_HOME/fleet.env}"
+FLEET_CODE="${FLEET_CODE:-$FLEET_HOME}"
+# See run-digest: fleet.env must not overwrite the layout the unit injected.
+_inj_home="${FLEET_HOME:-}"; _inj_code="${FLEET_CODE:-}"
+set -a
+# shellcheck source=/dev/null
+[ -f "$FLEET_ENV" ] && . "$FLEET_ENV"
+for _f in ${FLEET_ENV_FILES:-}; do
+  # shellcheck source=/dev/null
+  if [ -f "$_f" ]; then . "$_f"; fi
+done
+set +a
+# Secrets systemd provided as credentials: drop the environment copy (fleet-mode.sh).
+fleet_secrets_from_credentials
+[ -n "$_inj_home" ] && FLEET_HOME="$_inj_home"
+[ -n "$_inj_code" ] && FLEET_CODE="$_inj_code"
+export FLEET_HOME FLEET_CODE
+
+APPSCAN="$FLEET_CODE/bin/cti-appscan"
+TXT="$FLEET_HOME/reports/appscan-audit.txt"
+JSON="$FLEET_HOME/reports/appscan-audit.json"
+mkdir -p "$FLEET_HOME/reports"
+
+tmp="$(mktemp "$FLEET_HOME/reports/.appaudit.XXXXXX")"
+trap 'rm -f "$tmp" "$tmp.json" "$tmp.err" "$tmp.txt.new"' EXIT
+now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+rc=0
+"$APPSCAN" --audit --since 192h --delivered-log "$FLEET_HOME/state/appowners-sent.json" \
+  --audit-json "$tmp.json" > "$tmp" 2> "$tmp.err" < /dev/null || rc=$?
+if [ "$rc" -ne 0 ] || [ ! -s "$tmp.json" ]; then
+  # The reason, from cti-appscan's own last line (it prints names and
+  # counts, never a credential's value), as one JSON-safe line.
+  why="$(grep -v '^[[:space:]]*$' "$tmp.err" | tail -1 | tr -cd '[:print:]' | sed 's/["\\]//g' | cut -c1-300 || true)"
+  why="${why:-cti-appscan --audit exited $rc}"
+  printf '# run-appaudit %s: the audit could not run: %s\n' "$now" "$why" > "$tmp"
+  printf '{\n  "generated": "%s",\n  "error": "%s"\n}\n' "$now" "$why" > "$tmp.json"
+  echo "run-appaudit: the audit could not run: $why" >&2
+else
+  { printf '# run-appaudit %s - every web app in the scanner, its owner, newest scan and last owner report\n' "$now"
+    cat "$tmp"; } > "$tmp.txt.new" && mv -f "$tmp.txt.new" "$tmp"
+fi
+chmod 0600 "$tmp" "$tmp.json"
+mv -f "$tmp.json" "$JSON"
+mv -f "$tmp" "$TXT"
+echo "run-appaudit: $(head -2 "$TXT" | tail -1) - $TXT"
