@@ -1,7 +1,7 @@
 // cti-appreport fetches the DAST scanner's own report for each application,
 // zipped, for cti-jira to attach to the application's ticket.
 //
-//	cti-appreport --list-ids                                # app ids from the last weekly run; no API
+//	cti-appreport --list-ids                                # every web app id in the scanner; one API call
 //	cti-appreport --check                                   # credentials + rate-limit headers
 //	cti-appreport --app-id 1234 --dump-request              # the request body, nothing sent
 //	cti-appreport --app-id 1234 --out-dir /tmp/r            # one report: create, poll, download, delete
@@ -114,9 +114,9 @@ func run() int {
 		"print the scanner's verbose finding search for this web application id (3 open "+
 			"vulnerabilities), with Cookie, Set-Cookie and Authorization redacted, and exit")
 	listIDs := flag.Bool("list-ids", false,
-		"print the web application id, name and findings of every application in the newest "+
-			"$FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; "+
-			"reads the file only - no scanner calls, no credentials")
+		"print the id and name of every web application the scanner defines (one API call), with "+
+			"its findings from the weekly tickets file when that is under 8 days old, and exit; with "+
+			"--tickets FILE, that file only - no scanner calls, no credentials")
 	deliveries := flag.String("deliveries", "",
 		"the owners lane: build the owner report from the scanner's API (one finding search per "+
 			"application, one knowledge-base lookup per 1,000 kinds of finding) for every application in this "+
@@ -127,7 +127,7 @@ func run() int {
 	flag.Parse()
 
 	fleetenv.Load()
-	if *listIDs {
+	if *listIDs && *tickets != "" {
 		return doListIDs(*tickets)
 	}
 	if *deliveries != "" && *noFetch {
@@ -148,6 +148,21 @@ func run() int {
 	fetcher, err := reportProvider(cfg)
 	if err != nil {
 		return die("%s", safelog.Line(err.Error()))
+	}
+	if *listIDs {
+		lister, ok := fetcher.(appscan.AppLister)
+		if !ok {
+			return die("--list-ids: the %s provider cannot list its applications; name a tickets file with --tickets", fetcher.Name())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		apps, err := lister.Apps(ctx)
+		if err != nil {
+			return die("--list-ids: %s", safelog.Line(err.Error()))
+		}
+		tf, path := recentTickets(time.Now())
+		fmt.Print(listApps(apps, tf, path))
+		return exitOK
 	}
 	if *requestFile != "" {
 		d, ok := fetcher.(requestDumper)
@@ -464,6 +479,63 @@ func doListIDs(path string) int {
 	}
 	fmt.Print(listIDs(tf, path))
 	return exitOK
+}
+
+// ticketsMaxAge is how old the weekly tickets file may be and still give
+// --list-ids its counts: the run is weekly, so a file older than this is not
+// last week's. With tickets off no file is written at all, and the newest
+// one can be months old.
+const ticketsMaxAge = 8 * 24 * time.Hour
+
+// recentTickets is the newest weekly tickets file, if it is under
+// ticketsMaxAge old, and its name; or a zero file and the reason there are no
+// counts.
+func recentTickets(now time.Time) (appscan.TicketsFile, string) {
+	const why = "no counts: no weekly tickets file in the last 8 days (one is written only when the AppSec lane files tickets)"
+	home := os.Getenv("FLEET_HOME")
+	if home == "" {
+		return appscan.TicketsFile{}, why
+	}
+	path, err := newestTicketsFile(filepath.Join(home, "state"))
+	if err != nil {
+		return appscan.TicketsFile{}, why
+	}
+	// #nosec G304 G703 -- the runner's own tickets file
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return appscan.TicketsFile{}, why
+	}
+	var tf appscan.TicketsFile
+	if json.Unmarshal(b, &tf) != nil || now.Sub(tf.Generated) > ticketsMaxAge {
+		return appscan.TicketsFile{}, why
+	}
+	return tf, "findings from " + filepath.Base(path) + " (written " + tf.Generated.UTC().Format("2006-01-02") + ")"
+}
+
+// listApps is --list-ids: every application the scanner defines, the ids to
+// try --app-id with, and the week's findings where there are any.
+func listApps(apps []appscan.App, tf appscan.TicketsFile, source string) string {
+	byID := map[string]appscan.AppTicket{}
+	for _, t := range tf.Tickets {
+		byID[strings.TrimSpace(t.AppID)] = t
+	}
+	sorted := append([]appscan.App(nil), apps...)
+	sort.SliceStable(sorted, func(i, j int) bool { return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name) })
+	var b strings.Builder
+	fmt.Fprintf(&b, "From the scanner: %d web application(s); %s\n\n", len(sorted), source)
+	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "APP ID\tTO FIX\tPOTENTIAL\tAPPLICATION")
+	for _, a := range sorted {
+		fix, pot := "-", "-"
+		if t, ok := byID[strings.TrimSpace(a.ID)]; ok {
+			confirmed, potential := appscan.Split(t.Findings)
+			fix, pot = fmt.Sprint(len(confirmed)), fmt.Sprint(len(potential))
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", safelog.Line(a.ID), fix, pot, safelog.Line(a.Name))
+	}
+	_ = w.Flush()
+	b.WriteString("\nTry one with:\n  sudo cti-agent cti-appreport --app-id <APP ID> --out-dir /tmp/report\n")
+	return b.String()
 }
 
 func listIDs(tf appscan.TicketsFile, path string) string {

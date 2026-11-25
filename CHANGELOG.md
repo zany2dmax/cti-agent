@@ -97,6 +97,17 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   project, moved to the AppSec guide (RUNBOOK 11f). Comments and docs that
   cited "BACKLOG" for shipped work now cite their RUNBOOK section.
 
+### Fixed
+
+- **`cti-appreport --list-ids` lists every web application in the scanner.**
+  It read only the newest weekly tickets file, which is written only with
+  `WAS_TICKETS=1`. With tickets off since November, it showed a month-old
+  file's four applications out of sixteen, and didn't say the file was old.
+  It now asks the scanner for its applications (one API call). It shows each
+  one's findings only from a tickets file under 8 days old, and says when
+  there are none. `--tickets FILE` still lists that file alone, with no
+  scanner calls.
+
 ## 2.0-rc5 — 2026-11-25
 
 ### Added

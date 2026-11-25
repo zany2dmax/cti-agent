@@ -227,3 +227,57 @@ func TestListIDsWithNoFileSaysHowToMakeOne(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// --list-ids lists every application the scanner defines, not only the ones
+// last week's tickets file named: with WAS_TICKETS off no file is written,
+// and the newest one can be a month old and name a quarter of them.
+func TestListIDsListsEveryScannerApplication(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_HOME", home)
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	apps := []appscan.App{{ID: "22", Name: "Shop"}, {ID: "11", Name: "Admin portal"}, {ID: "33", Name: "Careers"}}
+	write := func(day string, generated time.Time) {
+		tf := appscan.TicketsFile{Generated: generated, Tickets: []appscan.AppTicket{
+			{Key: "id:22", AppID: "22", App: "Shop", Findings: []appscan.TicketFinding{{ID: "1"}, {ID: "2", Potential: true}}}}}
+		if err := os.WriteFile(filepath.Join(state, "appscan-tickets-"+day+".json"), tf.JSON(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A month-old file (tickets off since): every app, and no counts.
+	write("2026-10-30", now.AddDate(0, 0, -26))
+	tf, why := recentTickets(now)
+	out := listApps(apps, tf, why)
+	for _, want := range []string{"From the scanner: 3 web application(s)", "files tickets", "Admin portal", "Careers", "Shop"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "appscan-tickets-2026-10-30") {
+		t.Errorf("a month-old file gave counts:\n%s", out)
+	}
+
+	// Last week's file: the same list, with its counts where it has them.
+	write("2026-11-20", now.AddDate(0, 0, -5))
+	tf, why = recentTickets(now)
+	out = listApps(apps, tf, why)
+	if !strings.Contains(out, "findings from appscan-tickets-2026-11-20.json") {
+		t.Errorf("last week's file not used:\n%s", out)
+	}
+	shop := ""
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.HasSuffix(ln, "Shop") {
+			shop = ln
+		}
+	}
+	if f := strings.Fields(shop); len(f) < 4 || f[1] != "1" || f[2] != "1" {
+		t.Errorf("Shop's counts: %q", shop)
+	}
+	if strings.Index(out, "Admin portal") > strings.Index(out, "Shop") {
+		t.Errorf("not sorted by name:\n%s", out)
+	}
+}

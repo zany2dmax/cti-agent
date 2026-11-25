@@ -49,7 +49,7 @@ flag: --check | make one cheap authenticated call, print the scanner's rate-limi
 flag: --deliveries STRING | the owners lane: build the owner report from the scanner's API (one finding search per application, one knowledge-base lookup per 1,000 kinds of finding) for every application in this cti-appscan --deliveries-out file that is not held, and write each covering email beside it in --out-dir with send.tsv and held.tsv for the runner
 flag: --dump-request | with --app-id: print the request that creates the report, send nothing
 flag: --keep | leave each report in the scanner instead of deleting it (debugging)
-flag: --list-ids | print the web application id, name and findings of every application in the newest $FLEET_HOME/state/appscan-tickets-<date>.json (or the --tickets file), and exit; reads the file only - no scanner calls, no credentials
+flag: --list-ids | print the id and name of every web application the scanner defines (one API call), with its findings from the weekly tickets file when that is under 8 days old, and exit; with --tickets FILE, that file only - no scanner calls, no credentials
 flag: --max-reports INT | fetch at most this many reports in one run; the rest are listed as not fetched (default 30)
 flag: --no-fetch | with --deliveries: write the covering emails without fetching any report (a dry run)
 flag: --only-ref STRING | with --tickets: a cti-jira --ref-out preview; fetch only the applications whose ticket would be filed or commented (would-create, would-comment)

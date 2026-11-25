@@ -136,15 +136,21 @@ and a value may follow
 or a space.
 .TP
 .B \-\-list\-ids
-Print the web application id, name, confirmed and potential finding counts,
-and whether a report would be fetched, for every application in the newest
+Print the id and name of every web application the scanner defines (one
+API call, with the scanner's credentials), and its confirmed and potential
+finding counts from the newest
 .I $FLEET_HOME/state/appscan\-tickets\-<date>.json
-(the weekly run's tickets file), or in the
-.B \-\-tickets
-file when one is given; then exit. Reads the file only: no scanner calls,
-no credentials. The ids to try
+when that file is under 8 days old; then exit. The weekly run writes that
+file only with
+.BR WAS_TICKETS=1 ,
+so with tickets off there are no counts, and the output says so. The ids to
+try
 .B \-\-app\-id
-with.
+with. With
+.B \-\-tickets
+.IR FILE ,
+it lists that file's applications only, whether a report would be fetched
+for each, and calls nothing.
 Default:\~off.
 .TP
 .B \-\-check
