@@ -80,6 +80,30 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   through it, and never handles a secret in the conversation. Tested in
   `fleet-kit/tests/test_onboard.py`.
 
+- **`DOMAINS_REGISTRAR`** (`godaddy`, the default, or `none`). A fleet whose
+  registrar the domains lane can't read used to get `[REGISTRAR NOT CHECKED]`
+  in every week's subject, an amber lead, a failing `--check`, and an
+  escalation from the check-in on the second Tuesday. With `none`:
+  - the report says no registrar is configured, and names the checks that
+    don't run
+  - `--check` notes it and passes
+  - the check-in knows not to escalate
+
+  An unknown value stops the run. The lane's other add-on vendor already had
+  an off switch (`DOMAINS_MAIL_GATEWAY` unset or `off`), as does advisory
+  triage's Falcon (`TRIAGE_ENABLED` unset). So a fleet without GoDaddy,
+  Proofpoint or CrowdStrike now runs every lane cleanly.
+
+### Fixed
+
+- **The `fleet.d` example files are in git.** `.gitignore` ignores every
+  `*.env` (to keep real settings out), so the generated
+  `fleet-kit/fleet/fleet.d.example/*.env` were skipped by `git add`. The
+  commit that added `cti-agent-onboard` shipped without them, and an install
+  from it would have failed copying them. They're un-ignored by name, and a
+  test now fails when any generated file isn't tracked. The lane manifest
+  tests also stop writing generated files into the repository.
+
 ### Changed
 
 - **The systemd units are generated from lane manifests**

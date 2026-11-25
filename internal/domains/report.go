@@ -29,6 +29,10 @@ type Report struct {
 	// says why when it was attempted and failed.
 	Registrar    string
 	RegistrarErr string
+	// RegistrarOff: no registrar is configured, so none was consulted on
+	// purpose. The subject carries no NOT CHECKED tag and the lead is not
+	// amber for it; the report still says what was not checked.
+	RegistrarOff bool
 	Problems     []string // inventory file problems
 	FirstRun     bool     // no previous state, so no changes can be reported
 	Selectors    []string
@@ -151,7 +155,7 @@ func (r Report) live() int {
 func (r Report) Subject() string {
 	h, m, _ := r.counts()
 	tag := ""
-	if r.Registrar == "" {
+	if r.Registrar == "" && !r.RegistrarOff {
 		tag = " [REGISTRAR NOT CHECKED]"
 	}
 	var parts []string
@@ -185,7 +189,10 @@ func (r Report) leadLine() string {
 	} else if c > 0 {
 		s += fmt.Sprintf(" %d change(s) since last week.", c)
 	}
-	if r.Registrar == "" {
+	if r.Registrar == "" && r.RegistrarOff {
+		s += " No registrar is configured for this fleet, so expiry, lock, auto-renew and " +
+			"inventory-vs-account checks are not run."
+	} else if r.Registrar == "" {
 		why := "it was skipped"
 		if r.RegistrarErr != "" {
 			why = "it failed: " + r.RegistrarErr
@@ -533,7 +540,7 @@ func (r Report) html() string {
 	leadTone := emailkit.Green
 	if h > 0 {
 		leadTone = emailkit.Red
-	} else if m > 0 || r.Registrar == "" {
+	} else if m > 0 || (r.Registrar == "" && !r.RegistrarOff) {
 		leadTone = emailkit.Amber
 	}
 	emailkit.Lead(&b, leadTone, fmt.Sprintf(`%s

@@ -167,7 +167,20 @@ func run() int {
 	var cmp *domains.Comparison
 	var regs []domains.Registration
 	orgOf := map[string]domains.Registration{}
-	if *noRegistrar {
+	// DOMAINS_REGISTRAR: which registrar holds the domains. godaddy (the
+	// default) or none, for a fleet whose registrar the lane cannot read:
+	// then the report says no registrar is configured, rather than raising
+	// [REGISTRAR NOT CHECKED] every week for a check that can never run.
+	switch r := strings.ToLower(strings.TrimSpace(os.Getenv("DOMAINS_REGISTRAR"))); r {
+	case "", "godaddy":
+	case "none", "off":
+		opt.RegistrarOff = true
+	default:
+		return die("DOMAINS_REGISTRAR=%q is not godaddy or none", safelog.Line(r))
+	}
+	if opt.RegistrarOff {
+		logf("note   : DOMAINS_REGISTRAR=none - no registrar is configured; registration, expiry and account checks not run")
+	} else if *noRegistrar {
 		logf("note   : --no-registrar - registration, expiry and account checks skipped")
 	} else if tok := strings.TrimSpace(fleetenv.Secret("GODADDY_PAT")); tok == "" {
 		opt.RegistrarErr = "GODADDY_PAT is not set in fleet.env"
@@ -328,7 +341,7 @@ func run() int {
 
 	actions, skipped := domains.ActionsWithSkipped(results, opt.ExpectRUA, gwStatus)
 	rep := domains.Report{Now: opt.Now, Results: results, Findings: findings, Changes: changes,
-		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, Problems: problems,
+		Registrar: opt.Registrar, RegistrarErr: opt.RegistrarErr, RegistrarOff: opt.RegistrarOff, Problems: problems,
 		FirstRun: prev == nil, Selectors: selectors, SMTP: smtpMode, Actions: actions,
 		TicketSlot: *ticketSlot}
 	if cmp != nil {
@@ -458,8 +471,13 @@ func doCheck(inventory string) int {
 		}
 	}
 
-	if tok := strings.TrimSpace(fleetenv.Secret("GODADDY_PAT")); tok == "" {
-		logf("FAIL   : GODADDY_PAT is not set, so the registrar would not be checked")
+	if r := strings.ToLower(strings.TrimSpace(os.Getenv("DOMAINS_REGISTRAR"))); r == "none" || r == "off" {
+		logf("note   : DOMAINS_REGISTRAR=none - no registrar to check")
+	} else if r != "" && r != "godaddy" {
+		logf("FAIL   : DOMAINS_REGISTRAR=%q is not godaddy or none", safelog.Line(r))
+		failed++
+	} else if tok := strings.TrimSpace(fleetenv.Secret("GODADDY_PAT")); tok == "" {
+		logf("FAIL   : GODADDY_PAT is not set, so the registrar would not be checked (DOMAINS_REGISTRAR=none if there is none to check)")
 		failed++
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

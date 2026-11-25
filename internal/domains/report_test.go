@@ -49,6 +49,27 @@ func TestRender(t *testing.T) {
 	}
 }
 
+// A fleet with no registrar to read says so once, plainly: no NOT CHECKED tag
+// in every week's subject, and the checks it cannot run
+// named in the lead.
+func TestNoRegistrarConfiguredIsNotAnAlarm(t *testing.T) {
+	rep := Report{Now: now, RegistrarOff: true,
+		Results: []Result{{Entry: Entry{Name: "example.com"}, Web: []Web{{Host: "example.com", Addrs: Lookup{Absent: true}}}}}}
+	b := rep.Render()
+	if strings.Contains(b.Subject, "NOT CHECKED") {
+		t.Errorf("subject = %q", b.Subject)
+	}
+	if !strings.Contains(b.Text, "No registrar is configured for this fleet, so expiry, lock, auto-renew") ||
+		strings.Contains(b.Text, "was NOT consulted") {
+		t.Errorf("lead does not say no registrar is configured:\n%s", b.Text)
+	}
+	// Configured but failing is still the alarm.
+	rep.RegistrarOff, rep.RegistrarErr = false, "HTTP 401"
+	if !strings.Contains(rep.Render().Subject, "[REGISTRAR NOT CHECKED]") {
+		t.Error("a failing registrar lost its tag")
+	}
+}
+
 func TestTheInventoryMismatchHasItsOwnSectionNearTheTop(t *testing.T) {
 	rep := Report{Now: now, Registrar: "godaddy",
 		Results: []Result{{Entry: Entry{Name: "example.com"},

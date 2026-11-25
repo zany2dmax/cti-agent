@@ -43,6 +43,9 @@ type Options struct {
 	// (--no-registrar, or it failed - RegistrarErr then says why).
 	Registrar    string
 	RegistrarErr string
+	// RegistrarOff: this fleet has no registrar to consult, by its settings.
+	// Not a failure: the report says so plainly and raises no alarm.
+	RegistrarOff bool
 	// ExpectRUA, when set, must appear in every sending domain's DMARC rua=.
 	// Empty until the mail team says where aggregate reports should go; then
 	// the check is only that SOME rua= exists.

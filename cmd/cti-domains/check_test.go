@@ -76,6 +76,16 @@ func TestCheck(t *testing.T) {
 	if code, _ := runCheck(t, inv); code != exitErr {
 		t.Error("no GoDaddy token passed the check")
 	}
+	// A fleet with no registrar: nothing to check, not a failure.
+	t.Setenv("DOMAINS_REGISTRAR", "none")
+	if code, out := runCheck(t, inv); code != exitOK || !strings.Contains(out, "DOMAINS_REGISTRAR=none - no registrar to check") {
+		t.Errorf("DOMAINS_REGISTRAR=none failed the check: exit %d\n%s", code, out)
+	}
+	t.Setenv("DOMAINS_REGISTRAR", "namecheap")
+	if code, out := runCheck(t, inv); code != exitErr || !strings.Contains(out, "is not godaddy or none") {
+		t.Errorf("an unknown registrar passed: exit %d\n%s", code, out)
+	}
+	t.Setenv("DOMAINS_REGISTRAR", "")
 
 	t.Setenv("GODADDY_PAT", "test-pat")
 	registrarFor = func(string) domains.Registrar { return fakeRegistrar{} }

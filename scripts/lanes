@@ -607,6 +607,11 @@ def main(argv):
             print(f"lanes: {pr}", file=sys.stderr)
         return 1 if problems else 0
     stale = [p for p, text in want.items() if not p.exists() or p.read_text(encoding="utf-8") != text]
+    # An example for a lane that no longer exists would ship forever.
+    extra = sorted(p for p in EXAMPLES.glob("*.env") if p not in want)
+    for p in extra:
+        print(f"lanes: {shown(p)} is an example no lane generates - delete it", file=sys.stderr)
+    stale += extra
     for p in stale:
         print(f"lanes: {shown(p)} is out of date with its manifest - run scripts/lanes --write "
               "and review the diff (edit the manifest, never the unit)", file=sys.stderr)

@@ -7,6 +7,10 @@
 # every clone gets it. `*.env.example` is unaffected: it does not end .env.
 *.env
 fleet.env
+# Except the generated fleet.d examples (scripts/lanes): settings with their
+# comments and no values, the files cti-agent-onboard and the installer ship.
+# A test fails if any generated file is not tracked.
+!fleet-kit/fleet/fleet.d.example/*.env
 config.local.yaml
 
 # build outputs

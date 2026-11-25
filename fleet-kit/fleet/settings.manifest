@@ -223,6 +223,12 @@ section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains
 file: domains
 
+key: DOMAINS_REGISTRAR
+section: 4. RECIPIENTS AND THE SEND GATE - required
+readers: cti-domains
+file: domains
+default: godaddy
+
 key: DOMAINS_SMTP
 section: 4. RECIPIENTS AND THE SEND GATE - required
 readers: cti-domains cti-jira

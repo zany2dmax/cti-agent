@@ -38,6 +38,19 @@ class TheRepository(unittest.TestCase):
         r = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_every_generated_file_is_tracked(self):
+        # The fleet.d examples end in .env, which .gitignore ignores: they were
+        # generated, tested and installed from disk, and never committed.
+        m = module()
+        paths = [p.relative_to(REPO) for p in m.wanted(m.load_all())]
+        r = subprocess.run(["git", "-C", str(REPO), "ls-files", "--", *map(str, paths)],
+                           capture_output=True, text=True, check=False)
+        if r.returncode != 0:
+            self.skipTest("not a git checkout")
+        tracked = set(r.stdout.split())
+        untracked = sorted(str(p) for p in paths if str(p) not in tracked)
+        self.assertEqual(untracked, [], "generated but not in git (ignored?)")
+
     def test_every_lane_unit_and_timer_has_a_manifest(self):
         m = module()
         named = {u["name"] for lane in m.load_all().values() for u in lane["unit"]}
@@ -179,6 +192,14 @@ class AScratchCopy(unittest.TestCase):
         shutil.copytree(LANES, self.lanes)
         self.m = module()
         self.m.UNITS, self.m.LANES = self.units, self.lanes
+        # Every file --write writes goes to the scratch copy, never the repo.
+        fleet = REPO / "fleet-kit" / "fleet"
+        shutil.copy(fleet / "CLAUDE.md", self.dir / "CLAUDE.md")
+        shutil.copy(fleet / "lanes.list", self.dir / "lanes.list")
+        shutil.copy(REPO / "internal" / "checkin" / "lanes_gen.go", self.dir / "lanes_gen.go")
+        shutil.copytree(fleet / "fleet.d.example", self.dir / "fleet.d.example")
+        self.m.ORCHESTRATOR, self.m.LANE_LIST = self.dir / "CLAUDE.md", self.dir / "lanes.list"
+        self.m.VERDICT_LANES, self.m.EXAMPLES = self.dir / "lanes_gen.go", self.dir / "fleet.d.example"
 
     def check(self):
         return self.m.main(["--check"])
@@ -264,6 +285,11 @@ nice = 10
     def test_a_unit_running_an_unknown_command_is_caught(self):
         p = self.lanes / "scout.toml"
         p.write_text(p.read_text().replace("bin/cti-scout ", "bin/cti-scoutt "))
+        self.assertEqual(self.check(), 1)
+
+    def test_an_example_no_lane_generates_is_caught(self):
+        self.assertEqual(self.check(), 0)
+        (self.dir / "fleet.d.example" / "gone.env").write_text("# a lane that was removed\n")
         self.assertEqual(self.check(), 1)
 
     def test_a_timer_that_disagrees_is_caught(self):

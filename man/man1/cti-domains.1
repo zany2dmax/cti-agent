@@ -378,6 +378,17 @@ GoDaddy Personal Access Token, scope
 .B domains.domain:read
 only. Unset: registrar checks are skipped and the subject says so.
 .TP
+.B DOMAINS_REGISTRAR
+Which registrar holds the domains:
+.B godaddy
+(the default) or
+.BR none .
+None: no registrar is configured, so the expiry, lock, auto-renew and
+inventory-vs-account checks are not run; the report says so in its lead
+without the NOT CHECKED tag, and
+.B \-\-check
+passes. Anything else stops the run.
+.TP
 .B DOMAINS_DNS_SERVERS
 DNS servers to ask, as IPs with optional ports, comma- or space-separated.
 Empty: the public resolvers 1.1.1.1 and 8.8.8.8, because a box on the
