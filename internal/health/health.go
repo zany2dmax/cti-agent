@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/zany2dmax/cti-agent/internal/layout"
 )
@@ -74,8 +75,15 @@ type Gap struct {
 	Why      string `json:"why,omitempty"`
 }
 
-// Key is how a gap is recognised from one report to the next.
-func (g Gap) Key() string { return g.Kind + "|" + subjectKey(g.Subject) }
+// Key is how a gap is recognised from one report to the next: by its
+// source id when it has one, so two subjects that share a name (or a
+// look-alike of one) never share a key, else by its name.
+func (g Gap) Key() string {
+	if id := strings.TrimSpace(g.ID); id != "" {
+		return g.Kind + "|id:" + id
+	}
+	return g.Kind + "|" + subjectKey(g.Subject)
+}
 
 // Unexpected is the report's gaps that no declaration covers.
 func (r Report) Unexpected() []Gap {
@@ -99,13 +107,20 @@ func (r *Report) Add(subject, id, kind, detail string) {
 	r.Gaps = append(r.Gaps, Gap{Subject: Clean(subject, 160), ID: Clean(id, 64), Kind: kind, Detail: Clean(detail, 300)})
 }
 
-// Clean is s as one line of printable text, at most n runes.
+// Clean is s as one line of printable text, at most n runes. Controls and
+// line breaks become spaces; invisible format characters (zero-width, bidi
+// overrides, the tag characters that hide text from a reader but not from a
+// model) are dropped. It runs where a report is written AND where it is read
+// for the check-in, since a report file is only as clean as whoever wrote it.
 func Clean(s string, n int) string {
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
-			return ' '
+		switch {
+		case unicode.Is(unicode.Cf, r), r >= 0xe0000 && r <= 0xe007f:
+			return -1
+		case r == ' ', unicode.IsGraphic(r):
+			return r
 		}
-		return r
+		return ' '
 	}, s)
 	s = strings.Join(strings.Fields(s), " ")
 	if rs := []rune(s); len(rs) > n {
@@ -114,7 +129,18 @@ func Clean(s string, n int) string {
 	return s
 }
 
-func subjectKey(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+// subjectKey compares names: whitespace collapsed and ASCII case folded only.
+// Full Unicode folding would let a look-alike (the Kelvin sign for "k")
+// match a declared name.
+func subjectKey(s string) string {
+	b := []byte(strings.Join(strings.Fields(s), " "))
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
 
 // ─── declarations ───────────────────────────────────────────────────────────
 
@@ -236,9 +262,27 @@ func (d Declaration) matches(g Gap) bool {
 // the gap is an accident again, and says the exception lapsed.
 func (r *Report) Apply(decls []Declaration, now time.Time) {
 	used := map[int]bool{}
+	// A name declaration that matches two different subjects (two apps
+	// given one name, or a look-alike created to borrow an exception)
+	// covers neither: it is reported, and id:<ID> is the fix.
+	ambiguous := map[int]bool{}
+	for _, d := range decls {
+		if d.Lane != r.Lane || strings.HasPrefix(d.Subject, "id:") {
+			continue
+		}
+		ids := map[string]bool{}
+		for _, g := range r.Gaps {
+			if d.matches(g) {
+				ids[g.ID+"|"+g.Subject] = true
+			}
+		}
+		if len(ids) > 1 {
+			ambiguous[d.Line] = true
+		}
+	}
 	for i := range r.Gaps {
 		for _, d := range decls {
-			if d.Lane != r.Lane || !d.matches(r.Gaps[i]) {
+			if d.Lane != r.Lane || ambiguous[d.Line] || !d.matches(r.Gaps[i]) {
 				continue
 			}
 			used[d.Line] = true
@@ -254,7 +298,10 @@ func (r *Report) Apply(decls []Declaration, now time.Time) {
 		if d.Lane != r.Lane {
 			continue
 		}
-		if !used[d.Line] {
+		switch {
+		case ambiguous[d.Line]:
+			r.Unused = append(r.Unused, d.String()+" (matches more than one subject, so it covers none: name it by id:)")
+		case !used[d.Line]:
 			r.Unused = append(r.Unused, d.String())
 		}
 		if !d.Until.IsZero() && !now.After(d.Until.Add(24*time.Hour)) && d.Until.Sub(now) < ExpiryWarning {

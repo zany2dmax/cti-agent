@@ -561,12 +561,18 @@ SETTINGS_ARGS=()
 # changes are offered again. The block is data the lanes wrote, one line per
 # item and bounded; names in it come from outside the fleet.
 HEALTH_TOOL="$FLEET_CODE/bin/fleet-health"
-HEALTH_PENDING="$FLEET_HOME/state/health-pending.json"
-rm -f "$HEALTH_PENDING"
+# One pending file per beat: a second beat started while this one runs (its
+# lock gone stale) must not commit this one's, or the reverse.
+HEALTH_PENDING="$FLEET_HOME/state/health-pending-$CHECKIN_BEAT_ID.json"
+find "$FLEET_HOME/state" -maxdepth 1 -name 'health-pending-*.json' -mtime +1 -delete 2>/dev/null || true
+# fleet-health bounds its own output (and records as told only what it
+# printed), so nothing here cuts it: a cut would lose what it recorded.
 if [ -x "$HEALTH_TOOL" ]; then
-  health_block="$("$HEALTH_TOOL" delta --pending "$HEALTH_PENDING" --home "$FLEET_HOME" \
-                   --list "$FLEET_CODE/share/health.list" 2>/dev/null | head -c 8000)" \
-    || health_block="LANE HEALTH: could not be read this beat (fleet-health failed); say so in the verdict."
+  if ! health_block="$("$HEALTH_TOOL" delta --pending "$HEALTH_PENDING" --home "$FLEET_HOME" \
+                        --list "$FLEET_CODE/share/health.list" 2>/dev/null)"; then
+    health_block="LANE HEALTH: could not be read this beat (fleet-health failed); say so in the verdict."
+    rm -f "$HEALTH_PENDING"   # nothing was shown, so nothing is told
+  fi
 else
   health_block="LANE HEALTH: not available ($HEALTH_TOOL is not installed)."
 fi

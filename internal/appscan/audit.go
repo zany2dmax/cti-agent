@@ -207,7 +207,7 @@ func HealthReport(rows []AuditRow, decls []health.Declaration, window time.Durat
 	idx := map[string]int{}
 	for i, row := range rows {
 		if row.Problem {
-			idx[row.Kind+"|"+strings.ToLower(strings.Join(strings.Fields(health.Clean(row.App.Name, 160)), " "))] = i
+			idx[health.Gap{Kind: row.Kind, Subject: health.Clean(row.App.Name, 160), ID: health.Clean(row.App.ID, 64)}.Key()] = i
 			r.Add(row.App.Name, row.App.ID, row.Kind, row.Verdict)
 		}
 	}

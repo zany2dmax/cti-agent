@@ -80,6 +80,29 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
     what each will report.
   - `cti-agent-doctor` gains a `lane health` check, and `fleet-health show`
     prints every lane's report.
+  - **Hardened after an independent review of the new route into the
+    model:**
+    - **The reader cleans every field again.** A report is only as clean as
+      whoever wrote it, so the delta re-cleans subjects, details, reasons and
+      declaration notes, makes an unknown kind `invalid_kind`, and refuses a
+      report whose lane isn't its file's.
+    - **Invisible format characters are dropped:** zero-width, bidi
+      overrides, and tag characters.
+    - **Gaps are keyed by source id.** Names compare by ASCII case only, so
+      a look-alike name can't fold onto a declared one. A name declaration
+      that matches two subjects covers neither, and is reported.
+    - **The block is bounded inside `fleet-health`,** and only what it
+      prints is recorded as told. A lane that doesn't fit is held over to
+      the next beat, and one lane always fits. `run-checkin` no longer cuts
+      the output, and never commits a delta that failed.
+    - **Each beat has its own pending state,** so overlapping beats can't
+      commit each other's.
+    - **A report dated in the future is a problem.** Before, it would never
+      have gone stale.
+    - **"Cleared" lines name the subject as it was shown,** and a changing
+      error message isn't re-announced every beat.
+    - **The check-in skill holds the block in `$ARGUMENTS`,** so it reaches
+      the beat in a known place.
 
 - **The weekly AppSec report lists the applications that weren't scanned.** A
   new section, NOT SCANNED THIS WEEK, names every application set up in the

@@ -67,10 +67,12 @@ type State struct {
 type LaneState struct {
 	Generated time.Time `json:"generated,omitempty"`
 	// Problem is the report's own trouble when it had one: missing,
-	// unreadable, stale, or "error: ...". Empty when the report was usable.
+	// unreadable, stale, future, or "error: ...". Empty when it was usable.
 	Problem string `json:"problem,omitempty"`
-	// Open is the keys of the unexpected gaps the beat has been told of.
-	Open []string `json:"open,omitempty"`
+	// Open is the keys of the unexpected gaps the beat has been told of, and
+	// Names how each was shown, so a "cleared" line names it as it was.
+	Open  []string          `json:"open,omitempty"`
+	Names map[string]string `json:"names,omitempty"`
 	// Told is the declarations already mentioned as unused or expiring.
 	Told []string `json:"told,omitempty"`
 }
@@ -95,9 +97,19 @@ func LoadState(path string) (State, error) {
 	return st, nil
 }
 
-// MaxGapLines is how many new or cleared gaps one lane lists in a beat's
-// block; the rest are counted, and the report names them all.
-const MaxGapLines = 30
+// MaxGapLines is how many lines one lane lists in a beat's block, new,
+// cleared and notes together; the rest are counted, and the report names
+// them all. With each line bounded (blockField), one lane always fits in
+// MaxBlockBytes, so a lane is never held over for ever.
+const MaxGapLines = 20
+
+// blockField trims a detail or reason for the block; the report keeps it whole.
+func blockField(s string) string { return Clean(s, 120) }
+
+// MaxBlockBytes bounds the whole block. A lane whose changes do not fit is
+// named in one line and its state is kept as it was, so the next beat is
+// told its changes: nothing is recorded as told that the beat did not see.
+const MaxBlockBytes = 12000
 
 // Delta compares each lane's report (read from home's reports/health) with
 // st, and returns the lines for the beat (none when nothing changed) and the
@@ -105,26 +117,49 @@ const MaxGapLines = 30
 func Delta(specs []Spec, inUse func(string) bool, home string, st State, now time.Time) ([]string, State) {
 	next := State{Lanes: map[string]LaneState{}}
 	var out []string
+	size := 0
 	for _, sp := range specs {
 		if !inUse(sp.Lane) {
 			continue
 		}
 		prev := st.Lanes[sp.Lane]
 		lines, ls := laneDelta(sp, home, prev, now)
+		n := 0
+		for _, l := range lines {
+			n += len(l) + 1
+		}
+		if size+n > MaxBlockBytes && len(lines) > 0 {
+			// Not shown, so not told: this lane keeps its old state, and the
+			// next beat (with the others told and quiet) gets it.
+			out = append(out, fmt.Sprintf("%s: %d change line(s) held over to the next beat (this block is full)", sp.Lane, len(lines)))
+			size += 80
+			next.Lanes[sp.Lane] = prev
+			continue
+		}
+		size += n
 		next.Lanes[sp.Lane] = ls
 		out = append(out, lines...)
 	}
 	return out, next
 }
 
+// futureSkew is how far ahead of the clock a report may be dated before it
+// is treated as a problem: a report from the future would never go stale.
+const futureSkew = time.Hour
+
 func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, LaneState) {
-	ls := LaneState{Open: prev.Open, Told: prev.Told, Generated: prev.Generated}
+	ls := LaneState{Open: prev.Open, Names: prev.Names, Told: prev.Told, Generated: prev.Generated}
 	r, err := Read(Path(home, sp.Lane))
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		ls.Problem = "missing"
 	case err != nil:
 		ls.Problem = "unreadable"
+	case Clean(r.Lane, 40) != sp.Lane:
+		// A report under another lane's name is not that lane's report.
+		ls.Problem = "unreadable"
+	case r.Generated.Sub(now) > futureSkew:
+		ls.Problem = "future"
 	case now.Sub(r.Generated) > time.Duration(sp.FreshHours)*time.Hour:
 		ls.Problem = "stale"
 	case r.Error != "":
@@ -132,12 +167,19 @@ func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, L
 	}
 	var lines []string
 	head := fmt.Sprintf("%s:", sp.Lane)
-	if ls.Problem != prev.Problem {
+	// An error is announced when it starts, not each time its wording
+	// changes (a timeout's seconds, say).
+	same := ls.Problem == prev.Problem ||
+		(strings.HasPrefix(ls.Problem, "error: ") && strings.HasPrefix(prev.Problem, "error: "))
+	if !same {
 		switch {
 		case ls.Problem == "missing":
 			lines = append(lines, fmt.Sprintf("%s no health report: cti-agent-%s.service has not written reports/health/%s.json", head, sp.Unit, sp.Lane))
 		case ls.Problem == "unreadable":
-			lines = append(lines, fmt.Sprintf("%s its health report is unreadable (reports/health/%s.json)", head, sp.Lane))
+			lines = append(lines, fmt.Sprintf("%s its health report is unreadable or not this lane's (reports/health/%s.json)", head, sp.Lane))
+		case ls.Problem == "future":
+			lines = append(lines, fmt.Sprintf("%s its health report is dated in the future (%s): check the clock, or who wrote it",
+				head, r.Generated.UTC().Format("2006-01-02 15:04 UTC")))
 		case ls.Problem == "stale":
 			lines = append(lines, fmt.Sprintf("%s its health report is from %s, over %dh old: is cti-agent-%s.timer running?",
 				head, r.Generated.UTC().Format("2006-01-02 15:04 UTC"), sp.FreshHours, sp.Unit))
@@ -157,22 +199,35 @@ func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, L
 	for _, k := range sp.Kinds {
 		known[k] = true
 	}
-	open := r.Unexpected()
+	// Every field is cleaned again here, on the way into the beat's prompt:
+	// a report is only as clean as whoever wrote it, and anything running as
+	// the service account can write one.
+	var open []Gap
+	for _, g := range r.Unexpected() {
+		g.Subject, g.ID, g.Detail, g.Why = Clean(g.Subject, 160), Clean(g.ID, 64), Clean(g.Detail, 300), Clean(g.Why, 300)
+		if !kindRE.MatchString(g.Kind) || g.Kind == "*" {
+			g.Kind = "invalid_kind"
+		}
+		open = append(open, g)
+	}
 	was := map[string]bool{}
 	for _, k := range prev.Open {
 		was[k] = true
 	}
-	now2 := map[string]bool{}
+	ls.Names = map[string]string{}
+	nowOpen := map[string]bool{}
 	var added, cleared []string
 	for _, g := range open {
-		now2[g.Key()] = true
-		if !was[g.Key()] {
+		key := g.Key()
+		nowOpen[key] = true
+		ls.Names[key] = g.Subject
+		if !was[key] {
 			s := fmt.Sprintf("  - new %s: %s", g.Kind, g.Subject)
 			if g.Detail != "" {
-				s += " - " + g.Detail
+				s += " - " + blockField(g.Detail)
 			}
 			if g.Why != "" {
-				s += " (" + g.Why + ")"
+				s += " (" + blockField(g.Why) + ")"
 			}
 			if !known[g.Kind] {
 				s += " [kind not in the lane's manifest]"
@@ -181,12 +236,15 @@ func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, L
 		}
 	}
 	for _, k := range prev.Open {
-		if !now2[k] {
+		if !nowOpen[k] {
 			kind, subj, _ := strings.Cut(k, "|")
-			cleared = append(cleared, fmt.Sprintf("  - cleared %s: %s", kind, subj))
+			if name := prev.Names[k]; name != "" {
+				subj = name
+			}
+			cleared = append(cleared, fmt.Sprintf("  - cleared %s: %s", kind, Clean(subj, 160)))
 		}
 	}
-	ls.Open = sortedKeys(now2)
+	ls.Open = sortedKeys(nowOpen)
 
 	var told []string
 	toldBefore := map[string]bool{}
@@ -195,17 +253,19 @@ func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, L
 	}
 	var notes []string
 	for _, d := range r.Expiring {
+		d = Clean(d, 300)
 		key := "expiring|" + d
 		told = append(told, key)
 		if !toldBefore[key] {
-			notes = append(notes, "  - a declaration expires within 7 days: "+d)
+			notes = append(notes, "  - a declaration expires within 7 days: "+blockField(d))
 		}
 	}
 	for _, d := range r.Unused {
+		d = Clean(d, 300)
 		key := "unused|" + d
 		told = append(told, key)
 		if !toldBefore[key] {
-			notes = append(notes, "  - a declaration matches nothing (stale, or a renamed subject): "+d)
+			notes = append(notes, "  - a declaration matches nothing usable: "+blockField(d))
 		}
 	}
 	sort.Strings(told)
@@ -217,9 +277,8 @@ func laneDelta(sp Spec, home string, prev LaneState, now time.Time) ([]string, L
 	expected := len(r.Gaps) - len(open)
 	lines = append(lines, fmt.Sprintf("%s report of %s: %d of %d covered; %d unexpected gap(s) open, %d by design",
 		head, r.Generated.UTC().Format("2006-01-02 15:04 UTC"), r.Covered, r.Of, len(open), expected))
-	lines = append(lines, capped(added, sp.Lane)...)
-	lines = append(lines, capped(cleared, sp.Lane)...)
-	lines = append(lines, notes...)
+	all := append(append(append([]string{}, added...), cleared...), notes...)
+	lines = append(lines, capped(all, sp.Lane)...)
 	return lines, ls
 }
 

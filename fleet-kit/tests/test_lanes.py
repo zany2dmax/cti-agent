@@ -1360,6 +1360,14 @@ print({{"%u": o.get("u", 0), "%a": o.get("a", format(st.st_mode & 0o7777, "o")),
         self.assertIn("fleet-health delta", ran)
         self.assertNotIn("fleet-health commit", ran, "a failed beat's changes were marked as told")
 
+        # It wrote its pending state and then failed: nothing it computed was
+        # shown, so nothing may be recorded as told.
+        failing = stub.replace('echo "appscan: new not_scanned: Careers"', 'exit 1')
+        r, ran = self._checkin_box(health=failing)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("LANE HEALTH: could not be read this beat", ran)
+        self.assertNotIn("fleet-health commit", ran, "a failed delta was committed")
+
         # No fleet-health installed: the beat is told so, and still runs.
         r, ran = self._checkin_box()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

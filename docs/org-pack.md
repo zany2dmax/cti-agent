@@ -85,6 +85,9 @@ appscan | id:100000001 | * | retired; kept in the scanner for its history | unti
 ```
 
 - **The subject** is the name the lane reports, or `id:<ID>` for a source id.
+  Prefer `id:` where the lane has one (a web app's id): a name can be given to
+  a second subject, and a name declaration that matches two subjects covers
+  neither.
 - **The kind** is one of the lane's gap kinds (its manifest's `[health]
   kinds`), or `*` for any.
 - **A gap a line covers is "by design",** with the reason, and the check-in
