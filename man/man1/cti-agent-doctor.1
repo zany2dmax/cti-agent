@@ -36,8 +36,13 @@ Today's credential report
 every check ok, and written in the last 26 hours.
 .TP
 .B org pack
-The org pack, when there is one, passes
+The org pack the installer uses, when there is one, passes
 .BR "org\-pack check \-\-root\-owned" .
+It is found the installer's way: a fork's
+.I org/
+in the kit, or
+.I /etc/cti\-agent/org
+on a box installed from upstream. Both at once is a FAIL.
 .TP
 .B beat files
 .BR "run\-checkin \-\-audit" :

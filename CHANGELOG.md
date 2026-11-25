@@ -219,6 +219,12 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **`cti-agent-doctor` checks a fork's org pack.** It looked only in
+  `/etc/cti-agent/org`, so a fork's committed `org/`, which the installer
+  uses, was reported as "none" and never checked. It now finds the pack the
+  way the installer does (`org-pack find`), and two packs at once is a FAIL.
+  Tested in `fleet-kit/tests/test_doctor.py`.
+
 - **A fork's `layout.env` can be committed.** `.gitignore`'s `*.env` rule
   ignored it, so `git add layout.env` skipped it silently. It's un-ignored by
   name; the test that upstream ships none still holds.

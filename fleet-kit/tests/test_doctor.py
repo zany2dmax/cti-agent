@@ -57,7 +57,8 @@ class Doctor(unittest.TestCase):
         self.assertEqual(c["version"][0], "OK")
         self.assertIn("installed v9.9", c["version"][1])
         self.assertEqual(c["beat files"][0], "OK")
-        self.assertEqual(c["org pack"], ("OK", "none (the core prompts only)"))
+        self.assertEqual(c["org pack"][0], "OK")
+        self.assertIn("none", c["org pack"][1])
         # Not on a box: systemd is not asked.
         self.assertEqual(c["units"][0], "WARN")
         # Settings are missing here, so fleet-config's result is a FAIL and so is the run.
@@ -81,6 +82,36 @@ class Doctor(unittest.TestCase):
         state, detail = self.run_it()[1]["credentials"]
         self.assertEqual(state, "WARN")
         self.assertIn("old", detail)
+
+    def kit(self):
+        """A kit at CTI_KIT, with the org-pack tool and the core it checks against."""
+        kit = self.dir / "kit"
+        (kit / "fleet-kit" / "bin").mkdir(parents=True)
+        shutil.copy(REPO / "fleet-kit" / "bin" / "org-pack", kit / "fleet-kit" / "bin" / "org-pack")
+        for d in ("agents", "skills"):
+            shutil.copytree(FLEET / d, kit / "fleet-kit" / "fleet" / d)
+        self.m.KIT = kit
+        return kit
+
+    def test_a_forks_org_pack_is_found_and_checked(self):
+        # A fork commits org/ in the kit; the installer uses it, so the doctor checks it.
+        kit = self.kit()
+        _, c = self.run_it()
+        self.assertEqual(c["org pack"], ("OK", "none (the core prompts only)"))
+        (kit / "org").mkdir()
+        (kit / "org" / "orchestrator.md").write_text("A note.\n")
+        _, c = self.run_it()
+        # Checked as on the box: root-owned, which a test's files are not.
+        self.assertEqual(c["org pack"][0], "FAIL")
+        self.assertIn(str(kit / "org"), c["org pack"][1])
+
+    def test_two_org_packs_are_a_fail(self):
+        kit = self.kit()
+        (kit / "org").mkdir()
+        (self.dir / "etc/cti-agent/org").mkdir()
+        _, c = self.run_it()
+        self.assertEqual(c["org pack"][0], "FAIL")
+        self.assertIn("two org packs", c["org pack"][1])
 
     def test_a_failing_audit_is_a_fail(self):
         (self.dir / "opt/cti-agent/bin/run-checkin").write_text("#!/bin/bash\necho 'CLAUDE.md is writable by ctiagent' >&2\nexit 1\n")

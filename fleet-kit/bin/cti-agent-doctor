@@ -14,7 +14,8 @@ The checks, each OK, WARN or FAIL:
                patchtuesday's is off on purpose and is only a WARN
   credentials  today's credential report (reports/credcheck.txt): every check
                ok, and written in the last 26 hours
-  org pack     the org pack, when there is one, passes org-pack check
+  org pack     the org pack the installer uses (a fork's org/ in the kit, or
+               /etc/cti-agent/org), when there is one, passes org-pack check
   beat files   run-checkin's own integrity audit of the orchestrator's files
 
 It changes nothing and prints no setting's value. cti-agent-update runs it
@@ -152,12 +153,22 @@ def check_credentials():
 
 
 def check_org_pack():
-    pack = CONF / "org"
+    # The pack the installer uses, found the way it finds it (org-pack find):
+    # a fork's org/ in the kit, or /etc/cti-agent/org on a box installed from
+    # upstream, and never both.
     tool = KIT / "fleet-kit" / "bin" / "org-pack"
-    if not pack.exists():
-        return "OK", "none (the core prompts only)"
     if not tool.exists():
+        pack = CONF / "org"
+        if not pack.exists():
+            return "OK", f"none in {pack} (no kit at {KIT} to look for a fork's org/)"
         return "WARN", f"{pack} exists but there is no kit at {KIT} to check it with"
+    r = run(["bash", str(tool), "find", str(KIT), str(CONF)])
+    if r.returncode != 0:
+        return "FAIL", (r.stderr.strip().splitlines() or ["org-pack find failed"])[0]
+    found = r.stdout.strip()
+    if not found:
+        return "OK", "none (the core prompts only)"
+    pack = pathlib.Path(found)
     r = run(["bash", str(tool), "check", str(pack), str(KIT / "fleet-kit" / "fleet"), "--root-owned"])
     if r.returncode != 0:
         return "FAIL", (r.stderr.strip().splitlines() or ["org-pack check failed"])[0]
