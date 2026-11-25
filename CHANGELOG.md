@@ -35,7 +35,7 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
-## Unreleased
+## 2.0-rc5 — 2026-11-25
 
 ### Added
 
@@ -217,6 +217,59 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   triage's Falcon (`TRIAGE_ENABLED` unset). So a fleet without GoDaddy,
   Proofpoint or CrowdStrike now runs every lane cleanly.
 
+- **The org pack** ([docs/org-pack.md](docs/org-pack.md)). What one
+  organization adds to the fleet's prompts now lives in its own folder:
+  - `orchestrator.md` for the orchestrator's `CLAUDE.md`
+  - `agents/<agent>.md` for the supplier, triage-reader and triage-judge
+    prompts
+  - extra skills under `skills/`
+
+  The installer adds each file after the core text under
+  "Organization notes", on every install and update, so an org's notes no
+  longer freeze the installed `CLAUDE.md` against updates, and a fork's
+  pull from upstream never conflicts with them. A pack only adds: it can't
+  replace a core skill, and the appended block says the core text wins where
+  the two disagree.
+
+  The pack steers the beat, so `fleet-kit/bin/org-pack check` refuses an
+  install, before anything is installed, if the pack:
+  - isn't root-owned, or is group- or world-writable
+  - holds a symlink, or a file larger than 64 KB
+  - holds a file the layout doesn't name, or notes for an agent that isn't
+    core
+  - reuses a core skill's name
+
+  A fork commits the pack as `org/`; a box installed from upstream keeps it
+  in `/etc/cti-agent/org/`. Both at once is refused. A skill dropped from the
+  pack is removed from the box on the next install. `examples/org-pack/` is
+  a sanitized example of every file. Tested in `fleet-kit/tests/test_org_pack.py`.
+- **Vendor setup as settings.** Four things that described how one
+  organization set up a vendor or its network are now settings. Each one
+  defaults to what the fleet did before, so an update needs no config change.
+  - **`QUALYS_PORTAL_HOSTS`, and the platform from `QUALYS_BASE_URL`.** Links
+    in Qualys mail were trusted only to the four US pods, so on any other
+    Qualys platform (EU, CA, IN, UK, AE, KSA) every report link was refused
+    as unverified. cti-appscan, cti-appreport and cti-vmscan now also
+    accept the UI host of the pod named in `QUALYS_BASE_URL`
+    (`qualysapi.X` gives `qualysguard.X`), plus any hosts listed in
+    `QUALYS_PORTAL_HOSTS`. A value that isn't a plain host name stops the run.
+  - **`VMSCAN_USER_OCTET`** (default `30`, or `off`): the third octet that
+    marks a location's user network in the network sheet (10.X.30). `off`
+    leaves only rows labelled corp. The report's "How the spreadsheet is
+    read" guide follows the setting.
+  - **`VMSCAN_EXTRA_LABELS`**: row labels a sheet uses beyond the built-in
+    ones, so a label alone on its row isn't read as a new location.
+  - **`JIRA_CLOSE_RESOLUTION`** (default `Done`): the resolution set when the
+    close transition's screen asks for one, for a project that renamed
+    Jira's stock resolution.
+- **`VMSCAN_GAP_TEAMS`**: who the VM scan report asks why a network isn't
+  scanned. This was fixed text ("the network and M&A teams"), one
+  organization's process. The default is now the network team. To keep the
+  old wording, set `VMSCAN_GAP_TEAMS="network and M&A teams"` in
+  `fleet.d/vmscan.env` before updating. The action line now reads "Network
+  and M&A teams: say why this is not scanned." (it read "Network or M&A
+  team").
+
 ### Fixed
 
 - **`cti-agent-onboard` asks only what a lane can't run without.** It asked
@@ -345,61 +398,6 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
   entries named real locations, business units and scan titles as examples;
   they now use placeholders like the rest of the repository. The names remain
   in git history; the history was not rewritten.
-
-### Added
-
-- **The org pack** ([docs/org-pack.md](docs/org-pack.md)). What one
-  organization adds to the fleet's prompts now lives in its own folder:
-  - `orchestrator.md` for the orchestrator's `CLAUDE.md`
-  - `agents/<agent>.md` for the supplier, triage-reader and triage-judge
-    prompts
-  - extra skills under `skills/`
-
-  The installer adds each file after the core text under
-  "Organization notes", on every install and update, so an org's notes no
-  longer freeze the installed `CLAUDE.md` against updates, and a fork's
-  pull from upstream never conflicts with them. A pack only adds: it can't
-  replace a core skill, and the appended block says the core text wins where
-  the two disagree.
-
-  The pack steers the beat, so `fleet-kit/bin/org-pack check` refuses an
-  install, before anything is installed, if the pack:
-  - isn't root-owned, or is group- or world-writable
-  - holds a symlink, or a file larger than 64 KB
-  - holds a file the layout doesn't name, or notes for an agent that isn't
-    core
-  - reuses a core skill's name
-
-  A fork commits the pack as `org/`; a box installed from upstream keeps it
-  in `/etc/cti-agent/org/`. Both at once is refused. A skill dropped from the
-  pack is removed from the box on the next install. `examples/org-pack/` is
-  a sanitized example of every file. Tested in `fleet-kit/tests/test_org_pack.py`.
-- **Vendor setup as settings.** Four things that described how one
-  organization set up a vendor or its network are now settings. Each one
-  defaults to what the fleet did before, so an update needs no config change.
-  - **`QUALYS_PORTAL_HOSTS`, and the platform from `QUALYS_BASE_URL`.** Links
-    in Qualys mail were trusted only to the four US pods, so on any other
-    Qualys platform (EU, CA, IN, UK, AE, KSA) every report link was refused
-    as unverified. cti-appscan, cti-appreport and cti-vmscan now also
-    accept the UI host of the pod named in `QUALYS_BASE_URL`
-    (`qualysapi.X` gives `qualysguard.X`), plus any hosts listed in
-    `QUALYS_PORTAL_HOSTS`. A value that isn't a plain host name stops the run.
-  - **`VMSCAN_USER_OCTET`** (default `30`, or `off`): the third octet that
-    marks a location's user network in the network sheet (10.X.30). `off`
-    leaves only rows labelled corp. The report's "How the spreadsheet is
-    read" guide follows the setting.
-  - **`VMSCAN_EXTRA_LABELS`**: row labels a sheet uses beyond the built-in
-    ones, so a label alone on its row isn't read as a new location.
-  - **`JIRA_CLOSE_RESOLUTION`** (default `Done`): the resolution set when the
-    close transition's screen asks for one, for a project that renamed
-    Jira's stock resolution.
-- **`VMSCAN_GAP_TEAMS`**: who the VM scan report asks why a network isn't
-  scanned. This was fixed text ("the network and M&A teams"), one
-  organization's process. The default is now the network team. To keep the
-  old wording, set `VMSCAN_GAP_TEAMS="network and M&A teams"` in
-  `fleet.d/vmscan.env` before updating. The action line now reads "Network
-  and M&A teams: say why this is not scanned." (it read "Network or M&A
-  team").
 
 ## 2.0-rc4 — 2026-11-24
 
