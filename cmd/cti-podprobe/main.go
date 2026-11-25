@@ -9,7 +9,7 @@
 //
 // # WHAT IT IS FOR
 //
-// It is the first step of the domains lane's mail-gateway half (BACKLOG): it
+// It is the first step of the domains lane's mail-gateway half (RUNBOOK 11g): it
 // shows what the stream actually contains for this tenant before any lane
 // depends on it. It reads and prints counts only. It never prints or stores a
 // message, an address, a subject or the token, and it sends nothing.

@@ -106,9 +106,9 @@ The full annotated reference, including every fleet-only setting, is
 
 ## 11m. What is in fleet.env
 
-`fleet.env` holds about 165 settings, and every unit loads all of it, so
-every lane carries every secret. `fleet-config` is step 1 of splitting it
-(BACKLOG). It shows what the file holds, and never prints a value:
+`fleet.env` holds about 165 settings. Before the split, every unit loaded all
+of it, so every lane carried every secret. `fleet-config` was step 1 of
+splitting it. It shows what the file holds, and never prints a value:
 
 ```bash
 sudo cti-agent fleet-config check

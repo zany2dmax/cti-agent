@@ -5,7 +5,7 @@
     sudo cti-agent-settings split --dry-run   which setting would go to which file (names only)
     sudo cti-agent-settings split --for-real  write /etc/cti-agent/fleet.d/ and move fleet.env aside
 
-STEP 3 OF SPLITTING fleet.env (BACKLOG, RUNBOOK 11o). Every unit loaded all of
+STEP 3 OF SPLITTING fleet.env (RUNBOOK 11o). Every unit loaded all of
 fleet.env, so every lane saw every other lane's recipients and switches. After
 the split:
 

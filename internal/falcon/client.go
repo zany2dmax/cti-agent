@@ -2,7 +2,7 @@
 //
 // # WHAT IT IS FOR
 //
-// Advisory triage (BACKLOG, and the redesign plan) judges a threat-intel item
+// Advisory triage (RUNBOOK 11k) judges a threat-intel item
 // against facts from our own tools instead of a hand-written profile: which
 // applications we run (Falcon Discover), which hosts have seen an indicator
 // (IOC Management), and which ATT&CK techniques our detections have fired on

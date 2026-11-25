@@ -35,6 +35,21 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **BACKLOG.md holds only what is left.** Work that shipped in 2.0 is out of
+  it: the `fleet.env` split, the supplier lane, advisory triage, the
+  registrar setting, the PoD half of the domains lane, and the eval baseline.
+  What remains of each stays. The file is grouped (before 2.0 final,
+  interfaces, the agent harness, lanes, the platform), and a new first group
+  lists what 2.0 final still needs: a clean-box install, a fork's install,
+  the scanner report staging fix, a new check-in eval baseline and the tag
+  ruleset. The AppSec decision to track remediation by email, not a Jira
+  project, moved to the AppSec guide (RUNBOOK 11f). Comments and docs that
+  cited "BACKLOG" for shipped work now cite their RUNBOOK section.
+
 ## 2.0-rc5 — 2026-11-25
 
 ### Added

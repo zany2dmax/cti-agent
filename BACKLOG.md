@@ -6,453 +6,175 @@ and expect each to be designed first. Interface work follows the rule in
 is real, not before. Finished work moves out of this file into
 [CHANGELOG.md](CHANGELOG.md).
 
-- **Scanner report staging (PrimeSec Top-228, for 1.7).** Stage scanner reports in
-  `PrivateTmp`, promote them after redaction, clean up orphans on start, extend
-  the scrub list; test with a killed run. Needs an Opus review (credential scrubbing).
-- More scanner providers — Defender, Tenable, Rapid7 — behind the same interface
-- **Compromise assessment cross-check lane (research).** A consulting firm
-  sends a draft compromise assessment before a recurring review meeting. The
-  first one was a posture report (many numbered categories, no conclusion, no
-  indicators section), so the useful lane is a pre-meeting brief that checks
-  the report's claims against what the fleet already knows: scan coverage and
-  open exploited CVEs (`cti-vmscan`, `cti-kev`), domain and mail-authentication
-  posture (`cti-domains`), web-application findings (`cti-appscan`) and patch
-  status. Research first: how the report arrives (an encrypted PDF, the
-  password in a second email, so it must be read by a person or a local tool,
-  never by the mailbox lane), whether its tables can be read reliably (icons
-  and chart values were lost in text extraction), and which questions come up
-  every time (counts that disagree between pages, findings with no follow-up).
-  Never ingest the report into a tracked file; the brief names no hosts or
-  users.
-- **Interface work** (the full reasoning, with the current gaps, is in
-  [INTERFACES.md](INTERFACES.md); build each when a second implementation is
-  real, not before):
-  - Finish `vulnlookup.LookupProvider`: `cti-patchtuesday` builds the Qualys
-    client directly and ignores `LOOKUP_PROVIDER` (it needs the KB's CVE-to-QID
-    map and host counts, which the interface cannot express yet; `cti-jira` is done)
-  - `LOOKUP_PROVIDER`-style setting for the registrar (`registrarFor` is fixed
-    to GoDaddy)
-  - Mail transport interfaces (read, send, move) so a fleet on Google
-    Workspace or SMTP/IMAP can run it; Microsoft Graph is used directly by five
-    commands. The recipient allowlist stays above the
-    interface in `cti-mailer`. Largest, most valuable
-  - A ticket-tracker interface (`tickets.Tracker`) so ServiceNow, Azure
-    DevOps or GitHub Issues can replace Jira. Needs an answer for state kept
-    as a Jira issue property and for the Jira wiki-markup text
-  - A notification channel interface (`alert.Notifier`) for `cti-alert`:
-    Teams, Slack, a pager. Smallest, a good first one
-  - An ownership source interface (`appscan.OwnerSource`) so a CMDB or
-    identity group can replace `app-owners.txt`
-  - A network-source interface (`netmap.NetworkSource`: `Subnets(ctx)` returning
-    the subnets, each with a location and an address range, plus any questions
-    about the data) so the VM scan coverage check can read an IPAM (NetBox,
-    phpIPAM, Infoblox) or a CSV/JSON export, not only the spreadsheet.
-    `netmap.Check` is already source-neutral; `coverage()` in `cmd/cti-vmscan`
-    picks the spreadsheet or Graph file directly, and the parser, the corp-row
-    guess and `netrules.txt` assume the sheet's shape. An IPAM gives structured
-    prefixes, sites and roles, so most of that guessing would not be needed.
-    Needs a source-neutral reference on a finding (today a spreadsheet row
-    number) and a configured role or tag in place of the corp-row guess. Select
-    with a `SUBNET_SOURCE` setting. The same pattern could cover the Asset
-    Group side for another scanner. About a day: define the interface, move the
-    xlsx path behind it with no behaviour change (the existing tests prove it),
-    then add a CSV source; write a real IPAM adapter only against a real one.
-    A candidate feature for 1.6. Do it after the coverage check has run once
-    against the real spreadsheet (waiting on the Graph permission), so the
-    behaviour being moved is known to be right
-  - An advisory/exploit feed interface for new feeds (EPSS, vendor lists);
-    whether the Python CISA KEV fetch moves under it is a separate decision
-  - A detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
-    scanner detection IDs) for the Patch Tuesday correlation, which is
-    Qualys-only today
-- **Agent harness** (the reasoning, what already exists and the order, is in
-  [HARNESS.md](HARNESS.md); each item ships on its own and feeds the next):
-  - H2. Eval harness: **built** (`task eval:checkin`, 10 scenarios from
-    real traces and the hard rules; see HARNESS.md). Left: a 3-run baseline
-    on Sonnet, a Haiku comparison before any move to a cheaper model, and a
-    scenario per PrimeSec vector that touched the orchestrator
-  - H3. Structured check-in verdict: **built** (`cti-checkin/1`,
-    `internal/checkin`, `cti-checkin-verdict`; see HARNESS.md). A bad verdict
-    is an INFO board line to @all, not an ERROR, so the next beat does not
-    email it. Left: use the saved verdicts (a lane-health line in the digest,
-    a trend of attention/degraded beats)
-  - H4. Shared model-lane library: **built** (`share/model-lane.sh`; see
-    HARNESS.md). Left: decide whether the supplier lane goes through
-    `cti-budget` like the heartbeat; the next model lane (the advisory triage
-    reader) should source the library rather than grow its own copy
-  - H5. Optional learning exercise: reproduce one beat with the Claude Agent
-    SDK outside production. Not a migration
-- AppSec remediation is tracked by email, not Jira (decided 2026-11-07). The
-  app owners are mostly marketing teams with no Jira logins and no habit of
-  working there, so a separate AppSec Jira project would track work nobody can
-  update. The owner report and the weekly are the tracking: each finding stays
-  in them until a scan no longer sees it. The tickets the lane already files in
-  CR stay where they are. Not designed, if this proves too passive: a reminder
-  in the owner email for findings open past a set age, and an escalation line
-  to the AppSec team for ones that stay open
-- Supplier-request triage for third-party risk: the security team's shared
-  mailbox is now on the supplier-request distribution list, and each request
-  has to be judged for "will this supplier have access to company data or
-  systems, or provide technology?" (unsure counts as yes). A lane would find the
-  new-supplier-form messages and read the form's fields deterministically (it is
-  an `.xlsx`, so `archive/zip` and `encoding/xml`: supplier name, branch,
-  expense or inventory, spend, free-text notes), then give Yes / No / Unsure
-  with reasons from the name and notes, through the no-tools triage agent
-  pattern, for the security team only. It must never open the W-9 and bank
-  attachments (tax ids and account numbers; the PDFs are scanned anyway), never
-  reply to the requester and never move mail itself (the daily cleanup files away what the lane has dealt with). Sampled 2026-11-02: only
-  about 4 of 10 threads were real new-supplier requests (the rest were credit
-  applications, approvals and intercompany accounts), and at least one
-  technology supplier arrived with no form at all, so it must also read the
-  message text. The form does not yet carry the question; when it does, the
-  lane checks the requester's answer and flags a "No" for a name that looks like
-  a technology provider. Output decided: one item per request on the
-  security team's Kanban board (Jira project CYBR, a Task), assigned to the
-  Jira user named by a new `fleet.env` setting (an email, looked up like the
-  AppSec owners; an unknown user leaves it unassigned with a warning, never a
-  guess). Needs `CYBR` in `JIRA_ALLOW_CREATE`, a project-key setting for the
-  lane (the way the domains lane has its own), and the service account's
-  permissions in CYBR. **Digest decided (2026-11-08):** the lane also emails
-  the security team a digest listing the day's requests, so the person
-  assigned knows to go to the Kanban board. **Unsure wording decided
-  (2026-11-08):** only a certain Yes reads as a Yes. When the lane could not
-  determine a 100% Yes it says so on the item, in words along the lines of "we
-  could not determine a 100% Yes, so this is Unsure, and an Unsure gets a CYBR
-  Kanban to-do", so the person knows to check it by hand. Exact text is a
-  `fleet.env` template. **Linked forms (decided 2026-11-08):** a form can
-  arrive as a SharePoint/OneDrive link in the message body instead of an
-  attachment (a technology supplier did). The lane does not open links: it
-  marks that request Unsure with the reason "form not readable: linked, not
-  attached" and judges from the message text. **Built:** `internal/supplier`
-  reads the form (fields found by label text, blanks kept, required-but-empty
-  fields listed) on the shared `internal/xlsx` reader. **Finder built:**
-  `graph.MessagesAddressedTo` (address in To or Cc, case-insensitive, read-only)
-  and `supplier.ReadForms`, the only path from a message to attachment bytes:
-  `.xlsx` only by default, refuses names with a whole word like w9, bank,
-  routing, void, tax, irs or ach, caps size, and a test proves the W-9 and bank
-  files are never downloaded. **Judgement built (code side):**
-  `supplier.Render` / `supplier.Judge` and the no-tools agent's instructions
-  (`fleet-kit/fleet/agents/supplier/CLAUDE.md`, status design: nothing invokes
-  it yet). Code only ever moves a verdict toward Unsure: a Yes or No needs a
-  quote copied from the request, a No is refused when the form was linked or
-  unreadable, when the name, subject or notes hold a technology word, or when
-  the request tried to steer the reader, and output code cannot use is Unsure.
-  **Jira item and digest built (pure builders):** `supplier.TicketSummary` /
-  `TicketDescription` / `Labels` / `FindJQL` (one item per conversation, found
-  again by a hashed label so a rerun never files twice; Yes and Unsure get an
-  item, a No gets none - decided 2026-11-08, a No appears in the digest only,
-  so the lane never sets `includeNo`; no address, contact or remittance detail
-  goes in; everything from the request is escaped for Jira wiki markup) and
-  `supplier.Digest` (counts, the board link, https links only; no email on a
-  day with no requests). **Lane built (2026-11-08):** `cmd/cti-supplier`
-  (`--collect`, `--finish`, `--commit-seen`, each under `--dry-run` or
-  `--for-real`), `run-supplier` (the model runs with no tools, one request per
-  call; no model or a failed one means Unsure), the `cti-agent-supplier`
-  service and timer (daily 07:45, off until enabled), the `SUPPLIER_*`
-  settings, man pages, runbook, lanes and security notes. **Dry run on the real
-  mailbox (2026-11-08):** the model step worked end to end
-  (the no-tools flags are accepted; 20 requests judged, none failed), which
-  also showed that a window cutting a conversation hid its form message (fixed:
-  threads are read whole) and that the quarantine digest was filed as a request
-  (fixed: skipped by `MAILBOX_DIGEST_SENDERS`, counted). **Re-judging built:**
-  a reported request with a newer message is judged again and, if the verdict or
-  form state changed, commented on its existing item and listed as updated; each
-  Yes or Unsure item lists what is still needed; a request whose item failed is
-  no longer recorded as reported. Many open Unsure items are accepted on purpose:
-  the board is what prompts the requester to be asked for more. **Real run
-  (2026-11-09):** 19 requests judged and 12 items filed (CYBR-821 to 832), which
-  exposed two things now fixed: items were created in Jira's first status, Open,
-  which the board has no column for (the lane now moves them to To Do), and
-  nothing filed the mail away (the cleanup now archives what the lane dealt with).
-  **Waiting on the TPRM owner's final question wording**, to be added to the
-  supplier request form itself (website, what is supplied, data and system
-  access, security contact): then the form reader learns those fields, a
-  requester's Yes becomes a Yes, a blank becomes "still needed", and the website
-  gives a safe place to start a lookup done by code, not by the model.
-  **Eval set built and baselined (2026-11-08):** `task eval:supplier` (42
-  invented requests, 3 runs each, fails only on a dangerous No;
-  `internal/supplier/eval_test.go`, built with `-tags eval`). Instructions as of
-  commit c404c9c. Sonnet: 123/123 acceptable, 120/123 exact, 0 dangerous, 3%
-  too cautious, and it flagged all 18 hostile runs. Haiku: 121/123 acceptable,
-  103/123 exact, 0 dangerous, 21% too cautious (more Unsure, so more to-dos,
-  and two clear technology suppliers came back Unsure). Neither was ever moved
-  by the code's checks, so the gates are covered only by unit tests. Limits: the
-  cases and the instructions were written by the same hand, they are cleaner
-  than the real mailbox (the real dry run was 18 of 20 Unsure, mostly because
-  real forms have blank notes), and Opus was not run. Next: add a case whenever
-  a real request surprises us, rerun after any change to the instructions or
-  `SUPPLIER_MODEL`. Not done: the lookup by code, and a shared model-lane
-  runner (H4).
-  **Framing and shape (added 2026-11-06):** a Yes to the question means the
-  supplier is *critical* - it touches company data, systems or networks, or
-  provides technology (hardware, software or connected equipment) - and a
-  critical supplier has to go through the third-party risk management (TPRM)
-  process; a No is a supplier of materials or other non-technology goods. The
-  lane's job is to find the critical suppliers. Scope: every message in the
-  shared mailbox with the supplier-request address in To **or Cc**, not only
-  the new-supplier-form messages; the evidence is the message body and the
-  attachments that are safe to read (the form), never the tax and bank forms.
-  It is built generically so another organisation could use it: the
-  supplier-request address, the question's wording, the TPRM wording, the Jira
-  project and owner, and the readable attachment types come from `fleet.env`
-  settings (a template file for the longer text), with generic defaults and no
-  organisation name, address or supplier in tracked files. Like the other
-  lanes, an unset address means the lane does nothing, and its output goes
-  only to the security team
-- Qualys severity bands beside the QDS number, once the thresholds are verified
-  against Qualys' own documentation rather than guessed
-- A container image for deployment
-- Message trace for the domains lane: which domains actually send mail and from
-  where, on a separate read-only app registration. Probably unnecessary:
-  outbound mail relays through Proofpoint on Demand, so the PoD Log API
-  item below covers it for every domain already moved to PoD
-- *Maybe:* subdomain discovery for the domains lane, from Certificate
-  Transparency only (or the zone records, if the GoDaddy token can read
-  them) - not subfinder, whose dozens of third-party sources and libraries
-  would break the no-dependency rule and hand our domain list to outside
-  services. Resolve every name and report only live hosts missing from
-  `domains.txt`, dangling CNAMEs (takeover risk, High) and names new since
-  last week; historical names that no longer resolve are dropped
-- *Maybe:* CAA and DNSSEC checks for the domains lane (noted 2026-11-08). First
-  find out whether Qualys already reports them: a search found nothing in
-  Qualys EASM's Domain Security documentation beyond SPF and DKIM, so the
-  likely answer is no, but the docs may lag the product - look in the tenant
-  (CSAM, EASM, Domain Security) or ask the Qualys account manager before
-  building. If it does not, add the small version to the domains lane, Go
-  standard library only like the rest: the CAA lookup (walking up the name
-  until a CAA record is found, since a subdomain inherits its parent's), DS
-  and DNSKEY presence for DNSSEC, and the validating resolver's authenticated
-  (AD) answer bit. Estimate 2 to 3 days without a DNS library (about a day
-  with `miekg/dns`, which would break the no-dependency rule). Reporting
-  rules to settle when it is picked up: whether a missing CAA record is a
-  finding for every domain or only those that send mail or serve a site, and
-  whether DNSSEC counts for a domain parked at the registrar. Security-ratings
-  platforms (Bitsight, UpGuard, SecurityScorecard) score both, so if the
-  company already pays for one, reading its API may beat building this
-- Domains lane, the Proofpoint on Demand Log API half: **built** behind
-  `DOMAINS_MAIL_GATEWAY=pod` (off by default; `domains.MailGateway` with
-  `podgw` as the first implementation, see [INTERFACES.md](INTERFACES.md) and
-  RUNBOOK 11g part 7). A domain with outbound mail is never asked to be locked
-  down, and a failed read holds the tickets. Verified live on the box
-  2026-11-17 (`run-domains --to-dev`): a complete 7-day read, 313,325 events,
-  27 outbound header-From domains, one lock-down domain left out because it
-  sends, nothing held. The null MX check against mail received is built
-  (see CHANGELOG). Left:
-  - A null MX on a domain whose MX is not on Proofpoint (Microsoft 365,
-    GoDaddy, others) is still not checked: its mail never passes the
-    gateway. A Graph or Exchange message trace, or moving those domains'
-    MX to PoD first, would close it
-  - The `p=reject` evidence is a finding line in the report, not a ticket
-    action
-  - Then `domains.txt` could need only `saas` / `legacy` / `unknown`
-- Certificate expiry lane (build it behind a `certs.Source` interface from
-  the start, see [INTERFACES.md](INTERFACES.md)): a weekly email to IT listing certificates about to
-  expire, from Qualys Certificate View (CertView; the subscription has it and
-  the fleet's existing Qualys credentials reach it). Group by days left
-  (expired, 30, 60, 90), name the host, issuer and owner, and mention changes
-  since last week. Read-only, its own per-lane recipient list that fails
-  closed (like `WAS_*`/`DOM_*`), Go standard library only. Open questions:
-  the exact CertView API endpoints and fields (to be checked against a live
-  call, as the sandbox cannot reach Qualys), and whether IT wants a Jira
-  ticket per certificate
-- Fleet housekeeping: watch and trim the fleet's own data so the box never
-  fills up quietly - the orchestrator's `board.md` and its archive (rotate or
-  trim by size/age), `state/memory.db` (size, rollup and pruning, periodic
-  VACUUM), free disk on the volumes the fleet uses with a warning before it
-  is critical, journal and log rotation for the fleet's units, and the dated
-  reports, ticket files, previews and KB cache that build up in `state/`.
-  Problems and growth trends reported through the existing alert path or the
-  check-in. Noted only, not designed
-- **Split `fleet.env` and take the secrets out of the environment** (noted
-  2026-11-09, not designed). The file has grown to about 90 settings, and every
-  unit loads all of it through `EnvironmentFile=`, so every lane carries every
-  secret. That includes the check-in beat, which reads untrusted text;
-  `checkin-bash-guard` refuses `$NAME` expansion largely because of this. In
-  order:
-  1. **`fleet-config check`**: done (Unreleased, RUNBOOK §11m).
-     `settings.manifest` lists every key, its readers and the 11 secrets.
-     `fleet-config list --by-reader` is the grant map for step 2. Still to
-     decide before step 2: how manual `sudo cti-agent` runs get credentials
-     (a transient unit via `systemd-run`, recommended, or a decrypt into a
-     private temp folder)
-  2. **Secrets as systemd credentials**: built (Unreleased, RUNBOOK §11n),
-     with `ImportCredential=` from `/etc/credstore.encrypted` (non-fatal
-     when a credential isn't stored yet) and hand runs through
-     `systemd-run`. Left: narrow each unit's generated grants from "could
-     read" to "does read", one lane at a time, testing each with only its
-     grants. The original note: the ~10 secrets (`CLIENT_SECRET`,
-     `QUALYS_PASSWORD`, `GODADDY_PAT`, `POD_API_TOKEN`, `JIRA_API_TOKEN`,
-     `NVD_API_KEY`, the Claude token, `REPORT_REDACTION_SALT`) encrypted with
-     `systemd-creds` (TPM-bound on Fedora) and granted per unit with
-     `LoadCredentialEncrypted=`, so each lane gets only its own and the values
-     reach the process as files under `$CREDENTIALS_DIRECTORY`, not as
-     environment its children inherit. A `Secret(name)` helper in
-     `internal/fleetenv` (and its twins in the Python lanes and the shell runners)
-     reads the credential and falls back to the environment during the move.
-     Start with the check-in, then one lane at a time
-  3. **Settings split per lane**: built (Unreleased, RUNBOOK §11o) with
-     `cti-agent-settings split`. Left: core is large, because the "could
-     read" check sends anything a shared program names to core. Narrowing
-     it needs per-function reads, the same work as narrowing the grants
-  4. **1Password as the source of truth for secrets**: one field per secret
-     instead of a pasted copy of the whole file, and a committed `fleet.env.tpl`
-     of `op://` references rendered with `op inject` on the operator's Mac at
-     setup or rotation and fed to `systemd-creds encrypt` on the box. No
-     1Password service-account token on the server
-- The AI triage agent wired into the threat-intel digest, and a Defender for
-  Cloud attack-path lane
-- **Heartbeat escalation to a stronger model** (designed 2026-11-08, not
-  built). Groundwork shipped: `CHECKIN_MODEL` picks the beat's model. First
-  run a week or two of beats on a cheaper model (Sonnet) and look at where
-  they fell short before building this. The idea: routine beats stay cheap, a
-  beat that hits a hard reasoning problem gets one look from a stronger model
-  (Opus), and that model either solves it or escalates it to the operator.
-  - **The line between more power and a person.** The test is whether the
-    problem needs better reasoning over data the fleet can already read (send
-    to the stronger model) or an action or information the fleet does not
-    have (a person).
-    - *Stronger model:* conflicting signals between two sources (the Nov 4
-      beats saw `cti-kev` clean while the rollup showed 9 overdue); an
-      `UNKNOWN` CVE mapping that needs careful reading of the advisory against
-      the scanner's data; the cause of a recurring lane failure buried in the
-      journal; Patch Tuesday exposure reasoning; whether a feed or format
-      change is harmless or broken.
-    - *Always a person:* anything that changes who is mailed, an allowlist, a
-      gate or a ticket; credentials and authentication; anything that needs a
-      system the fleet cannot see, or contact with someone outside the company
-      (the CISA block); a risk decision (accepting an overdue KEV); suspected
-      prompt injection or compromise; a bug in the fleet's own code (the
-      stronger model may diagnose it, but the fix is the operator's).
-  - **Mechanism.** The decision sits in `run-checkin`, the deterministic
-    bash, never in a model:
-    1. The beat asks through one new granted command, e.g. `fleet-deeper
-       <kind> <subject> "<question>"`. `kind` must come from a fixed list
-       (`conflict`, `unknown-cve`, `failure`, `exposure`, `noise`). The
-       command records one bounded request in state. The beat cannot name a
-       model, tools or a budget; it can only ask.
-    2. After the beat, `run-checkin` gates it: a valid request, `kind` on the
-       list, budget room with the stronger run weighted as several beats, the
-       same subject not escalated in the last 24 hours, and a daily cap not
-       yet used. Pass, and it runs; fail, and the request is logged and
-       dropped. This is the automatic approval, and it is plain bash.
-    3. It runs `claude -p /deeper --model $DEEPER_MODEL` with exactly the
-       beat's grants (read-only plus board, memory and `cti-alert`; no Agent
-       tool, no edit tools) and the request as input. It must end in one of
-       three outcomes: **solved** (posts the finding, writes a memory);
-       **needs a person** (one `cti-alert` carrying the original question and
-       its own analysis); or **not worth it** (a memory saying so, so later
-       cheap beats escalate less).
-    4. Optional: deterministic triggers that request a deeper look without
-       asking the model, such as the same `UNKNOWN` unresolved across 3 beats,
-       or a lane failing twice in a row.
-  - **Safety.** A cheap beat steered by hostile mail can request a deeper look
-    but gains nothing: the stronger run has no more power than the beat,
-    so the worst case is wasted quota (capped daily) and an alert to the
-    operator, which a beat can already send. This design never grants the
-    Agent tool, which would widen what a beat can do.
-  - **Pieces:** `DEEPER_MODEL` in `fleet.env`; the `fleet-deeper` wrapper
-    (root-owned, validated like `fleet-board`, and in `checkin-bash-guard`'s
-    world); a `/deeper` skill; the gate and the second run in `run-checkin`;
-    beat weighting in `cti-budget`, which counts beats today, not cost;
-    tests for the gate's refusals; and the orchestrator CLAUDE.md telling a
-    beat when to ask.
-  - **The week on Sonnet, 2026-11-08 to 11-15: not built yet, on purpose.**
-    82 beats, all `claude-sonnet-5-5`, all completed `ok`: $13.35, $0.163 a
-    beat ($0.136 to $0.227), about $1.91 a day or $57 a month, 8 to 17 turns
-    (usually 9 to 11). Read from the traces (`fleet-trace list -n 0` and
-    `show`). What it found:
-    - *Routine work was fine.* It found the VM scan's SharePoint 403 and
-      escalated once (11-11). Through the Graph 502 outage (11-13) it posted
-      once, did not repeat itself, saw the recovery and noted the 11-13
-      digest was never sent (the 11-14 one covers it).
-    - *One stronger-model case, the one this design names.* KEV readings
-      disagreed and no beat asked why: 11-12 and 11-13 said two Sev5 KEV CVEs
-      due 11-24 on 435 and 230 hosts, and from 11-14 16:17 "none due within
-      30 days". On 11-09 the weekly said 9 overdue KEV deadlines while
-      `cti-kev` said none, the same pair as 11-04. It reported each side
-      faithfully. **Settled 2026-11-16, no stronger model needed:** both
-      were definition and scope problems. The weekly counted deadlines on
-      CVEs not found here (fixed), and `cti-kev` reads one day's mail, so the
-      due pair dropped out on 11-14 when no email named it again (now said on
-      every report; the estate-wide version is its own item below).
-    - *The rest was guard friction, not reasoning,* fixed without a stronger
-      model (2026-11-15): 9 refused calls, each a lost turn and a retry. A
-      semicolon, question mark or tilde in a quoted message (5, including the
-      first try of the 11-09 11:20 escalation, which went out after a reword);
-      `fleet-board tail -n 8`; board kind `WARN`; `fleet-db findings CVE-...`;
-      `fleet-db recent --help`; a `grep` of the board file. The guard now
-      allows that punctuation inside quotes, `fleet-board tail -n N` and
-      `fleet-db findings --cve` exist, and the skill lists the kinds and says
-      there is no `--help`.
-    - *Next:* rerun this review on another week of traces. Build the escalation only if real stronger-model cases
-      keep appearing; at about one in 82 beats it would cost more than it buys.
-- **`cti-kev` over every stored finding, not one day's mail** (noted
-  2026-11-16, not designed). It reads the newest daily enriched file, which
-  holds only the CVEs that day's emails named, so a present KEV CVE drops out
-  the first day nobody mails about it (the 11-12/11-13 due pair, gone from
-  11-14). The stored findings in `state/memory.db` are the estate picture, but
-  Go cannot read SQLite without a dependency. Likely shape: `run-digest daily`
-  writes a JSON snapshot of stored PRESENT KEV findings after the upsert
-  (`fleet-db rollup`, a wider window), and `cti-kev` reads that by default.
-  Decide the window (stored rows are re-confirmed only when mail names them
-  again, so an old row may be fixed already) and whether the daily's own KEV
-  banner should move to it too.
-- **VM lane: Jira tickets for out-of-SLA vulnerabilities** (noted 2026-11-10,
-  not designed). Pull every detection past its remediation SLA for its
-  severity, with the affected hosts, and file Jira tickets for them. Not
-  decided yet, so brainstorm before building:
-  - Ticket granularity: one ticket per QID listing its N hosts, one per host,
-    one per QID per owning team or site, or a rollup per severity.
-  - Where the SLA days per severity are defined, and whether they come from
-    config or from Qualys.
-  - How a ticket stays in step on later runs: hosts added or fixed, closing
-    when none are left, and reopening when one comes back.
-  - Assignment and project. AppSec tickets already want their own project
-    (see #160), and CR is the infrastructure help desk.
-  - It must follow the fleet's rules: a full preview and one labelled test
-    ticket before any real filing, and no real host names in tracked files.
-- **New lane: weekly design-review coverage report** (noted 2026-11-11, not
-  designed; the Jira query is still to be decided). Once a week, look at the
-  sprint status across the development projects in Jira. Report which work
-  items got a PrimeSec design review, which did not, and, for each that did
-  not, the justification recorded for skipping it, or that there is none.
-  - **Inputs.**
-    - Jira: the sprint's issues across projects, via the existing
-      `/rest/api/3/search/jql` client in `internal/jira` (read-only). **The JQL
-      is TBD**: which projects and boards, which sprint (the active one, or
-      the one closed that week), and which issue types count as needing a
-      review (stories and epics, but probably not bugs or subtasks).
-    - PrimeSec: the design reviews (`search_design_docs` and the security
-      review brief in the Prime API), matched back to Jira issues.
-  - **Open questions, to brainstorm before building:**
-    - *How a review is tied to an issue.* A Jira link or field on the issue,
-      the issue key in the Prime design doc, or Prime's own Jira integration?
-      This decides whether matching is exact or a guess. A guess should be
-      reported as unmatched, never as reviewed.
-    - *Where the justification lives.* A Jira field, a label (such as
-      `no-design-review`) with a comment, or a resolution. It has to be
-      something a person sets on purpose, so the report can tell "no review,
-      justified" apart from "no review, nobody said why".
-    - *What "got a review" means.* A Prime review that exists, one that is
-      finished, or one whose open threats have been answered. It could also
-      show the review's risk level or open recommendations.
-    - *Audience and format.* Who gets it (AppSec, engineering leads, the
-      product owners), on which day after the sprint boundary, and whether it
-      is an email digest, a board post, or both. The default is email to an
-      allowlisted audience through `cti-mailer`, like the other lanes.
-    - *The Prime credential.* A Prime API token for the fleet, read-only,
-      kept with the other secrets (see "Split `fleet.env`" above), and how the
-      lane's rate use is budgeted.
-    - *Go or Python.* A Go command (`cti-designreview`) with a
-      `run-designreview` runner and timer, following `cti-appscan` and
-      `run-appscan`. Python only if it needs SQLite (SECURITY.md, Supply
-      chain); the history of what was reported each week probably does not.
-  - **Fleet rules it must follow.**
-    - Read-only against Jira and Prime: it files and changes nothing.
-    - `--dry-run`, `--for-real` or `--to-dev` with no default, and an entry
-      in `commands.manifest` and a man page.
-    - Listed in the orchestrator's lane table and the checkin skill, which a
-      test enforces.
-    - Issue keys and titles can name internal projects, so the report goes
-      only to the configured audience, and none of it lands in tracked files.
-      The tests use example projects.
+## Before 2.0 final
+
+The reuse work for 2.0 is built. What is left is checking it, plus one open
+security finding.
+
+- **A clean-box install.** Follow [INSTALL.md](INSTALL.md) on a scratch Fedora
+  VM until `cti-agent-doctor` shows no FAIL. It has only been run as an
+  upgrade of an existing box. Fix whatever the guide gets wrong.
+- **A fork's install.** On the same VM, install a throwaway fork with an
+  `org/` pack, a `layout.env` and a `FLEET_LANES` subset. The doctor should
+  check the fork's pack, the paths should be relocated, and the lanes left
+  out should stay off.
+- **Scanner report staging (PrimeSec Top-228).** Stage scanner reports in
+  `PrivateTmp`, promote them after redaction, clean up orphans on start,
+  extend the scrub list; test with a killed run. Needs an Opus review
+  (credential scrubbing).
+- **A new check-in eval baseline** (`task eval:checkin`). The one in
+  HARNESS.md (2026-11-18) is from before the beat stopped running the
+  credential checks, so its turns and cost no longer compare.
+- **The GitHub tag ruleset** on the repository, by its owner (the command is
+  in [development.md §11i](docs/guides/development.md#a-pushed-tag-never-moves)),
+  and a leak check of the whole tree for organization names.
+
+## Interfaces
+
+The reasoning and the current gaps are in [INTERFACES.md](INTERFACES.md).
+Build each when a second implementation is real.
+
+- More scanner providers (Defender, Tenable, Rapid7) behind
+  `vulnlookup.LookupProvider`.
+- Finish `vulnlookup.LookupProvider`: `cti-patchtuesday` builds the Qualys
+  client directly and ignores `LOOKUP_PROVIDER`. It needs the KB's
+  CVE-to-QID map and host counts, which the interface cannot express yet. With
+  it, a detection-mapping interface (`vulnlookup.DetectionMapper`, CVE to
+  scanner detection IDs) for the Patch Tuesday correlation.
+- A second registrar: `DOMAINS_REGISTRAR` knows `godaddy` and `none`.
+- **Mail transport** (read, send, move), so a fleet on Google Workspace or
+  SMTP/IMAP can run it. Microsoft Graph is used directly by five commands; the
+  recipient allowlist stays above the interface in `cti-mailer`. The largest,
+  and the most valuable for reuse.
+- **A ticket tracker** (`tickets.Tracker`) so ServiceNow, Azure DevOps or
+  GitHub Issues can replace Jira. Needs an answer for the state kept as a Jira
+  issue property, and for the Jira wiki markup.
+- **A notification channel** (`alert.Notifier`) for `cti-alert`: Teams,
+  Slack, a pager. The smallest, a good first one.
+- **An ownership source** (`appscan.OwnerSource`) so a CMDB or identity group
+  can replace the owners list.
+- **A network source** (`netmap.NetworkSource`, `Subnets(ctx)`) so the VM scan
+  coverage check can read an IPAM (NetBox, phpIPAM, Infoblox) or a CSV/JSON
+  export, not only the spreadsheet. `netmap.Check` is already source-neutral;
+  `coverage()` in `cmd/cti-vmscan` picks the sheet directly, and the parser,
+  the corp-row guess and `netrules.txt` assume its shape. Needs a
+  source-neutral reference on a finding (today a row number) and a configured
+  role in place of the corp-row guess, selected by a `SUBNET_SOURCE` setting.
+  About a day: move the xlsx path behind the interface with no change in
+  behaviour (the tests prove it), then add a CSV source. Write an IPAM adapter
+  only against a real one.
+- An advisory/exploit feed interface for new feeds (EPSS, vendor lists).
+
+## The agent harness
+
+The order and reasoning are in [HARNESS.md](HARNESS.md).
+
+- **H2, evals.** Built, with a Sonnet baseline. Left: a Haiku comparison
+  before any move to a cheaper model, and a scenario for each PrimeSec vector
+  that touched the orchestrator.
+- **H3, use the saved verdicts.** A lane-health line in the digest, and a
+  trend of attention and degraded beats.
+- **H4.** Decide whether the supplier lane's model calls count against
+  `cti-budget`, like the heartbeat's.
+- **H5 (optional).** Reproduce one beat with the Claude Agent SDK outside
+  production, as a learning exercise, not a migration.
+- **Heartbeat escalation to a stronger model.** Designed 2026-11-08 and not
+  built, on purpose. The idea: a beat asks through one granted command
+  (`fleet-deeper <kind> <subject> "<question>"`, `kind` from a fixed list);
+  `run-checkin` gates the request in bash (budget, one per subject per day, a
+  daily cap) and runs one stronger beat with exactly the beat's grants, which
+  ends solved, needing a person, or not worth it. A beat steered by hostile
+  mail gains nothing but wasted quota. A week of Sonnet beats (2026-11-08 to
+  11-15: 82 beats, $13.35, all `ok`) found one case that would have used it,
+  and it turned out to be a definition problem, fixed without a stronger
+  model. Rerun that review on another week of traces; build it only if real
+  cases keep appearing.
+
+## Lanes
+
+- **Supplier requests: the TPRM wording.** Waiting on the final question
+  wording for the supplier request form (website, what is supplied, data and
+  system access, security contact). Then the form reader learns those fields,
+  a requester's Yes becomes a Yes, a blank becomes "still needed", and the
+  website gives a safe starting point for a lookup done by code, not by the
+  model. Add an eval case whenever a real request surprises us.
+- **`cti-kev` over every stored finding, not one day's mail.** It reads the
+  newest daily enriched file, so a present KEV CVE drops out the first day no
+  email names it. Likely shape: `run-digest daily` writes a JSON snapshot of
+  the stored PRESENT KEV findings (`fleet-db rollup`, a wider window), and
+  `cti-kev` reads that. Decide the window (a stored row is re-confirmed only
+  when mail names it again) and whether the daily's KEV banner moves to it.
+- **VM lane: Jira tickets for out-of-SLA vulnerabilities.** Every detection
+  past its remediation SLA, with its hosts. To brainstorm first: one ticket
+  per QID, per host, per team or site, or a rollup per severity; where the SLA
+  days come from; how a ticket follows later runs (hosts added or fixed,
+  closed when none are left, reopened when one comes back); its project and
+  assignee. A full preview and one labelled test ticket before any real
+  filing, and no real host names in tracked files.
+- **A certificate expiry lane**, behind a `certs.Source` interface from the
+  start: a weekly email to IT of certificates about to expire, from Qualys
+  Certificate View (the existing Qualys credentials reach it), grouped by days
+  left, with host, issuer and owner, and changes since last week. Read-only,
+  with its own recipient list that fails closed. Open: the CertView endpoints
+  and fields (check against a live call), and whether IT wants a ticket per
+  certificate.
+- **A weekly design-review coverage report.** For the sprint's work items
+  across the development projects in Jira, which got a PrimeSec design review,
+  which did not, and the recorded reason for each that did not. Read-only
+  against Jira and Prime. To decide first: the JQL (projects, which sprint,
+  which issue types), how a review is tied to an issue (exactly, never by a
+  guess), where the justification lives (something a person sets on
+  purpose), what counts as reviewed, the audience, and a read-only Prime token
+  stored with the other secrets. Issue keys and titles can name internal
+  projects, so the report goes only to its configured audience.
+- **A compromise-assessment cross-check (research).** A consulting firm sends
+  a draft assessment before a recurring review meeting. The useful lane is a
+  pre-meeting brief that checks the report's claims against what the fleet
+  already knows: scan coverage and open exploited CVEs, domain and
+  mail-authentication posture, web-application findings and patch status.
+  Research first how it arrives (an encrypted PDF with the password in a
+  second email, so a person or a local tool reads it, never the mailbox
+  lane), whether its tables can be read reliably, and which questions come up
+  every time. Never put the report in a tracked file; the brief names no hosts
+  or users.
+- **A Defender for Cloud attack-path lane.**
+- **Domains: what the mail gateway can't see.** A null MX on a domain whose MX
+  is not on Proofpoint (Microsoft 365, GoDaddy, others) is still not checked,
+  since its mail never passes the gateway: a Graph or Exchange message trace,
+  or moving those domains' MX to PoD first, would close it. The `p=reject`
+  evidence is a finding line, not a ticket action. Then `domains.txt` could
+  need only `saas`, `legacy` and `unknown`.
+- *Maybe:* **subdomain discovery** for the domains lane, from Certificate
+  Transparency only (or the zone records, if the registrar token can read
+  them). Report live hosts missing from `domains.txt`, dangling CNAMEs
+  (takeover risk) and names new since last week. Not subfinder: its third-party
+  sources and libraries would break the no-dependency rule and hand the domain
+  list to outside services.
+- *Maybe:* **CAA and DNSSEC checks** for the domains lane. First find out
+  whether Qualys already reports them (look in the tenant, or ask the account
+  manager). If not: the CAA lookup walking up the name, DS and DNSKEY presence,
+  and the validating resolver's AD bit, in the standard library (2 to 3 days).
+  Settle first whether a missing CAA record is a finding for every domain, and
+  whether DNSSEC counts for a parked one. A security-ratings platform's API
+  may beat building it, if one is already paid for.
+- Qualys severity bands beside the QDS number, once the thresholds are checked
+  against Qualys' own documentation rather than guessed.
+
+## The platform
+
+- **Narrow each unit's secrets from "could read" to "does read."** The grants
+  are generated from which programs a unit could run, so most lanes get more
+  than they use (the check-in was narrowed by hand in 2.0). Do it one lane at
+  a time, testing each with only its grants. The same per-function reads
+  would shrink `00-core.env`, which holds anything a shared program names.
+- **1Password as the source of truth for secrets**: one field per secret, a
+  committed `fleet.env.tpl` of `op://` references rendered with `op inject` on
+  the operator's Mac at setup or rotation, then stored on the box with
+  `cti-agent-secrets set`. No 1Password token on the server.
+- **Fleet housekeeping**: watch and trim the fleet's own data so the box never
+  fills up quietly. That covers the board and its archive, `memory.db` (size,
+  pruning, VACUUM), free disk with a warning before it is critical, journal
+  and log rotation, and the dated reports, previews and KB cache in `state/`,
+  reported through the alert path or the check-in. Not designed.
+- **A container image** for deployment, after 2.0: the install layout is now
+  set by `layout.env`, which is most of what an image needs.

@@ -1,6 +1,6 @@
 package fleetenv
 
-// SECRETS AS SYSTEMD CREDENTIALS (step 2 of splitting fleet.env, BACKLOG)
+// SECRETS AS SYSTEMD CREDENTIALS (step 2 of splitting fleet.env, RUNBOOK 11n)
 //
 // A secret used to reach every program as an environment variable, because
 // every unit loads all of fleet.env. Now each unit imports only the secrets

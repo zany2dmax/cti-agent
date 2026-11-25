@@ -497,6 +497,16 @@ any outside address gets one.
 sudo systemctl enable --now cti-agent-appowners.timer
 ```
 
+### Why remediation is tracked by email, not a Jira project
+
+Decided 2026-11-07. Most application owners have no Jira login and don't work
+in Jira, so a separate AppSec project would track work nobody can update. The
+owner report and the weekly report are the tracking: each finding stays in
+them until a scan no longer sees it. The tickets the lane files (below) stay
+where they are. If this proves too passive, the next step, not yet designed,
+is a reminder in the owner's email for findings open past a set age, and an
+escalation line to the AppSec team for ones that stay open.
+
 ### One Jira ticket per application
 
 **Off unless `WAS_TICKETS=1`** in `fleet.env`. The help desk does not want
