@@ -106,7 +106,7 @@ key would otherwise be silently ignored. `exec` must run something under
   declared `--check` grants. Each granted command still needs its row in
   the bash guard's policy table (`test_lanes.py` checks that).
 - **`fleet-kit/fleet/lanes.list`**: each lane, its units and the
-  credential checks the beat runs for it, one tab-separated line a lane. It
+  credential checks `run-credcheck` runs for it, one tab-separated line a lane. It
   goes to `/opt/cti-agent/share/` for the tools on the box that don't read
   TOML: the installer, `fleet-timers` and `fleet-config`, which use it for
   `FLEET_LANES`. `internal/checkin/lanes_gen.go` also maps each unit to its
@@ -117,6 +117,12 @@ key would otherwise be silently ignored. `exec` must run something under
   each setting's comment and file from here, and `task lane:write` runs the
   lane generator again after the settings one, because these follow
   `settings.manifest`.
+- **[`docs/lanes.md`](lanes.md)**: the lane reference for people. For each
+  lane it gives the units, what each runs and when, its time limit, the
+  settings in its `fleet.d` file, the secrets its programs read, its
+  credential checks and its beat grants. It also follows `settings.manifest`
+  and `lane-settings.list`, so the same second run of the lane generator
+  keeps it current.
 - **`fleet-kit/fleet/lane-settings.list`** (written by
   `scripts/settings-manifest`, not this): per lane, the settings and secrets
   its programs read, for `cti-agent-onboard`. A setting named for another

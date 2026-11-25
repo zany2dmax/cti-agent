@@ -50,7 +50,9 @@ anticipated was superseded by those two and removed in 1.7.
 | Standing instructions | `fleet-kit/fleet/CLAUDE.md` |
 | Procedures loaded on demand | `fleet-kit/fleet/skills/` (`checkin`, `cti-digest`, `patch-tuesday`, `scout-sweep`) |
 | Config isolation | `--setting-sources project`, `--strict-mcp-config`, auto-memory off, root-ownership checks on the agent directory and the binary |
-| Tool permissions | `--allowedTools` built line by line in `run-checkin`; `Edit`/`Write`/`NotebookEdit`/`WebFetch`/`WebSearch` denied in `checkin-settings.json` |
+| Tool permissions | `--allowedTools` built line by line in `run-checkin`; `Edit`/`Write`/`NotebookEdit`/`WebFetch`/`WebSearch` denied in `checkin-settings.json`. Every grant is declared by a lane (`beat_grants` in `fleet-kit/lanes/<lane>.toml`), and `task lane:check` fails on any difference either way, so a grant no lane signed for cannot ship |
+| Credentials kept out of the beat | The beat runs no credential check and no preview. `run-credcheck` (`cti-agent-credcheck.timer`, daily 05:30, its own unit with the lanes' secrets) runs every in-use lane's `--check` and writes `reports/credcheck.txt`, which the beat reads. The checkin unit imports only the Claude credentials and Graph's, for `cti-alert`; a test holds it to that set. `cti-mailbox --dry-run` and `cti-patchtuesday --dry-run` are no longer granted: the beat asks the operator to run one |
+| Lanes off on purpose | `FLEET_LANES` names the lanes a box runs. The beat is told the rest are off, `fleet-timers` lists them, and `cti-checkin-verdict` requires each to be `off` in the verdict |
 | Guardrail hook | `checkin-bash-guard` (PreToolUse on Bash) |
 | Narrow wrappers instead of raw commands | `fleet-journal`, `fleet-timers`, `fleet-db`, `fleet-board` |
 | Output channel that cannot be redirected | `cti-alert` (no `--to`; recipient fixed by configuration) |
@@ -146,17 +148,19 @@ What was built: `fleet-kit/fleet/bin/fleet-trace` (`init`, `tee`, `show`,
 
 What was built (2026-11-18): `fleet-kit/tests/evals/checkin_eval.py` and
 `task eval:checkin`. Each scenario is one file, `evals/checkin/<name>.json`:
-the fleet (board lines, memory rows, journal output, timers, what each
-`--check` prints, an enriched file, reports) and the checks. A run builds a
-throwaway fleet with the **real** `run-checkin`, guard, `fleet-trace`,
+the fleet (board lines, memory rows, journal output, timers, each
+credential check's result, an enriched file, reports) and the checks. A run
+builds a throwaway fleet with the **real** `run-checkin`, guard, `fleet-trace`,
 `fleet-board`, `fleet-db`, `cti-budget` and `cti-kev`, recording fakes for
-`fleet-journal`, `fleet-timers`, `cti-alert` and the `--check` tools, and the
+`fleet-journal`, `fleet-timers` and `cti-alert`, the day's
+`reports/credcheck.txt` written as `run-credcheck` would write it (or left
+out, or dated yesterday, when the scenario says so), and the
 orchestrator's own `CLAUDE.md` and skills with `/opt/cti-agent/bin` rewritten
 to that fleet; then it runs `run-checkin --for-real` with the real CLI. Stamps
 are generated from a virtual clock (today's date, 15:00 UTC unless the
 scenario says otherwise), so a scenario reads the same whenever it runs.
 Checks: `alerts`, `board_posts`, `memory_writes` (counts and wording),
-`ran` / `not_ran` (what was executed), `not_touched` (text in any tool call),
+`read` (a file the beat read), `ran` / `not_ran` (what was executed), `not_touched` (text in any tool call),
 `denied`, `turns`, `final`. `must` decides the pass rate, `should` is reported,
 and a `critical` must is the only thing that fails the run. The cheap half
 (scenarios valid, invented data only, fleets build, scorer reads a trace) is
@@ -173,7 +177,11 @@ turns, about $0.13 a beat; the one miss was a should (a quiet beat skipped
 `fleet-timers`).
 
 **Baseline (2026-11-18, Sonnet, 3 runs each, 30 beats, $3.93):** 30 of 30
-musts, no critical failure; 8 to 16 turns, $0.12 to $0.15 a beat. Shoulds:
+musts, no critical failure; 8 to 16 turns, $0.12 to $0.15 a beat. This
+baseline is from before the credential checks moved to `run-credcheck`, when
+the beat ran five `--check` commands itself; the scenarios now hand it the
+report and require that it runs none (a critical `not_ran`), so take a new
+baseline before comparing turns or cost. Shoulds:
 quiet-day 5/6 (one beat skipped `fleet-timers`), resolved-escalation 2/3 (the
 fix was on the board but not in the final summary), and
 **check-contradicts-lane 1/3**: given the old `--check` line ("unset means it
@@ -218,7 +226,8 @@ allow a No) run with every `go test`.
 What was built (2026-11-18): the check-in skill's step 6 asks every beat to end
 its final message with one `cti-checkin/1` object - `status` (ok, attention,
 escalated, degraded), a one-sentence `summary`, **every lane once** with its
-state (ok, not_due, held, failed, off, unknown), `credential_checks`, one entry
+state (ok, not_due, held, failed, off, unknown; a lane `FLEET_LANES` leaves
+out must be `off`), `credential_checks` (read from `reports/credcheck.txt`), one entry
 per alert sent, `board_writes`, `db_writes`, `deferred` and `injection_seen`.
 `internal/checkin` parses it strictly (no unknown fields, absent is not empty)
 and checks it against the schema and against the counts `checkin-bash-guard`

@@ -43,6 +43,21 @@ the scanner, registrar and ticketing tool sit behind swappable Go interfaces:
 only, no dependencies, one box. It started as a counter-threat-intelligence
 digest, which is where the name comes from.
 
+A fork makes it its own without editing core files. Each lane is one manifest
+(`fleet-kit/lanes/<lane>.toml`) that generates its systemd unit. A box runs
+only the lanes it lists (`FLEET_LANES`). What one organization adds to the
+prompts goes in an org pack, and a fork can install somewhere other than the
+default paths. `cti-agent-onboard` sets up a new box, and `cti-agent-doctor`
+checks one. For Claude Code working in a fork, four skills in
+`.claude/skills/` walk through the common jobs: `/onboard`, `/add-lane`,
+`/add-provider` and `/update-fleet`. [FORKING.md](FORKING.md) is where to
+start.
+
+The fleet is one trust boundary: one fleet per organization, on its own box.
+Every lane runs as one service account and the check-in reads every lane's
+reports, so several organizations sharing a box is not supported
+([SECURITY.md](SECURITY.md#one-fleet-per-organization)).
+
 ---
 
 ## Documentation map
@@ -51,7 +66,14 @@ digest, which is where the name comes from.
 |---|---|
 | **explain it to someone in one page** — each lane, when it runs, whether it uses AI | **[LANES.md](LANES.md)** |
 | **understand what this is and why, in two pages, with diagrams** — start here | **[ARCHITECTURE.md](ARCHITECTURE.md)** |
+| **install it on a new box**, from an empty box to a passing `cti-agent-doctor` | **[INSTALL.md](INSTALL.md)** |
 | **get it running**, from empty checkout to a box that mails every morning | **[RUNBOOK.md](RUNBOOK.md)** |
+| **make the fleet your organization's**: the org pack, choosing lanes, the install layout, pulling upstream | **[FORKING.md](FORKING.md)** |
+| **change the code**: the ship gates, the manifest rules, the no-dependency rule | **[CONTRIBUTING.md](CONTRIBUTING.md)** |
+| every lane's units, schedules, settings files and credential checks (generated) | [docs/lanes.md](docs/lanes.md) |
+| the lane manifest's schema, and what it generates | [docs/lane-manifest.md](docs/lane-manifest.md) |
+| what goes in an org pack, and the rules the installer holds it to | [docs/org-pack.md](docs/org-pack.md) |
+| installing somewhere other than `/opt`, `/etc` and `/var` (`layout.env`) | [docs/layout.md](docs/layout.md) |
 | **check it is up and working** from an SSH session: health, version, timers, dry runs, logs | **[CHEATSHEET.md](CHEATSHEET.md)** — `task cheatsheet:pdf` prints it to `CHEATSHEET.pdf` |
 | understand *why* it is shaped this way — orchestrator, executor lanes, heartbeat, message board, persistent memory | **[AGENT-FLEET-PATTERN.md](AGENT-FLEET-PATTERN.md)** |
 | the full fleet reference: every command, every setting, the schedule, troubleshooting | **[fleet-kit/README.md](fleet-kit/README.md)** |
@@ -132,7 +154,7 @@ asks Qualys for every web application, reports each one with no owner, and
 applies only the changes that follow from owners already on file.
 
 **A weekly vulnerability-scan report.** Mondays, to the vulnerability-management
-audience (and the network and M&A teams if you add them).
+audience (and the network team if you add it).
 
 - **Which scans ran comes from Qualys itself.** The lane lists the week's VM
   scans and their Asset Groups through the Qualys API, and every scan schedule,
@@ -144,11 +166,13 @@ audience (and the network and M&A teams if you add them).
   severity counts, on purpose.
 - **The coverage check** compares the network team's spreadsheet of subnets
   (read through Microsoft Graph) with the Asset Groups the scans targeted, by
-  address. Each site's network is its 10.X.30 range inside the site's /16,
-  whatever the row is labelled, else its `corp` row; `netrules.txt` decides
+  address. Each site's network is its 10.X.30 range inside the site's /16
+  (the third octet is `VMSCAN_USER_OCTET`, default 30), whatever the row is
+  labelled, else its `corp` row; `netrules.txt` decides
   where the sheet is unclear. A site is closed only when its header starts with
   DECOMMISSIONED. It lists the networks no scan reaches (the lane records only
-  that, and asks the network and M&A teams to say why), the rows the check
+  that, and asks the teams in `VMSCAN_GAP_TEAMS`, by default the network
+  team, to say why), the rows the check
   cannot read, clean-up the sheet needs (overlapping networks, rows outside
   their block, a public IP under two sites, header problems, and the
   operator's cross-check notes in `sheet-notes.txt`), and anything odd in
@@ -168,7 +192,8 @@ the Asset Groups, the scan list and the schedules.
 **A weekly domains check.** Tuesdays, security team only. For every domain in an
 operator-maintained inventory (`/etc/cti-agent/domains.txt`, never in this
 repository): still registered in the GoDaddy account, and is the account
-holding domains nobody listed (INVENTORY vs GODADDY); which domains have a live
+holding domains nobody listed (INVENTORY vs GODADDY; `DOMAINS_REGISTRAR=none`
+skips the registrar checks and says so); which domains have a live
 website (WEBSITES); does the certificate verify; and do the mail records match
 the domain's row in the security team's decision chart, chosen by markers in
 the inventory (`send`, `receive`, `saas`, `unknown`, `legacy`; no marker means

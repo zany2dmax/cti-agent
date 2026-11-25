@@ -86,7 +86,7 @@ A fork that installs elsewhere sets these paths and the account in a
 
 | You need | Why | Notes |
 |---|---|---|
-| Go 1.23+ | builds the fourteen binaries | stdlib only; `go.mod` has no dependencies |
+| Go, at least the `go` line in `go.mod` (1.26) | builds the fourteen binaries | stdlib only; `go.mod` has no dependencies |
 | [Task](https://taskfile.dev) | every build, test and gate target | `task --list` shows all of them |
 | Python 3.9+ | the SQLite tools (`fleet-db`, `fleet-owners`), `fleet-config` and the root tools; no lane | stdlib only |
 | A shared M365 mailbox | where the CTI advisories arrive | the agent reads it; it never replies |
@@ -495,10 +495,19 @@ here; on a box where the fleet is already running it says so and how many
 timers are enabled. Take these steps in order, reading each one's output before
 the next.
 
-1. **Fill in the config, then confirm Graph can see the mailbox:**
+1. **Fill in the config, then confirm Graph can see the mailbox.**
+   `cti-agent-onboard` asks for each setting and secret the box's lanes need
+   ([INSTALL.md](INSTALL.md)):
 
    ```bash
-   sudo vi /etc/cti-agent/fleet.env
+   sudo cti-agent-onboard --dry-run
+   ```
+
+   ```bash
+   sudo cti-agent-onboard --for-real
+   ```
+
+   ```bash
    sudo cti-agent cti-mailer --check
    ```
 

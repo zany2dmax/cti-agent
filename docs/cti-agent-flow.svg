@@ -40,7 +40,7 @@
 
 <path d="M115 261 L115 280" fill="none" stroke="#1E9E4A" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
 
-<rect x="22" y="284" width="240" height="372" rx="6" fill="#FFF3A6" stroke="#C9A400" stroke-width="2"/>
+<rect x="22" y="284" width="240" height="416" rx="6" fill="#FFF3A6" stroke="#C9A400" stroke-width="2"/>
 <text class="th hw" x="38" y="310" style="fill:#1E9E4A;font-size:16px">task ship = the gate</text>
 <text class="ts hw" x="38" y="330" style="fill:#333">Everything, then push.</text>
 <text class="ts hw" x="38" y="347" style="fill:#333">Refuses unless all of it passes.</text>
@@ -65,11 +65,15 @@
 <path d="M36 570 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 <text class="t hw" x="58" y="574" style="fill:#1A1A1A">10 task lint:shell</text>
 <path d="M36 592 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-<text class="t hw" x="58" y="596" style="fill:#1A1A1A">11 task release:check</text>
-<path d="M34 614 L50 614 M44 608 L50 614 L44 620" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-<text class="th hw" x="58" y="618" style="fill:#1E9E4A">12 git push</text>
-<path d="M56 624 q40 4 80 0" fill="none" stroke="#1E9E4A" stroke-width="2" stroke-linecap="round"/>
-<text class="ts hw" x="38" y="641" style="fill:#D62828">first failure stops everything</text>
+<text class="t hw" x="58" y="596" style="fill:#1A1A1A">11 task sbom</text>
+<path d="M36 614 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text class="t hw" x="58" y="618" style="fill:#1A1A1A">12 task lane:check</text>
+<path d="M36 636 l4 5 l8 -10" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text class="t hw" x="58" y="640" style="fill:#1A1A1A">13 task release:check</text>
+<path d="M34 658 L50 658 M44 652 L50 658 L44 664" fill="none" stroke="#1E9E4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text class="th hw" x="58" y="662" style="fill:#1E9E4A">14 git push</text>
+<path d="M56 668 q40 4 80 0" fill="none" stroke="#1E9E4A" stroke-width="2" stroke-linecap="round"/>
+<text class="ts hw" x="38" y="685" style="fill:#D62828">first failure stops everything</text>
 
 <path d="M189 227 Q211 220 232 227" fill="none" stroke="#1E9E4A" stroke-width="3" stroke-linecap="round" marker-end="url(#ag)"/>
 <text class="ts hw" x="211" y="212" text-anchor="middle" style="fill:#1E9E4A">push</text>

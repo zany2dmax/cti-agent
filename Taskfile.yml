@@ -542,7 +542,7 @@ tasks:
     cmds:
       - python3 scripts/lanes --write
       - python3 scripts/settings-manifest --write
-      # Again: the fleet.d examples follow the settings manifest just written.
+      # Again: the fleet.d examples and docs/lanes.md follow the settings manifest just written.
       - python3 scripts/lanes --write
 
   release:check:
@@ -571,8 +571,8 @@ tasks:
           at="$(git rev-parse --short "$tag^{commit}")"
           echo "changelog:check: CHANGELOG.md at $tag ($at) has no section for $ver, so its GitHub Release fails." >&2
           echo "  Rename ## Unreleased to ## $ver — YYYY-MM-DD, stamp the cheat sheet, commit both as \"Release $ver\"," >&2
-          echo "  then move the tag onto that commit: git tag -d $tag && git tag -a $tag -m \"Release $ver\"" >&2
-          echo "  (and git push --force origin $tag if it was already pushed)." >&2
+          echo "  then, if the tag has not been pushed, move it onto that commit: git tag -d $tag && git tag -a $tag -m \"Release $ver\"" >&2
+          echo "  A tag already pushed never moves: release the next version instead (RUNBOOK 11i)." >&2
           exit 1
         fi
 

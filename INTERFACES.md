@@ -179,8 +179,11 @@ registrar's list against `domains.txt` in both directions. Moving registrar,
 or holding domains at two, is an implementation.
 
 - `cmd/cti-domains` builds it through `var registrarFor = func(token string)
-  domains.Registrar`. It is hard-wired to GoDaddy and has **no environment
-  switch** yet. To add one, mirror `buildLookupProvider`.
+  domains.Registrar`, chosen by `DOMAINS_REGISTRAR`: `godaddy` (the default)
+  or `none`. With `none` the report says no registrar is configured and names
+  the checks that don't run, and `--check` passes. A second registrar is a
+  new value in that `switch` in `cmd/cti-domains/main.go`, with its own
+  credentials.
 - The GoDaddy token is read-only (`domains.domain:read`). A new registrar
   implementation must be read-only too. The lane never needs an auth code or a
   write scope.
@@ -245,7 +248,8 @@ heading so links to it still land somewhere.
 - `internal/domains/proofpoint.go` recognises Proofpoint on Demand by MX and
   SPF host names. It is logic, not an interface. (The gateway's log evidence
   is behind [`MailGateway`](#16-domainsmailgateway).)
-- The registrar has no selection setting (see [1.4](#14-domainsregistrar)).
+- The registrar's selection setting knows one vendor, GoDaddy, or none
+  (see [1.4](#14-domainsregistrar)).
 
 ### 2.4 Microsoft 365 Graph and Jira are used as concrete types
 
@@ -414,7 +418,9 @@ that vendor's API, and guesses are wrong in ways that are expensive to fix
 later. The exceptions are lanes not yet built (3.8 to 3.10): write them behind
 an interface from the start.
 
-Adding an implementation to an existing interface:
+Adding an implementation to an existing interface. In a fork, the
+`/add-provider` Claude Code skill (`.claude/skills/add-provider`) walks
+these steps, and the tests below fail when one is missed.
 
 1. **Package.** Put it beside the others, for example
    `internal/appscan/invicti/`, importing only the interface's package and the
@@ -425,6 +431,11 @@ Adding an implementation to an existing interface:
 3. **One selection point.** Add a case to the single function that chooses
    the implementation (`buildLookupProvider`, `reportProvider`, the
    `providers` slice, `registrarFor`). Do not add vendor checks anywhere else.
+   Tests hold this: `internal/vulnlookup/providers` fails when a lookup
+   package has no name in `Names` or a name doesn't build, and
+   `fleet-kit/tests/test_registries.py` fails when an appscan or domains
+   vendor package isn't imported where it is chosen, or a scanner vendor is
+   named outside the wiring file.
 4. **Configuration.** Add the environment variables to
    `fleet-kit/fleet/fleet.env.example`, with `none` or empty meaning "off",
    and make config validation require the credentials only when that provider
@@ -434,7 +445,10 @@ Adding an implementation to an existing interface:
    tracked file.
 6. **Docs.** The man pages must document every new flag (a test fails on
    drift); update README, RUNBOOK, CHEATSHEET and SECURITY where the vendor is
-   mentioned; add a CHANGELOG entry that ends with **Upgrade**.
+   mentioned; add a CHANGELOG entry that ends with **Upgrade**. In a fork,
+   list the vendor in the org pack's `recipe.md`
+   ([docs/org-pack.md](docs/org-pack.md)), so whoever pulls from upstream
+   knows what the fork added.
 7. **Verify against the live service before trusting it.** Element and field
    names from a vendor's documentation are a hypothesis. Add a probe flag
    (see `cti-appreport --probe-findings` and `--request-file`) so the first
@@ -446,127 +460,14 @@ Adding an implementation to an existing interface:
 2. Implement `Name()` and `LookupCVE(ctx, cve)`.
 3. Return normalised `vulnlookup.Result` values: `PRESENT`, `NOT_PRESENT` or
    `UNKNOWN`, never a guess.
-4. Add the provider to `Build()` in `internal/vulnlookup/providers`.
+4. Add the provider to `Build()` in `internal/vulnlookup/providers`, and its
+   `LOOKUP_PROVIDER` value to `Names` there.
 5. Add provider-specific config to `internal/config` only if needed, and
    require its credentials only when this provider is selected.
 
 `cmd/cti-patchtuesday` does not go through `providers.Build` ([2.1](#21-vulnlookuplookupprovider-is-bypassed-by-patch-tuesday)),
 so a new provider reaches the digest and ticketing, and Patch Tuesday only
 after 3.4 is built.
-
-### 3.4 CVE to detection mapping for Patch Tuesday
-
-Patch Tuesday asks "which scanner signatures detect this month's CVEs, and how
-many of our hosts have them". That is a Qualys QID lookup through the
-KnowledgeBase cache, and `LookupProvider` cannot express it, because it takes
-a CVE and returns a verdict, not a list of detection IDs. A `DetectionMapper`
-(`CVE -> []detection ID`, plus hosts per detection) would let another scanner
-do the same correlation. Lower priority than 3.1 to 3.3: the correlation is
-itself a Qualys feature, and a second scanner may not have an equivalent.
-
-### 3.5 Notification channel
-
-`cti-alert` writes to the message board and sends one email. A `Notifier`
-(Teams, Slack, a pager) would be a small, low-risk first interface to add. Any
-outbound channel needs the same discipline as mail: an allowlist, no default
-destination, and a fail-closed default.
-
-### 3.6 Ownership source
-
-`app-owners.txt` maps applications to owners, components and watchers.
-An `OwnerSource` would let a CMDB or an identity group be that source instead
-of a file. The file stays the default and the fallback.
-
-### 3.7 Advisory and exploit feeds
-
-CISA KEV is fetched by `cti-enrich` (`internal/enrich`, `KEVFeed`), the
-`internal/kev` package only handles deadlines, and Patch Tuesday reads the
-Qualys blog, BleepingComputer and MSRC through `patchtuesday.Source`, which is
-a data struct and not an interface. New features are Go, so any new feed
-(EPSS, a vendor advisory list) should be built behind an `AdvisorySource`
-from the start. Whether to move the Python KEV fetch under it is a separate
-decision.
-
-### 3.8 Mail-gateway evidence
-
-Built: see [1.6](#16-domainsmailgateway). Proofpoint on Demand is
-implementation one. A second gateway adds an implementation and a selector.
-
-### 3.9 Exposure / attack-path source
-
-The `internal/defender` package parses Defender for Cloud attack-path emails.
-The [backlog](BACKLOG.md)'s attack-path lane is where an `exposure.Provider` would first be
-needed, as the second source after Defender.
-
-### 3.10 Certificate inventory
-
-The backlog's certificate-expiry lane (Qualys Certificate View) is unbuilt.
-Because it is unbuilt, it can be written behind a `certs.Source` from line one
-at almost no extra cost. Decide that when it is picked up.
-
----
-
-## 4. What we deliberately do not abstract
-
-- **The agent runtime.** The orchestrator runs on the `claude` CLI and
-  `internal/budget` rations a Claude subscription. This is the product, not a
-  swappable tool. Abstracting it would add a layer with nothing behind it.
-- **The state store** (`state/memory.db`, the dated report and ticket files).
-  Plain files and SQLite are the point: they are inspectable from an SSH
-  session at 06:30.
-- **The one-shot parsers** (`internal/triage`, `internal/mailbox` plans). They
-  are pure functions of text; an interface would be ceremony.
-
----
-
-## 5. How to put a new tool behind an interface
-
-**The rule: extract an interface when the second implementation is real or
-imminent.** An interface written for a vendor nobody uses yet is a guess about
-that vendor's API, and guesses are wrong in ways that are expensive to fix
-later. The exceptions are lanes not yet built (3.8 to 3.10): write them behind
-an interface from the start.
-
-Adding an implementation to an existing interface:
-
-1. **Package.** Put it beside the others, for example
-   `internal/appscan/invicti/`, importing only the interface's package and the
-   standard library. The module has **no dependencies**; push back on any
-   change that needs one.
-2. **Implement the whole contract**, including the tri-state results
-   ([section 6](#6-the-conventions-every-interface-here-follows)).
-3. **One selection point.** Add a case to the single function that chooses
-   the implementation (`buildLookupProvider`, `reportProvider`, the
-   `providers` slice, `registrarFor`). Do not add vendor checks anywhere else.
-4. **Configuration.** Add the environment variables to
-   `fleet-kit/fleet/fleet.env.example`, with `none` or empty meaning "off",
-   and make config validation require the credentials only when that provider
-   is selected.
-5. **Tests with a fake server.** Use invented data only: `example.com`,
-   `host-a`, `192.0.2.x`. No real tenant, host or application data in any
-   tracked file.
-6. **Docs.** The man pages must document every new flag (a test fails on
-   drift); update README, RUNBOOK, CHEATSHEET and SECURITY where the vendor is
-   mentioned; add a CHANGELOG entry that ends with **Upgrade**.
-7. **Verify against the live service before trusting it.** Element and field
-   names from a vendor's documentation are a hypothesis. Add a probe flag
-   (see `cti-appreport --probe-findings` and `--request-file`) so the first
-   live run is a diagnosis, not a guess.
-
-### 5.1 Adding a lookup provider
-
-1. Create a package under `internal/vulnlookup/<provider>`.
-2. Implement `Name()` and `LookupCVE(ctx, cve)`.
-3. Return normalised `vulnlookup.Result` values: `PRESENT`, `NOT_PRESENT` or
-   `UNKNOWN`, never a guess.
-4. Add the provider to `Build()` in `internal/vulnlookup/providers`.
-5. Add provider-specific config to `internal/config` only if needed, and
-   require its credentials only when this provider is selected.
-
-`cmd/cti-jira` and `cmd/cti-patchtuesday` do not go through
-`buildLookupProvider` yet ([2.1](#21-vulnlookuplookupprovider-is-bypassed-by-two-commands)),
-so a new provider reaches the daily digest first and ticketing only after that
-gap is closed.
 
 ### 5.2 Adding a DAST scanner
 

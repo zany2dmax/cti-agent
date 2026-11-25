@@ -39,7 +39,8 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 
 | What | Where |
 |---|---|
-| Settings and secrets (root:ctiagent, 0640) | `/etc/cti-agent/fleet.env` |
+| Settings (root:ctiagent, 0640) | `/etc/cti-agent/fleet.env`, or `/etc/cti-agent/fleet.d/*.env` once split (10a) |
+| Secrets, once moved (root only) | `/etc/credstore.encrypted` (`sudo cti-agent-secrets status`) |
 | Installed version record | `/etc/cti-agent/version` |
 | Domain inventory (not in git) | `/etc/cti-agent/domains.txt` |
 | Programs | `/opt/cti-agent/bin`, `/opt/cti-agent/lanes` |
@@ -47,6 +48,8 @@ Full detail: `man cti-agent`, `man <command>` for any command below, and
 | Message board | `sudo cti-agent fleet-board tail 30` |
 | Go source the installer builds from (root's clone) | `/opt/cti-agent/agent` |
 | Kit you install from (runners, units, lanes) | a root-owned clone, `/root/cti-agent-kit` (not under `/home`) |
+| Today's credential checks | `/var/lib/cti-agent/reports/credcheck.txt` |
+| Update snapshots, last three (root only) | `/var/lib/cti-agent-update/` |
 
 ## 2. The one-minute health check
 
@@ -61,16 +64,23 @@ sudo /root/cti-agent-kit/scripts/healthcheck.sh
 Or by hand:
 
 ```bash
+sudo cti-agent-doctor                        # one line per check: version, settings, units, timers, credentials, org pack, beat files
 systemctl list-timers 'cti-agent-*'          # every lane, last and next run
 systemctl --failed 'cti-agent-*'             # anything in a failed state
 sudo cat /etc/cti-agent/version              # what is installed
 sudo cti-agent fleet-db recent               # memory, open tasks, finding counts
 sudo cti-agent fleet-board tail 20           # what the fleet said recently
 sudo cti-agent cti-budget status             # heartbeat ceilings and cooldown
+sudo cat /var/lib/cti-agent/reports/credcheck.txt   # credential checks: lane, command, ok|FAIL, last line
 ```
 
-All good looks like: no failed units, every timer has a NEXT time, the board has
-no recent `ERROR` lines, and the budget says `ready` or `denied` with a reason.
+All good looks like: `cti-agent-doctor: 0 FAIL`, no failed units, every timer
+has a NEXT time, the board has no recent `ERROR` lines, the budget says `ready`
+or `denied` with a reason, and every credcheck line says `ok`.
+
+The credential checks (every in-use lane's `--check`) run in their own unit,
+`cti-agent-credcheck.timer`, daily at 05:30; the check-in reads the report and
+no longer runs them. To rerun them now: `sudo cti-agent run-credcheck`.
 
 ## 3. What version is installed?
 
@@ -92,7 +102,15 @@ commit, the box is behind. Update it (section 11).
 systemctl list-timers 'cti-agent-*'                  # NEXT and LAST for each lane
 systemctl list-timers cti-agent-domains.timer        # one lane
 systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=)
+sudo cti-agent fleet-timers                          # the same, ending "Off on purpose (not in FLEET_LANES): ..."
 ```
+
+`FLEET_LANES` (comma-separated lane names; unset = every lane) is which lanes
+this box runs. A lane left out has its timer turned off by the installer, needs
+none of its settings, and the check-in treats it as off, not broken.
+`fleet-timers` names those lanes in its "Off on purpose" footer. Set it with
+`sudo cti-agent-onboard --for-real`, or in `fleet.env` (`00-core.env` when
+split), then `sudo cti-agent-update --for-real`.
 
 | Lane | Timer | Schedule (box clock) | Sends to |
 |---|---|---|---|
@@ -107,6 +125,7 @@ systemctl cat cti-agent-digest.timer                 # its schedule (OnCalendar=
 | Patch Tuesday (by hand for now, section 7a) | `cti-agent-patchtuesday` (disabled) | Wednesday after the 2nd Tuesday, 07:30 | digest audience |
 | Feed scout | `cti-agent-scout` | every 4 hours at :15 | nobody |
 | Orchestrator heartbeat | `cti-agent-checkin` | every 2 hours | escalations only |
+| Credential checks | `cti-agent-credcheck` (on with the heartbeat) | every day 05:30 | nobody (`reports/credcheck.txt`) |
 
 A failed unit emails the operator automatically (`cti-agent-alert@`).
 
@@ -142,7 +161,8 @@ None of these send mail, file tickets or advance a baseline.
 
 ```bash
 sudo cti-agent run-digest daily --dry-run
-#   advisory triage (FLEET ADVISORIES): TRIAGE_ENABLED=1 in fleet.env turns it on, 0 turns it off;
+#   advisory triage (FLEET ADVISORIES): TRIAGE_ENABLED=1 turns it on, 0 turns it off; it goes in
+#   fleet.d/digest.env on a split box (fleet-config check flags it in 00-core.env), else fleet.env;
 #   the log says "triage: off" or "triage: reader, Falcon and judge ...". Two model calls per advisory, dry run too.
 sudo cti-agent run-digest weekly --dry-run
 sudo cti-agent run-appscan --dry-run
@@ -360,7 +380,7 @@ sudo cti-agent-settings split --for-real        # write fleet.d/ (core + one fil
 sudo cti-agent-onboard --dry-run                # which lanes run, which of their settings are empty, which secrets unstored
 sudo cti-agent-onboard --for-real               # choose the lanes (FLEET_LANES), fill their settings, store their secrets
 sudo cti-agent-doctor                           # is the box healthy? version, settings, units, timers, credentials
-sudo cti-agent-update --rollback --dry-run      # what the snapshot from before the last update would put back
+sudo cti-agent-update --rollback --dry-run      # what the snapshot from before the last update would put back (section 11)
 journalctl -u 'cti-manual-*' -n 50              # hand runs, once a secret is stored (see below)
 ```
 
@@ -415,6 +435,24 @@ sudo cti-agent-update --for-real     # pull the kit, then install; keeps fleet.e
 sudo cat /etc/cti-agent/version      # confirm: tag, commit, no -DIRTY
 systemctl list-timers 'cti-agent-*'  # timers still scheduled
 ```
+
+The update ends with `cti-agent-doctor`. Before installing it snapshots what the
+install replaces (code, config, units, the kit's and source's commits, a copy of
+`memory.db`) in `/var/lib/cti-agent-update/`, root only, the last three kept. A
+failed install puts all of it back by itself. To undo one that installed but
+misbehaves:
+
+```bash
+sudo cti-agent-update --rollback --dry-run    # what the latest snapshot would put back; changes nothing
+sudo cti-agent-update --rollback --for-real   # put it back (refuses while a lane runs); memory.db is left as is
+```
+
+A tag that moved upstream stops the fetch: the updater prints the two
+`git tag -d` commands that fix it, and runs neither.
+
+A new box: after the installer, `sudo cti-agent-onboard --dry-run`, then
+`sudo cti-agent-onboard --for-real` (which lanes, their settings, their
+secrets), then `sudo cti-agent-doctor`. Full walk-through: [INSTALL.md](INSTALL.md).
 
 `cti-agent-update` is put on the box by the installer. The first time (or on a
 box installed before it existed) run it by path:
@@ -519,10 +557,11 @@ Rules:
   `.github/workflows/` files. If it ever fails (a conflict, or branch
   protection blocking the `SYNC_PAT` push) the job fails visibly in the
   Actions tab and `main` stays as it was; the tags are already copied.
-- A tag that is wrong and only local: `git tag -d v1.5.1`. Already pushed:
-  `gh release delete v1.5.1 --repo zany2dmax/cti-agent`, then
-  `git push origin :refs/tags/v1.5.1`, and delete the release and tag in the
-  company repo, then tag again (the new push makes a new release). Never move a tag the box has installed.
+- **A pushed tag never moves.** A wrong tag that is only local:
+  `git tag -d 1.6.7`, then tag again. Once pushed, cut the next version (a new
+  rc, `2.0-rc5`) instead: a moved tag stops every box's update, since
+  `git fetch --tags` refuses to clobber it. RUNBOOK 11i has the ruleset that
+  enforces this on GitHub.
 - Workflow secrets (company repo, Settings, Secrets and variables, Actions):
   `SYNC_PAT` (a work-account token that can write contents and workflows) and,
   only if the personal repo ever goes private, `UPSTREAM_READ_TOKEN`.
@@ -531,7 +570,7 @@ Rules:
 
 ```bash
 sudo cti-agent cti-mailer --check       # token, granted roles, version
-sudo cti-agent cti-mailbox --dry-run    # cleanup plan; without --dry-run it moves mail
+sudo cti-agent cti-mailbox --dry-run    # cleanup plan; --for-real moves mail
 ```
 
 `MISSING Mail.Read` or `MISSING Mail.Send` means the app registration lost a
@@ -544,6 +583,8 @@ permission or admin consent.
 | No daily email today | `journalctl -u cti-agent-digest.service --since today --no-pager` |
 | A unit shows failed | `systemctl status <unit>`, then its journal |
 | Heartbeat not running | `sudo cti-agent cti-budget status` (cooldown or ceiling?) |
+| Doctor says `credentials` WARN/FAIL | `sudo cat /var/lib/cti-agent/reports/credcheck.txt`, then `sudo cti-agent run-credcheck` |
+| Bad update | `sudo cti-agent-update --rollback --dry-run`, then `--for-real` (section 11) |
 | "journal unavailable" in a hand-run alert | Expected: only the alert unit can read the journal |
 | Patch Tuesday sources show 403 | Both article sites block the box: save the pages by hand (section 7a) |
 | Domains report says lookups failed | `DOMAINS_DNS_SERVERS` in fleet.env; outbound UDP/TCP 53 |

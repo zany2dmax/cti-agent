@@ -19,7 +19,8 @@ command, every setting, the schedule, and the troubleshooting table. If you are
 setting the whole thing up for the first time, start with
 [../RUNBOOK.md](../RUNBOOK.md) instead — it covers the Entra app registration,
 the scanner credentials, the deploy order and which timer to enable when, and
-sends you here for the detail. [../README.md](../README.md) is the overview and
+sends you here for the detail. [../INSTALL.md](../INSTALL.md) walks one new
+box from clone to first timer. [../README.md](../README.md) is the overview and
 the map of every other document.
 
 **Conventions in this document.** Replace these with your own values:
@@ -246,8 +247,8 @@ sudo -u ctiagent FLEET_ENV=/etc/cti-agent/fleet.env \
 | `task run` | Run the Go agent directly from env vars |
 | `task install` | Copy the binary to `~/bin` |
 | `task fmt` / `task fmt:check` | Format / fail if unformatted |
-| `<fleet> cti-mailbox --dry-run` | Mailbox cleanup rehearsal: what it would archive, delete and leave. Without `--dry-run` it moves the mail |
-| `<fleet> run-mailbox-cleanup` | The same through the runner, posting the plan to the board. Moves mail; add `--dry-run` to rehearse |
+| `<fleet> cti-mailbox --dry-run` | Mailbox cleanup rehearsal: what it would archive, delete and leave. `--for-real` moves the mail |
+| `<fleet> run-mailbox-cleanup --dry-run` | The same through the runner, posting the plan to the board. `--for-real` moves mail |
 | `task test:mailbox` | The processed-message gate, precedence, retention, backlog note |
 | `task test:patchtuesday` | Date maths, source parsing, exposure, QQL, the QID table and the release manifest the daily reads |
 | `task test:env` | `fleet.env` parsing and the per-command credential requirements. A lane that refuses to run over credentials it never uses, or over ones already in the file, has happened twice; this is the regression test for both |
@@ -280,6 +281,10 @@ Via the `cti-agent` wrapper the installer writes:
 | `sudo cti-agent cti-mailer --to-dev --html FILE --subject S` | Send any rendered file to `FLEET_DEV_EMAIL` only, subject `[DEV TEST] ...`, to see it in a real mail client without mailing the team |
 | `sudo cti-agent cti-mailer --check` | Decode the token, list granted app roles |
 | `sudo cti-agent cti-audit --check` | Is the audit trail directory writable and, if forwarding is set, is the collector reachable. Exit 1 if not. `cti-audit --prune --days N --dry-run` lists what retention would delete; see `man cti-audit` |
+| `sudo cti-agent run-credcheck` | Every in-use lane's `--check` (the fleet-wide `cti-mailer` and `cti-jira` ones too), one line each to `reports/credcheck.txt`, which the check-in reads. Read-only; `cti-agent-credcheck.timer` runs it daily at 05:30 |
+| `sudo cti-agent-doctor` | Is this box healthy? One OK/WARN/FAIL line each for the version against the kit, `fleet-config check`, failed units, the in-use lanes' timers, today's credential report, the org pack and `run-checkin --audit`. Read-only; `--json` for scripting |
+| `sudo cti-agent-onboard --dry-run` | Which lanes the box runs, which of their settings are empty, which secrets are not stored. `--for-real` asks, writes them and stores the secrets. See [Install, Steps](#steps) |
+| `sudo cti-agent-update --rollback --dry-run` | What the snapshot taken before the last update would put back. `--for-real` puts it back |
 | `sudo cti-agent fleet-db recent` | Memory, tasks, mailbox, priority counts |
 | `sudo cti-agent fleet-board tail 30` | Recent board lines |
 | `systemctl list-timers 'cti-agent-*'` | What is scheduled and when |
@@ -407,9 +412,27 @@ this one (`install-fedora.sh`, the runners, the units, the manifest); the Go
 source under `/opt/cti-agent/agent` is pulled by the installer itself. Nothing
 pulled the kit, and the installer runs from it, so the old two-step
 (`git pull`, then the installer) was easy to do halfway. The updater pulls with
-tags, refuses a kit with local edits or one inside the installed tree, says if
-the result is not an exact release tag, and hands over with `exec` so it can
-safely update its own file.
+tags, refuses a kit with local edits or one inside the installed tree, and says
+if the result is not an exact release tag. Then it snapshots what the install
+replaces (the kit's and the Go source's commits, `/opt/cti-agent`,
+`/etc/cti-agent`, the fleet's units, a copy of `memory.db`) into
+`/var/lib/cti-agent-update/`, root-only, the last three kept. It runs the
+installer as a child: if the installer fails, the snapshot is put back whole,
+database included, and the update exits with the installer's status. It ends
+with `cti-agent-doctor`.
+
+To undo an update that installed but misbehaves:
+
+```bash
+sudo cti-agent-update --rollback --dry-run     # what the latest snapshot would put back
+sudo cti-agent-update --rollback --for-real    # put it back; refuses while a lane is running
+```
+
+A rollback by hand leaves `memory.db` as it is, since the lanes have written to
+it since; it names the snapshot's copy. The root tools, man pages and
+completions stay at the newer version until the next install. A release tag
+that moved upstream stops the fetch; the updater prints the two `git tag -d`
+commands that fix it and runs neither (`man cti-agent-update`).
 
 The repository is public and `AGENT_REPO` is plain HTTPS, so the clone needs no
 credentials on the box.
@@ -428,22 +451,32 @@ rebuilds every binary, installs the man pages, rewrites the units, runs `daemon-
 
 ```bash
 # ── 2. add any new settings ──────────────────────────────────────────────────
-sudo vi /etc/cti-agent/fleet.env
+sudo cti-agent fleet-config check          # missing, misspelt, in the wrong file
+sudo cti-agent-onboard --dry-run           # the in-use lanes' empty settings and unstored secrets
+sudo cti-agent-onboard --for-real          # ask for them, write them, store the secrets
 ```
 
 New variables arrive with new lanes, and the installer will not invent values
-for them. Check `fleet-kit/fleet/fleet.env.example` against your file after
-every pull that adds a feature — a variable documented but unset is the
-quietest kind of missing.
+for them. `cti-agent-onboard` asks for each empty one the box's lanes
+(`FLEET_LANES`) need, showing the example's comment, and writes it to
+`fleet.env` or, on a split box, the `fleet.d` file it belongs in. Editing by
+hand works too: `fleet-kit/fleet/fleet.env.example` (one file) and
+`fleet-kit/fleet/fleet.d.example/` (split) are the references — a variable
+documented but unset is the quietest kind of missing.
 
 ```bash
 # ── 3. verify credentials and permissions BEFORE trusting a timer ────────────
 sudo cti-agent cti-mailer --check
+sudo cti-agent run-credcheck                          # every in-use lane's --check
+sudo cat /var/lib/cti-agent/reports/credcheck.txt     # lane, command, ok|FAIL, last line
+sudo cti-agent-doctor                                 # the whole box, one line per check
 ```
 
-This decodes the real token and reports the granted application roles. Read all
-of it, not just the exit code: it also names roles that are consented and that
-nothing in this codebase calls.
+`cti-mailer --check` decodes the real token and reports the granted application
+roles. Read all of it, not just the exit code: it also names roles that are
+consented and that nothing in this codebase calls. `run-credcheck` is what
+`cti-agent-credcheck.timer` runs at 05:30; the check-in reads its report
+instead of running the checks itself.
 
 ```bash
 # ── 4. dry run each lane you are about to enable ─────────────────────────────
@@ -456,12 +489,16 @@ sudo cti-agent run-domains --dry-run             # needs domains.txt, DOM_TO, DO
 # ── 5. enable timers ONE AT A TIME, oldest and least surprising first ────────
 sudo systemctl enable --now cti-agent-digest.timer
 sudo systemctl enable --now cti-agent-checkin.timer
+sudo systemctl enable --now cti-agent-credcheck.timer   # its report is what the check-in reads
 sudo systemctl enable --now cti-agent-scout.timer cti-agent-weekly.timer
 # cti-agent-patchtuesday.timer stays OFF for now: the lane is run by hand
 # each month (CHEATSHEET.md section 7a)
 sudo systemctl enable --now cti-agent-appscan.timer      # a different audience
 sudo systemctl enable --now cti-agent-domains.timer
 sudo systemctl enable --now cti-agent-mailbox.timer      # last: see below
+# Later installs turn cti-agent-credcheck.timer on whenever the check-in's is.
+# A lane left out of FLEET_LANES has its timer turned off by the installer;
+# fleet-timers lists those under "Off on purpose".
 
 # ── 6. watch it ──────────────────────────────────────────────────────────────
 systemctl list-timers 'cti-agent-*'
@@ -553,7 +590,7 @@ specifically need to see hosts, and remember what that file then contains.
 
 - Linux server that stays on. Fedora or RHEL 8+ (Rocky and Alma work), 2 vCPU / 4 GB is plenty.
 - Python 3.9+ (stdlib only — no pip installs anywhere in this kit).
-- Go 1.21+ *or* a prebuilt `cti-agent` binary.
+- Go, at least the `go` line in `go.mod` (1.26), *or* a prebuilt `cti-agent` binary.
 - Claude Code, installed **as the service account**, plus credentials it can
   use unattended — an API key, a `claude setup-token` token, or its own login
   (see below). The heartbeat needs it; the digest timers do not.
@@ -581,11 +618,16 @@ sudo git clone https://github.com/zany2dmax/cti-agent.git /root/cti-agent-kit
 sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh --dry-run
 sudo /root/cti-agent-kit/fleet-kit/install-fedora.sh --for-real
 
-# 3. Fill in config and secrets. The installer wrote placeholders
-#    (0640 root:ctiagent); it keeps this file on every later run.
-sudo vi /etc/cti-agent/fleet.env
+# 3. Choose the lanes, fill in their settings, store their secrets. The
+#    installer wrote placeholders (0640 root:ctiagent) and keeps the file on
+#    every later run; onboard sets FLEET_LANES, asks each empty setting those
+#    lanes need, and stores each secret through cti-agent-secrets set, so no
+#    value passes through it. It ends with fleet-config check.
+sudo cti-agent-onboard --dry-run
+sudo cti-agent-onboard --for-real
 
-# 4. Verify Graph permissions BEFORE trusting the morning timer
+# 4. Confirm the box, and Graph permissions, BEFORE trusting the morning timer
+sudo cti-agent-doctor
 sudo cti-agent cti-mailer --check
 
 # 5. Dry run the whole pipeline - renders and validates, sends nothing
@@ -595,6 +637,11 @@ sudo cti-agent run-digest daily --dry-run
 sudo systemctl enable --now cti-agent-digest.timer
 systemctl list-timers 'cti-agent-*'
 ```
+
+The full walk-through, from the clone to the first timer, is
+[../INSTALL.md](../INSTALL.md). On a new box `cti-agent-doctor` warns about
+the timers not yet enabled and the credential report not yet written; that is
+expected until step 6 and the check-in's timer.
 
 Step 6 is deliberately one timer. Enabling all of them on day one means
 untested lanes failing at once at 06:00, and no way to tell which caused what.
@@ -757,12 +804,19 @@ keeps the code out of the service account's reach:
 | the systemd journal | every run's output: `journalctl -u 'cti-agent-*'`, hand runs `-u 'cti-manual-*'` | journald |
 | `/etc/systemd/system/cti-agent-*` | units and timers | `root:root` `0644` |
 | `/usr/local/bin/cti-agent` | the wrapper for hand runs | `root:root` `0755` |
-| `/usr/local/sbin/cti-agent-update`, `-secrets`, `-settings` | root tools, run with `sudo` | `root:root` `0755` |
+| `/usr/local/sbin/cti-agent-update`, `-secrets`, `-settings`, `-onboard`, `-doctor` | root tools, run with `sudo` | `root:root` `0755` |
+| `/var/lib/cti-agent-update` | the updater's snapshots, the last three, for `cti-agent-update --rollback` | root-only |
 | `/usr/local/share/man/man1` | a man page for every command | `root:root` `0644` |
 | `/usr/share/bash-completion/completions`, `/usr/share/zsh/site-functions` | tab completion | `root:root` `0644` |
 
 All standard *IX locations (FHS, systemd, man, bash-completion), so the
 default SELinux policy fits with no custom module.
+
+A fork that has to install elsewhere commits a `layout.env` at the top of its
+repository, setting the code, config, state and log directories, the service
+account and the repository to build. `fleet-kit/layout.sh` reads it (never
+sources it) and refuses anything unsafe; unset, every path is the one above.
+The rules and caveats are in [../docs/layout.md](../docs/layout.md).
 
 Because nothing lives under `/home`, the units set `ProtectHome=yes` and hide
 it entirely — stricter than a punch-through into `/home`, and less likely to break. They also
@@ -837,23 +891,47 @@ mailbox is a contained incident.
 
 ## Configuration reference
 
-Every setting the fleet reads lives in one file. `fleet/fleet.env.example` is
-the authoritative copy, with the same notes as below inline — this section is
-for reading before you start, that file is for editing.
+Every setting the fleet reads lives in one file, `fleet.env`, until the box is
+split into `fleet.d/` (`00-core.env` plus one file per lane, so each lane sees
+only its own). `fleet/fleet.env.example` is the authoritative copy, with the
+same notes as below inline — this section is for reading before you start,
+that file is for editing. `fleet/fleet.d.example/` is the same text cut into
+the split files, generated from it; it shows which file a setting goes in.
+Secrets and logins belong in systemd credentials, not either
+(`sudo cti-agent-secrets set NAME`).
 
 | Where it lives | Mode |
 |---|---|
 | `install-fedora.sh` → `/etc/cti-agent/fleet.env` | `0640 root:ctiagent` |
+| after `cti-agent-settings split --for-real` → `/etc/cti-agent/fleet.d/*.env` | `0640 root:ctiagent` |
+
+The `TRIAGE_*` settings (advisory triage) belong in `fleet.d/digest.env`, not
+`00-core.env`. One left in core is still read, and `fleet-config check` lists
+it under `IN THE WRONG FILE`.
 
 **Check your work rather than discovering a gap one lane at a time:**
 
 ```bash
+fleet fleet-config check     # missing, misspelt, in the wrong file; never prints a value
 fleet cti-mailer --check      # every required setting, its state, then the Graph token
 fleet cti-budget status      # the quota ceilings, as actually parsed
 ```
 
-`cti-mailer --check` reports *all* missing settings at once and names the
-resolved config path. Run it before anything else.
+`fleet-config check` and `cti-mailer --check` report *all* missing settings at
+once. Run them before anything else. `sudo cti-agent-onboard --dry-run` lists
+the empty settings and unstored secrets of the lanes this box runs, and
+`--for-real` asks for each.
+
+### Which lanes this box runs
+
+| Variable | Notes |
+|---|---|
+| `FLEET_LANES` | The lanes this box runs, comma-separated, by the names in `/opt/cti-agent/share/lanes.list`: `checkin`, `digest`, `scout`, `patchtuesday`, `appscan`, `appowners`, `domains`, `vmscan`, `supplier`, `mailbox`. **Unset: every lane.** A name that is no lane stops the install |
+
+For each lane left out: the installer turns its timer off, `fleet-config check`
+no longer requires its settings, `fleet-timers` ends with an "Off on purpose"
+line naming it, the check-in treats it as off rather than broken, and
+`run-credcheck` skips its checks. `cti-agent-onboard` sets this for you.
 
 **Syntax.** `KEY=value`, one per line, no `export`, no spaces around `=`.
 Values are read literally — don't quote unless the value contains a space. A
@@ -891,6 +969,7 @@ cause.
 | `LOOKUP_PROVIDER` | `qualys` or `none`. `none` makes every CVE `UNKNOWN` — useful for testing the mail path without scanner credentials |
 | `QUALYS_BASE_URL` | your **pod**, not the login page. See below |
 | `QUALYS_USERNAME` / `QUALYS_PASSWORD` | a read-only account with KnowledgeBase and Host Detection API access. It does not need scan-launch or admin rights |
+| `QUALYS_PORTAL_HOSTS` | optional. Links in Qualys mail are trusted only to known Qualys hosts: the US pods, and the UI host of the pod in `QUALYS_BASE_URL` (`qualysapi.X` gives `qualysguard.X`), so an EU or other platform needs no setting. List further UI hosts here, comma-separated, only if that rule misses yours. A value that isn't a plain host name stops the run |
 
 ```
 US POD1  https://qualysapi.qualys.com
@@ -904,6 +983,16 @@ EU POD2  https://qualysapi.qg2.apps.qualys.eu
 Get the pod wrong and it authenticates, returns nothing, and every CVE reads
 `NOT_PRESENT`. That is the most dangerous wrong answer this system can
 produce, so confirm it against the URL you use for the Qualys UI.
+
+The weekly VM scan report (`run-vmscan`) reads the network team's spreadsheet
+to find networks no scan reaches. How it reads the sheet is set in
+`fleet.d/vmscan.env`:
+
+| Variable | Notes |
+|---|---|
+| `VMSCAN_USER_OCTET` | the third octet that marks a location's user network (`10.X.<octet>` inside its /16). Default `30`; `off` counts only a row labelled corp. The report's "How the spreadsheet is read" guide follows it |
+| `VMSCAN_EXTRA_LABELS` | row labels the sheet uses beyond the built-in ones, comma-separated, so a label alone on its row isn't read as a new location |
+| `VMSCAN_GAP_TEAMS` | who the report asks why a network isn't scanned. Default: the network team. Name everyone who adds networks, e.g. `VMSCAN_GAP_TEAMS="network and M&A teams"` |
 
 ### 3. Paths — the group that differs per machine
 
@@ -947,6 +1036,7 @@ play.
 | `DOM_ALLOW_TO` | allowlist for `DOM_TO`. Fail-closed, same rules as `WAS_ALLOW_TO` |
 | `DOMAINS_FILE` | the domain inventory, default `/etc/cti-agent/domains.txt`. Not in the repository. One domain per line plus markers `send`, `receive`, `saas`, `unknown`, `legacy`; no marker means no mail, and `send` alone means send-only |
 | `GODADDY_PAT` | GoDaddy Personal Access Token, `domains.domain:read` only. Unset: registrar checks are skipped and the subject says so |
+| `DOMAINS_REGISTRAR` | `godaddy` (the default) or `none`, for a registrar the lane can't read. `none`: the report says no registrar is configured and names the checks that don't run, with no `[REGISTRAR NOT CHECKED]` alarm, `--check` passes, and the check-in doesn't escalate. Any other value stops the run |
 | `DOMAINS_DKIM_SELECTORS` | DKIM selectors to probe; empty uses a built-in list. DKIM keys cannot be enumerated, so add your mail service's selector |
 | `DOMAINS_DNS_SERVERS` | DNS the domains lane asks. Empty = public resolvers, so internal split-horizon DNS cannot hide a domain's public records; `system` = this host's; or a list of IPs |
 | `DOMAINS_SMTP` | `off` disables the MX greeting/STARTTLS probe. On by default |
@@ -1111,7 +1201,7 @@ stayed in the inbox.
 
 #### Rule 4 was "archive", and the first production dry run showed why it cannot be
 
-`cybersecurity@` is not a feed. It is the team's shared reporting mailbox:
+`CTI_MAILBOX` is not a feed. It is the team's shared reporting mailbox:
 everyone reads it, and its contents are how a new starter finds out what has
 been happening and how work survives somebody leaving. Mail moved out of it by
 a bot is institutional memory taken away from the people who need it, on a
@@ -1121,7 +1211,7 @@ With rule 4 as archive, the first real dry run proposed archiving:
 
 ```
 archive suspicious                                       (processed, no CVE, not an automatic reply)
-archive FW: Atlanta Office Technologies Inc Invoice      (processed, no CVE, not an automatic reply)
+archive FW: Example Vendor Inc Invoice                   (processed, no CVE, not an automatic reply)
 archive Microsoft Defender for Cloud found potential ... (processed, no CVE, not an automatic reply)
 archive Qualys: Scheduled Web Application Vuln Scan ...  (processed, no CVE, not an automatic reply)
 archive pathway missing again                            (processed, no CVE, not an automatic reply)
@@ -1272,6 +1362,17 @@ moves credentials elsewhere — leave it blank, the default is already under
 All the subscription options share a person's seat with an unattended process.
 The API key costs money instead. There is no option that avoids both.
 
+**The check-in unit imports six secrets, no more:** the three Claude
+credential names above (store one) and Graph's `TENANT_ID`, `CLIENT_ID` and
+`CLIENT_SECRET`, for `cti-alert`. A test holds it to exactly that set. The
+beat reads untrusted mail, so it no longer runs any lane's `--check`, nor the
+`cti-mailbox --dry-run` and `cti-patchtuesday --dry-run` previews (they read
+the mailbox, Jira and the scanner): `run-credcheck`, in its own
+`cti-agent-credcheck.service` with the lanes' secrets, runs the checks daily
+at 05:30 and writes `reports/credcheck.txt`, which the beat reads. A line that
+contains a stored credential's value is withheld whole. When a beat needs a
+preview, it asks the operator to run one.
+
 ### 8. Quota ceilings
 
 Covered in full under [Rationing the quota](#rationing-the-quota).
@@ -1367,7 +1468,7 @@ one thing neither can tell you — what landed on *our* machines.
 
 ```bash
 fleet run-patchtuesday --dry-run          # render, send nothing
-fleet run-patchtuesday                    # send to DIGEST_TO
+fleet run-patchtuesday --for-real         # send to DIGEST_TO
 fleet run-patchtuesday --month 2026-08    # replay a past month, never sends
 ```
 
@@ -1602,7 +1703,9 @@ list must agree with that run's scans and the tickets file be under 24 hours
 old; at most 3 per run and never most of the open queue (more closes none and
 warns); gated by `JIRA_ALLOW_CLOSE` (project keys, empty = never, separate from
 `JIRA_ALLOW_CREATE`) and `--for-real`. The transition is chosen by its Done
-status category; `JIRA_CLOSE_TRANSITION` names one when several qualify. Needs
+status category; `JIRA_CLOSE_TRANSITION` names one when several qualify, and
+`JIRA_CLOSE_RESOLUTION` (default `Done`) is the resolution set when its screen
+asks for one, for a project that renamed Jira's stock resolution. Needs
 the Jira permission "Transition issues". Rehearse with `cti-jira
 --appscan-test <id> --for-real`, then `--appscan-close-test CR-NNN` (preview)
 and `--for-real`. Detail: [RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application-security-lane).
@@ -1699,7 +1802,9 @@ Operating detail is in
 - **The GoDaddy account** - `GET /v1/domains` with a read-only Personal Access
   Token (`domains.domain:read`). The client never requests `authCode`; a test
   fails if it ever does. Unset or failing: the report still runs, and its
-  subject says `[REGISTRAR NOT CHECKED]`.
+  subject says `[REGISTRAR NOT CHECKED]`. A fleet whose registrar isn't
+  GoDaddy sets `DOMAINS_REGISTRAR=none`: the report says no registrar is
+  configured, names the checks that don't run, and raises no alarm.
 - **Public DNS and the sites themselves** - ordinary lookups, a GET on 443 and
   80, and the certificate verified separately from whether a page loaded.
 
@@ -1825,6 +1930,7 @@ sudo cti-agent cti-mailer --to-operator --board-id q17 --for-real \
 | When | What | Fired by |
 |---|---|---|
 | every 2h | `/checkin` heartbeat — relay, decide, one proactive task. Subject to the quota ceiling below | `cti-agent-checkin.timer` |
+| 05:30 daily | credential checks: every in-use lane's `--check`, to `reports/credcheck.txt` for the heartbeat. Turned on by the installer with the heartbeat's timer | `cti-agent-credcheck.timer` |
 | 06:00 daily | ingest → enrich → brief → **send** | `cti-agent-digest.timer` |
 | 00,04,08,12,16,20:15 | scout sweep + correlate new CVEs | `cti-agent-scout.timer` |
 | Mon 07:00 | weekly rollup, includes Sev1 | `cti-agent-weekly.timer` |
@@ -1832,14 +1938,21 @@ sudo cti-agent cti-mailer --to-operator --board-id q17 --for-real \
 | Fri 07:30 | AppSec report to `WAS_TO` | `cti-agent-appscan.timer` |
 | 07:00 daily | mailbox cleanup | `cti-agent-mailbox.timer` |
 | Tue 08:00 | domains check to `DOM_TO`, CSV attached; then the Jira lock-down ticket | `cti-agent-domains.timer` |
+| 07:15 daily | application scan reports to their owners | `cti-agent-appowners.timer` |
+| 07:45 daily | supplier requests judged, Kanban items, digest to `SUPPLIER_TO` | `cti-agent-supplier.timer` |
+| Mon 08:00 | VM scan report to `VMSCAN_TO`, with the network sheet's coverage check | `cti-agent-vmscan.timer` |
 | Sun 02:00 | scanner KB refresh, vacuum, log rotate | orchestrator, on its beat |
 
 Change the times by editing `OnCalendar=` in the relevant timer, then
-`systemctl daemon-reload`.
+`systemctl daemon-reload`. The timers are hand-written; `task ship` checks each
+one's schedule against its lane manifest (`fleet-kit/lanes/<lane>.toml`), so
+change both. A lane left out of `FLEET_LANES` has its timer off;
+`fleet-timers` says so under "Off on purpose".
 
-All timers are `Persistent=true`, so a digest missed because the box was down
-fires on boot. A silently skipped digest reads as "no news," which is the worst
-possible failure for a system like this.
+Every timer but the heartbeat's and the mailbox cleanup's is
+`Persistent=true`, so a digest missed because the box was down fires on boot.
+A silently skipped digest reads as "no news," which is the worst possible
+failure for a system like this.
 
 ### Timezones — the trap
 
@@ -1937,7 +2050,11 @@ for a copy that leaves the distribution list.
 fleet-kit/
 ├── README.md                      this runbook
 ├── install-fedora.sh              idempotent installer (Fedora/RHEL, FHS layout)
-├── update-fedora.sh               pull the kit, then run the installer from it (cti-agent-update)
+├── update-fedora.sh               pull the kit, snapshot, run the installer from it; --rollback (cti-agent-update)
+├── stop-fedora.sh                 take the fleet off the schedule without removing it
+├── layout.sh                      reads a fork's layout.env (never sources it) and checks it (docs/layout.md)
+├── lanes/<lane>.toml              one manifest per lane: handles, units, settings prefixes, beat grants,
+│                                  credential checks (docs/lane-manifest.md); scripts/lanes --write
 ├── bin/dev-run                    local runner: doctor/ingest/enrich/brief/send
 ├── bin/cti-agent-secrets          root tool: move secrets and logins into systemd credentials (status/import/set/remove)
 ├── bin/cti-agent-settings         root tool: split fleet.env into fleet.d/ core + one file per lane (status/split)
@@ -1945,8 +2062,16 @@ fleet-kit/
 ├── bin/cti-agent-doctor           root tool: is the box healthy? one line per check, read-only
 ├── bin/org-pack                   find, check and apply the org pack (docs/org-pack.md); the installer runs it
 └── fleet/
-    ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate
+    ├── CLAUDE.md                  orchestrator standing instructions + autonomy gate (lane table generated)
+    ├── agents/                    supplier, triage-reader, triage-judge prompts
     ├── fleet.env.example          all config, superset of the Go agent's .env
+    ├── fleet.d.example/           generated: fleet.env.example cut into 00-core.env + one file per lane
+    ├── lanes.list                 generated: each lane, its units, its credential checks, its programs
+    │                              (installed in /opt/cti-agent/share/; FLEET_LANES names lanes from it)
+    ├── lane-settings.list         generated: each lane's settings and secrets, for cti-agent-onboard
+    ├── settings.manifest          every setting, who reads it, which fleet.d file it goes in (partly
+    │                              generated); fleet-config check reads it
+    ├── commands.manifest          every command and flag: the wrapper's list and tab completion read it
     ├── bin/
     │   ├── fleet-board            lock-safe append-only board (say/post/read/prune/tail/resolve/expire; the beat gets say/read/tail/resolve/expire)
     │   ├── fleet-db               SQLite memory: findings, tasks, mailbox, digests
@@ -1955,6 +2080,8 @@ fleet-kit/
     │   ├── fleet-trace            each beat's record in state/traces (decisions and cost, not mail text; CHECKIN_TRACE_KEEP): show, list, prune (operator only)
     │   ├── checkin-bash-guard     the beat's Bash hook: refuses shell syntax (redirects, pipes, chaining, $ expansion, globs, ~)
     │   ├── run-digest             deterministic ingest→enrich→brief→send
+    │   ├── run-credcheck          every in-use lane's --check, to reports/credcheck.txt for the beat
+    │   ├── run-*                  one runner per lane (appscan, appowners, domains, vmscan, ...)
     │   └── run-checkin            resolves the claude binary, audits, fires one beat
     ├── checkin-settings.json      root-owned --settings for the beat (one Bash guard hook, deny rules)
     ├── lanes/
@@ -1962,27 +2089,43 @@ fleet-kit/
     ├── skills/
     │   ├── checkin/SKILL.md       the heartbeat's brain
     │   ├── cti-digest/SKILL.md    full pipeline on demand
+    │   ├── patch-tuesday/SKILL.md the monthly synopsis
     │   └── scout-sweep/SKILL.md   feed sweep + correlate
-    └── systemd-fedora/            service + timer pairs, hardened
-tests/
-└── test_lanes.py                  33 lane tests: stdlib unittest, no network
+    └── systemd-fedora/            hardened units: each .service generated from its lane
+                                   manifest (scripts/lanes --write); each .timer hand-written,
+                                   checked against the manifest by scripts/lanes --check
+tests/                             stdlib unittest, no network: lanes, manifests, onboard,
+                                   doctor, credcheck, layout, org pack, update, ...
 ```
 
-Run the tests with `task test:lanes`, or `python3 fleet-kit/tests/test_lanes.py -v`.
-They stub the NVD, EPSS and KEV fetchers, so they are deterministic offline and
-need no API key.
+Run the lane tests with `task test:lanes`, or all of them with
+`python3 -m unittest discover -s fleet-kit/tests`. They stub the NVD, EPSS and
+KEV fetchers, so they are deterministic offline and need no API key.
 
-Before first run, edit two files for your environment: `fleet.env` (addresses,
-credentials, paths) and `fleet/CLAUDE.md` (the orchestrator's mandate, tone, and
-who it escalates to). `CLAUDE.md` is a prompt, not code — rewrite it in your own
-words if the shipped voice doesn't fit your team.
+Don't edit a generated file; edit its source (for a unit, its lane manifest)
+and run `task lane:write`,
+which runs both generators (`scripts/lanes` and `scripts/settings-manifest`).
+`task ship` refuses a stale one.
+
+Before first run, set `fleet.env` (addresses, credentials, paths) for your
+environment; `cti-agent-onboard` asks for what the box's lanes need. What your
+organization wants the orchestrator to know (its escalation habits, who owns
+what, house terms) goes in the **org pack**, not in edits to
+`fleet/CLAUDE.md`: a folder of notes the installer adds after the core
+prompts under "Organization notes", on every install and update. A fork
+commits it as `org/`; a box installed from upstream keeps it in
+`/etc/cti-agent/org/`. A pack only adds, the core text wins where they
+disagree, and `bin/org-pack check` refuses an install whose pack isn't
+root-owned, holds a symlink or an unknown file, or reuses a core skill's name.
+An edited installed `CLAUDE.md` stops updating; move the edits into the pack.
+Detail: [../docs/org-pack.md](../docs/org-pack.md).
 
 ---
 
 ## Operating it
 
 **The fleet lives in three places.** Code is in `/opt/cti-agent`, config in
-`/etc/cti-agent/fleet.env`, and state, logs and the database in
+`/etc/cti-agent/fleet.env` (or `fleet.d/`, once split), and state, logs and the database in
 `/var/lib/cti-agent` (the default `FLEET_HOME`). There is no
 `/home/ctiagent`, so a command written against a home-directory path fails
 with "no such file or directory".
@@ -2001,8 +2144,11 @@ fleet() { sudo cti-agent "$@"; }
 
 ```bash
 # Health
+sudo cti-agent-doctor                       # one line per check; exit 1 on any FAIL
 systemctl list-timers 'cti-agent-*'
+fleet fleet-timers                          # ends with the lanes off on purpose (FLEET_LANES)
 fleet fleet-db recent
+sudo cat /var/lib/cti-agent/reports/credcheck.txt   # today's credential checks
 
 # The board
 fleet fleet-board tail 30
@@ -2055,6 +2201,9 @@ sudo -u ctiagent env HOME=/var/lib/cti-agent FLEET_ENV=/etc/cti-agent/fleet.env 
 | Heartbeat never runs | `claude` not found, or no usable credentials | `journalctl -u cti-agent-checkin` — run-checkin names which one it is; set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `fleet.env`, or pin `CLAUDE_BIN` |
 | Every other beat skipped | Stale `.checkin.lock` from a killed beat | `sudo rmdir $FLEET_HOME/.checkin.lock` (auto-breaks after 30m) |
 | Board not growing | Stale lock | `sudo rmdir $FLEET_HOME/.board.lock` (auto-breaks after 60s) |
+| `cti-agent-doctor` says `credentials` WARN or FAIL | No report yet, a day old, or a lane's `--check` failed | `sudo cat /var/lib/cti-agent/reports/credcheck.txt` names the lane and the check's last line. Rerun with `sudo cti-agent run-credcheck`; if there is no report at all, `sudo systemctl enable --now cti-agent-credcheck.timer` |
+| An update installed but a lane misbehaves | The new release, not the box | `sudo cti-agent-update --rollback --dry-run`, then `--for-real`. A failed install already rolled itself back |
+| Check-in calls a lane broken that this box doesn't run | `FLEET_LANES` unset, so every lane is expected | Set `FLEET_LANES` (`sudo cti-agent-onboard --for-real`), then `sudo cti-agent-update --for-real` turns the others' timers off |
 | Scout finds nothing | Feeds 404'd | `journalctl -u cti-agent-scout`. It names the failed feeds — a dead feed is a blind spot that looks like good news |
 | Command not found | Used a home-directory path | There is no `/home/ctiagent`. Use `sudo cti-agent <cmd>` |
 | Works by hand, every timer fails | SELinux label, not permissions | `sudo restorecon -RFv /etc/cti-agent /opt/cti-agent /var/lib/cti-agent`. See below |
@@ -2135,7 +2284,7 @@ source of CVEs.
 **Week 3 — heartbeat.** Set `FLEET_OPERATOR_EMAIL` and enable
 `cti-agent-checkin.timer`. Now an orchestrator is doing proactive work between
 digests: chasing UNKNOWNs, nudging stale Sev5s, and emailing you when it needs a
-decision. Watch `checkin.log` for a few days and judge whether its proactive
+decision. Watch `journalctl -u cti-agent-checkin` for a few days and judge whether its proactive
 picks are useful or busywork.
 
 **Week 4 — scout.** Enable `cti-agent-scout.timer` after trimming `feeds.txt` to

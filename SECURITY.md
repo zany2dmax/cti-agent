@@ -20,15 +20,21 @@ A threat model that claims controls it does not have is worse than none.
 - [Secrets: systemd credentials, not the environment](#secrets-systemd-credentials-not-the-environment)
 - [AI triage: untrusted input reaching a model with tools](#ai-triage-untrusted-input-reaching-a-model-with-tools)
 - [Data sensitivity: the report is a targeting list](#data-sensitivity-the-report-is-a-targeting-list)
+- [Encryption at rest](#encryption-at-rest)
 - [Credentials and secrets](#credentials-and-secrets)
+- [The audit trail](#the-audit-trail)
+- [Transport security (outbound calls)](#transport-security-outbound-calls)
 - [Microsoft Graph permissions](#microsoft-graph-permissions)
 - [The send gate](#the-send-gate)
 - [Autonomy gates](#autonomy-gates)
+- [The org pack: notes the beat reads](#the-org-pack-notes-the-beat-reads)
 - [Mailbox modification](#mailbox-modification)
 - [Supply chain](#supply-chain)
 - [Host hardening](#host-hardening)
+- [Where it is installed, and undoing an update](#where-it-is-installed-and-undoing-an-update)
 - [Build and release gates](#build-and-release-gates)
 - [Output handling](#output-handling)
+- [Validating what is written](#validating-what-is-written)
 - [Failure philosophy](#failure-philosophy)
 - [Known gaps and accepted risks](#known-gaps-and-accepted-risks)
 - [If you are deploying this yourself](#if-you-are-deploying-this-yourself)
@@ -37,8 +43,13 @@ A threat model that claims controls it does not have is worse than none.
 
 ## Reporting a vulnerability
 
-Open a GitHub security advisory on this repository, or contact the maintainer
-privately. Please do not open a public issue for anything exploitable.
+Use GitHub's private vulnerability reporting on this repository: the
+**Security** tab, then **Report a vulnerability**. Only the maintainers see
+the report. Please do not open a public issue, pull request or discussion for
+anything exploitable.
+
+This covers the code in this repository. A finding in a fork's own changes
+(its org pack, its added lanes or providers) goes to that fork's owner.
 
 Include what you did, what happened, and what you expected. A proof of concept
 is welcome but not required.
@@ -76,11 +87,29 @@ degrees differ:
 | Qualys API responses | our scanner, over the network | **semi-trusted** | XML parsed; host names treated as sensitive output |
 | Microsoft Graph responses | our tenant | **semi-trusted** | message bodies are third-party content and stay untrusted |
 | `fleet.env` | the operator | **trusted** | it holds the credentials; whoever can write it already controls the process |
+| The org pack (`org/` or `/etc/cti-agent/org/`) | the operator, or the fork's owner | **trusted, and checked** | it steers the beat, so the install refuses one that isn't root-owned and writable by root only (below, The org pack) |
+| `layout.env` | the fork's owner, in a checkout | **trusted, and checked** | read as `KEY=value` lines, never sourced by the root installer (below, Where it is installed) |
 | Environment from systemd | the host | **trusted** | same reasoning |
 
 The consequence worth stating plainly: **an email body is attacker-controlled
 input.** Anyone can send mail to a published security address. Every design
 decision downstream of the mailbox assumes the sender is hostile.
+
+### One fleet per organization
+
+The fleet is built for one organization, on its own box, run by one operator
+or by a team whose members trust each other. Everyone who can be root on the
+box, write `/etc/cti-agent` or push to the repository it installs from can
+change what every lane does. The controls in this document protect the fleet
+from the mail and the web it reads, not from its own operators.
+
+**Multi-tenant use is unsupported.** Do not run lanes for two organizations
+that don't trust each other on one box or in one fleet. They would share the
+service account, the state directory, `memory.db`, the board and the
+check-in beat, and nothing here separates one tenant's data or settings from
+another's. Each organization gets its own box, its own fleet and its own
+credentials. A fork is the way to adapt the fleet to another organization;
+see [FORKING.md](FORKING.md).
 
 ---
 
@@ -196,6 +225,38 @@ anyway; the gain is that each lane sees only the systems it uses.
 `fleet.d/00-core.env` and its own lane's file. A lane no longer sees another
 lane's recipients or switches. These files hold no secret, and stay plain
 text.
+
+**The unit that reads untrusted mail holds six secrets.** The check-in beat
+used to run every lane's credential check itself, so its unit imported 21
+secrets: every system the fleet logs in to, in the one process that reads
+hostile text and drives a model. The checks need no model, so they moved:
+
+- **`run-credcheck`** (`cti-agent-credcheck.service`, daily at 05:30) runs
+  the `--check` of every lane the box runs (`FLEET_LANES`), with those lanes'
+  credentials. Which checks a lane has is its manifest's `credential_checks`.
+  The runner refuses a lane list that names any command not on its own list,
+  and a test keeps the two equal.
+- It writes one line per check to `reports/credcheck.txt` (0600), which the
+  beat reads. **A line that contains the value of any credential the unit
+  was given is withheld whole**, replaced by a notice. The checks print names
+  and counts, never values; this is the net under that. Values under eight
+  characters are not compared, and no fleet secret is that short.
+- **The check-in unit now imports six:** the three Claude credential names
+  (one of them is stored) and Graph's three, for `cti-alert`. A test holds it
+  to exactly that set.
+- **The beat lost its two previews.** `cti-mailbox --dry-run` and
+  `cti-patchtuesday --dry-run` read the mailbox, Jira and the scanner, so
+  their grants put those secrets in the beat's unit. They are no longer
+  granted, and their bash-guard rows are gone; a beat that needs one asks the
+  operator to run it.
+
+**A comment is not a call.** `scripts/settings-manifest` decides which
+secrets a unit imports by following which programs each runner starts. It
+read `/opt/cti-agent` in a runner's comment as a call to the `cti-agent`
+wrapper, and granted that runner every secret the wrapper can read. That is
+how `run-checkin` held Falcon's keys, and `run-mailbox-cleanup` the Claude
+tokens and Falcon's. Shell and Python comment lines are no longer read, so a
+grant now follows the code, not prose about it.
 
 **Limits.** The grants are generated as "could read", so wider than needed:
 a runner gets the secrets of every program it calls. Until a secret's line is
@@ -1068,13 +1129,15 @@ which rewrites the findings the digest reports. The second included
 `--mark-sent`, which makes the daily digest drop a whole Patch Tuesday
 release's CVEs. `CLAUDE.md` forbade all three, but a prohibition that lives
 only in the prompt, on a capability the grant includes, is not a control. The
-grant is now `fleet-db` read and memory subcommands only, and `cti-patchtuesday
---dry-run:*`, made safe by the binary itself refusing `--mark-sent` together
-with `--dry-run`. It likewise refuses `--url-msrc` (other than `none`),
-`--url-bleeping`, `--url-qualys` and `--drop-dir` with `--dry-run` (exit 2),
-because the grant allows any arguments and those would let a steered beat make
-outbound GETs to any host or read any folder; the operator still uses them
-without `--dry-run`. `tests/test_lanes.py` fails if a forbidden command becomes
+grant is now `fleet-db` read and memory subcommands only. `cti-patchtuesday`
+was narrowed to `--dry-run:*`, made safe by the binary itself refusing
+`--mark-sent` together with `--dry-run`. It likewise refuses `--url-msrc`
+(other than `none`), `--url-bleeping`, `--url-qualys` and `--drop-dir` with
+`--dry-run` (exit 2), because a grant with any arguments would let a steered
+beat make outbound GETs to any host or read any folder; the operator still
+uses them without `--dry-run`. Since the credential split (Secrets, above)
+the beat has no `cti-patchtuesday` grant at all; the binary's refusals stay.
+`tests/test_lanes.py` fails if a forbidden command becomes
 grantable, or if the instructions tell the agent to run something that is not.
 
 **`fleet.env` is outside the agent's reach by instruction only.** The service
@@ -1095,6 +1158,20 @@ cannot be widened by the thing it constrains. The startup integrity check
 described above is what keeps that true: a box where it stops being true does
 not run a beat.
 
+**Every grant is declared by a lane.** The grant is still written by hand in
+`run-checkin`, line by line with its reasons. Each lane's manifest
+(`fleet-kit/lanes/<lane>.toml`) also names, in `beat_grants`, what that lane
+adds to it: today the check-in lane declares the fleet-wide tools, and no
+other lane adds anything, since the credential checks left the beat.
+`scripts/lanes --check` runs `run-checkin`'s grant code with the box's paths
+and compares the result with every lane's `beat_grants`, both ways. A grant
+no lane declares fails; a declared grant that isn't given fails; widening one
+(`--check` to `--check:*`) shows as one of each. `task ship` runs this as
+`lane:check`, so a new or widened grant cannot ship without a lane signing
+for it in a reviewed file. Each granted command also needs its row in
+the bash guard's policy table, and `test_lanes.py` checks that
+([docs/lane-manifest.md](docs/lane-manifest.md)).
+
 Deliberately absent from the grant:
 
 - **`cti-mailer`.** The orchestrator cannot address mail. It
@@ -1114,13 +1191,15 @@ Deliberately absent from the grant:
   address nobody approved, and `cti-alert` cannot be pointed at an address at
   all. It remains worth closing, because a future `--to` would silently turn a
   safe grant into an unsafe one.
-- **`cti-mailbox` without `--dry-run`.** It moves mail, so the grant is the
-  exact command `cti-mailbox --dry-run`, without `:*`: nothing can be appended
-  to it and the bare command is not matched. Until 1.6 the polarity was the
-  other way (bare = dry run, `--for-real` moved); when it flipped, the grant
-  was changed with it, and a test (`test_lanes.py`) fails if the bare command
-  or `--for-real` is ever granted. Moving mail is a scheduled decision, not a
-  beat-time one.
+- **`cti-mailbox`, in any mode.** It moves mail, so the grant was the exact
+  command `cti-mailbox --dry-run`, without `:*`: nothing could be appended to
+  it and the bare command was not matched. That preview still reads the
+  mailbox with Graph's secrets, so the credential split (Secrets, above)
+  removed it too; the operator runs it by hand when a beat asks. A test
+  (`test_lanes.py`) fails if the bare command or `--for-real` is ever
+  granted. Moving mail is a scheduled decision, not a beat-time one.
+- **Any lane's `--check`.** The credential checks run in
+  `cti-agent-credcheck.service`, and the beat reads their report.
 - **`run-domains` and `cti-domains`.** Not granted. The first sends to the
   security team; the second probes every domain we own and advances last
   week's baseline, so an extra run would swallow a week's changes. The
@@ -1172,6 +1251,55 @@ deterministic Go only (`cti-triage`). No model is ever given the token.
 
 Model usage is rationed by `cti-budget` — window and daily ceilings with
 exponential backoff — so an agent loop cannot consume a shared subscription.
+
+---
+
+## The org pack: notes the beat reads
+
+What one organization adds to the fleet's prompts lives in its org pack
+([docs/org-pack.md](docs/org-pack.md)): notes appended to the orchestrator's
+`CLAUDE.md` and to the supplier, triage-reader and triage-judge prompts, and
+extra skills for the orchestrator. The installer composes them on every
+install and update.
+
+**The pack steers the beat**, the process that reads untrusted mail. Text in
+the pack is instructions to a model with tools. So it is held to the rules
+the installed prompts are, and a pack that could be rewritten by the service
+account would undo the steering audit and the root-owned orchestrator
+directory described under Autonomy gates.
+
+**`fleet-kit/bin/org-pack check` refuses the install**, before anything is
+installed, if the pack:
+
+- **isn't root-owned, or is group- or world-writable** (any file or folder).
+  Otherwise the service account, or anyone in its group, could rewrite what
+  the beat is told. The installer checks with `--root-owned`.
+- **holds a symlink.** A link could point the installer at a file outside the
+  pack.
+- **holds a file larger than 64 KB.**
+- **holds a file the layout doesn't name**, or notes for an agent that isn't
+  a core agent. A misspelt name is refused by name rather than silently
+  ignored.
+- **reuses a core skill's name.** A pack adds skills; it cannot replace
+  `/checkin` or any other core skill.
+
+**Additive only, and the core text wins.** Each file is appended after the
+core text under `## Organization notes`, with a line saying the notes add to
+the instructions above and never override them: where the two disagree, the
+core text wins. A pack cannot remove a hard rule, widen the grant or change
+the bash guard. Those are code, not prose, so a pack that tries only produces
+a beat that is told something the guard still refuses. A skill dropped from
+the pack is removed from the box on the next install, so a stale skill can't
+linger.
+
+**One pack, in one place.** A fork commits the pack as `org/` at the top of
+its repository; a box installed from an upstream clone keeps it in
+`/etc/cti-agent/org/`. Both at once is refused, because there would be two
+answers to which notes apply. Upstream never ships an `org/` folder.
+
+**What this does not protect against.** Whoever writes the pack is trusted:
+an operator or fork owner who puts bad instructions in it gets a beat that
+follows them, within the grant. See "One fleet per organization" above.
 
 ---
 
@@ -1392,16 +1520,78 @@ behind.
 
 ---
 
+## Where it is installed, and undoing an update
+
+**A fork can move the install, and the root installer still runs no fork
+code to find out where.** By default the fleet uses `/opt/cti-agent`,
+`/etc/cti-agent`, `/var/lib/cti-agent`, `/var/log/cti-agent` and the
+`ctiagent` account. A fork that needs other paths commits a `layout.env`
+([docs/layout.md](docs/layout.md)). The installer and the updater run as
+root and the file sits in a checkout, so `fleet-kit/layout.sh` **reads it,
+never sources it**: only `KEY=value` lines with known keys. Any of these
+stops the install before anything changes:
+
+- an unknown key, or a line that isn't `KEY=value`
+- a path that isn't absolute and plain (letters, digits, `. _ - /`), holds
+  `..`, or is `/`
+- one directory inside another, or a new path that holds a default path
+- a path under `/home`, `/root`, `/tmp`, `/var/tmp`, `/run`, `/proc`, `/sys`,
+  `/dev` or `/boot`, which the units' `ProtectHome=yes` and `PrivateTmp` hide
+  or which are not the fleet's to use
+- an account name that isn't lower case
+- a repository that isn't an `https://`, `ssh://` or `git@` URL
+
+The units keep their hardening when moved: `StateDirectory=` and
+`LogsDirectory=` become `ReadWritePaths=` for the layout's directories, so
+`ProtectSystem=strict` still makes everything else read-only. The Go binaries
+get the paths stamped at build time (`internal/layout`), and a test fails if
+any other Go file names one of them. Unset, every path is what it was.
+
+**A fork's box builds the fork.** The installer used to take the Go source
+from a hard-coded upstream URL, so a fork's box built upstream's code next to
+the fork's runners. It now uses the kit's own `origin`, or `LAYOUT_REPO`.
+
+**An update can be undone.** `cti-agent-update --for-real` snapshots what the
+installer replaces before it runs: the kit's and the Go source's commits,
+the code and config directories, the fleet's systemd units and a copy of
+`memory.db`. Snapshots go in `/var/lib/cti-agent-update/`, root only, the
+last three kept, and follow the layout. If the installer fails, the updater
+puts the snapshot back whole and exits with the installer's status, so a
+half-applied update does not keep running. `cti-agent-update --rollback
+--dry-run|--for-real` puts back the latest snapshot by hand (not
+`memory.db`, which the lanes have written since), and refuses while a lane
+is running. `cti-agent-doctor`, read-only, runs at the end of every update
+and reports the version, the config check, failed units, timers, the
+credential report, the org pack and `run-checkin --audit`.
+
+---
+
 ## Build and release gates
 
 `task ship` is the only thing that pushes, and it stops at the first failure:
 
 ```
-fmt → build → test → lint → scan → gosec → govulncheck → lint:py → bandit → lint:shell → push
+fmt:check → build → test → lint → scan → gosec → govulncheck → lint:py → bandit → lint:shell → sbom → lane:check → release:check → push
 ```
 
 It exists because a push once outran a red test when the two were separate
-commands.
+commands. `lane:check` fails when a generated unit is stale or the beat's
+grant differs from what the lanes declare (Autonomy gates, above).
+`release:check` fails when the latest tag's own commit has no CHANGELOG
+section for it, or the cheat sheet names another release. The push is
+`git push`: it pushes `main`, never tags.
+
+**A pushed tag never moves.** Every box's `cti-agent-update` pulls tags, and
+a tag that moved under it stops that box's update. A moved tag is also how a
+release would silently change after people checked it. So a tag found wrong
+after it is pushed is never moved or deleted: the fix is the next version (a
+new release candidate), with its own CHANGELOG heading, and the old tag and
+its release stay as they are. GitHub can enforce this with a tag ruleset
+that refuses updating or deleting any tag, created once by the repository's
+owner (a fork's owner does the same for the fork). The command, and how to
+pause it for a history rewrite, are in [RUNBOOK.md §11i](RUNBOOK.md#11i-cutting-a-release).
+When a tag did move upstream, the updater prints the two `git tag -d` commands
+for that box and runs neither.
 
 ![From the laptop to production: task ship gates every push, the Fedora installer is idempotent, and a sync workflow copies each release tag to the company GitHub, where PrimeSec AI scans it.](docs/cti-agent-flow.svg)
 
@@ -1442,6 +1632,16 @@ a run once reported three occurrences of an issue that had twenty-six.
   means nothing is clickable. Links from mail are additionally unwrapped from
   Proofpoint and pinned to an allowlist of specific Qualys pods, not
   `*.qualys.com`.
+- **Which Qualys hosts are trusted comes from configuration, never from
+  mail.** The allowlist was the four US pods, so on any other Qualys
+  platform every report link was refused. `cti-appscan`, `cti-appreport` and
+  `cti-vmscan` now also accept the UI host of the pod named in
+  `QUALYS_BASE_URL` (an `https://qualysapi.X` base gives `qualysguard.X`),
+  plus any hosts in `QUALYS_PORTAL_HOSTS`. Each must be a plain lower-case
+  host name of at least three labels: a wildcard, port, path or scheme stops
+  the run before any link is checked. The US pods stay accepted. Whoever
+  sets `QUALYS_BASE_URL` already decides where the Qualys credentials go, so
+  trusting that pod's UI host adds no one new to trust.
 - **Log injection (CWE-117)**: log calls in the ingest lane that carry outside
   text pass through a sanitiser that replaces control characters, so a newline
   in a path or a parse error cannot forge a journal record. A forged record in
@@ -1643,6 +1843,11 @@ nor the portal reports the effective scope.
   deleted or replaced the day's real files and the domains website list. Dry
   runs now write under `dryrun/<lane>/` and take the lane lock (Test sends,
   above).
+- ~~The settings generator read comments as calls.~~ A runner's comment
+  naming `/opt/cti-agent` granted it every secret the `cti-agent` wrapper
+  reads; comment lines no longer count (Secrets, above).
+- ~~The check-in unit held every lane's secrets.~~ The credential checks run
+  in their own unit, and the check-in imports six (Secrets, above).
 
 **Worth fixing**
 
@@ -1716,24 +1921,28 @@ nor the portal reports the effective scope.
 
 A short checklist, in order:
 
-1. Create the Entra app with **only** the permissions you will use.
-2. Apply an Application Access Policy confining it to the CTI mailbox, and
+1. Give the fleet its own box, for one organization only. Multi-tenant use is
+   unsupported (Trust boundaries, above).
+2. Create the Entra app with **only** the permissions you will use.
+3. Apply an Application Access Policy confining it to the CTI mailbox, and
    verify with `Test-ApplicationAccessPolicy`, **before** granting consent.
-3. Set `VM_ALLOW_TO` **and** `DIGEST_TO` before the first send. There is no
+4. Set `VM_ALLOW_TO` **and** `DIGEST_TO` before the first send. There is no
    default address anywhere, so an install with neither refuses rather than
    guesses — but note that leaving `VM_ALLOW_TO` unset does not refuse: it
    falls back to `DIGEST_TO`, and `FLEET_OPERATOR_EMAIL` is always allowed.
    The gate is only as narrow as those two variables.
-4. Set `FLEET_OPERATOR_EMAIL`, so alert mail never falls back to the whole
+5. Set `FLEET_OPERATOR_EMAIL`, so alert mail never falls back to the whole
    distribution list.
-5. Decide `REPORT_HOSTNAMES` deliberately, and set `REPORT_REDACTION_SALT` if
+6. Decide `REPORT_HOSTNAMES` deliberately, and set `REPORT_REDACTION_SALT` if
    you choose `redact` — without it the pseudonyms are not protective.
-6. Add `UMask=0077` to the units, so the Python-written digest and enriched
+7. Add `UMask=0077` to the units, so the Python-written digest and enriched
    JSON are not group-readable.
-7. Confirm `fleet.env` is `0600`, owned by the service account, and correctly
-   labelled if SELinux is enforcing.
-8. Run every lane with `--dry-run` and read the output before enabling a timer.
-9. For mailbox cleanup specifically, dry-run for several days and confirm the
+8. Confirm `fleet.env` (or each file in `fleet.d/`) is `0640 root:ctiagent`,
+   so the service account can read it and not change it, holds no secret
+   (those are in `/etc/credstore.encrypted`), and is correctly labelled if
+   SELinux is enforcing.
+9. Run every lane with `--dry-run` and read the output before enabling a timer.
+10. For mailbox cleanup specifically, dry-run for several days and confirm the
    archive list contains nothing but advisories before `--for-real` goes
    anywhere near a timer.
 

@@ -11,6 +11,10 @@ fleet.env
 # comments and no values, the files cti-agent-onboard and the installer ship.
 # A test fails if any generated file is not tracked.
 !fleet-kit/fleet/fleet.d.example/*.env
+# And a fork's layout.env (docs/layout.md): paths and an account name, no
+# secrets, and meant to be committed. Upstream never ships one; a test fails
+# if it does.
+!/layout.env
 config.local.yaml
 
 # build outputs

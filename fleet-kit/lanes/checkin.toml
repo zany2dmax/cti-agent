@@ -6,7 +6,8 @@ summary = "The orchestrator's heartbeat: one /checkin beat of the Claude Code ag
 # Settings whose names start with these live in this lane's fleet.d file
 # (scripts/settings-manifest); the longest matching prefix wins.
 setting_prefixes = ["CHECKIN_", "FLEET_BUDGET_"]
-# The check-in runs every lane's credential check, so it loads every lane's file.
+# Its credcheck unit runs every lane's credential check, and the beat reads
+# what every lane did, so this lane loads every lane's settings file.
 all_settings = true
 # The fleet-wide logins, checked daily by run-credcheck with each lane's own.
 credential_checks = ["cti-mailer", "cti-jira"]

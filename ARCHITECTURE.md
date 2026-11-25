@@ -228,10 +228,32 @@ flowchart TB
 | Primitive | Here | Why it exists |
 |---|---|---|
 | **Orchestrator** | A Claude session every 2 hours | Judgment. Decides what to chase and what to say nothing about |
-| **Executor lanes** | Ten systemd timers, plus the heartbeat's (Patch Tuesday's is off for now; the operator runs that lane by hand). Advisory triage runs inside the daily digest's unit | Deterministic work. Each does one thing and cannot reach a human |
+| **Executor lanes** | Ten systemd timers, plus the heartbeat's and the daily credential checks' (Patch Tuesday's is off for now; the operator runs that lane by hand). Advisory triage runs inside the daily digest's unit. A box may run only some lanes (`FLEET_LANES`) | Deterministic work. Each does one thing and cannot reach a human |
 | **Heartbeat** | `cti-agent-checkin.timer` | Turns a program into a presence. It wakes whether or not you asked |
 | **Message board** | Append-only markdown | How parts that never run at the same time talk to each other |
 | **Persistent memory** | SQLite | Continuity. Without it every beat is a stranger starting over |
+
+### How a lane is defined
+
+Each lane is described once, in `fleet-kit/lanes/<lane>.toml`: its board
+handles, a summary, the settings that belong in its `fleet.d` file, its
+credential checks, what it adds to the beat's grant, and per unit the command,
+timeout and nice level. `scripts/lanes --write` (`task lane:write`) generates
+from the manifests every lane's `.service` unit, the lane table in the
+orchestrator's `CLAUDE.md`, the lanes every verdict must account for
+(`internal/checkin/lanes_gen.go`), `lanes.list` for the tools on the box and
+the `fleet.d.example/` files. Timers stay hand-written, with their reasons,
+and `task lane:check` (in `task ship`) fails when one disagrees with its
+manifest. [docs/lane-manifest.md](docs/lane-manifest.md) has the schema.
+
+Three things a fork changes live outside core files. Settings say who you are
+and what you run; `FLEET_LANES` says which lanes this box runs. The **org
+pack** (`org/` in a fork, `/etc/cti-agent/org/` on a box installed from
+upstream) holds what one organization adds to the prompts; the installer
+appends it to the core text on every install
+([docs/org-pack.md](docs/org-pack.md)). A fork's `layout.env` moves the code,
+config, state and log directories and the service account
+([docs/layout.md](docs/layout.md)).
 
 ### What each lane adds
 
@@ -284,6 +306,9 @@ is the join across them; the rest report on their own.
   against the model subscription so a crash loop cannot exhaust it, and ending
   every beat with a `cti-checkin/1` verdict checked against counts the model
   cannot change
+- **Will tomorrow's runs get past their logins?** — `run-credcheck`, daily at
+  05:30 in its own unit: every in-use lane's `--check`, one line each in
+  `reports/credcheck.txt`, which the heartbeat reads
 - **Can we show what the fleet did?** — the audit trail: one RFC 5424 syslog
   line for every mail sent or moved, every Jira write and every owners change,
   kept 120 days and forwardable to a SIEM
@@ -294,7 +319,10 @@ The orchestrator has no mailbox, no shell and no ability to address mail. It
 may call a short allowlist of commands — named **per subcommand**, so it can
 write its own notes but cannot record a digest as sent, rewrite a finding, or
 mark a monthly release delivered — and nothing else. It cannot run any lane:
-every one of them sends or moves mail, and timers (or the operator) own them. Its only route to a
+every one of them sends or moves mail, and timers (or the operator) own them. It does not run
+the credential checks either: those run in their own unit, `cti-agent-credcheck`, which holds
+the lanes' secrets, and the beat reads their report. So the unit that reads untrusted mail holds
+only the Claude credential and the Graph secrets `cti-alert` needs. Its only route to a
 person is `cti-alert`, which has no recipient argument. It reads the journal
 only through `fleet-journal`, which takes `cti-agent-*` units and no option that
 writes, and lists timers only through `fleet-timers`, which takes `--all` and
@@ -370,6 +398,35 @@ absent `FLEET_HOME` — each means *report more*, never *report less*. The
 recurring bug in this system was never a crash; it was a check that ran and had
 no effect, or a refusal indistinguishable from a quiet day.
 
+**The beat holds no lane's secrets.** Checking that a lane's login still
+works needs that lane's credentials, and the heartbeat is the unit that reads
+untrusted mail. So the checks run in `cti-agent-credcheck.service` and write
+`reports/credcheck.txt`; the beat reads the file. A report line that contains
+a stored credential's value is withheld whole. The beat's grant is declared
+lane by lane (`beat_grants`), and `task lane:check` fails when `run-checkin`
+grants anything no lane declared.
+
+**A lane is one file, not eight.** The units, the orchestrator's lane table
+and the verdict's lane list are generated from the lane's manifest, and the
+checks fail when a hand-written timer, a unit's command or the commands
+manifest disagree with it. A forker adds a manifest, not a copy of a unit.
+
+**One fleet, one organization.** Every lane runs as one service account and
+the heartbeat reads every lane's reports, so the box is one trust boundary.
+Running several organizations on one box is not supported; give each its own
+fleet and box ([SECURITY.md](SECURITY.md#one-fleet-per-organization)).
+
+**An organization's notes are added, never edited in.** The org pack is
+appended to the core prompts on every install, under a heading that says the
+core text wins. An update never overwrites the notes, and a fork's pull from
+upstream never conflicts with them. The installer refuses a pack that isn't
+root-owned, holds a symlink, or reuses a core skill's name.
+
+**An update can be undone.** `cti-agent-update --for-real` snapshots the code,
+config, units and a copy of `memory.db` before the installer runs, and puts
+it all back if the installer fails. `--rollback` restores the latest snapshot
+by hand. `cti-agent-doctor` then checks the box, one line per check.
+
 **Reports are targeting lists.** They pair "exploitable" with "these machines",
 are written `0600`, are gitignored, and go only to an allowlisted internal
 distribution list. See [RUNBOOK → Report
@@ -408,6 +465,19 @@ sensitivity](RUNBOOK.md#13-report-sensitivity).
 | `cti-audit` | `run-mailbox-cleanup`, daily (`--prune`); `fleet-owners` and scripts (`--action`); by hand (`--check`) | The audit trail's command. The Graph and Jira clients write their own events; this writes one for a script, prunes `audit-DATE.log` files past `AUDIT_RETAIN_DAYS` (120), and checks that the trail is writable and the optional syslog collector (`AUDIT_SYSLOG_ADDR`) reachable |
 | `cti-podprobe` | by hand | Reads one window of Proofpoint on Demand's Log API and prints aggregate counts: events per direction, routes, DMARC and SPF results, the From domains and DKIM of outbound mail. Built to learn the log before the domains lane relied on it; the domains lane reads the gateway through `internal/domains/podgw` |
 
+`run-credcheck` (bash, `cti-agent-credcheck.timer`, daily 05:30) runs the
+`--check` of every lane the box runs, with those lanes' secrets, and writes
+`reports/credcheck.txt` for the heartbeat. `cti-mailer --check`, `cti-jira
+--check` and each lane's own check run there, not in the beat.
+
+Two root tools in `fleet-kit/bin/` (Python, installed in `/usr/local/sbin`)
+set up and check a box: `cti-agent-onboard` asks which lanes the box runs,
+fills the settings they need and stores their secrets through
+`cti-agent-secrets set`; `cti-agent-doctor` is read-only and prints one line
+per check (version, `fleet-config check`, failed units, timers, today's
+credential report, the org pack, `run-checkin --audit`). `cti-agent-update`
+runs it at the end of every update.
+
 `fleet-owners` (Python, beside `fleet-db`) keeps the application owners in
 `/etc/cti-agent/owners.db` and writes the `owners.json` snapshot `cti-appscan`
 and `cti-mailer --lane owner` read: Go never opens a SQLite file.
@@ -445,6 +515,12 @@ ARCHITECTURE.md                this page: how it works, the decisions, the layou
 INTERFACES.md                  the Go interfaces a new tool plugs into
 HARNESS.md                     the agent harness: traces, evals, the checked verdict, shared model-lane rules
 LANES.md                       every lane on one page: what, when, AI or not, who gets it
+INSTALL.md                     a new box, to a passing cti-agent-doctor
+FORKING.md                     making the fleet your organization's
+CONTRIBUTING.md                ship gates, manifest rules, the no-dependency rule
+docs/lanes.md                  generated per-lane reference: units, schedules, settings, checks
+docs/                          lane-manifest.md, org-pack.md, layout.md: the manifest, the
+                               org pack, the install layout
 BACKLOG.md                     what is planned, and what is only an idea
 
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown
@@ -485,7 +561,8 @@ internal/audit/                the audit trail: RFC 5424 syslog lines, retention
 internal/useragent/            the User-Agent the fleet sends, naming its contact mailbox
 internal/renderguard/          a test: no Go file formats an unescaped value into HTML
 internal/sanitize/             cleans command output before the orchestrator reads it
-internal/checkin/              parses and checks the heartbeat's cti-checkin/1 verdict
+internal/checkin/              parses and checks the heartbeat's cti-checkin/1 verdict;
+                               lanes_gen.go (generated): the lanes it must account for
 internal/redact/               removes tax ids, bank and card numbers from text bound for a model
 internal/falcon/               read-only CrowdStrike Falcon client (Hosts, Discover, IOCs, Alerts)
 internal/cti/                  CTI parsing and CVE extraction
@@ -532,7 +609,17 @@ internal/vulnlookup/noop/      no scanner: exercises extraction only
 man/man1/                      a man page for every operator command
 
 fleet-kit/                     the always-on fleet (see fleet-kit/README.md)
+fleet-kit/lanes/               one manifest per lane (<lane>.toml): units, settings prefixes,
+                               credential checks, beat grants (docs/lane-manifest.md)
+fleet-kit/layout.sh            reads and checks a fork's layout.env (docs/layout.md)
 fleet-kit/bin/dev-run          local pipeline runner: doctor/ingest/enrich/brief/send
+fleet-kit/bin/cti-agent-onboard  root tool: a box's lanes, their settings and secrets
+fleet-kit/bin/cti-agent-doctor root tool, read-only: is this box healthy?
+fleet-kit/bin/cti-agent-secrets  root tool: store or rotate a secret (systemd credentials)
+fleet-kit/bin/cti-agent-settings root tool: split fleet.env into core plus one file per lane
+fleet-kit/bin/org-pack         checks an org pack, and composes it onto the core prompts
+fleet-kit/update-fedora.sh     cti-agent-update: snapshot, install, roll back on failure;
+                               --rollback by hand (snapshots in /var/lib/cti-agent-update)
 fleet-kit/fleet/lanes/         feeds.txt, the feed list cti-scout polls (no code)
 fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-appscan,
                                run-appowners, run-vmscan, run-supplier, run-domains,
@@ -540,18 +627,32 @@ fleet-kit/fleet/bin/           run-digest, run-checkin, run-patchtuesday, run-ap
                                fleet-journal, fleet-timers, fleet-config
 fleet-kit/fleet/share/         model-lane.sh (the controls every model lane shares),
                                fleet-mode.sh, the CLI's usage and tab completion
-fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions
-                               (installed to /opt/cti-agent/orchestrator)
+fleet-kit/fleet/CLAUDE.md      the orchestrator's standing instructions, its lane table
+                               generated (installed to /opt/cti-agent/orchestrator)
+fleet-kit/fleet/lanes.list     generated: each lane, its units, checks and programs
+                               (in /opt/cti-agent/share; FLEET_LANES names lanes from it)
+fleet-kit/fleet/fleet.d.example/  generated: fleet.env.example, one file per lane
+fleet-kit/fleet/lane-settings.list  generated: each lane's settings and secrets, for onboard
 fleet-kit/fleet/checkin-settings.json  root-owned settings for the beat
 fleet-kit/fleet/agents/        triage-reader, triage-judge (advisory triage), supplier: no-tools agents' instructions
 fleet-kit/fleet/skills/        /checkin, /cti-digest, /scout-sweep, /patch-tuesday
-fleet-kit/fleet/systemd-fedora/ service + timer pairs, FHS layout for Fedora/RHEL
+fleet-kit/fleet/systemd-fedora/ service + timer pairs, FHS layout for Fedora/RHEL;
+                               each .service generated from its manifest, each .timer
+                               hand-written (cti-agent-credcheck.timer: daily 05:30)
 fleet-kit/install-fedora.sh    the installer: code in /opt (root-owned), config
-                               in /etc, state in /var/lib
+                               in /etc, state in /var/lib (or where layout.env says);
+                               adds the org pack to the core prompts
 fleet-kit/tests/               lane tests (stdlib unittest, no network)
 fleet-kit/tests/evals/         the heartbeat's eval scenarios (task eval:checkin)
+scripts/lanes                  the lane generator: --write, --check (task lane:check), --list
+scripts/settings-manifest      each unit's settings and credentials blocks, settings.manifest
 scripts/                       sbom.py (task sbom), release-notes.sh, healthcheck.sh,
                                history scrub, cheatsheet-header.tex (task cheatsheet:pdf)
+examples/org-pack/             a sanitized example of every org pack file
+org/                           a fork's org pack; never in upstream (/etc/cti-agent/org on a box)
+layout.env                     a fork's install layout; never in upstream
+.claude/skills/                Claude Code skills for a fork: /onboard, /add-lane,
+                               /add-provider, /update-fleet
 .github/workflows/release.yml  a GitHub Release, with its SBOM, for every release tag
 ```
 

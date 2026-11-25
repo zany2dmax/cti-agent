@@ -416,6 +416,10 @@ The lanes and tools that watch the fleet rather than the estate:
 - `cti-audit` — every mail sent or moved, every Jira write and every owners
   change as one RFC 5424 syslog line, kept 120 days, forwardable to a SIEM. The
   heartbeat cannot write to or delete the trail it is accountable to.
+- `run-credcheck` — every in-use lane's `--check`, daily at 05:30 in its own
+  unit, written to `reports/credcheck.txt`. The heartbeat reads the report
+  rather than running the checks, so the unit that reads untrusted mail never
+  holds the lanes' secrets.
 
 These feel like plumbing. They're the difference between a demo and something
 you leave running: a fleet that can say what it did, prove the AI part told
@@ -586,7 +590,15 @@ useful thing to have.
 
 ## Adding a lane
 
-The pattern's real payoff is that extension is cheap and bounded. To add one:
+The pattern's real payoff is that extension is cheap and bounded. In this
+repository a lane starts as one manifest, `fleet-kit/lanes/<lane>.toml`, and
+`task lane:write` generates its systemd units, its row in the orchestrator's
+lane table and its place in the verdict's lane list. Nobody writes a unit by
+hand; the timer is the one file you write, and `task lane:check` holds it to
+the manifest. [docs/lane-manifest.md](docs/lane-manifest.md) has the schema,
+and the `/add-lane` Claude Code skill (`.claude/skills/add-lane`) walks a fork
+through every step, including the parts no generator writes. The decisions
+are the same whatever writes the files:
 
 1. **Name the axis.** What question does this answer that no existing lane can?
    If it doesn't add an axis, it's a feature on an existing lane, not a new one.
@@ -598,9 +610,13 @@ The pattern's real payoff is that extension is cheap and bounded. To add one:
    audience gets its own recipient list that fails closed — not a section in
    someone else's email, and not a fallback to the default list when its own
    is unset.
-5. **Give it a failure mode that is loud.** `OnFailure=cti-agent-alert@%n`.
-6. **Tell the orchestrator it exists.** `CLAUDE.md` and the skills are the
-   agent's actual instructions. A tool the orchestrator doesn't know about is a
+5. **Give it a failure mode that is loud.** `OnFailure=cti-agent-alert@%n`,
+   which every generated unit carries. Give it a `--check` too, listed in the
+   manifest's `credential_checks`, so a broken login shows up in the next
+   morning's credential report rather than at the lane's next run.
+6. **Tell the orchestrator it exists.** The manifest generates its lane-table
+   row; the notes on what to watch for are still written by hand. `CLAUDE.md`
+   and the skills are the agent's actual instructions. A tool the orchestrator doesn't know about is a
    tool that never gets used — and stale instructions produce wrong decisions,
    not just bad documentation.
 7. **Write the test before the integration.** Stub the network. The lane tests
