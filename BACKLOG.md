@@ -168,6 +168,15 @@ The order and reasoning are in [HARNESS.md](HARNESS.md).
 
 ## The platform
 
+- **A health report for each lane that can go quiet.** The AppSec audit
+  (`run-appaudit`, `reports/appscan-audit.json`) is the pattern: a read-only
+  unit with the lane's own credentials writes what the lane *didn't* cover,
+  and the heartbeat reads it. With no new grant and no secret in the beat's
+  unit, it escalates once and tracks the problem. Candidates: VM scan
+  schedules that stopped launching between Monday reports, domains in
+  `domains.txt` the weekly check couldn't reach, feeds the scout hasn't heard
+  from. Each one is a `[[unit]]` in its lane's manifest, a JSON report, and a
+  section in the orchestrator's instructions.
 - **Narrow each unit's secrets from "could read" to "does read."** The grants
   are generated from which programs a unit could run, so most lanes get more
   than they use (the check-in was narrowed by hand in 2.0). Do it one lane at
