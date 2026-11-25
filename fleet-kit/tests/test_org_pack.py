@@ -48,6 +48,7 @@ class TheExamplePack(Base):
     def test_the_example_holds_every_kind_of_file(self):
         names = {str(p.relative_to(EXAMPLE)) for p in EXAMPLE.rglob("*") if p.is_file()}
         self.assertIn("README.md", names)
+        self.assertIn("recipe.md", names)
         self.assertIn("orchestrator.md", names)
         for agent in sorted(d.name for d in (CORE / "agents").iterdir() if d.is_dir()):
             self.assertIn(f"agents/{agent}.md", names, "the example has no notes for a core agent")

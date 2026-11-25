@@ -12,6 +12,8 @@
 #   agents/<agent>.md          appended to agents/<agent>/CLAUDE.md (a core agent)
 #   skills/<name>/SKILL.md     an extra skill (never one of the core skills' names)
 #   README.md                  for people; not installed
+#   recipe.md                  what this fork added to the core (providers,
+#                              lanes), one line each; for people, not installed
 #
 # ADDITIVE ONLY. A pack adds notes after the core text and new skills beside
 # the core ones. It cannot replace or remove a core instruction: the hard
@@ -85,7 +87,7 @@ cmd_check() {
     fi
     if [ ! -f "$p" ]; then add "$rel: not a regular file"; continue; fi
     case "$rel" in
-      README.md|orchestrator.md) ;;
+      README.md|orchestrator.md|recipe.md) ;;
       agents/*.md)
         name="${rel#agents/}"; name="${name%.md}"
         [ -d "$core/agents/$name" ] || add "$rel: there is no core agent called $name (the agents are: $(ls "$core/agents" | tr '\n' ' '))" ;;

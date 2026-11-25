@@ -51,6 +51,7 @@ rather than the fleet:
 ```
 org/                         (or /etc/cti-agent/org/ on a box)
   README.md                  for people; not installed
+  recipe.md                  what this fork added to the core, one line each; not installed
   orchestrator.md            added after the orchestrator's CLAUDE.md
   agents/supplier.md         added after agents/supplier/CLAUDE.md
   agents/triage-reader.md    added after agents/triage-reader/CLAUDE.md

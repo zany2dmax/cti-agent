@@ -127,6 +127,10 @@ key would otherwise be silently ignored. `exec` must run something under
 
 ## Adding a lane
 
+In a fork, the `/add-lane` Claude Code skill (`.claude/skills/add-lane`) walks
+through all of this, including the parts no generator writes. `/add-provider`
+does the same for a new vendor behind an existing interface.
+
 1. Write `fleet-kit/lanes/<lane>.toml`.
 2. Write its timer in `fleet-kit/fleet/systemd-fedora/`, if it has one.
 3. Run these, then review the diff:

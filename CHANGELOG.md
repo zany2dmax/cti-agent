@@ -39,6 +39,25 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Skills for forkers, and the registry tests they rely on.** In
+  `.claude/skills/`, for Claude Code working in a fork:
+  - **`/add-provider`** puts a new vendor behind an existing interface
+    (INTERFACES.md section 5): the package, its one selection line,
+    settings, tests against a fake server, a probe flag, docs and a recipe
+    line.
+  - **`/add-lane`** walks a new lane from command to timer, including the
+    parts no generator writes: the guard's handle list, the orchestrator's
+    notes, the check-in skill's row and count, RUNBOOK section 9,
+    ARCHITECTURE.md and the audit-log classification.
+
+  Two new tests fail, naming the package, when a vendor package isn't
+  reached from its one selection point. `internal/vulnlookup/providers` gains
+  `Names` (the values `LOOKUP_PROVIDER` takes), with a test that every name
+  builds a distinct provider and every provider package has a name.
+  `fleet-kit/tests/test_registries.py` checks the appscan and domains vendors
+  the same way. The org pack may now hold a `recipe.md`: the fork's list of
+  what it added, kept for the person pulling upstream, and not installed.
+
 - **The credential checks run in their own unit, not the check-in's.**
   `run-credcheck` (`cti-agent-credcheck.timer`, daily 05:30) runs every
   in-use lane's `--check`, and writes one line per check to

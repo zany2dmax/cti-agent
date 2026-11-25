@@ -14,6 +14,12 @@ import (
 	"github.com/zany2dmax/cti-agent/internal/vulnlookup/qualys"
 )
 
+// Names are the values LOOKUP_PROVIDER takes, one per provider package. A
+// provider added to Build and not here, or here and not in Build, fails
+// TestEveryNameBuilds; a provider package under internal/vulnlookup that no
+// name reaches fails TestEveryProviderPackageHasAName.
+var Names = []string{"qualys", "crowdstrike", "none"}
+
 // Build returns the provider LOOKUP_PROVIDER names. An unknown value is an
 // error, never a silent fallback.
 func Build(cfg config.Config) (vulnlookup.LookupProvider, error) {
