@@ -199,13 +199,24 @@ info "full schedule: systemctl list-timers 'cti-agent-*'"
 
 # ── journal ──────────────────────────────────────────────────────────────────
 section "Journal since boot"
-errs="$(journalctl -b -u 'cti-agent-*' --no-pager -q 2>/dev/null \
+# The heartbeat's trace echoes every shell call its model makes. A probe such
+# as "test -f X && echo yes || echo no" exits 1 by design and is traced as
+# "[trace]   Bash -> ERROR: Exit code 1 no", and the traced command line
+# ("[trace] turn N tool Bash: ...") can quote any word. Neither is a fleet
+# failure, so they are counted apart. "[trace] API ERROR" is still an error.
+jall="$(journalctl -b -u 'cti-agent-*' --no-pager -q 2>/dev/null || true)"
+probe_re='\[trace\] +[A-Za-z_]+ -> ERROR:'
+errs="$(printf '%s\n' "$jall" | grep -Ev "$probe_re|\[trace\] turn [0-9]+ tool " \
         | grep -E 'FAILED|ERROR|REFUSING|Traceback|panic:' || true)"
+probes="$(printf '%s\n' "$jall" | grep -Ec "$probe_re" || true)"
 if [ -n "$errs" ]; then
   warn "$(printf '%s\n' "$errs" | wc -l) error line(s) since boot; the last ten:"
   printf '%s\n' "$errs" | tail -10 | cut -c1-200 | show
 else
   pass "no FAILED/ERROR lines from cti-agent units since boot"
+fi
+if [ "${probes:-0}" -gt 0 ]; then
+  info "not counted: $probes heartbeat tool call(s) that exited non-zero (the model's own probes)"
 fi
 
 beat="$(journalctl -u cti-agent-checkin.service -n 300 --no-pager -q 2>/dev/null)"
