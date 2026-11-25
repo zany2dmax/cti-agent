@@ -82,7 +82,7 @@ the fleet's own check-in agent, which never runs it.
    Then, for each lane, its own `--check` if it has one (`fleet-kit/fleet/lanes.list`,
    third column).
 
-6. **Turn the lanes on.** RUNBOOK.md section 9 has the order and the gate
+6. **Turn the lanes on.** RUNBOOK section 9 (`docs/guides/setup.md`) has the order and the gate
    for each timer. The installer never enables a timer, and onboard doesn't
    either.
 

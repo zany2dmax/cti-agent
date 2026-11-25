@@ -603,7 +603,8 @@ def render_reference(lanes):
            "plain words; [lane-manifest.md](lane-manifest.md) explains the manifest this",
            "page is generated from. A box runs every lane unless `FLEET_LANES` names",
            "only some of them, by the names below. Secrets are never in a settings",
-           "file: store each with `sudo cti-agent-secrets set NAME`.",
+           "file: store each with `sudo cti-agent-secrets set NAME`. A lane that needs",
+           "more than this to run has an operating guide in [lanes/](lanes/).",
            "",
            "| Lane | What it is | Units |",
            "|---|---|---|"]

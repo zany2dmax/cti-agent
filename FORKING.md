@@ -100,7 +100,7 @@ On the box the installer refuses a pack that isn't root-owned, is writable by
 others, holds a symlink or a file it doesn't know, or reuses a core skill's
 name. A fork's pack and `/etc/cti-agent/org/` at once is refused too. The
 layout and every rule: [docs/org-pack.md](docs/org-pack.md) and
-[RUNBOOK 11p](RUNBOOK.md#11p-the-org-pack).
+[RUNBOOK 11p](docs/guides/configuration.md#11p-the-org-pack).
 
 ## Choosing lanes
 
@@ -157,7 +157,7 @@ defaults to what the fleet did before:
 | `JIRA_CLOSE_RESOLUTION` | `00-core.env` | The resolution set when Jira's close screen asks for one. Default `Done`. |
 
 The file is where the setting goes once settings are split per lane
-([RUNBOOK 11o](RUNBOOK.md#11o-settings-per-lane)); before that, everything is
+([RUNBOOK 11o](docs/guides/configuration.md#11o-settings-per-lane)); before that, everything is
 in `fleet.env`. Each setting's comment is in
 `fleet-kit/fleet/fleet.d.example/`.
 
@@ -234,7 +234,7 @@ task ship
 On the box: add the lane to `FLEET_LANES` if that's set, run
 `sudo cti-agent-onboard --dry-run` for its settings and secrets, run the lane
 by hand with `--dry-run`, and only then enable its timer
-([RUNBOOK 9](RUNBOOK.md#every-timer-and-its-gate)).
+([RUNBOOK 9](docs/guides/setup.md#every-timer-and-its-gate)).
 
 ## Pulling from upstream
 
@@ -295,13 +295,13 @@ box.
 
 **A pushed tag never moves.** The box's updater fetches tags, and a tag that
 moved under it stops the update. If a pushed tag is wrong, cut the next
-version instead. [RUNBOOK 11i](RUNBOOK.md#a-pushed-tag-never-moves) gives the
+version instead. [RUNBOOK 11i](docs/guides/development.md#a-pushed-tag-never-moves) gives the
 one `gh api` command that makes GitHub refuse to move or delete a tag. Your
 fork's owner runs it once, for the fork.
 
 The box stamps its version from the nearest tag in the kit, so a fork that
 merges upstream's release tags reports upstream's version. To tag a release of
-your own, follow [RUNBOOK 11i's steps](RUNBOOK.md#the-steps): `task ship`
+your own, follow [RUNBOOK 11i's steps](docs/guides/development.md#the-steps): `task ship`
 checks that the latest tag's commit has its CHANGELOG section. Pick a name
 upstream won't use, so `git fetch upstream --tags` never meets a clash. Those
 steps edit `CHANGELOG.md` and `CHEATSHEET.md`, which upstream changes too, so
@@ -319,7 +319,7 @@ just gets no Releases page.
    `org/recipe.md`.
 4. If you install outside the FHS paths, commit a `layout.env`
    (`git add -f`).
-5. Create the tag ruleset for the fork ([RUNBOOK 11i](RUNBOOK.md#a-pushed-tag-never-moves)).
+5. Create the tag ruleset for the fork ([RUNBOOK 11i](docs/guides/development.md#a-pushed-tag-never-moves)).
 6. Install a box from the fork ([INSTALL.md](INSTALL.md)), choosing only the
    lanes you have tools for.
 7. Turn off the add-on vendors you don't have, and set the vendor settings

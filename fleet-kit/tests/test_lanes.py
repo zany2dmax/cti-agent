@@ -856,7 +856,7 @@ class TestFileShape(unittest.TestCase):
         """
         root = pathlib.Path(__file__).resolve().parents[2]
         installer = (root / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
-        runbook = (root / "RUNBOOK.md").read_text(encoding="utf-8")
+        runbook = (root / "docs" / "guides" / "setup.md").read_text(encoding="utf-8")  # RUNBOOK section 9 lives here
         self.assertNotIn("Enable ONLY the daily digest", installer,
                          "the steps belong in RUNBOOK section 9, not the installer")
         self.assertIn("The fleet is running", installer)
@@ -880,7 +880,7 @@ class TestFileShape(unittest.TestCase):
         enabling lanes from the table would never turn them on.
         """
         root = pathlib.Path(__file__).resolve().parents[2]
-        runbook = (root / "RUNBOOK.md").read_text(encoding="utf-8")
+        runbook = (root / "docs" / "guides" / "setup.md").read_text(encoding="utf-8")  # RUNBOOK section 9 lives here
         table = runbook.split("### Every timer, and its gate", 1)[1].split("```", 1)[0]
         shipped = sorted(t.name for t in (root / "fleet-kit" / "fleet" / "systemd-fedora").glob("*.timer"))
         self.assertTrue(shipped, "no timers found - the path moved")
@@ -5305,7 +5305,7 @@ class SbinTools(unittest.TestCase):
                        "LOG_DIR": lay["LOG"], "FLEET_USER": lay["USER"], "FLEET_GROUP": lay["USER"]})
         for k, v in consts.items():
             layout = layout.replace("$" + k, v)
-        runbook = (self.REPO / "RUNBOOK.md").read_text()
+        runbook = (self.REPO / "docs" / "guides" / "setup.md").read_text()  # the RUNBOOK's "Where it lives"
         table = runbook[runbook.index("## Where it lives"):runbook.index("## Before you start")]
         kit = (KIT / "README.md").read_text()
         kit_table = kit[kit.index("| Path | Holds | Ownership |"):kit.index("All standard *IX locations")]

@@ -753,7 +753,7 @@ are a record, not tamper-proof evidence. Shipping them off the host is what
 makes them evidence. The trail does not replace the `changes` table in
 `owners.db`, which stays the history of the owners data, and it is not
 `fleet-trace`, which is an operational trace of the heartbeat. See
-`man cti-audit` and the [RUNBOOK](RUNBOOK.md#11l-the-audit-trail).
+`man cti-audit` and the [Operating the fleet](docs/guides/operations.md#11l-the-audit-trail).
 
 ---
 
@@ -1486,7 +1486,7 @@ it never was.
 
 **Since 1.6.6 every runner calls `cti-mailer`**, and `mailer.py` was removed
 after 1.7.2; the installer deletes it from the box. See
-[RUNBOOK → The mailer](RUNBOOK.md#11b-the-mailer).
+[The mailer](docs/guides/operations.md#11b-the-mailer).
 
 `brief.py`, the digest's email layout, **has been ported to `cmd/cti-brief`**
 (`internal/brief`), byte for byte: the Go tests compare its output with
@@ -1589,7 +1589,7 @@ new release candidate), with its own CHANGELOG heading, and the old tag and
 its release stay as they are. GitHub can enforce this with a tag ruleset
 that refuses updating or deleting any tag, created once by the repository's
 owner (a fork's owner does the same for the fork). The command, and how to
-pause it for a history rewrite, are in [RUNBOOK.md §11i](RUNBOOK.md#11i-cutting-a-release).
+pause it for a history rewrite, are in [RUNBOOK.md §11i](docs/guides/development.md#11i-cutting-a-release).
 When a tag did move upstream, the updater prints the two `git tag -d` commands
 for that box and runs neither.
 

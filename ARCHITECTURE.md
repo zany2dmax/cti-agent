@@ -429,8 +429,8 @@ by hand. `cti-agent-doctor` then checks the box, one line per check.
 
 **Reports are targeting lists.** They pair "exploitable" with "these machines",
 are written `0600`, are gitignored, and go only to an allowlisted internal
-distribution list. See [RUNBOOK → Report
-sensitivity](RUNBOOK.md#13-report-sensitivity).
+distribution list. See [Report
+sensitivity](docs/guides/operations.md#13-report-sensitivity).
 
 ---
 
@@ -521,6 +521,9 @@ CONTRIBUTING.md                ship gates, manifest rules, the no-dependency rul
 docs/lanes.md                  generated per-lane reference: units, schedules, settings, checks
 docs/                          lane-manifest.md, org-pack.md, layout.md: the manifest, the
                                org pack, the install layout
+docs/guides/                   the RUNBOOK's sections by topic: setup, configuration,
+                               development and releases, operations
+docs/lanes/                    an operating guide for each lane that needs one
 BACKLOG.md                     what is planned, and what is only an idea
 
 cmd/cti-agent/                 the agent: mailbox -> CVEs -> scanner -> markdown

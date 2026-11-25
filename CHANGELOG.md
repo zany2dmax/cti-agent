@@ -251,6 +251,22 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Changed
 
+- **The RUNBOOK is split by topic.** At 3,500 lines it was one file for
+  every job. Its sections now live in:
+  - `docs/guides/`: `setup.md` (vendor accounts, install, timers),
+    `configuration.md` (`fleet.env`, `fleet.d`, secrets, the org pack),
+    `development.md` (the local loop, man pages, releases) and
+    `operations.md` (mailer, Jira, the audit trail, troubleshooting)
+  - `docs/lanes/`: one guide each for appscan, domains, mailbox, Patch
+    Tuesday and advisory triage
+
+  Every section keeps its number and heading. `RUNBOOK.md` is now an index
+  that keeps each numbered heading as a one-line pointer, so "RUNBOOK 11n" in
+  a message, man page or older doc still finds it. Links into the RUNBOOK
+  from every other doc now point to the section's new place. The tests that
+  read section 9 and "Where it lives" read `docs/guides/setup.md`. The guides
+  are outside `docs/*.md`, which stays the set of PDF sources.
+
 - **The systemd units are generated from lane manifests**
   ([docs/lane-manifest.md](docs/lane-manifest.md)). Each lane is described
   once, in `fleet-kit/lanes/<lane>.toml`: its handles, a summary, and per unit
@@ -4245,7 +4261,7 @@ now say they are for a session with you present.
 ### Upgrade
 
 Reinstall and set two variables. The lane's timer is **not** enabled by the
-installer; see [RUNBOOK 11f](RUNBOOK.md#11f-the-weekly-application-security-lane).
+installer; see [RUNBOOK 11f](docs/lanes/appscan.md#11f-the-weekly-application-security-lane).
 
 ```bash
 # in fleet.env, both required - the mailer refuses without them

@@ -454,7 +454,9 @@ class InstallerSaysHow(unittest.TestCase):
         """Any line that runs the installer (not just names it) says --for-real
         or --dry-run, or is the updater's exec."""
         run = re.compile(r"(sudo\s+|exec\s+)\S*install-fedora\.sh(?P<rest>[^\n`]*)")
-        for f in [ROOT / "RUNBOOK.md", ROOT / "fleet-kit" / "README.md", ROOT / "fleet-kit" / "update-fedora.sh",
+        guides = sorted((ROOT / "docs" / "guides").glob("*.md")) + sorted((ROOT / "docs" / "lanes").glob("*.md"))
+        self.assertTrue(guides, "the RUNBOOK's guides moved")
+        for f in [ROOT / "RUNBOOK.md", *guides, ROOT / "INSTALL.md", ROOT / "fleet-kit" / "README.md", ROOT / "fleet-kit" / "update-fedora.sh",
                   ROOT / "fleet-kit" / "stop-fedora.sh", ROOT / "fleet-kit" / "install-fedora.sh"]:
             for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
                 m = run.search(line)

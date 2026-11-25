@@ -67,7 +67,7 @@ reports, so several organizations sharing a box is not supported
 | **explain it to someone in one page** — each lane, when it runs, whether it uses AI | **[LANES.md](LANES.md)** |
 | **understand what this is and why, in two pages, with diagrams** — start here | **[ARCHITECTURE.md](ARCHITECTURE.md)** |
 | **install it on a new box**, from an empty box to a passing `cti-agent-doctor` | **[INSTALL.md](INSTALL.md)** |
-| **get it running**, from empty checkout to a box that mails every morning | **[RUNBOOK.md](RUNBOOK.md)** |
+| **get it running**, from empty checkout to a box that mails every morning, and run it day to day: vendor accounts, configuration, each lane's guide, troubleshooting | **[RUNBOOK.md](RUNBOOK.md)**, an index into [docs/guides/](docs/guides/) and [docs/lanes/](docs/lanes/) |
 | **make the fleet your organization's**: the org pack, choosing lanes, the install layout, pulling upstream | **[FORKING.md](FORKING.md)** |
 | **change the code**: the ship gates, the manifest rules, the no-dependency rule | **[CONTRIBUTING.md](CONTRIBUTING.md)** |
 | every lane's units, schedules, settings files and credential checks (generated) | [docs/lanes.md](docs/lanes.md) |
@@ -89,12 +89,12 @@ reports, so several organizations sharing a box is not supported
 | see what a report looks like before running anything | [examples/sample-report.md](examples/sample-report.md) |
 
 Quick jumps into the runbook: [Entra app
-registration](RUNBOOK.md#1-microsoft-entra-app-registration) ·
-[configuration](RUNBOOK.md#4-configuration) · [the two-box
-workflow](RUNBOOK.md#7-the-two-box-workflow-mac-to-fedora) · [enabling
-timers](RUNBOOK.md#9-enabling-the-timers-in-order) · [verifying a
-run](RUNBOOK.md#12-verifying-a-run) · [taking a host off the
-schedule](RUNBOOK.md#11e-taking-a-host-off-the-schedule) · [known
+registration](docs/guides/setup.md#1-microsoft-entra-app-registration) ·
+[configuration](docs/guides/configuration.md#4-configuration) · [the two-box
+workflow](docs/guides/development.md#7-the-two-box-workflow-mac-to-fedora) · [enabling
+timers](docs/guides/setup.md#9-enabling-the-timers-in-order) · [verifying a
+run](docs/guides/operations.md#12-verifying-a-run) · [taking a host off the
+schedule](docs/guides/operations.md#11e-taking-a-host-off-the-schedule) · [known
 gaps](SECURITY.md#known-gaps-and-accepted-risks)
 
 **From laptop to production.** Every push passes the `task ship` gate, the
@@ -229,7 +229,7 @@ Message bodies, ticket text and credentials are never written. Forwarding to a
 collector is optional (`AUDIT_SYSLOG_ADDR`); no SIEM is bundled, and the local
 files are a record, not tamper-proof evidence. See
 [SECURITY.md](SECURITY.md#the-audit-trail),
-[RUNBOOK.md](RUNBOOK.md#11l-the-audit-trail) and `man cti-audit`.
+[Operating the fleet](docs/guides/operations.md#11l-the-audit-trail) and `man cti-audit`.
 
 ---
 
@@ -251,13 +251,13 @@ team's needs.
 ## Two ways to run this
 
 **The agent alone.** Build it, point it at a mailbox, get a markdown report. No
-systemd, no service account. [RUNBOOK → The agent
-alone](RUNBOOK.md#5-the-agent-alone).
+systemd, no service account. [The agent
+alone](docs/guides/development.md#5-the-agent-alone).
 
 **The agent inside the fleet** (`fleet-kit/`). An always-on orchestrator plus
 executor lanes that add exploitability context, prioritise Sev5–Sev1, render the
-HTML digest and mail it on a schedule. [RUNBOOK → Installing the
-fleet](RUNBOOK.md#8-installing-the-fleet), and
+HTML digest and mail it on a schedule. [Installing the
+fleet](docs/guides/setup.md#8-installing-the-fleet), and
 [fleet-kit/README.md](fleet-kit/README.md) for the complete reference.
 
 ---

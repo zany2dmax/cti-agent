@@ -60,7 +60,7 @@ Two jobs share this skill. Ask which one, or tell from what the person says:
    - **FAIL `settings`:** `sudo cti-agent fleet-config check` names each
      setting.
    - **WARN `timers`:** a lane this box runs has its timer off. Turn it on
-     per RUNBOOK section 9, or leave the lane out of `FLEET_LANES`.
+     per RUNBOOK section 9 (`docs/guides/setup.md`), or leave the lane out of `FLEET_LANES`.
    - **FAIL `credentials`:** a login broke. The line names the lane.
    - **FAIL `units`:** a unit failed. Read its journal with
      `sudo cti-agent fleet-journal -u <unit> -n 50 --no-pager`.

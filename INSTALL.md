@@ -53,10 +53,10 @@ repository it clones.
 these ready before onboarding:
 
 - Microsoft Graph: an Entra app registration and a shared mailbox, for every
-  lane that reads or sends mail ([RUNBOOK 1](RUNBOOK.md#1-microsoft-entra-app-registration)).
-- A vulnerability scanner for exposure ([RUNBOOK 2](RUNBOOK.md#2-qualys-api-access)),
+  lane that reads or sends mail ([RUNBOOK 1](docs/guides/setup.md#1-microsoft-entra-app-registration)).
+- A vulnerability scanner for exposure ([RUNBOOK 2](docs/guides/setup.md#2-qualys-api-access)),
   or `LOOKUP_PROVIDER=none` to skip it.
-- An NVD API key ([RUNBOOK 3](RUNBOOK.md#3-the-nvd-api-key)).
+- An NVD API key ([RUNBOOK 3](docs/guides/setup.md#3-the-nvd-api-key)).
 - A Claude credential, for the check-in only ([step 7](#7-claude-code-for-the-check-in)).
 
 [docs/lanes.md](docs/lanes.md) lists what each other lane needs.
@@ -80,7 +80,7 @@ won't find it).
 By default the fleet uses the FHS layout: code in `/opt/cti-agent`, settings
 in `/etc/cti-agent`, state in `/var/lib/cti-agent`, the audit trail in
 `/var/log/cti-agent`, and a service account named `ctiagent`
-([RUNBOOK: Where it lives](RUNBOOK.md#where-it-lives)).
+([RUNBOOK: Where it lives](docs/guides/setup.md#where-it-lives)).
 
 To install elsewhere, commit a `layout.env` at the top of your fork before
 installing. [docs/layout.md](docs/layout.md) has the keys and the rules.
@@ -114,7 +114,7 @@ Installed. No timer is enabled yet - that is deliberate.
 
 If it stops part-way, it says on which line, and that the box is partly
 installed. Fix the cause and run it again: it's safe to re-run. More in
-[RUNBOOK 8](RUNBOOK.md#8-installing-the-fleet).
+[RUNBOOK 8](docs/guides/setup.md#8-installing-the-fleet).
 
 ## 5. Onboard: lanes, settings, secrets
 
@@ -156,9 +156,9 @@ Working with Claude Code in your fork? The `/onboard` skill
 (`.claude/skills/onboard`) walks you through this. It runs only the read-only
 commands, and never asks for a secret.
 
-More in [RUNBOOK 9](RUNBOOK.md#9-enabling-the-timers-in-order) and
+More in [RUNBOOK 9](docs/guides/setup.md#9-enabling-the-timers-in-order) and
 `man cti-agent-onboard`. Secrets:
-[RUNBOOK 11n](RUNBOOK.md#11n-moving-secrets-into-systemd-credentials).
+[RUNBOOK 11n](docs/guides/configuration.md#11n-moving-secrets-into-systemd-credentials).
 
 ## 6. Check the settings
 
@@ -171,8 +171,8 @@ sudo cti-agent fleet-config check
 It reports settings that are required and missing, misspelt, set twice or in
 the wrong file. It never prints a value. Fix each one it names, in the file it
 names. A new box keeps every setting in `fleet.env`; splitting it into one
-file per lane is optional ([RUNBOOK 11o](RUNBOOK.md#11o-settings-per-lane)).
-What each setting means: [RUNBOOK 11m](RUNBOOK.md#11m-what-is-in-fleetenv).
+file per lane is optional ([RUNBOOK 11o](docs/guides/configuration.md#11o-settings-per-lane)).
+What each setting means: [RUNBOOK 11m](docs/guides/configuration.md#11m-what-is-in-fleetenv).
 
 ## 7. Claude Code for the check-in
 
@@ -255,9 +255,9 @@ sudo cti-agent run-vmscan --dry-run
 ## 9. Turn on the timers
 
 One lane at a time, each after its gate. The order and the gate for every
-timer are in [RUNBOOK 9: Every timer, and its gate](RUNBOOK.md#every-timer-and-its-gate),
+timer are in [RUNBOOK 9: Every timer, and its gate](docs/guides/setup.md#every-timer-and-its-gate),
 and the steps for a new box are in
-[On a new deployment](RUNBOOK.md#on-a-new-deployment-the-steps-after-the-installer).
+[On a new deployment](docs/guides/setup.md#on-a-new-deployment-the-steps-after-the-installer).
 Start with the digest alone:
 
 ```bash
@@ -333,11 +333,11 @@ the lanes have written to it since; it names the snapshot's copy.
 
 **If the fetch refuses a tag** ("would clobber existing tag"), the updater
 prints the fix and runs nothing. Run exactly what it printed. Why a tag should
-never move: [RUNBOOK 11i](RUNBOOK.md#a-pushed-tag-never-moves).
+never move: [RUNBOOK 11i](docs/guides/development.md#a-pushed-tag-never-moves).
 
 The `/update-fleet` Claude Code skill (`.claude/skills/update-fleet`) walks
 through an update with you. See also `man cti-agent-update` and
-[RUNBOOK 11d](RUNBOOK.md#11d-what-version-is-this-box-running).
+[RUNBOOK 11d](docs/guides/operations.md#11d-what-version-is-this-box-running).
 
 ## When the doctor fails
 
@@ -362,4 +362,4 @@ sudo cti-agent-doctor --json
 ```
 
 A command that works by hand while every timer fails is usually SELinux. That
-case and others: [RUNBOOK 15](RUNBOOK.md#15-when-something-breaks).
+case and others: [RUNBOOK 15](docs/guides/operations.md#15-when-something-breaks).

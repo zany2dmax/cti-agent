@@ -78,7 +78,10 @@ order, and run `task ship` at the end.
      `fleet-journal -u cti-agent-<unit>.service --since today --no-pager`,
      and the runner's `done` line). Also add its entry to the example verdict,
      and update the lane count ("all ten").
-   - **RUNBOOK section 9:** a row in the timer table, with its gate.
+   - **RUNBOOK section 9** (`docs/guides/setup.md`): a row in the timer
+     table, with its gate. If the lane needs an operating guide, it goes in
+     `docs/lanes/<lane>.md`, with its own RUNBOOK number and a pointer in
+     `RUNBOOK.md`.
    - **ARCHITECTURE.md:** the runner in the layout block, and the command in
      the commands table.
    - **`test_lanes.py` `AuditTrailUnits`:** the unit in `WITH` if it writes
@@ -99,4 +102,4 @@ order, and run `task ship` at the end.
    - add the lane to `FLEET_LANES` if that is set
    - run `sudo cti-agent-onboard --dry-run` for its settings and secrets
    - run the lane by hand with `--dry-run`
-   - only then enable its timer, as RUNBOOK section 9 says
+   - only then enable its timer, as RUNBOOK section 9 (`docs/guides/setup.md`) says

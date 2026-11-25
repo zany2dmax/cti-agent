@@ -19,7 +19,9 @@ Once per clone, install the git hooks:
 ```
 
 The `pre-commit` hook runs `gofmt` over staged Go files. `--status` checks
-that it is installed and current ([RUNBOOK.md §6](RUNBOOK.md#6-local-development-loop)).
+that it is installed and current ([RUNBOOK.md §6](docs/guides/development.md#6-local-development-loop)).
+[Developing and releasing](docs/guides/development.md) has the local loop,
+the Mac-to-box workflow, the man pages and the release steps.
 
 You need Go and [Task](https://taskfile.dev), plus the tools the gates run:
 `golangci-lint`, `staticcheck`, `gosec`, `govulncheck`, `ruff`, `bandit` and
@@ -53,7 +55,7 @@ adds `go vet` and the syntax tests, and leaves out `build`, `lane:check` and
 `release:check`. Run `task lane:check` yourself after touching a lane.
 
 `task ship` pushes `main`. It never pushes tags. Releases are tagged by the
-maintainer ([RUNBOOK.md §11i](RUNBOOK.md#11i-cutting-a-release)), and a
+maintainer ([RUNBOOK.md §11i](docs/guides/development.md#11i-cutting-a-release)), and a
 pushed tag never moves.
 
 A finding is fixed, or annotated at the line with its reason

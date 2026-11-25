@@ -1298,7 +1298,7 @@ Two specific things to check first:
 
 All optional. The fleet writes one RFC 5424 syslog line for each mail sent or
 moved, Jira write and owners change to `AUDIT_DIR`, one file per UTC day. Detail
-in [SECURITY.md](../SECURITY.md#the-audit-trail), [RUNBOOK.md](../RUNBOOK.md#11l-the-audit-trail)
+in [SECURITY.md](../SECURITY.md#the-audit-trail), [Operating the fleet](../docs/guides/operations.md#11l-the-audit-trail)
 and `man cti-audit`.
 
 | Variable | Notes |
@@ -1676,7 +1676,7 @@ own detections.
 ## The weekly AppSec report
 
 `@appscan`, `cti-agent-appscan.timer`, Fridays 07:30. Operating detail is in
-[RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application-security-lane); this is
+[RUNBOOK 11f](../docs/lanes/appscan.md#11f-the-weekly-application-security-lane); this is
 the shape of it.
 
 ### What it reads
@@ -1708,7 +1708,7 @@ status category; `JIRA_CLOSE_TRANSITION` names one when several qualify, and
 asks for one, for a project that renamed Jira's stock resolution. Needs
 the Jira permission "Transition issues". Rehearse with `cti-jira
 --appscan-test <id> --for-real`, then `--appscan-close-test CR-NNN` (preview)
-and `--for-real`. Detail: [RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application-security-lane).
+and `--for-real`. Detail: [RUNBOOK 11f](../docs/lanes/appscan.md#11f-the-weekly-application-security-lane).
 
 ### What the email says
 
@@ -1726,12 +1726,12 @@ and `--for-real`. Detail: [RUNBOOK 11f](../RUNBOOK.md#11f-the-weekly-application
   `/etc/cti-agent/app-owners.txt`, carrying every active Serious-or-above
   finding with where, risk, what was found and how to fix it. Commented only
   when the findings change; left alone the week a scan was not trustworthy.
-  See [RUNBOOK 11f](../RUNBOOK.md#one-jira-ticket-per-application).
+  See [RUNBOOK 11f](../docs/lanes/appscan.md#one-jira-ticket-per-application).
 - **NOT SCANNED** - live websites from the domains lane that no Qualys WAS web
   app covers - and **COVERED VIA STAGING** - production sites scanned only
   through a staging copy marked `covers=` in `app-owners.txt`, which tests the
   code but not production's own configuration. See
-  [RUNBOOK 11f](../RUNBOOK.md#staging-copies-that-stand-in-for-production).
+  [RUNBOOK 11f](../docs/lanes/appscan.md#staging-copies-that-stand-in-for-production).
 - **Watchers** - an optional `watchers=a@example.com,b@example.com` field on an
   app's line in `app-owners.txt` (max 10) adds each as a Jira watcher on its
   ticket, on create and every weekly comment. Best-effort: a watcher not found
@@ -1787,7 +1787,7 @@ application still gets one row, from its newest scan.
 `@domains`, `cti-agent-domains.timer`, Tuesdays 08:00, security team only
 (`cti-mailer --lane dom`: `DOM_TO` against `DOM_ALLOW_TO`, no fallback).
 Operating detail is in
-[RUNBOOK 11g](../RUNBOOK.md#11g-the-weekly-domains-lane). No model is involved.
+[RUNBOOK 11g](../docs/lanes/domains.md#11g-the-weekly-domains-lane). No model is involved.
 
 ### What it reads
 
@@ -1798,7 +1798,7 @@ Operating detail is in
   `unknown`, `legacy`; no marker means no mail at all. **`send` alone is
   send-only**, so mail domains must be `send receive`. Unknown markers and
   duplicates are reported in the email, not ignored. The chart is in
-  `man cti-domains` and [RUNBOOK 11g](../RUNBOOK.md#1-the-inventory-not-in-the-repository).
+  `man cti-domains` and [RUNBOOK 11g](../docs/lanes/domains.md#1-the-inventory-not-in-the-repository).
 - **The GoDaddy account** - `GET /v1/domains` with a read-only Personal Access
   Token (`domains.domain:read`). The client never requests `authCode`; a test
   fails if it ever does. Unset or failing: the report still runs, and its
@@ -2177,7 +2177,7 @@ The audit trail is separate: `/var/log/cti-agent/audit-YYYY-MM-DD.log`, one
 syslog line per mail sent or moved, Jira write and owners change. The
 heartbeat and scout do not write there (on purpose), so their events stay in
 the journal. See [SECURITY.md](../SECURITY.md#the-audit-trail) and
-[RUNBOOK.md](../RUNBOOK.md#11l-the-audit-trail).
+[Operating the fleet](../docs/guides/operations.md#11l-the-audit-trail).
 
 Asking the fleet something directly needs the orchestrator's own directory
 (root-owned; it holds `CLAUDE.md` and `.claude/skills`), since they are
