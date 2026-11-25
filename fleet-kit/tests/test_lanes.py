@@ -5261,7 +5261,7 @@ class SbinTools(unittest.TestCase):
     completion; this keeps the next one from doing the same."""
 
     REPO = KIT.parent
-    TOOLS = ("cti-agent-secrets", "cti-agent-settings", "cti-agent-onboard")
+    TOOLS = ("cti-agent-secrets", "cti-agent-settings", "cti-agent-onboard", "cti-agent-doctor")
 
     def test_each_tool_has_its_man_page_completion_and_docs(self):
         inst = (KIT / "install-fedora.sh").read_text()
@@ -5273,7 +5273,7 @@ class SbinTools(unittest.TestCase):
                 for f in (f"{t}.bash", f"_{t}"):
                     self.assertTrue((KIT / "fleet" / "share" / f).is_file(), f)
                 self.assertIn(f"/usr/local/sbin/{t}", inst, "installed")
-                self.assertIn("for t in cti-agent-secrets cti-agent-settings cti-agent-onboard; do", inst, "completion installed")
+                self.assertIn("for t in cti-agent-secrets cti-agent-settings cti-agent-onboard cti-agent-doctor; do", inst, "completion installed")
                 self.assertIn(f"/usr/share/bash-completion/completions/{t}", inst, "relabelled and removed")
                 self.assertIn(f"/usr/share/zsh/site-functions/_{t}", inst)
                 self.assertIn(f"bin/{t}", readme, "README file tree")

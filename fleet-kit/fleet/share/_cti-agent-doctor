@@ -1,0 +1,11 @@
+#compdef cti-agent-doctor
+# zsh completion for cti-agent-doctor. Installed by install-fedora.sh into
+# site-functions. Works under sudo. A test (test_lanes.py, SbinTools) fails
+# when these flags differ from the tool's own.
+_cti-agent-doctor() {
+  local -a d
+  (( ${words[(I)--json]} )) && return 0
+  d=("--json  -- the checks as JSON")
+  compadd -V safe -X "%B%F{green}SAFE: read-only%f%b" -d d -- --json
+}
+_cti-agent-doctor "$@"

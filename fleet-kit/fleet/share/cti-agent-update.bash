@@ -3,21 +3,30 @@
 # Works as `cti-agent-update <TAB>` and `sudo cti-agent-update <TAB>`.
 #
 # The updater is not a fleet command (the cti-agent wrapper does not run it), so
-# it is not in the command manifest. Its two flags are listed here instead, and
-# a test (test_update.py) fails when they differ from update-fedora.sh.
+# it is not in the command manifest. Its flags are listed here instead, and a
+# test (test_update.py) fails when they differ from update-fedora.sh.
 #
-# Exactly one is required. Once one is on the line there is nothing more to
-# offer. Tagged like cti-agent's own completion, since bash cannot colour.
+# Exactly one mode is required; --rollback may come before it. Once a mode is
+# on the line there is nothing more to offer. Tagged like cti-agent's own completion, since bash cannot colour.
 _cti_agent_update() {
   local cur="${COMP_WORDS[COMP_CWORD]}" w i
   COMPREPLY=()
+  local back=""
   for ((i = 1; i < COMP_CWORD; i++)); do
-    case "${COMP_WORDS[i]}" in --dry-run|--for-real) return 0 ;; esac
+    case "${COMP_WORDS[i]}" in
+      --dry-run|--for-real) return 0 ;;
+      --rollback) back=1 ;;
+    esac
   done
-  local -a words=(--dry-run --for-real)
-  local -a tags=("REQUIRED, one of; read-only" "REQUIRED, one of; CHANGES THINGS")
+  local -a words=(--dry-run --for-real --rollback)
+  local -a tags=("REQUIRED, one of; read-only" "REQUIRED, one of; CHANGES THINGS" "optional, before a mode")
   local -a descs=("fetch and show what is incoming, change nothing"
-                  "pull the kit, then run the installer from it")
+                  "pull the kit, then run the installer from it"
+                  "put back the install before the last update")
+  if [ -n "$back" ]; then
+    words=(--dry-run --for-real)
+    descs=("say what the rollback would restore" "restore the latest snapshot")
+  fi
   local -a hit=()
   for ((i = 0; i < ${#words[@]}; i++)); do
     case "${words[i]}" in "$cur"*) hit+=("$i") ;; esac

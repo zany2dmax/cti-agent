@@ -39,6 +39,36 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Added
 
+- **Updates can be undone, and the box can be checked.**
+  - **A snapshot before every install.** `cti-agent-update --for-real` now
+    snapshots what the installer replaces, before it runs:
+    - the kit's and the Go source's commits
+    - `/opt/cti-agent`, `/etc/cti-agent` and the fleet's systemd units
+    - a copy of `memory.db`
+
+    Snapshots go in `/var/lib/cti-agent-update/` (root only, the last three
+    kept). The installer now runs as a child, not exec'd, so when it fails
+    the updater puts the snapshot back whole, database included, and exits
+    with the installer's status.
+  - **`--rollback`.** `cti-agent-update --rollback --dry-run|--for-real` puts
+    back the latest snapshot by hand, except `memory.db`, which the lanes
+    have written to since. It refuses while a lane is running.
+  - **A moved release tag gets the right fix.** When a tag moved upstream
+    and the branch history is intact, the updater prints the two `git tag -d`
+    commands for that tag. It no longer prints the reset steps meant for a
+    rewritten history. It still runs neither.
+  - **`cti-agent-doctor`** is a new read-only root tool, with a man page and
+    completions. It prints one line per check: version against the kit,
+    `fleet-config check`, failed units, the timers of the lanes in use,
+    today's credential report, the org pack, and `run-checkin --audit`. The
+    updater runs it at the end.
+  - **The `/update-fleet` skill** covers updating a box (reading the
+    CHANGELOG for what it asks first) and bringing a fork up to date with
+    upstream.
+
+  Tested in `fleet-kit/tests/test_update.py` (a failed install rolled back
+  whole, a rollback by hand, a moved tag) and `test_doctor.py`.
+
 - **Skills for forkers, and the registry tests they rely on.** In
   `.claude/skills/`, for Claude Code working in a fork:
   - **`/add-provider`** puts a new vendor behind an existing interface

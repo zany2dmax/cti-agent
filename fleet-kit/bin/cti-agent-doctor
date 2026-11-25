@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""cti-agent-doctor - is this box healthy? One line per check, read-only.
+
+    sudo cti-agent-doctor            every check; exit 1 when any FAILs
+    sudo cti-agent-doctor --json     the same, as JSON
+
+The checks, each OK, WARN or FAIL:
+
+  version      the installed release (/etc/cti-agent/version) against the kit
+               it was installed from; a box behind its own kit was not reinstalled
+  settings     fleet-config check: missing, misspelt or misplaced settings
+  units        any of the fleet's systemd units in a failed state
+  timers       every timer of a lane this box runs (FLEET_LANES) is enabled;
+               patchtuesday's is off on purpose and is only a WARN
+  credentials  today's credential report (reports/credcheck.txt): every check
+               ok, and written in the last 26 hours
+  org pack     the org pack, when there is one, passes org-pack check
+  beat files   run-checkin's own integrity audit of the orchestrator's files
+
+It changes nothing and prints no setting's value. cti-agent-update runs it
+after every update. Root only: it reads /etc and asks systemd.
+"""
+import argparse
+import datetime as dt
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess  # nosec B404
+import sys
+
+R = os.environ.get("CTI_DOCTOR_ROOT", "")
+CONF = pathlib.Path(R + "/etc/cti-agent")
+CODE = pathlib.Path(R + "/opt/cti-agent/")
+HOME = pathlib.Path(R + "/var/lib/cti-agent")
+KIT = pathlib.Path(os.environ.get("CTI_KIT", R + "/root/cti-agent-kit"))
+OFF_ON_PURPOSE = {"cti-agent-patchtuesday.timer"}
+REPORT_MAX_AGE = dt.timedelta(hours=26)
+
+
+def run(cmd, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120, **kw)  # nosec B603
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+def settings():
+    """KEY=value from the files the units load: fleet.env, else fleet.d (later wins)."""
+    files = [CONF / "fleet.env"] if (CONF / "fleet.env").is_file() else \
+        [CONF / "fleet.d" / "00-core.env"] + sorted(p for p in (CONF / "fleet.d").glob("*.env") if p.name != "00-core.env")
+    vals = {}
+    for p in files:
+        if p.is_file():
+            for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+                m = re.match(r"^([A-Z][A-Z0-9_]*)=(.*)$", line.strip())
+                if m:
+                    vals[m.group(1)] = m.group(2).strip().strip("\"'")
+    return vals
+
+
+def check_version():
+    v = CONF / "version"
+    if not v.is_file():
+        return "FAIL", f"no {v}: the installer has not finished on this box"
+    fields = dict(ln.split("=", 1) for ln in v.read_text().splitlines() if "=" in ln)
+    tag = fields.get("tag", "unknown")
+    if not (KIT / ".git").exists():
+        return "OK", f"installed {tag} (no kit at {KIT} to compare with)"
+    kit = run(["git", "-C", str(KIT), "describe", "--tags", "--always"]).stdout.strip() or "unknown"
+    if kit != tag:
+        return "WARN", f"installed {tag}, but the kit is at {kit}: run sudo cti-agent-update --for-real"
+    return "OK", f"installed {tag}, the kit's own"
+
+
+def check_settings():
+    fc = CODE / "bin" / "fleet-config"
+    if not fc.exists():
+        return "FAIL", f"no {fc}"
+    r = run([sys.executable, str(fc), "check"], env=dict(os.environ, CTI_CONF_DIR=str(CONF), FLEET_CODE=str(CODE)))
+    line = next((ln for ln in r.stdout.splitlines() if ln.startswith("result:")), "")
+    m = re.match(r"result: (\d+) problem", line)
+    if not m:
+        return "FAIL", (r.stderr.strip().splitlines() or ["fleet-config check printed no result"])[-1]
+    n = int(m.group(1))
+    return ("OK" if n == 0 else "FAIL"), line[len("result: "):] + ("" if n == 0 else " - sudo cti-agent fleet-config check")
+
+
+def systemctl():
+    return shutil.which("systemctl") if not R else None
+
+
+def check_units():
+    sc = systemctl()
+    if not sc:
+        return "WARN", "no systemctl here; not checked"
+    r = run([sc, "--failed", "--plain", "--no-legend", "--no-pager", "cti-agent-*"])
+    failed = [ln.split()[0] for ln in r.stdout.splitlines() if ln.strip()]
+    if failed:
+        return "FAIL", f"failed: {', '.join(failed)} - sudo cti-agent fleet-journal -u {failed[0]} -n 50 --no-pager"
+    return "OK", "none failed"
+
+
+def lanes_in_use(vals):
+    """{lane: [timer units]} for the lanes this box runs, from lanes.list."""
+    lst = CODE / "share" / "lanes.list"
+    use = {n for n in vals.get("FLEET_LANES", "").replace(" ", "").split(",") if n}
+    out = {}
+    if not lst.is_file():
+        return out
+    for ln in lst.read_text(encoding="utf-8").splitlines():
+        if not ln.strip() or ln.startswith("#"):
+            continue
+        f = ln.split("\t")
+        if use and f[0] not in use:
+            continue
+        out[f[0]] = [f"cti-agent-{u}.timer" for u in f[1].split(",")]
+    return out
+
+
+def check_timers(vals):
+    sc = systemctl()
+    if not sc:
+        return "WARN", "no systemctl here; not checked"
+    off, purpose = [], []
+    for timers in lanes_in_use(vals).values():
+        for t in timers:
+            state = run([sc, "is-enabled", t]).stdout.strip() or "not-found"
+            if state == "not-found":
+                continue  # a lane with a unit but no timer
+            if state != "enabled":
+                (purpose if t in OFF_ON_PURPOSE else off).append(t)
+    if off:
+        return "WARN", f"not enabled: {', '.join(off)} (RUNBOOK section 9, or leave the lane out of FLEET_LANES)"
+    note = f"; {', '.join(purpose)} off on purpose" if purpose else ""
+    return "OK", "every timer of the lanes in use is enabled" + note
+
+
+def check_credentials():
+    rep = HOME / "reports" / "credcheck.txt"
+    if not rep.is_file():
+        return "WARN", f"no {rep}: cti-agent-credcheck.timer has not run (sudo cti-agent run-credcheck)"
+    age = dt.datetime.now() - dt.datetime.fromtimestamp(rep.stat().st_mtime)
+    rows = [ln.split("\t") for ln in rep.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")]
+    failed = [f"{r[1]} ({r[0]})" for r in rows if len(r) >= 3 and r[2] != "ok"]
+    if failed:
+        return "FAIL", f"failed: {', '.join(failed)} - see {rep}"
+    if age > REPORT_MAX_AGE:
+        return "WARN", f"{len(rows)} ok, but the report is {age.days}d {age.seconds // 3600}h old: is the credcheck timer on?"
+    return "OK", f"{len(rows)} check(s) ok"
+
+
+def check_org_pack():
+    pack = CONF / "org"
+    tool = KIT / "fleet-kit" / "bin" / "org-pack"
+    if not pack.exists():
+        return "OK", "none (the core prompts only)"
+    if not tool.exists():
+        return "WARN", f"{pack} exists but there is no kit at {KIT} to check it with"
+    r = run(["bash", str(tool), "check", str(pack), str(KIT / "fleet-kit" / "fleet"), "--root-owned"])
+    if r.returncode != 0:
+        return "FAIL", (r.stderr.strip().splitlines() or ["org-pack check failed"])[0]
+    return "OK", r.stdout.strip().removeprefix("org-pack: ")
+
+
+def check_beat_files():
+    rc = CODE / "bin" / "run-checkin"
+    if not rc.exists():
+        return "FAIL", f"no {rc}"
+    r = run(["bash", str(rc), "--audit"], env=dict(os.environ, FLEET_CODE=str(CODE), FLEET_HOME=str(HOME)))
+    if r.returncode != 0:
+        tail = (r.stderr.strip() or r.stdout.strip()).splitlines()
+        return "FAIL", (tail[-1] if tail else f"run-checkin --audit exited {r.returncode}")
+    return "OK", "the orchestrator's files pass run-checkin's audit"
+
+
+def main(argv=None, out=sys.stdout):
+    ap = argparse.ArgumentParser(prog="cti-agent-doctor", description="Is this box healthy? Read-only.")
+    ap.add_argument("--json", action="store_true", help="print the checks as JSON")
+    a = ap.parse_args(argv)
+    vals = settings() if CONF.is_dir() else {}
+    results = []
+    for name, fn in (("version", check_version), ("settings", check_settings), ("units", check_units),
+                     ("timers", lambda: check_timers(vals)), ("credentials", check_credentials),
+                     ("org pack", check_org_pack), ("beat files", check_beat_files)):
+        try:
+            state, detail = fn()
+        except Exception as e:  # a check that cannot run is a finding, not a crash
+            state, detail = "FAIL", f"could not run: {e}"
+        results.append({"check": name, "state": state, "detail": detail})
+    if a.json:
+        print(json.dumps(results, indent=2), file=out)
+    else:
+        for r in results:
+            print(f"{r['state']:<5} {r['check']:<12} {r['detail']}", file=out)
+        fails = sum(r["state"] == "FAIL" for r in results)
+        warns = sum(r["state"] == "WARN" for r in results)
+        print(f"\ncti-agent-doctor: {fails} FAIL, {warns} WARN", file=out)
+    return 1 if any(r["state"] == "FAIL" for r in results) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

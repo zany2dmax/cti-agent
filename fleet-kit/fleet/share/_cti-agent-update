@@ -3,8 +3,8 @@
 # site-functions beside _cti-agent. Works under sudo too.
 #
 # The updater is not a fleet command (the cti-agent wrapper does not run it), so
-# it is not in the command manifest. Its two flags are listed here instead, and
-# a test (test_update.py) fails when they differ from update-fedora.sh.
+# it is not in the command manifest. Its flags are listed here instead, and a
+# test (test_update.py) fails when they differ from update-fedora.sh.
 #
 # Exactly one is required, coloured like cti-agent's own completion: green
 # changes nothing, red changes the install. Once one is given, nothing more.
@@ -17,5 +17,8 @@ _cti-agent-update() {
   d=("--for-real  -- pull the kit, then run the installer from it")
   compadd -V required/changes -X "%B%F{red}REQUIRED, one of - CHANGES THE INSTALL%f%b" \
     -d d -- --for-real
+  (( ${words[(I)--rollback]} )) && return 0
+  d=("--rollback  -- put back the install before the last update (with a mode)")
+  compadd -V optional -X "%BOPTIONAL, before a mode%b" -d d -- --rollback
 }
 _cti-agent-update "$@"

@@ -383,6 +383,23 @@ sudo systemctl enable --now cti-agent-digest.timer
 gate, so a push cannot outrun a red test — which it did once, when `task test`
 and `git push` were separate lines in the same paste.
 
+**Every update can be undone.** `cti-agent-update --for-real` snapshots the
+code, config, units and `memory.db` first, in `/var/lib/cti-agent-update/`. If
+the installer fails, it puts all of it back. Afterwards it runs
+`cti-agent-doctor`, one line per health check. If a release misbehaves later:
+
+```bash
+sudo cti-agent-update --rollback --dry-run
+```
+
+```bash
+sudo cti-agent-update --rollback --for-real
+```
+
+That restores everything but `memory.db`, which the lanes have written to
+since. In a fork, the `/update-fleet` Claude Code skill walks through an
+update, including reading the CHANGELOG for what it asks of the box.
+
 **A deploy never enables a timer before a dry run has been read.** The dry run
 is the only place a wrong recipient, a broken parser or an empty report is
 cheap.

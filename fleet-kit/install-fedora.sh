@@ -239,7 +239,7 @@ if [ "$ACTION" != install ]; then
   systemctl daemon-reload
   ok "units removed"
   rm -f /usr/local/sbin/cti-agent-update /usr/local/sbin/cti-agent-secrets /usr/local/sbin/cti-agent-settings \
-        /usr/local/sbin/cti-agent-onboard
+        /usr/local/sbin/cti-agent-onboard /usr/local/sbin/cti-agent-doctor
   # /etc/credstore.encrypted is left alone: it holds the fleet's secrets,
   # encrypted to this machine, and removing them is a decision, not cleanup.
   bold "Removing tab completion"
@@ -247,7 +247,8 @@ if [ "$ACTION" != install ]; then
         /usr/share/bash-completion/completions/cti-agent-update /usr/share/zsh/site-functions/_cti-agent-update \
         /usr/share/bash-completion/completions/cti-agent-secrets /usr/share/zsh/site-functions/_cti-agent-secrets \
         /usr/share/bash-completion/completions/cti-agent-settings /usr/share/zsh/site-functions/_cti-agent-settings \
-        /usr/share/bash-completion/completions/cti-agent-onboard /usr/share/zsh/site-functions/_cti-agent-onboard
+        /usr/share/bash-completion/completions/cti-agent-onboard /usr/share/zsh/site-functions/_cti-agent-onboard \
+        /usr/share/bash-completion/completions/cti-agent-doctor /usr/share/zsh/site-functions/_cti-agent-doctor
   bold "Removing man pages"
   for page in "$SRC/../man/man1"/*.1; do
     if [ -f "$page" ]; then rm -f "/usr/local/share/man/man1/$(basename "$page")"; fi
@@ -517,6 +518,8 @@ run install -m 0755 -o root -g root "$SRC/bin/cti-agent-secrets" /usr/local/sbin
 run install -m 0755 -o root -g root "$SRC/bin/cti-agent-settings" /usr/local/sbin/cti-agent-settings
 # Setting up a box: which lanes, their settings, their secrets (RUNBOOK section 9).
 run install -m 0755 -o root -g root "$SRC/bin/cti-agent-onboard" /usr/local/sbin/cti-agent-onboard
+# Is the box healthy? Read-only; cti-agent-update runs it after every update.
+run install -m 0755 -o root -g root "$SRC/bin/cti-agent-doctor" /usr/local/sbin/cti-agent-doctor
 if command -v systemctl >/dev/null 2>&1; then
   sdv="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
   case "$sdv" in
@@ -550,7 +553,7 @@ if [ "$MODE" != dryrun ]; then
   install -m 0644 "$SRC/fleet/share/_cti-agent-update" /usr/share/zsh/site-functions/_cti-agent-update
   # The root tools for secrets and settings (RUNBOOK 11n, 11o), likewise; their
   # completion reads the installed manifest and the names-only stored list.
-  for t in cti-agent-secrets cti-agent-settings cti-agent-onboard; do
+  for t in cti-agent-secrets cti-agent-settings cti-agent-onboard cti-agent-doctor; do
     sed -e "s#@CODE_DIR@#$CODE_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" "$SRC/fleet/share/$t.bash" \
       > /usr/share/bash-completion/completions/$t
     sed -e "s#@CODE_DIR@#$CODE_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" "$SRC/fleet/share/_$t" \
@@ -564,9 +567,10 @@ if [ "$MODE" != dryrun ]; then
       /usr/share/bash-completion/completions/cti-agent-secrets /usr/share/zsh/site-functions/_cti-agent-secrets \
       /usr/share/bash-completion/completions/cti-agent-settings /usr/share/zsh/site-functions/_cti-agent-settings \
       /usr/share/bash-completion/completions/cti-agent-onboard /usr/share/zsh/site-functions/_cti-agent-onboard \
+      /usr/share/bash-completion/completions/cti-agent-doctor /usr/share/zsh/site-functions/_cti-agent-doctor \
       2>/dev/null || true
   fi
-  ok "tab completion for bash and zsh: cti-agent, cti-agent-update, cti-agent-secrets, cti-agent-settings, cti-agent-onboard (open a new shell to pick it up)"
+  ok "tab completion for bash and zsh: cti-agent, cti-agent-update, cti-agent-secrets, cti-agent-settings, cti-agent-onboard, cti-agent-doctor (open a new shell to pick it up)"
 else
   info "would install bash and zsh tab completion"
 fi

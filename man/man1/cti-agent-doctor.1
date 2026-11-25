@@ -1,0 +1,66 @@
+.TH CTI-AGENT-DOCTOR 1 "2026-11-25" "cti-agent" "CTI Fleet Manual"
+.SH NAME
+cti-agent-doctor \- is this box healthy? one line per check, read-only
+.SH SYNOPSIS
+.B sudo cti\-agent\-doctor
+.RB [ \-\-json ]
+.SH DESCRIPTION
+Runs the box's health checks and prints one line each,
+.BR OK ,
+.B WARN
+or
+.BR FAIL ,
+with what to do about anything that is not OK.
+.TP
+.B version
+The installed release
+.RI ( /etc/cti\-agent/version )
+against the kit it was installed from. A box behind its own kit was pulled
+but not reinstalled.
+.TP
+.B settings
+.BR "fleet\-config check" :
+missing, misspelt or misplaced settings.
+.TP
+.B units
+Any of the fleet's systemd units in a failed state.
+.TP
+.B timers
+Every timer of a lane this box runs
+.RB ( FLEET_LANES )
+is enabled. The Patch Tuesday timer is off on purpose and is only noted.
+.TP
+.B credentials
+Today's credential report
+.RI ( /var/lib/cti\-agent/reports/credcheck.txt ):
+every check ok, and written in the last 26 hours.
+.TP
+.B org pack
+The org pack, when there is one, passes
+.BR "org\-pack check \-\-root\-owned" .
+.TP
+.B beat files
+.BR "run\-checkin \-\-audit" :
+the orchestrator's files are root-owned and nothing in the service account's
+reach could steer a beat.
+.PP
+It changes nothing and prints no setting's value.
+.B cti\-agent\-update
+runs it after every update. Root only.
+.SH OPTIONS
+.TP
+.B \-\-json
+Print the checks as a JSON list of
+.RI { check ", " state ", " detail }.
+.SH EXAMPLES
+.nf
+sudo cti\-agent\-doctor
+sudo cti\-agent\-doctor \-\-json | jq '.[] | select(.state != "OK")'
+.fi
+.SH EXIT STATUS
+0 when no check FAILs (WARNs included), 1 when one does, 2 for a usage error.
+.SH SEE ALSO
+.BR cti\-agent\-update (1),
+.BR fleet\-config (1),
+.BR run\-credcheck (1),
+.BR run\-checkin (1)

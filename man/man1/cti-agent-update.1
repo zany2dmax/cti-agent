@@ -5,6 +5,9 @@ cti-agent-update \- bring the fleet box up to date: pull the kit, then run the i
 .B sudo cti\-agent\-update
 .RB ( \-\-dry\-run | \-\-for\-real )
 .PP
+.B sudo cti\-agent\-update \-\-rollback
+.RB ( \-\-dry\-run | \-\-for\-real )
+.PP
 .B sudo /root/cti\-agent\-kit/fleet\-kit/update\-fedora.sh
 .RB ( \-\-dry\-run | \-\-for\-real )
 .SH DESCRIPTION
@@ -96,6 +99,36 @@ does.
 .B \-\-for\-real
 Pull the kit and run the installer from it. Needs root. When the kit is
 already up to date, the installer is still run.
+.TP
+.B \-\-rollback
+With
+.BR \-\-for\-real ,
+put back the latest snapshot: the code in
+.I /opt/cti\-agent
+(the Go source by its commit), the config in
+.IR /etc/cti\-agent ,
+the fleet's systemd units, and the kit's commit. It refuses while a lane is
+running.
+.I memory.db
+is not put back, since the lanes have written to it since; the snapshot's
+copy is named. With
+.BR \-\-dry\-run ,
+say what it would restore.
+.PP
+Every
+.B \-\-for\-real
+update first takes such a snapshot, in
+.I /var/lib/cti\-agent\-update/
+(root only, the last three kept), and when the installer fails puts all of
+it back at once, the database included, and exits with the installer's
+status. Commands installed elsewhere (this one, the root tools, man pages,
+completions) stay at the newer version until the next install.
+.PP
+When a fetch is refused because a release tag moved upstream and the branch
+history is intact, it prints the two
+.B git tag \-d
+commands that fix it, one per checkout. When the history itself was
+rewritten, it prints the reset steps instead. It runs neither.
 .TP
 .BR \-h ", " \-\-help
 Print the usage line and exit 0. Nothing is fetched.

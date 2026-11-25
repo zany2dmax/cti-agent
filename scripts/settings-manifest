@@ -85,6 +85,7 @@ RUNTIME = {
     # Test overrides for cti-agent-secrets and fleet-config, never in fleet.env.
     "CTI_CREDSTORE", "CTI_CREDSTORE_LIST", "SYSTEMD_CREDS", "CTI_CONF_DIR",
     "CTI_AGENT_SECRETS",  # cti-agent-onboard's path to cti-agent-secrets, for its tests
+    "CTI_UPDATE_ROOT", "CTI_DOCTOR_ROOT", "CTI_KIT",  # test roots for the updater and cti-agent-doctor
     "FLEET_ENV_FILES",  # the fleet.d files a unit or hand run loads (step 3)
 }
 # Programs that name secrets without reading them: checkin-bash-guard lists

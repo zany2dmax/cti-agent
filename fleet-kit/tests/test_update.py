@@ -62,7 +62,27 @@ class UpdateFedora(unittest.TestCase):
         return subprocess.run(
             ["bash", str(self.kit / "fleet-kit" / "update-fedora.sh"), *args],
             check=False, capture_output=True, text=True,
-            env={"PATH": os.environ["PATH"], "HOME": str(self.tmp), "FLEET_UPDATE_UID": uid})
+            env={"PATH": os.environ["PATH"], "HOME": str(self.tmp), "FLEET_UPDATE_UID": uid,
+                 "CTI_UPDATE_ROOT": str(self.root)})
+
+    @property
+    def root(self):
+        """The box's filesystem, for the snapshot: code, config, units, state."""
+        r = self.tmp / "box"
+        if not r.exists():
+            for d in ("opt/cti-agent/bin", "etc/cti-agent/fleet.d", "etc/systemd/system", "var/lib/cti-agent/state"):
+                (r / d).mkdir(parents=True)
+            (r / "opt/cti-agent/bin/cti-scout").write_text("old binary\n")
+            (r / "etc/cti-agent/fleet.d/00-core.env").write_text("DIGEST_TO=old@example.com\n")
+            (r / "etc/systemd/system/cti-agent-scout.service").write_text("[Unit]\nDescription=old\n")
+            (r / "etc/systemd/system/other.service").write_text("not the fleet's\n")
+            import sqlite3
+            db = sqlite3.connect(r / "var/lib/cti-agent/state/memory.db")
+            db.execute("CREATE TABLE m (v TEXT)")
+            db.execute("INSERT INTO m VALUES ('before')")
+            db.commit()
+            db.close()
+        return r
 
     def test_it_must_be_told_how_to_run(self):
         r = self.run_update()
@@ -169,6 +189,23 @@ class UpdateFedora(unittest.TestCase):
         # Printed, never run: the kit still has the old history.
         self.assertEqual(git(self.kit, "log", "-1", "--format=%s").strip(), "one")
 
+    def test_a_moved_tag_with_intact_history_gets_the_tag_fix_not_a_reset(self):
+        # What happened to 2.0-rc3: the tag was moved onto a later commit of
+        # the same history. Deleting the tag in both checkouts is the fix;
+        # the reset steps for a rewritten history would be the wrong advice.
+        self.publish("two")
+        other = self.tmp / "mover"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], check=True)
+        git(other, "tag", "-f", "v1.0")
+        git(other, "push", "-q", "--force", "origin", "v1.0")
+        r = self.run_update("--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Release tag(s) moved upstream after this box fetched them: v1.0", r.stderr)
+        self.assertIn(f"sudo git -C {self.kit} tag -d v1.0", r.stderr)
+        self.assertIn("sudo git -C /opt/cti-agent/agent tag -d v1.0", r.stderr)
+        self.assertNotIn("reset --hard", r.stderr)
+        self.assertNotIn("INSTALLER", r.stdout)
+
     def test_a_rewritten_branch_is_refused_with_the_fix(self):
         self.rewrite_upstream(retag=False)
         r = self.run_update("--for-real")
@@ -176,6 +213,95 @@ class UpdateFedora(unittest.TestCase):
         self.assertIn("cannot be fast-forwarded", r.stderr)
         self.assertIn("reset --hard", r.stderr)
         self.assertNotIn("INSTALLER", r.stdout)
+
+    def test_an_update_takes_a_snapshot_first(self):
+        self.publish("two", tag="v1.1")
+        r = self.run_update("--for-real")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        snaps = sorted((self.root / "var/lib/cti-agent-update").iterdir())
+        self.assertEqual(len(snaps), 1)
+        d = snaps[0]
+        self.assertIn(f"snapshot : {d}", r.stdout)
+        for f in ("kit-rev", "code.tgz", "conf.tgz", "units.tgz", "memory.db"):
+            self.assertTrue((d / f).exists(), f)
+        # The commit BEFORE the pull: a rollback returns to the install that worked.
+        self.assertEqual((d / "kit-rev").read_text().strip(), git(self.kit, "rev-parse", "v1.0").strip())
+        self.assertEqual(oct(d.stat().st_mode & 0o777), "0o700")
+
+    def test_a_failed_install_is_rolled_back_whole(self):
+        p = self.tmp / "other-bad"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(p)], check=True)
+        inst = p / "fleet-kit" / "install-fedora.sh"
+        # A new install that changes everything, then fails partway.
+        inst.write_text(f'''#!/usr/bin/env bash
+echo "INSTALLER bad"
+echo "new binary" > {self.root}/opt/cti-agent/bin/cti-scout
+echo "new" > {self.root}/opt/cti-agent/bin/cti-added-by-new
+echo "DIGEST_TO=new@example.com" > {self.root}/etc/cti-agent/fleet.d/00-core.env
+echo "[Unit]" > {self.root}/etc/systemd/system/cti-agent-new.service
+python3 -c "import sqlite3; d=sqlite3.connect('{self.root}/var/lib/cti-agent/state/memory.db'); d.execute(\\"UPDATE m SET v='migrated'\\"); d.commit()"
+exit 7
+''')
+        inst.chmod(0o755)
+        git(p, "add", "-A")
+        git(p, "commit", "-q", "-m", "bad")
+        git(p, "push", "-q", "origin", "main")
+        r = self.run_update("--for-real")
+        self.assertEqual(r.returncode, 7, r.stderr)
+        self.assertIn("the install failed (exit 7). Rolling back", r.stderr)
+        self.assertIn("rolled back. The box runs v1.0 again", r.stderr)
+        b = self.root
+        self.assertEqual((b / "opt/cti-agent/bin/cti-scout").read_text(), "old binary\n")
+        self.assertFalse((b / "opt/cti-agent/bin/cti-added-by-new").exists())
+        self.assertEqual((b / "etc/cti-agent/fleet.d/00-core.env").read_text(), "DIGEST_TO=old@example.com\n")
+        self.assertFalse((b / "etc/systemd/system/cti-agent-new.service").exists())
+        self.assertTrue((b / "etc/systemd/system/cti-agent-scout.service").exists())
+        self.assertEqual((b / "etc/systemd/system/other.service").read_text(), "not the fleet's\n")
+        import sqlite3
+        db = sqlite3.connect(b / "var/lib/cti-agent/state/memory.db")
+        self.assertEqual(db.execute("SELECT v FROM m").fetchone()[0], "before")
+        db.close()
+        self.assertEqual(git(self.kit, "log", "-1", "--format=%s").strip(), "one")
+
+    def test_rollback_by_hand_restores_the_code_and_leaves_the_database(self):
+        self.publish("two", tag="v1.1")
+        self.assertEqual(self.run_update("--for-real").returncode, 0)
+        b = self.root
+        (b / "opt/cti-agent/bin/cti-scout").write_text("new binary\n")
+        import sqlite3
+        db = sqlite3.connect(b / "var/lib/cti-agent/state/memory.db")
+        db.execute("UPDATE m SET v='written since'")
+        db.commit()
+        db.close()
+        r = self.run_update("--rollback", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("v1.1 -> v1.0", r.stdout)
+        self.assertIn("Dry run: nothing was restored", r.stdout)
+        self.assertEqual((b / "opt/cti-agent/bin/cti-scout").read_text(), "new binary\n")
+        r = self.run_update("--rollback", "--for-real")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((b / "opt/cti-agent/bin/cti-scout").read_text(), "old binary\n")
+        self.assertEqual(git(self.kit, "describe", "--tags").strip(), "v1.0")
+        db = sqlite3.connect(b / "var/lib/cti-agent/state/memory.db")
+        self.assertEqual(db.execute("SELECT v FROM m").fetchone()[0], "written since", "a hand rollback kept the lanes' writes")
+        db.close()
+
+    def test_rollback_needs_a_mode_and_a_snapshot(self):
+        self.assertEqual(self.run_update("--rollback").returncode, 2)
+        r = self.run_update("--rollback", "--for-real")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no snapshot to roll back to", r.stderr)
+
+    def test_only_the_last_three_snapshots_are_kept(self):
+        snaps = self.root / "var/lib/cti-agent-update"
+        snaps.mkdir(parents=True)
+        for t in ("20260101T000000Z", "20260102T000000Z", "20260103T000000Z", "20260104T000000Z"):
+            (snaps / t).mkdir()
+        self.assertEqual(self.run_update("--for-real").returncode, 0)
+        kept = sorted(p.name for p in snaps.iterdir())
+        self.assertEqual(len(kept), 3)
+        self.assertNotIn("20260101T000000Z", kept)
+        self.assertNotIn("20260102T000000Z", kept)
 
     def test_a_fetch_that_fails_says_so(self):
         git(self.kit, "remote", "set-url", "origin", str(self.tmp / "gone.git"))
@@ -214,8 +340,8 @@ class UpdateDocsAndCompletion(unittest.TestCase):
         src = (ROOT / "fleet-kit" / "update-fedora.sh").read_text(encoding="utf-8")
         return set(re.findall(r"^\s*(--[a-z-]+)\)\s", src, re.M))
 
-    def test_the_updater_has_the_two_modes(self):
-        self.assertEqual(self.flags(), {"--dry-run", "--for-real"})
+    def test_the_updater_has_the_two_modes_and_rollback(self):
+        self.assertEqual(self.flags(), {"--dry-run", "--for-real", "--rollback"})
 
     def test_the_man_page_documents_every_flag(self):
         page = (ROOT / "man" / "man1" / "cti-agent-update.1").read_text(encoding="utf-8").replace("\\-", "-")
@@ -246,7 +372,7 @@ class UpdateDocsAndCompletion(unittest.TestCase):
                   '_cti_agent_update 2>/dev/null; echo "${#COMPREPLY[@]} ${COMPREPLY[0]%% *}"; }\n'
                   't cti-agent-update ""; t cti-agent-update --f; t cti-agent-update --dry-run ""\n')
         r = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
-        self.assertEqual(r.stdout.split("\n")[:3], ["2 --dry-run", "1 --for-real", "0 "])
+        self.assertEqual(r.stdout.split("\n")[:3], ["3 --dry-run", "1 --for-real", "0 "])
 
     def test_the_installer_installs_and_removes_them(self):
         inst = (ROOT / "fleet-kit" / "install-fedora.sh").read_text(encoding="utf-8")
