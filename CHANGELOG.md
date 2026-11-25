@@ -219,6 +219,14 @@ the tag" stops being a true statement until it is rebuilt from a clean tree.
 
 ### Fixed
 
+- **`cti-agent-doctor`'s beat-files check no longer fails on every box.** It
+  ran `run-checkin --audit` as root. The audit refuses any orchestrator file
+  the account running it can write, and root can write them all, so the
+  check always failed. As root it now runs the audit as the service account,
+  the way the check-in unit does. A FAIL now shows the audit's first line,
+  which names the file, where it showed the last line, which was only the
+  fix. Tested in `fleet-kit/tests/test_doctor.py`.
+
 - **`cti-agent-doctor` checks a fork's org pack.** It looked only in
   `/etc/cti-agent/org`, so a fork's committed `org/`, which the installer
   uses, was reported as "none" and never checked. It now finds the pack the

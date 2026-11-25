@@ -12,6 +12,7 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FLEET = REPO / "fleet-kit" / "fleet"
@@ -118,6 +119,35 @@ class Doctor(unittest.TestCase):
         state, detail = self.run_it()[1]["beat files"]
         self.assertEqual(state, "FAIL")
         self.assertIn("writable by ctiagent", detail)
+
+    def test_a_refusal_reports_what_was_refused(self):
+        # The audit's first line names the file; the lines after it say how to fix it.
+        (self.dir / "opt/cti-agent/bin/run-checkin").write_text(
+            "#!/bin/bash\necho 'run-checkin: REFUSING to start: /opt/x is writable' >&2\n"
+            "echo '  reinstall with install-fedora.sh --for-real' >&2\nexit 1\n")
+        state, detail = self.run_it()[1]["beat files"]
+        self.assertEqual((state, detail), ("FAIL", "run-checkin: REFUSING to start: /opt/x is writable"))
+
+    def test_as_root_the_audit_runs_as_the_service_account(self):
+        # Root can write every file, so the audit run as root refuses them all.
+        seen = []
+        real_run = self.m.run
+
+        def fake(cmd, **kw):
+            seen.append(cmd)
+            return real_run(cmd[cmd.index("--") + 1:] if cmd[0] == "runuser" else cmd, **kw)
+        with mock.patch.object(self.m.os, "geteuid", return_value=0), \
+             mock.patch.object(self.m.shutil, "which", return_value="/usr/sbin/runuser"), \
+             mock.patch.object(self.m, "run", fake):
+            state, _ = self.run_it()[1]["beat files"]
+        self.assertEqual(state, "OK")
+        audit = [c for c in seen if "--audit" in c]
+        self.assertEqual(audit[0][:4], ["runuser", "-u", "ctiagent", "--"])
+        with mock.patch.object(self.m.os, "geteuid", return_value=0), \
+             mock.patch.object(self.m.shutil, "which", return_value=None):
+            state, detail = self.run_it()[1]["beat files"]
+        self.assertEqual(state, "WARN")
+        self.assertIn("runuser", detail)
 
     def test_no_version_file_is_a_fail(self):
         (self.dir / "etc/cti-agent/version").unlink()

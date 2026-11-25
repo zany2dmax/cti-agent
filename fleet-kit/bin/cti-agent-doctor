@@ -36,6 +36,11 @@ CONF = pathlib.Path(R + "/etc/cti-agent")
 CODE = pathlib.Path(R + "/opt/cti-agent/")
 HOME = pathlib.Path(R + "/var/lib/cti-agent")
 KIT = pathlib.Path(os.environ.get("CTI_KIT", R + "/root/cti-agent-kit"))
+# The service account the units run as. run-checkin's audit refuses a file the
+# account running it can write, so as root (who can write anything) it is run
+# as this account, as the check-in unit runs it. The installer rewrites the
+# name for a fork's layout.
+SERVICE_USER = "ctiagent"
 OFF_ON_PURPOSE = {"cti-agent-patchtuesday.timer"}
 REPORT_MAX_AGE = dt.timedelta(hours=26)
 
@@ -179,10 +184,17 @@ def check_beat_files():
     rc = CODE / "bin" / "run-checkin"
     if not rc.exists():
         return "FAIL", f"no {rc}"
-    r = run(["bash", str(rc), "--audit"], env=dict(os.environ, FLEET_CODE=str(CODE), FLEET_HOME=str(HOME)))
+    cmd = ["bash", str(rc), "--audit"]
+    env = dict(os.environ, FLEET_CODE=str(CODE), FLEET_HOME=str(HOME))
+    if os.geteuid() == 0:
+        if not shutil.which("runuser"):
+            return "WARN", f"no runuser, so the audit cannot run as {SERVICE_USER}, as the check-in does"
+        cmd = ["runuser", "-u", SERVICE_USER, "--", "env", f"FLEET_CODE={CODE}", f"FLEET_HOME={HOME}", *cmd]
+    r = run(cmd, env=env)
     if r.returncode != 0:
-        tail = (r.stderr.strip() or r.stdout.strip()).splitlines()
-        return "FAIL", (tail[-1] if tail else f"run-checkin --audit exited {r.returncode}")
+        # The first line says what was refused; the lines after it, how to fix it.
+        lines = [ln.strip() for ln in (r.stderr.strip() or r.stdout.strip()).splitlines() if ln.strip()]
+        return "FAIL", (lines[0] if lines else f"run-checkin --audit exited {r.returncode}")
     return "OK", "the orchestrator's files pass run-checkin's audit"
 
 
